@@ -1,0 +1,70 @@
+# sharp — Dokploy compose file
+#
+# Dokploy runs its own Traefik reverse proxy with automatic HTTPS, so this file
+# has NO caddy and publishes NO host ports. Route traffic via Dokploy's
+# "Domains" tab: service `sharp`, port 3000 (websockets work out of the box).
+#
+# Dokploy setup: see deploy/DOKPLOY.md
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sharp
+      POSTGRES_DB: sharp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sharp -d sharp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+  sharp:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://sharp:${POSTGRES_PASSWORD}@postgres:5432/sharp
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      SHARP_DISABLE_SIGNUP: ${SHARP_DISABLE_SIGNUP:-false}
+      RUST_LOG: ${RUST_LOG:-info}
+    expose:
+      - "3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - dokploy-network
+      - default
+
+  # Optional: serve the landing page as part of the same stack.
+  # Alternatively deploy it as a separate Dokploy Application (see DOKPLOY.md).
+  landing:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.landing
+    restart: unless-stopped
+    expose:
+      - "80"
+    networks:
+      - dokploy-network
+      - default
+
+networks:
+  dokploy-network:
+    external: true
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,9 @@
+# Docker build context excludes.
+# Conservative on purpose: only regenerated/local artifacts are excluded.
+# Build-required sources are NOT excluded, so deploy/Dockerfile
+# (server/ incl. server/migrations/, web/ sources) and
+# deploy/Dockerfile.landing (landing/) keep everything they COPY.
+**/target/
+**/node_modules/
+web/dist_verify/
+.git/

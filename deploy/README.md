@@ -1,5 +1,8 @@
 # Deploying sharp on a VPS
 
+> **Using Dokploy?** See [DOKPLOY.md](DOKPLOY.md) and use
+> `docker-compose.dokploy.yml` instead — Dokploy's Traefik replaces Caddy.
+
 One command brings up the whole stack: Postgres, Redis, the sharp server (API + web
 SPA in one container) and Caddy (automatic HTTPS + serving the landing page).
 
