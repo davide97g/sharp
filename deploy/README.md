@@ -50,7 +50,7 @@ Build the landing page so Caddy can serve it (optional, only if you use the
 `landing` mount):
 
 ```bash
-( cd ../landing && npm install && npm run build )
+( cd ../landing && bun install && bun run build )
 ```
 
 ## 4. Launch

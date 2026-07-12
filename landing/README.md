@@ -8,10 +8,10 @@ Caddy at the apex domain (see `deploy/`).
 ## Develop
 
 ```bash
-npm install
-npm run dev      # http://localhost:4321
-npm run build    # → dist/  (static)
-npm run preview
+bun install
+bun run dev      # http://localhost:4321
+bun run build    # → dist/  (static)
+bun run preview
 ```
 
 ## Before deploying
@@ -24,5 +24,5 @@ npm run preview
 
 ## Output
 
-`npm run build` emits fully static HTML/CSS to `dist/`. The `deploy/` Caddy config
+`bun run build` emits fully static HTML/CSS to `dist/`. The `deploy/` Caddy config
 mounts `../landing/dist` at `/srv/landing` and serves it on the apex domain.

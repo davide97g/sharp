@@ -14,8 +14,8 @@ Built against the contract in [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.m
 ## Develop
 
 ```bash
-npm install
-npm run dev
+bun install
+bun run dev
 ```
 
 The dev server runs on `http://localhost:5173` and proxies `/api` (including the
@@ -26,19 +26,19 @@ by default — no extra config needed.
 ## Build
 
 ```bash
-npm run build      # tsc --noEmit && vite build  ->  dist/
-npm run preview    # serve the production build locally
+bun run build      # tsc --noEmit && vite build  ->  dist/
+bun run preview    # serve the production build locally
 ```
 
 The Rust server serves `web/dist` as static files with SPA fallback (see
-`WEB_DIST` in the architecture doc), so `npm run build` output drops straight in.
+`WEB_DIST` in the architecture doc), so `bun run build` output drops straight in.
 
 ## Server URL resolution
 
 The API/WS base URL is resolved in this order:
 
 1. `import.meta.env.VITE_API_URL` — set at build time, e.g.
-   `VITE_API_URL=https://chat.example.com npm run build`
+   `VITE_API_URL=https://chat.example.com bun run build`
 2. `localStorage['sharp.serverUrl']` — set from the login screen's **Server URL**
    field, which only appears when running inside the Tauri desktop shell
    (`'__TAURI_INTERNALS__' in window`)

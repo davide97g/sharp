@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-for bin in docker cargo npm; do
+for bin in docker cargo bun; do
   command -v "$bin" >/dev/null || { echo "error: '$bin' is required (install it first)"; exit 1; }
 done
 
@@ -36,7 +36,7 @@ echo "==> building & starting sharp-server (first build takes a few minutes)"
 SERVER_PID=$!
 
 echo "==> starting web dev server"
-(cd web && { [ -d node_modules ] || npm install --no-audit --no-fund; } && npm run dev) &
+(cd web && { [ -d node_modules ] || bun install; } && bun run dev) &
 WEB_PID=$!
 
 echo

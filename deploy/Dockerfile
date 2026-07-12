@@ -8,20 +8,20 @@
 #     docker build -f deploy/Dockerfile -t sharp .
 #
 # Multi-stage:
-#   1. node  — build the React/Vite web SPA         -> /web/dist
+#   1. bun   — build the React/Vite web SPA          -> /web/dist
 #   2. rust  — build the axum server (release)       -> the server binary
 #   3. debian slim runtime — server binary + web dist, serving both on $PORT
 
 # ---------- 1. web builder ----------
-FROM node:22-alpine AS web
+FROM oven/bun:1-alpine AS web
 WORKDIR /web
 # Install deps first for better layer caching.
-COPY web/package.json web/package-lock.json* ./
-RUN npm ci || npm install
+COPY web/package.json web/bun.lock* ./
+RUN bun install --frozen-lockfile || bun install
 COPY web/ ./
 # VITE_API_URL is intentionally unset: the SPA is served same-origin by the server,
 # so it uses window.location.origin for the API/WS base.
-RUN npm run build
+RUN bun run build
 
 # ---------- 2. server builder ----------
 # bookworm (glibc) rather than alpine/musl — friendlier for sqlx & the crypto crates.

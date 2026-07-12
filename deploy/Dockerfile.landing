@@ -2,12 +2,12 @@
 # Build context must be the REPO ROOT:
 #   docker build -f deploy/Dockerfile.landing .
 
-FROM node:22-alpine AS build
+FROM oven/bun:1-alpine AS build
 WORKDIR /landing
-COPY landing/package.json landing/package-lock.json* ./
-RUN npm install --no-audit --no-fund
+COPY landing/package.json landing/bun.lock* ./
+RUN bun install --frozen-lockfile || bun install
 COPY landing/ ./
-RUN npm run build
+RUN bun run build
 
 FROM nginx:alpine
 COPY --from=build /landing/dist /usr/share/nginx/html

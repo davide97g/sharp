@@ -34,13 +34,13 @@ Open your server's address, register the first account, create `#general`, invit
 cd server && cargo run
 
 # web
-cd web && npm install && npm run dev   # proxies /api to localhost:3000
+cd web && bun install && bun run dev   # proxies /api to localhost:3000
 
 # desktop
-cd desktop && npm install && npm run tauri dev
+cd desktop && bun install && bun run tauri dev
 
 # landing
-cd landing && npm install && npm run dev
+cd landing && bun install && bun run dev
 ```
 
 ## Repo layout

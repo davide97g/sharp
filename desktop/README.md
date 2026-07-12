@@ -17,14 +17,14 @@ localStorage.
 ## Develop
 
 ```bash
-npm install
-npm run tauri dev     # runs `npm --prefix ../web run dev` and opens the shell
+bun install
+bun run tauri dev     # runs `bun --cwd ../web run dev` and opens the shell
 ```
 
 ## Build
 
 ```bash
-npm run tauri build   # runs `npm --prefix ../web run build` first, then bundles
+bun run tauri build   # runs `bun --cwd ../web run build` first, then bundles
 ```
 
 Bundle targets are `all` (macOS `.dmg`, Windows NSIS `.exe`, Linux AppImage/`.deb`),
@@ -38,7 +38,7 @@ from a single source SVG/PNG. `tauri.conf.json` references `icons/icon.png`, so 
 this once (from `desktop/`) before your first `tauri build`:
 
 ```bash
-npm run tauri icon assets/icon.svg
+bun run tauri icon assets/icon.svg
 ```
 
 This creates `src-tauri/icons/` (icon.png, icon.icns, icon.ico, and the various

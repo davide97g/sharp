@@ -34,9 +34,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 22
+          bun-version: latest
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -49,16 +49,16 @@ jobs:
           workspaces: desktop/src-tauri
 
       - name: Install web dependencies
-        run: npm ci || npm install
+        run: bun install --frozen-lockfile || bun install
         working-directory: web
 
       - name: Install desktop dependencies
-        run: npm ci || npm install
+        run: bun install --frozen-lockfile || bun install
         working-directory: desktop
 
       # Icon binaries are not committed; generate them from the source SVG.
       - name: Generate app icons
-        run: npm run tauri icon assets/icon.svg
+        run: bun run tauri icon assets/icon.svg
         working-directory: desktop
 
       # NOTE: macOS builds are UNSIGNED in v1 — users right-click > Open the first
