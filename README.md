@@ -20,7 +20,7 @@ single binary backed by Postgres.
 ## Quick start (self-host)
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_USER/sharp && cd sharp/deploy
+git clone https://github.com/davide97g/sharp && cd sharp/deploy
 cp .env.example .env   # set JWT_SECRET + POSTGRES_PASSWORD (+ your domain for TLS)
 docker compose up -d
 ```

@@ -35,7 +35,7 @@ Docker Compose v2 ships with the Docker Engine (`docker compose ...`).
 ## 3. Clone & configure
 
 ```bash
-git clone https://github.com/GITHUB_OWNER/sharp
+git clone https://github.com/davide97g/sharp
 cd sharp/deploy
 cp .env.example .env
 ```

@@ -208,7 +208,7 @@ user enters server URL at login; persisted in localStorage). Plugins:
 
 `landing/` — Astro (latest v5), single static page, zero client JS beyond an OS-detect
 snippet for the download button. Hero with the `#` mark, tagline, download buttons
-linking `https://github.com/<owner>/sharp/releases/latest`, feature trio (Chat/Self-host/
+linking `https://github.com/davide97g/sharp/releases/latest`, feature trio (Chat/Self-host/
 Open source), copy-paste `docker compose up -d` block, GitHub link. Deployable to any
 static host; also served by the VPS Caddy at the apex domain.
 
