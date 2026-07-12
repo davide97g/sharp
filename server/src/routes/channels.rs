@@ -20,6 +20,7 @@ const CHANNEL_SELECT: &str = "
         CASE WHEN cm.user_id IS NULL THEN 0::bigint ELSE
             (SELECT count(*) FROM messages m
              WHERE m.channel_id = c.id AND m.deleted_at IS NULL
+               AND m.parent_id IS NULL
                AND m.user_id <> $1 AND m.id > cm.last_read_message_id)
         END AS unread_count
     FROM channels c
@@ -179,14 +180,25 @@ pub async fn create_channel(
 
     let channel = load_channel(&state.pool, channel_id, auth.id).await?;
 
-    // Public channels are announced to everyone connected; others to members.
-    let targets = if body.kind == "public" {
-        state.hub.online_user_ids()
-    } else {
-        members.clone()
-    };
-    let ev = envelope("channel.created", json!({ "channel": &channel }));
-    state.hub.broadcast(ev, targets).await;
+    // Members get the member view (is_member=true). Public channels are also
+    // announced to everyone else connected, but with a non-member view so their
+    // sidebar does not show the channel as already-joined.
+    let member_ev = envelope("channel.created", json!({ "channel": &channel }));
+    state.hub.broadcast(member_ev, members.clone()).await;
+
+    if body.kind == "public" {
+        let mut public_view = channel.clone();
+        public_view.is_member = false;
+        public_view.unread_count = 0;
+        let others: Vec<Uuid> = state
+            .hub
+            .online_user_ids()
+            .into_iter()
+            .filter(|u| !members.contains(u))
+            .collect();
+        let public_ev = envelope("channel.created", json!({ "channel": &public_view }));
+        state.hub.broadcast(public_ev, others).await;
+    }
 
     Ok((StatusCode::CREATED, Json(channel)))
 }
@@ -264,9 +276,15 @@ pub async fn create_dm(
     }
 
     let channel = load_channel(&state.pool, channel_id, auth.id).await?;
-    let targets = vec![auth.id, body.user_id];
-    let ev = envelope("channel.created", json!({ "channel": &channel }));
-    state.hub.broadcast(ev, targets).await;
+
+    // channel.created must be hydrated per-viewer: dm_user is the *other* member
+    // relative to the recipient, so each side gets its own view of the channel.
+    let ev_self = envelope("channel.created", json!({ "channel": &channel }));
+    state.hub.broadcast(ev_self, vec![auth.id]).await;
+
+    let other_view = load_channel(&state.pool, channel_id, body.user_id).await?;
+    let ev_other = envelope("channel.created", json!({ "channel": &other_view }));
+    state.hub.broadcast(ev_other, vec![body.user_id]).await;
 
     Ok(Json(channel))
 }
