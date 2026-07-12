@@ -1,30 +1,38 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
-import type { SearchResult } from '../lib/types'
+import type { DocSearchResult, SearchResult } from '../lib/types'
 import { Markdown } from './Markdown'
 import { Avatar } from './Avatar'
 import { fmtTime, fmtDayDivider } from '../lib/util'
 import { toastError } from '../lib/toast'
 
+type Tab = 'messages' | 'docs'
+
 export function SearchResults() {
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const q = params.get('q') ?? ''
-  const [results, setResults] = useState<SearchResult[]>([])
+  const tab: Tab = params.get('tab') === 'docs' ? 'docs' : 'messages'
+
+  const [messages, setMessages] = useState<SearchResult[]>([])
+  const [docs, setDocs] = useState<DocSearchResult[]>([])
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
 
   useEffect(() => {
     if (!q.trim()) {
-      setResults([])
+      setMessages([])
+      setDocs([])
       return
     }
     let cancelled = false
     setLoading(true)
-    api
-      .search(q, 20)
+    const req = tab === 'docs' ? api.docSearch(q, 20) : api.search(q, 20)
+    req
       .then((res) => {
-        if (!cancelled) setResults(res.results)
+        if (cancelled) return
+        if (tab === 'docs') setDocs((res as { results: DocSearchResult[] }).results)
+        else setMessages((res as { results: SearchResult[] }).results)
       })
       .catch((e) => {
         if (!cancelled && e instanceof Error) toastError(e.message)
@@ -35,7 +43,16 @@ export function SearchResults() {
     return () => {
       cancelled = true
     }
-  }, [q])
+  }, [q, tab])
+
+  function setTab(next: Tab) {
+    const p = new URLSearchParams(params)
+    if (next === 'docs') p.set('tab', 'docs')
+    else p.delete('tab')
+    setParams(p, { replace: true })
+  }
+
+  const results = tab === 'docs' ? docs : messages
 
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
@@ -45,6 +62,15 @@ export function SearchResults() {
           {q ? `Results for "${q}"` : 'Type a query in the sidebar'}
         </span>
       </header>
+
+      <div className="flex items-center gap-1 border-b border-[var(--color-border)] px-4">
+        <TabButton active={tab === 'messages'} onClick={() => setTab('messages')}>
+          Messages
+        </TabButton>
+        <TabButton active={tab === 'docs'} onClick={() => setTab('docs')}>
+          Docs
+        </TabButton>
+      </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {loading ? (
@@ -57,15 +83,45 @@ export function SearchResults() {
           <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
             <div className="text-3xl">🔍</div>
             <p className="text-sm text-[var(--color-text-dim)]">
-              {q ? 'No messages matched your search.' : 'Search across your channels and DMs.'}
+              {q
+                ? `No ${tab} matched your search.`
+                : 'Search across your channels and DMs.'}
             </p>
+          </div>
+        ) : tab === 'docs' ? (
+          <div className="space-y-2">
+            <div className="mb-1 text-xs text-[var(--color-text-faint)]">
+              {docs.length} {docs.length === 1 ? 'result' : 'results'}
+            </div>
+            {docs.map((d) => (
+              <button
+                key={d.id}
+                onClick={() => navigate(`/d/${d.id}`)}
+                className="flex w-full items-start gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] p-3 text-left transition hover:border-[var(--color-accent)]"
+              >
+                <span className="text-xl">{d.icon || '📄'}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="mb-0.5 flex items-center gap-2">
+                    <span className="truncate font-semibold">{d.title || 'Untitled'}</span>
+                    <span className="shrink-0 text-[11px] text-[var(--color-accent-hover)]">
+                      #{d.channel_name}
+                    </span>
+                  </div>
+                  {d.preview && (
+                    <p className="line-clamp-2 text-xs text-[var(--color-text-dim)]">
+                      {d.preview}
+                    </p>
+                  )}
+                </div>
+              </button>
+            ))}
           </div>
         ) : (
           <div className="space-y-2">
             <div className="mb-1 text-xs text-[var(--color-text-faint)]">
-              {results.length} {results.length === 1 ? 'result' : 'results'}
+              {messages.length} {messages.length === 1 ? 'result' : 'results'}
             </div>
-            {results.map((r) => (
+            {messages.map((r) => (
               <button
                 key={r.id}
                 onClick={() => navigate(`/c/${r.channel_id}`)}
@@ -92,5 +148,28 @@ export function SearchResults() {
         )}
       </div>
     </div>
+  )
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`-mb-px border-b-2 px-3 py-2.5 text-sm font-medium transition ${
+        active
+          ? 'border-[var(--color-accent)] text-[var(--color-text)]'
+          : 'border-transparent text-[var(--color-text-faint)] hover:text-[var(--color-text-dim)]'
+      }`}
+    >
+      {children}
+    </button>
   )
 }

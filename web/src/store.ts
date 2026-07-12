@@ -2,11 +2,17 @@ import { create } from 'zustand'
 import { api, clearToken, setToken } from './lib/api'
 import { WsClient } from './lib/ws'
 import { cmpId } from './lib/util'
-import { toastError } from './lib/toast'
+import { toastError, toastInfo } from './lib/toast'
 import type {
   Channel,
   ChannelCreatedPayload,
   ChannelMemberPayload,
+  Doc,
+  DocCreatedPayload,
+  DocDeletedPayload,
+  DocMention,
+  DocMentionPayload,
+  DocUpdatedPayload,
   HelloPayload,
   Message,
   MessageCreatedPayload,
@@ -67,6 +73,14 @@ type State = {
   // quick switcher
   quickSwitcherOpen: boolean
 
+  // --- docs (Phase 2) ---
+  docsByChannel: Record<string, Doc[]> // active (non-trashed) docs, updated_at desc
+  docsLoaded: Set<string> // channel ids whose active docs were fully fetched
+  trashByChannel: Record<string, Doc[]> // trashed docs, loaded on demand
+  docMeta: Record<string, Doc> // individual doc meta cache by id
+  mentions: DocMention[]
+  unreadMentionCount: number
+
   // ws
   ws: WsClient | null
 
@@ -110,6 +124,21 @@ type State = {
   sendTyping: (channelId: string) => void
   pruneTyping: () => void
 
+  // docs actions
+  loadChannelDocs: (channelId: string) => Promise<void>
+  loadChannelTrash: (channelId: string) => Promise<void>
+  createDoc: (channelId: string, input?: { title?: string; icon?: string }) => Promise<Doc>
+  fetchDoc: (id: string) => Promise<Doc>
+  patchDoc: (
+    id: string,
+    input: { title?: string; icon?: string; everyone_role?: 'editor' | 'viewer' | 'none' },
+  ) => Promise<Doc>
+  trashDoc: (id: string) => Promise<void>
+  restoreDoc: (id: string) => Promise<Doc>
+  permanentDeleteDoc: (id: string) => Promise<void>
+  loadMentions: () => Promise<void>
+  markMentionsRead: (ids: string[]) => Promise<void>
+
   applyWsEvent: (env: WsEnvelope) => void
   totalUnread: () => number
 }
@@ -131,6 +160,12 @@ export const useStore = create<State>((set, get) => ({
   thread: { open: false, parentId: null, parent: null, replies: [], loading: false },
   typing: {},
   quickSwitcherOpen: false,
+  docsByChannel: {},
+  docsLoaded: new Set(),
+  trashByChannel: {},
+  docMeta: {},
+  mentions: [],
+  unreadMentionCount: 0,
   ws: null,
 
   async init(token, me) {
@@ -142,6 +177,7 @@ export const useStore = create<State>((set, get) => ({
       handler: (env) => get().applyWsEvent(env),
       onReconnect: () => {
         get().refetchDirectory()
+        get().loadMentions()
         const cur = get().currentChannelId
         if (cur) get().loadMessages(cur)
       },
@@ -150,6 +186,7 @@ export const useStore = create<State>((set, get) => ({
     ws.connect()
 
     await get().refetchDirectory()
+    get().loadMentions()
     set({ ready: true })
   },
 
@@ -170,6 +207,12 @@ export const useStore = create<State>((set, get) => ({
       thread: { open: false, parentId: null, parent: null, replies: [], loading: false },
       typing: {},
       quickSwitcherOpen: false,
+      docsByChannel: {},
+      docsLoaded: new Set(),
+      trashByChannel: {},
+      docMeta: {},
+      mentions: [],
+      unreadMentionCount: 0,
       ws: null,
     })
   },
@@ -460,6 +503,111 @@ export const useStore = create<State>((set, get) => ({
     return get().channels.reduce((sum, c) => sum + (c.unread_count || 0), 0)
   },
 
+  // --- docs ---
+
+  async loadChannelDocs(channelId) {
+    try {
+      const res = await api.channelDocs(channelId)
+      set((s) => {
+        const docMeta = { ...s.docMeta }
+        for (const d of res.docs) docMeta[d.id] = d
+        const docsLoaded = new Set(s.docsLoaded)
+        docsLoaded.add(channelId)
+        return {
+          docsByChannel: { ...s.docsByChannel, [channelId]: sortDocs(res.docs) },
+          docsLoaded,
+          docMeta,
+        }
+      })
+    } catch (e) {
+      if (e instanceof Error) toastError(e.message)
+    }
+  },
+
+  async loadChannelTrash(channelId) {
+    try {
+      const res = await api.channelDocsTrash(channelId)
+      set((s) => {
+        const docMeta = { ...s.docMeta }
+        for (const d of res.docs) docMeta[d.id] = d
+        return {
+          trashByChannel: { ...s.trashByChannel, [channelId]: sortDocs(res.docs) },
+          docMeta,
+        }
+      })
+    } catch (e) {
+      if (e instanceof Error) toastError(e.message)
+    }
+  },
+
+  async createDoc(channelId, input = {}) {
+    const doc = await api.createDoc(channelId, input)
+    set((s) => placeDoc(s, doc))
+    return doc
+  },
+
+  async fetchDoc(id) {
+    const doc = await api.getDoc(id)
+    set((s) => ({ docMeta: { ...s.docMeta, [id]: doc } }))
+    return doc
+  },
+
+  async patchDoc(id, input) {
+    const doc = await api.patchDoc(id, input)
+    set((s) => placeDoc(s, doc))
+    return doc
+  },
+
+  async trashDoc(id) {
+    await api.deleteDoc(id)
+    // Optimistic local move; the doc.deleted WS event confirms.
+    set((s) => {
+      const existing = s.docMeta[id]
+      if (!existing) return s
+      return placeDoc(s, { ...existing, deleted_at: new Date().toISOString() })
+    })
+  },
+
+  async restoreDoc(id) {
+    const doc = await api.restoreDoc(id)
+    set((s) => placeDoc(s, doc))
+    return doc
+  },
+
+  async permanentDeleteDoc(id) {
+    await api.permanentDeleteDoc(id)
+    set((s) => removeDoc(s, id))
+  },
+
+  async loadMentions() {
+    try {
+      const res = await api.mentions()
+      set({
+        mentions: res.mentions,
+        unreadMentionCount: countUnread(res.mentions),
+      })
+    } catch (e) {
+      if (e instanceof Error) toastError(e.message)
+    }
+  },
+
+  async markMentionsRead(ids) {
+    if (ids.length === 0) return
+    const idSet = new Set(ids)
+    const now = new Date().toISOString()
+    set((s) => {
+      const mentions = s.mentions.map((m) =>
+        idSet.has(m.id) && !m.read_at ? { ...m, read_at: now } : m,
+      )
+      return { mentions, unreadMentionCount: countUnread(mentions) }
+    })
+    try {
+      await api.markMentionsRead(ids)
+    } catch (e) {
+      if (e instanceof Error) toastError(e.message)
+    }
+  },
+
   applyWsEvent(env) {
     const me = get().me
     switch (env.type) {
@@ -571,11 +719,113 @@ export const useStore = create<State>((set, get) => ({
         })
         break
       }
+      case 'doc.created': {
+        const { doc } = env.payload as DocCreatedPayload
+        set((s) => placeDoc(s, doc))
+        break
+      }
+      case 'doc.updated': {
+        const { doc } = env.payload as DocUpdatedPayload
+        set((s) => placeDoc(s, doc))
+        break
+      }
+      case 'doc.deleted': {
+        const p = env.payload as DocDeletedPayload
+        set((s) => applyDocDeleted(s, p))
+        break
+      }
+      case 'doc.mention': {
+        const { mention } = env.payload as DocMentionPayload
+        if (get().mentions.some((m) => m.id === mention.id)) break
+        set((s) => {
+          const mentions = [mention, ...s.mentions]
+          return { mentions, unreadMentionCount: countUnread(mentions) }
+        })
+        // Toast unless the user is already looking at the mentioned doc.
+        const viewing =
+          typeof window !== 'undefined' &&
+          window.location.pathname === `/d/${mention.doc.id}`
+        if (!viewing) {
+          toastInfo(
+            `${mention.from_user.display_name} mentioned you in ${
+              mention.doc.title || 'Untitled'
+            }`,
+          )
+        }
+        break
+      }
       default:
         break
     }
   },
 }))
+
+// --- doc helpers ---
+
+function sortDocs(docs: Doc[]): Doc[] {
+  return [...docs].sort((a, b) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0))
+}
+
+function countUnread(mentions: DocMention[]): number {
+  return mentions.reduce((n, m) => n + (m.read_at ? 0 : 1), 0)
+}
+
+type DocSlice = {
+  docsByChannel: Record<string, Doc[]>
+  trashByChannel: Record<string, Doc[]>
+  docMeta: Record<string, Doc>
+}
+
+function withoutDoc(map: Record<string, Doc[]>, channelId: string, id: string): Record<string, Doc[]> {
+  const list = map[channelId]
+  if (!list) return map
+  const next = list.filter((d) => d.id !== id)
+  return next.length === list.length ? map : { ...map, [channelId]: next }
+}
+
+/** Upsert a doc into the right bucket (active/trash) based on my_role + deleted_at. */
+function placeDoc(s: DocSlice, doc: Doc): DocSlice {
+  const cid = doc.channel_id
+  if (doc.my_role === 'none') return removeDoc(s, doc.id, cid)
+
+  const docMeta = { ...s.docMeta, [doc.id]: doc }
+  let docsByChannel = withoutDoc(s.docsByChannel, cid, doc.id)
+  let trashByChannel = withoutDoc(s.trashByChannel, cid, doc.id)
+
+  if (doc.deleted_at) {
+    // Only track trash for channels whose trash was explicitly loaded.
+    if (trashByChannel[cid]) {
+      trashByChannel = { ...trashByChannel, [cid]: sortDocs([...trashByChannel[cid], doc]) }
+    }
+  } else {
+    const cur = docsByChannel[cid] ?? []
+    docsByChannel = { ...docsByChannel, [cid]: sortDocs([...cur, doc]) }
+  }
+  return { docMeta, docsByChannel, trashByChannel }
+}
+
+function removeDoc(s: DocSlice, id: string, channelId?: string): DocSlice {
+  const cid = channelId ?? s.docMeta[id]?.channel_id
+  const docMeta = { ...s.docMeta }
+  delete docMeta[id]
+  if (!cid) return { ...s, docMeta }
+  return {
+    docMeta,
+    docsByChannel: withoutDoc(s.docsByChannel, cid, id),
+    trashByChannel: withoutDoc(s.trashByChannel, cid, id),
+  }
+}
+
+function applyDocDeleted(s: DocSlice, p: DocDeletedPayload): DocSlice {
+  if (p.permanent) return removeDoc(s, p.doc_id, p.channel_id)
+  const existing =
+    s.docMeta[p.doc_id] ?? s.docsByChannel[p.channel_id]?.find((d) => d.id === p.doc_id)
+  if (!existing) {
+    // Nothing cached: just drop from the active list if present.
+    return { ...s, docsByChannel: withoutDoc(s.docsByChannel, p.channel_id, p.doc_id) }
+  }
+  return placeDoc(s, { ...existing, deleted_at: existing.deleted_at ?? new Date().toISOString() })
+}
 
 // --- pure helpers ---
 

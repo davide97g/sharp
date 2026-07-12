@@ -81,6 +81,50 @@ export type ReactionPayload = {
 }
 export type ChannelCreatedPayload = { channel: Channel }
 export type ChannelMemberPayload = { channel_id: string; user: User }
+
+// --- Phase 2: Docs ---
+
+export type DocRole = 'owner' | 'editor' | 'viewer' | 'none'
+
+export type Doc = {
+  id: string
+  channel_id: string
+  title: string
+  icon: string
+  created_by: string | null
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  everyone_role: 'editor' | 'viewer' | 'none'
+  my_role: DocRole // resolved for the requesting/receiving user
+  preview: string // first 160 chars of content_text
+}
+
+export type DocMention = {
+  id: string
+  doc: { id: string; title: string; icon: string; channel_id: string }
+  from_user: { id: string; display_name: string }
+  created_at: string
+  read_at: string | null
+}
+
+// Doc REST response shapes
+export type DocsResponse = { docs: Doc[] }
+export type DocRoleEntry = { user: User; role: 'editor' | 'viewer' | 'none' }
+export type DocRolesResponse = { roles: DocRoleEntry[] }
+export type DocMentionsResponse = { mentions: DocMention[] }
+export type DocSearchResult = Doc & { channel_name: string }
+export type DocSearchResponse = { results: DocSearchResult[] }
+
+// Doc WS payloads
+export type DocCreatedPayload = { doc: Doc }
+export type DocUpdatedPayload = { doc: Doc }
+export type DocDeletedPayload = {
+  doc_id: string
+  channel_id: string
+  permanent: boolean
+}
+export type DocMentionPayload = { mention: DocMention }
 export type TypingPayload = {
   channel_id: string
   user_id: string

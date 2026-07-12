@@ -2,6 +2,11 @@ import type {
   AuthResponse,
   Channel,
   ChannelsResponse,
+  Doc,
+  DocMentionsResponse,
+  DocRolesResponse,
+  DocSearchResponse,
+  DocsResponse,
   Message,
   MembersResponse,
   MessagesResponse,
@@ -207,5 +212,68 @@ export const api = {
   search(q: string, limit = 20) {
     const params = new URLSearchParams({ q, limit: String(limit) })
     return request<SearchResponse>(`/search?${params.toString()}`)
+  },
+
+  // --- docs ---
+  channelDocs(channelId: string) {
+    return request<DocsResponse>(`/channels/${channelId}/docs`)
+  },
+  channelDocsTrash(channelId: string) {
+    return request<DocsResponse>(`/channels/${channelId}/docs/trash`)
+  },
+  createDoc(channelId: string, input: { title?: string; icon?: string } = {}) {
+    return request<Doc>(`/channels/${channelId}/docs`, {
+      method: 'POST',
+      body: input,
+    })
+  },
+  getDoc(id: string) {
+    return request<Doc>(`/docs/${id}`)
+  },
+  patchDoc(
+    id: string,
+    input: { title?: string; icon?: string; everyone_role?: 'editor' | 'viewer' | 'none' },
+  ) {
+    return request<Doc>(`/docs/${id}`, { method: 'PATCH', body: input })
+  },
+  deleteDoc(id: string) {
+    return request<void>(`/docs/${id}`, { method: 'DELETE' })
+  },
+  restoreDoc(id: string) {
+    return request<Doc>(`/docs/${id}/restore`, { method: 'POST' })
+  },
+  permanentDeleteDoc(id: string) {
+    return request<void>(`/docs/${id}/permanent`, { method: 'DELETE' })
+  },
+  docRoles(id: string) {
+    return request<DocRolesResponse>(`/docs/${id}/roles`)
+  },
+  putDocRole(id: string, userId: string, role: 'editor' | 'viewer' | 'none') {
+    return request<void>(`/docs/${id}/roles/${userId}`, {
+      method: 'PUT',
+      body: { role },
+    })
+  },
+  deleteDocRole(id: string, userId: string) {
+    return request<void>(`/docs/${id}/roles/${userId}`, { method: 'DELETE' })
+  },
+  backlinks(id: string) {
+    return request<DocsResponse>(`/docs/${id}/backlinks`)
+  },
+  addDocMention(id: string, userId: string) {
+    return request<void>(`/docs/${id}/mentions`, {
+      method: 'POST',
+      body: { user_id: userId },
+    })
+  },
+  mentions() {
+    return request<DocMentionsResponse>('/mentions')
+  },
+  markMentionsRead(ids: string[]) {
+    return request<void>('/mentions/read', { method: 'POST', body: { ids } })
+  },
+  docSearch(q: string, limit = 20) {
+    const params = new URLSearchParams({ q, limit: String(limit) })
+    return request<DocSearchResponse>(`/docs/search?${params.toString()}`)
   },
 }

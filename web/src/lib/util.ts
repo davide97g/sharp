@@ -93,6 +93,32 @@ export function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
 
+/**
+ * Deterministic vivid color for a collaborator cursor, keyed by user id.
+ * Returned as hex (#rrggbb) — BlockNote's Yjs cursor plugin rejects `hsl()`
+ * ("unsupported color format"), and hex works everywhere else too.
+ */
+export function userColor(id: string): string {
+  let h = 0
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0
+  return hslToHex(h % 360, 70, 60)
+}
+
+/** Convert HSL (h in degrees, s/l in percent) to a #rrggbb hex string. */
+function hslToHex(h: number, s: number, l: number): string {
+  const sn = s / 100
+  const ln = l / 100
+  const a = sn * Math.min(ln, 1 - ln)
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12
+    const c = ln - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))
+    return Math.round(255 * c)
+      .toString(16)
+      .padStart(2, '0')
+  }
+  return `#${f(0)}${f(8)}${f(4)}`
+}
+
 /** Deterministic accent color for an avatar based on id. */
 export function avatarColor(id: string): string {
   const palette = [

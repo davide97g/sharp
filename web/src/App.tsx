@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { api, getToken, setUnauthorizedHandler } from './lib/api'
+import { setNavigate } from './lib/nav'
 import { useStore } from './store'
 import { Login } from './components/Login'
 import { AppShell } from './components/AppShell'
@@ -8,6 +9,9 @@ import { MessagePane } from './components/MessagePane'
 import { SearchResults } from './components/SearchResults'
 import { Home } from './components/Home'
 import { Toasts } from './components/Toasts'
+import { DocsHome } from './components/docs/DocsHome'
+import { ChannelDocs } from './components/docs/ChannelDocs'
+import { DocEditor } from './components/docs/DocEditor'
 
 type Boot = 'loading' | 'authed' | 'anon'
 
@@ -26,6 +30,11 @@ export function App() {
       navigate('/login', { replace: true })
     })
   }, [logout, navigate])
+
+  // expose router navigation to non-React callers (doc chips, etc.)
+  useEffect(() => {
+    setNavigate(navigate)
+  }, [navigate])
 
   // restore session on load
   useEffect(() => {
@@ -87,6 +96,9 @@ export function App() {
           <Route index element={<Home />} />
           <Route path="c/:channelId" element={<MessagePane />} />
           <Route path="search" element={<SearchResults />} />
+          <Route path="docs" element={<DocsHome />} />
+          <Route path="docs/c/:channelId" element={<ChannelDocs />} />
+          <Route path="d/:docId" element={<DocEditor />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

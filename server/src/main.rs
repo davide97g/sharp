@@ -1,12 +1,13 @@
 mod auth;
 mod config;
+mod docs_sync;
 mod error;
 mod models;
 mod routes;
 mod state;
 mod ws;
 
-use axum::routing::{get, patch, post, put};
+use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use config::Config;
 use serde_json::json;
@@ -67,6 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         pool,
         config,
         hub,
+        doc_rooms: Default::default(),
     });
 
     let api = Router::new()
@@ -97,6 +99,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             put(routes::messages::add_reaction).delete(routes::messages::remove_reaction),
         )
         .route("/search", get(routes::search::search))
+        // --- Phase 2: docs ---
+        .route(
+            "/channels/:id/docs",
+            get(routes::docs::list_channel_docs).post(routes::docs::create_doc),
+        )
+        .route(
+            "/channels/:id/docs/trash",
+            get(routes::docs::list_channel_trash),
+        )
+        .route("/docs/search", get(routes::docs::search_docs))
+        .route(
+            "/docs/:id",
+            get(routes::docs::get_doc)
+                .patch(routes::docs::update_doc)
+                .delete(routes::docs::delete_doc),
+        )
+        .route("/docs/:id/restore", post(routes::docs::restore_doc))
+        .route(
+            "/docs/:id/permanent",
+            delete(routes::docs::permanent_delete_doc),
+        )
+        .route("/docs/:id/roles", get(routes::docs::list_roles))
+        .route(
+            "/docs/:id/roles/:user_id",
+            put(routes::docs::set_role).delete(routes::docs::delete_role),
+        )
+        .route("/docs/:id/backlinks", get(routes::docs::backlinks))
+        .route("/docs/:id/mentions", post(routes::docs::create_mention))
+        .route("/docs/:id/sync", get(docs_sync::doc_sync_handler))
+        .route(
+            "/mentions",
+            get(routes::docs::list_mentions),
+        )
+        .route("/mentions/read", post(routes::docs::read_mentions))
         .route("/healthz", get(healthz))
         .route("/ws", get(ws::ws_handler));
 

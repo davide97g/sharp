@@ -81,3 +81,46 @@ pub struct SearchResult {
     pub message: Message,
     pub channel_name: String,
 }
+
+/// A collaborative doc, serialized with the requesting/receiving user's resolved role.
+#[derive(Debug, Clone, Serialize)]
+pub struct Doc {
+    pub id: Uuid,
+    pub channel_id: Uuid,
+    pub title: String,
+    pub icon: String,
+    pub created_by: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub deleted_at: Option<DateTime<Utc>>,
+    pub everyone_role: String,
+    pub my_role: String,
+    pub preview: String,
+}
+
+/// The compact doc shape embedded in a mention.
+#[derive(Debug, Clone, Serialize)]
+pub struct DocMentionDoc {
+    pub id: Uuid,
+    pub title: String,
+    pub icon: String,
+    pub channel_id: Uuid,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DocMention {
+    #[serde(serialize_with = "ser_i64_string")]
+    pub id: i64,
+    pub doc: DocMentionDoc,
+    pub from_user: MessageUser,
+    pub created_at: DateTime<Utc>,
+    pub read_at: Option<DateTime<Utc>>,
+}
+
+/// Doc-search result: a doc plus the channel name it belongs to.
+#[derive(Debug, Clone, Serialize)]
+pub struct DocSearchResult {
+    #[serde(flatten)]
+    pub doc: Doc,
+    pub channel_name: String,
+}

@@ -1,4 +1,5 @@
 pub mod channels;
+pub mod docs;
 pub mod messages;
 pub mod search;
 pub mod users;

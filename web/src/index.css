@@ -151,6 +151,21 @@ body {
   margin: 0.6rem 0;
 }
 
+/* BlockNote editor — blend with the dark app shell */
+.sharp-doc .bn-container {
+  --bn-colors-editor-background: transparent;
+  --bn-colors-editor-text: var(--color-text);
+  --bn-font-family: var(--font-sans);
+}
+.sharp-doc .bn-editor {
+  background: transparent;
+  padding-inline: 0;
+}
+.sharp-doc .bn-block-outer:first-child .bn-block-content {
+  /* tighten the gap under the doc title */
+  padding-top: 0;
+}
+
 @keyframes sharp-fade-in {
   from {
     opacity: 0;

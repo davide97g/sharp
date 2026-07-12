@@ -1,11 +1,31 @@
 import { Fragment, type ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { navigateTo } from '../lib/nav'
 
 // Mention matcher: @ followed by word chars.
 const MENTION_TOKEN = /@[\w][\w-]*/g
+// Doc-chip matcher: [[doc:<uuid>|<title>]].
+const DOC_TOKEN = /\[\[doc:([0-9a-f-]{36})\|([^\]]*)\]\]/g
 
-function highlightString(text: string, keyPrefix: string): ReactNode[] {
+function DocChip({ docId, title }: { docId: string; title: string }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation()
+        navigateTo(`/d/${docId}`)
+      }}
+      className="mx-0.5 inline-flex items-center gap-1 rounded border border-[var(--color-border)] bg-[var(--color-panel-2)] px-1.5 py-0.5 align-baseline text-[0.85em] font-medium text-[var(--color-accent-hover)] hover:border-[var(--color-accent)]"
+    >
+      <span>📄</span>
+      <span>{title || 'Untitled'}</span>
+    </button>
+  )
+}
+
+/** Highlight @mentions inside a plain-text run. */
+function highlightMentions(text: string, keyPrefix: string): ReactNode[] {
   const out: ReactNode[] = []
   let last = 0
   let m: RegExpExecArray | null
@@ -24,6 +44,35 @@ function highlightString(text: string, keyPrefix: string): ReactNode[] {
     last = m.index + m[0].length
   }
   if (last < text.length) out.push(text.slice(last))
+  return out
+}
+
+/** Split a text run on doc chips, highlighting mentions in the gaps. */
+function highlightString(text: string, keyPrefix: string): ReactNode[] {
+  const out: ReactNode[] = []
+  let last = 0
+  let m: RegExpExecArray | null
+  DOC_TOKEN.lastIndex = 0
+  let i = 0
+  while ((m = DOC_TOKEN.exec(text)) !== null) {
+    if (m.index > last) {
+      out.push(
+        <Fragment key={`${keyPrefix}-t${i}`}>
+          {highlightMentions(text.slice(last, m.index), `${keyPrefix}-t${i}`)}
+        </Fragment>,
+      )
+    }
+    out.push(<DocChip key={`${keyPrefix}-d${i}`} docId={m[1]} title={m[2]} />)
+    last = m.index + m[0].length
+    i++
+  }
+  if (last < text.length) {
+    out.push(
+      <Fragment key={`${keyPrefix}-t${i}`}>
+        {highlightMentions(text.slice(last), `${keyPrefix}-t${i}`)}
+      </Fragment>,
+    )
+  }
   return out
 }
 

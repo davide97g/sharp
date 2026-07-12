@@ -7,6 +7,7 @@ import { toastError } from '../lib/toast'
 type Item =
   | { kind: 'channel'; id: string; label: string; sub: string; icon: string }
   | { kind: 'user'; id: string; label: string; sub: string; icon: string }
+  | { kind: 'doc'; id: string; label: string; sub: string; icon: string }
 
 export function QuickSwitcher() {
   const open = useStore((s) => s.quickSwitcherOpen)
@@ -16,6 +17,7 @@ export function QuickSwitcher() {
   const me = useStore((s) => s.me)
   const online = useStore((s) => s.online)
   const openDm = useStore((s) => s.openDm)
+  const docsByChannel = useStore((s) => s.docsByChannel)
   const navigate = useNavigate()
 
   const [q, setQ] = useState('')
@@ -61,8 +63,20 @@ export function QuickSwitcher() {
         sub: 'Open direct message',
         icon: online.has(u.id) ? '🟢' : '👤',
       }))
-    return [...chanItems, ...userItems]
-  }, [channels, users, me, online])
+    const chanName: Record<string, string> = {}
+    for (const c of channels) chanName[c.id] = c.kind === 'dm' ? channelLabel(c) : c.name
+    const docItems: Item[] = Object.values(docsByChannel)
+      .flat()
+      .filter((d) => !d.deleted_at)
+      .map((d) => ({
+        kind: 'doc',
+        id: d.id,
+        label: d.title || 'Untitled',
+        sub: `Doc · #${chanName[d.channel_id] ?? ''}`,
+        icon: d.icon || '📄',
+      }))
+    return [...chanItems, ...userItems, ...docItems]
+  }, [channels, users, me, online, docsByChannel])
 
   const filtered = useMemo(() => {
     const query = q.trim()
@@ -88,6 +102,8 @@ export function QuickSwitcher() {
     setOpen(false)
     if (it.kind === 'channel') {
       navigate(`/c/${it.id}`)
+    } else if (it.kind === 'doc') {
+      navigate(`/d/${it.id}`)
     } else {
       try {
         const ch = await openDm(it.id)
