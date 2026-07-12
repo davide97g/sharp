@@ -73,6 +73,11 @@ impl Hub {
         guard.keys().copied().collect()
     }
 
+    /// Whether the user has at least one live connection on this replica.
+    pub fn is_online(&self, user_id: Uuid) -> bool {
+        self.sessions.lock().unwrap().contains_key(&user_id)
+    }
+
     /// Send a serialized envelope to all local connections of the target users.
     pub fn send_local(&self, targets: &[Uuid], text: &str) {
         let guard = self.sessions.lock().unwrap();

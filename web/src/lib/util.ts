@@ -10,6 +10,26 @@ export function maxId(a: string, b: string): string {
   return cmpId(a, b) >= 0 ? a : b
 }
 
+export function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** Compact relative time, e.g. "now", "5m", "3h", "2d", else a date. */
+export function fmtRelative(iso: string): string {
+  const then = new Date(iso).getTime()
+  const secs = Math.max(0, Math.floor((Date.now() - then) / 1000))
+  if (secs < 45) return 'now'
+  const mins = Math.floor(secs / 60)
+  if (mins < 60) return `${mins}m`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days}d`
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
 export function fmtTime(iso: string): string {
   const d = new Date(iso)
   return d.toLocaleTimeString(undefined, {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { api, getToken, setUnauthorizedHandler } from './lib/api'
+import { setNavigate } from './lib/notify'
 import { useStore } from './store'
 import { Login } from './components/Login'
 import { AppShell } from './components/AppShell'
@@ -26,6 +27,11 @@ export function App() {
       navigate('/login', { replace: true })
     })
   }, [logout, navigate])
+
+  // let notification clicks deep-link into channels
+  useEffect(() => {
+    setNavigate((path) => navigate(path))
+  }, [navigate])
 
   // restore session on load
   useEffect(() => {

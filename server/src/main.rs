@@ -2,10 +2,14 @@ mod auth;
 mod config;
 mod error;
 mod models;
+mod notify;
 mod routes;
 mod state;
+mod storage;
+mod vapid;
 mod ws;
 
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, patch, post, put};
 use axum::{Json, Router};
 use config::Config;
@@ -43,6 +47,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     sqlx::migrate!("./migrations").run(&pool).await?;
 
+    // File storage (optional S3-compatible backend).
+    let storage = match &config.s3 {
+        Some(s3) => match storage::Storage::from_config(s3) {
+            Ok(s) => {
+                tracing::info!("file uploads enabled (bucket '{}')", s3.bucket);
+                Some(s)
+            }
+            Err(e) => {
+                tracing::warn!("file uploads disabled: {}", e);
+                None
+            }
+        },
+        None => {
+            tracing::info!("file uploads disabled (S3 not configured)");
+            None
+        }
+    };
+
+    // Web-push keys (env → persisted → auto-generated).
+    let vapid = vapid::resolve(&config, &pool).await;
+    tracing::info!(
+        "web push {}",
+        if vapid.is_some() { "enabled" } else { "disabled" }
+    );
+
     // Optional Redis client for cross-replica fanout.
     let redis_client = match &config.redis_url {
         Some(url) => Some(redis::Client::open(url.clone())?),
@@ -62,11 +91,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let port = config.port;
     let web_dist = config.web_dist.clone();
+    let upload_limit = config.max_upload_bytes + 1024 * 1024;
 
     let app_state: state::SharedState = Arc::new(AppState {
         pool,
         config,
         hub,
+        storage,
+        vapid,
     });
 
     let api = Router::new()
@@ -95,6 +127,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/messages/:id/reactions/:emoji",
             put(routes::messages::add_reaction).delete(routes::messages::remove_reaction),
+        )
+        // files
+        .route(
+            "/channels/:id/uploads",
+            post(routes::files::upload).layer(DefaultBodyLimit::max(upload_limit)),
+        )
+        .route("/files/:id", get(routes::files::download))
+        // notifications + preferences
+        .route(
+            "/notifications",
+            get(routes::notifications::list_notifications),
+        )
+        .route("/notifications/read", post(routes::notifications::mark_read))
+        .route("/prefs", get(routes::notifications::get_prefs))
+        .route("/prefs/dnd", put(routes::notifications::set_dnd))
+        .route(
+            "/channels/:id/prefs",
+            put(routes::notifications::set_channel_pref),
+        )
+        // web push
+        .route("/push/vapid", get(routes::notifications::vapid_public))
+        .route("/push/subscribe", post(routes::notifications::subscribe))
+        .route(
+            "/push/unsubscribe",
+            post(routes::notifications::unsubscribe),
         )
         .route("/search", get(routes::search::search))
         .route("/healthz", get(healthz))

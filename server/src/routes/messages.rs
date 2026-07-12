@@ -1,6 +1,7 @@
 use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
-use crate::models::{Message, MessageUser, Reaction};
+use crate::models::{Attachment, Message, MessageUser, Reaction};
+use crate::notify;
 use crate::routes::{channel_kind, is_member};
 use crate::state::SharedState;
 use crate::ws::{channel_member_ids, envelope};
@@ -44,6 +45,7 @@ pub(crate) fn map_message_row(row: &PgRow) -> AppResult<Message> {
         edited_at: row.try_get("edited_at")?,
         deleted_at,
         reactions: Vec::new(),
+        attachments: Vec::new(),
         reply_count: row.try_get("reply_count")?,
         last_reply_at: row.try_get("last_reply_at")?,
     })
@@ -82,6 +84,38 @@ pub(crate) async fn fetch_reactions_map(
     Ok(map)
 }
 
+pub(crate) async fn fetch_attachments_map(
+    pool: &PgPool,
+    ids: &[i64],
+) -> AppResult<HashMap<i64, Vec<Attachment>>> {
+    let mut map: HashMap<i64, Vec<Attachment>> = HashMap::new();
+    if ids.is_empty() {
+        return Ok(map);
+    }
+    let rows = sqlx::query(
+        "SELECT id, message_id, filename, content_type, size FROM files
+         WHERE message_id = ANY($1)
+         ORDER BY message_id, created_at, id",
+    )
+    .bind(ids.to_vec())
+    .fetch_all(pool)
+    .await?;
+
+    for row in &rows {
+        let message_id: i64 = row.try_get("message_id")?;
+        let id: Uuid = row.try_get("id")?;
+        let attachment = Attachment {
+            id,
+            filename: row.try_get("filename")?,
+            content_type: row.try_get("content_type")?,
+            size: row.try_get("size")?,
+            url: format!("/api/v1/files/{id}"),
+        };
+        map.entry(message_id).or_default().push(attachment);
+    }
+    Ok(map)
+}
+
 async fn assemble(pool: &PgPool, rows: Vec<PgRow>, viewer: Uuid) -> AppResult<Vec<Message>> {
     let mut msgs = Vec::with_capacity(rows.len());
     for row in &rows {
@@ -89,9 +123,13 @@ async fn assemble(pool: &PgPool, rows: Vec<PgRow>, viewer: Uuid) -> AppResult<Ve
     }
     let ids: Vec<i64> = msgs.iter().map(|m| m.id).collect();
     let mut rmap = fetch_reactions_map(pool, &ids, viewer).await?;
+    let mut amap = fetch_attachments_map(pool, &ids).await?;
     for m in &mut msgs {
         if let Some(rs) = rmap.remove(&m.id) {
             m.reactions = rs;
+        }
+        if let Some(atts) = amap.remove(&m.id) {
+            m.attachments = atts;
         }
     }
     Ok(msgs)
@@ -203,6 +241,8 @@ pub async fn list_messages(
 pub struct CreateMessageRequest {
     pub content: String,
     pub parent_id: Option<String>,
+    /// Ids of the caller's pending uploads to attach to this message.
+    pub attachment_ids: Option<Vec<Uuid>>,
 }
 
 pub async fn create_message(
@@ -212,7 +252,32 @@ pub async fn create_message(
     Json(body): Json<CreateMessageRequest>,
 ) -> AppResult<(StatusCode, Json<Message>)> {
     require_member(&state, channel_id, auth.id).await?;
-    validate_content(&body.content)?;
+
+    let attachment_ids: Vec<Uuid> = body.attachment_ids.clone().unwrap_or_default();
+    // Content may be empty only when the message carries at least one attachment —
+    // and only if the ids actually resolve to the caller's own unattached uploads in
+    // this channel (otherwise bogus ids would persist a permanently blank message).
+    if body.content.trim().is_empty() {
+        if attachment_ids.is_empty() {
+            return Err(AppError::Validation("content must not be empty".to_string()));
+        }
+        let row = sqlx::query(
+            "SELECT count(*) AS c FROM files
+             WHERE id = ANY($1) AND channel_id = $2 AND user_id = $3 AND message_id IS NULL",
+        )
+        .bind(&attachment_ids)
+        .bind(channel_id)
+        .bind(auth.id)
+        .fetch_one(&state.pool)
+        .await?;
+        if row.try_get::<i64, _>("c")? == 0 {
+            return Err(AppError::Validation("content must not be empty".to_string()));
+        }
+    } else if body.content.chars().count() > 8000 {
+        return Err(AppError::Validation(
+            "content must be at most 8000 characters".to_string(),
+        ));
+    }
 
     let parent_id: Option<i64> = match body.parent_id {
         Some(ref s) if !s.is_empty() => {
@@ -247,11 +312,50 @@ pub async fn create_message(
     .await?;
     let new_id: i64 = row.try_get("id")?;
 
+    // Attach the caller's pending uploads (their own, in this channel, unattached).
+    if !attachment_ids.is_empty() {
+        sqlx::query(
+            "UPDATE files SET message_id = $1
+             WHERE id = ANY($2) AND channel_id = $3 AND user_id = $4 AND message_id IS NULL",
+        )
+        .bind(new_id)
+        .bind(&attachment_ids)
+        .bind(channel_id)
+        .bind(auth.id)
+        .execute(&state.pool)
+        .await?;
+    }
+
     let message = load_message(&state.pool, new_id, auth.id).await?;
 
     let targets = channel_member_ids(&state.pool, channel_id).await?;
     let ev = envelope("message.created", json!({ "message": &message }));
     state.hub.broadcast(ev, targets).await;
+
+    // Fan out notifications (mentions / dm / reply) — best-effort, OFF the request
+    // path: web push does outbound HTTP, so never let it delay this response.
+    let kind = channel_kind(&state.pool, channel_id)
+        .await?
+        .unwrap_or_default();
+    let notify_state = state.clone();
+    let content = message.content.clone();
+    let first_attachment = message.attachments.first().map(|a| a.filename.clone());
+    let msg_id = message.id;
+    let parent = message.parent_id;
+    let author = auth.id;
+    tokio::spawn(async move {
+        notify::dispatch_message(
+            &notify_state,
+            msg_id,
+            channel_id,
+            &kind,
+            parent,
+            author,
+            &content,
+            first_attachment.as_deref(),
+        )
+        .await;
+    });
 
     Ok((StatusCode::CREATED, Json(message)))
 }

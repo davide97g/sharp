@@ -1,14 +1,18 @@
 import type {
+  Attachment,
   AuthResponse,
   Channel,
   ChannelsResponse,
   Message,
   MembersResponse,
   MessagesResponse,
+  NotificationsResponse,
+  Prefs,
   SearchResponse,
   ThreadResponse,
   User,
   UsersResponse,
+  VapidResponse,
 } from './types'
 
 const TOKEN_KEY = 'sharp.token'
@@ -172,10 +176,18 @@ export const api = {
       `/channels/${channelId}/messages?${params.toString()}`,
     )
   },
-  sendMessage(channelId: string, content: string, parent_id?: string) {
+  sendMessage(
+    channelId: string,
+    content: string,
+    parent_id?: string,
+    attachment_ids?: string[],
+  ) {
+    const body: Record<string, unknown> = { content }
+    if (parent_id) body.parent_id = parent_id
+    if (attachment_ids && attachment_ids.length) body.attachment_ids = attachment_ids
     return request<Message>(`/channels/${channelId}/messages`, {
       method: 'POST',
-      body: parent_id ? { content, parent_id } : { content },
+      body,
     })
   },
   thread(messageId: string) {
@@ -203,9 +215,104 @@ export const api = {
     )
   },
 
+  // --- files ---
+  uploadFile(
+    channelId: string,
+    file: File,
+    onProgress?: (fraction: number) => void,
+  ): Promise<Attachment> {
+    return new Promise((resolve, reject) => {
+      const form = new FormData()
+      form.append('file', file, file.name)
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', `${apiBase()}/channels/${channelId}/uploads`)
+      const token = getToken()
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+      xhr.upload.onprogress = (e) => {
+        if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total)
+      }
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText) as Attachment)
+          } catch {
+            reject(new ApiRequestError('bad upload response', 'error', xhr.status))
+          }
+        } else {
+          if (xhr.status === 401) {
+            clearToken()
+            onUnauthorized?.()
+          }
+          let message = `Upload failed (${xhr.status})`
+          try {
+            message = JSON.parse(xhr.responseText)?.error?.message ?? message
+          } catch {
+            /* ignore */
+          }
+          reject(new ApiRequestError(message, 'error', xhr.status))
+        }
+      }
+      xhr.onerror = () => reject(new ApiRequestError('network error', 'error', 0))
+      xhr.send(form)
+    })
+  },
+
+  // --- notifications ---
+  notifications(before?: string, limit = 30) {
+    const params = new URLSearchParams()
+    if (before) params.set('before', before)
+    params.set('limit', String(limit))
+    return request<NotificationsResponse>(`/notifications?${params.toString()}`)
+  },
+  markNotificationsRead(opts: { ids?: string[]; all?: boolean }) {
+    return request<void>('/notifications/read', { method: 'POST', body: opts })
+  },
+
+  // --- preferences ---
+  prefs() {
+    return request<Prefs>('/prefs')
+  },
+  setDnd(dnd: boolean) {
+    return request<void>('/prefs/dnd', { method: 'PUT', body: { dnd } })
+  },
+  setChannelMute(channelId: string, muted: boolean) {
+    return request<void>(`/channels/${channelId}/prefs`, {
+      method: 'PUT',
+      body: { muted },
+    })
+  },
+
+  // --- web push ---
+  vapidPublicKey() {
+    return request<VapidResponse>('/push/vapid')
+  },
+  subscribePush(sub: { endpoint: string; keys: { p256dh: string; auth: string } }) {
+    return request<void>('/push/subscribe', { method: 'POST', body: sub })
+  },
+  unsubscribePush(endpoint: string) {
+    return request<void>('/push/unsubscribe', { method: 'POST', body: { endpoint } })
+  },
+
   // --- search ---
   search(q: string, limit = 20) {
     const params = new URLSearchParams({ q, limit: String(limit) })
     return request<SearchResponse>(`/search?${params.toString()}`)
   },
+}
+
+/** Absolute URL for a proxied attachment path (handles custom server origins). */
+export function attachmentAbsoluteUrl(url: string): string {
+  return url.startsWith('http') ? url : `${resolveBaseUrl()}${url}`
+}
+
+/** Fetch an attachment as a Blob with the auth header (for <img> / downloads). */
+export async function fetchAttachmentBlob(url: string): Promise<Blob> {
+  const token = getToken()
+  const res = await fetch(attachmentAbsoluteUrl(url), {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) {
+    throw new ApiRequestError(`download failed (${res.status})`, 'error', res.status)
+  }
+  return res.blob()
 }
