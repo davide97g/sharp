@@ -1,0 +1,48 @@
+# sharp — full local stack in Docker (no Rust/Node needed on your machine).
+# Everything (server + web UI) is built inside Docker and served at :3000.
+#
+#   cd deploy
+#   docker compose -f docker-compose.local.yml up --build
+#
+# First build compiles the Rust server (~5-10 min); later builds use the cache.
+# App: http://localhost:3000
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sharp
+      POSTGRES_PASSWORD: sharp
+      POSTGRES_DB: sharp
+    volumes:
+      - pg_local_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sharp -d sharp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  sharp:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://sharp:sharp@postgres:5432/sharp
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: local-dev-secret
+      SHARP_DISABLE_SIGNUP: "false"
+      RUST_LOG: info
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pg_local_data:
