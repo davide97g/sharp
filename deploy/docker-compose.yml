@@ -1,0 +1,83 @@
+# sharp — production stack for a single VPS.
+#
+#   1. Copy .env.example to .env and set strong secrets + your domain(s).
+#   2. docker compose up -d
+#
+# Caddy (below) is OPTIONAL: it terminates TLS and reverse-proxies the app + serves
+# the landing page. If you already run a reverse proxy, delete the `caddy` service
+# and publish sharp directly by uncommenting its `ports:` line.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sharp
+      POSTGRES_DB: sharp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sharp -d sharp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  sharp:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgres://sharp:${POSTGRES_PASSWORD}@postgres:5432/sharp
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      PORT: 3000
+      WEB_DIST: /app/web-dist
+      SHARP_DISABLE_SIGNUP: ${SHARP_DISABLE_SIGNUP:-false}
+      RUST_LOG: ${RUST_LOG:-info}
+    # Expose sharp directly instead of going through Caddy by uncommenting:
+    # ports:
+    #   - "3000:3000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - sharp
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SHARP_DOMAIN: ${SHARP_DOMAIN}
+      LANDING_DOMAIN: ${LANDING_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../landing/dist:/srv/landing:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pg_data:
+  redis_data:
+  caddy_data:
+  caddy_config:

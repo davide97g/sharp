@@ -1,0 +1,301 @@
+---
+import "../styles/global.css";
+
+// NOTE: Replace GITHUB_OWNER with your GitHub org/user before deploying.
+const GITHUB_OWNER = "GITHUB_OWNER";
+const repo = `https://github.com/${GITHUB_OWNER}/sharp`;
+const releases = `${repo}/releases/latest`;
+
+const title = "sharp — Team chat. Your server. No compromises.";
+const description =
+  "An open-source, self-hosted Slack replacement: channels, threads, DMs and full-text search, running on your own server from a single container.";
+const siteUrl = "https://example.com";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="canonical" href={siteUrl} />
+    <meta name="theme-color" content="#0e0e11" />
+
+    <!-- Open Graph / Twitter -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={siteUrl} />
+    <meta property="og:site_name" content="sharp" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+
+    <link rel="preconnect" href="https://rsms.me/" />
+    <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
+  </head>
+  <body>
+    <!-- ===== Nav ===== -->
+    <nav class="nav">
+      <div class="container nav-inner">
+        <a class="brand" href="/">
+          <span class="hash">#</span> sharp
+        </a>
+        <div class="nav-links">
+          <a class="hide-sm" href="#features">Features</a>
+          <a class="hide-sm" href="#selfhost">Self-host</a>
+          <a class="hide-sm" href="#download">Download</a>
+          <a class="gh" href={repo} rel="noopener">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.5v-1.7c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.8 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
+            GitHub
+          </a>
+        </div>
+      </div>
+    </nav>
+
+    <!-- ===== Hero ===== -->
+    <header class="hero">
+      <div class="container">
+        <div class="mark"><span>#</span></div>
+        <div>
+          <span class="pill"><span class="dot"></span> Open source · AGPL-3.0 · self-hosted</span>
+        </div>
+        <h1 class="headline">Team chat. Your server. No compromises.</h1>
+        <p class="subline">
+          sharp is an open-source Slack replacement — channels, threads, DMs and
+          full-text search — self-hosted in a single container. Your data never
+          leaves your infrastructure.
+        </p>
+        <div class="cta-row">
+          <a id="downloadCta" class="btn btn-primary" href={releases} rel="noopener">
+            Download for macOS
+          </a>
+          <a class="btn btn-ghost" href="#selfhost">Self-host in 5 minutes</a>
+        </div>
+        <p class="cta-note">No account. No telemetry. No SaaS lock-in.</p>
+
+        <!-- ===== App mock ===== -->
+        <div class="mock-wrap">
+          <div class="mock">
+            <div class="mock-bar">
+              <span class="tl"></span><span class="tl"></span><span class="tl"></span>
+              <span class="title">sharp — #general</span>
+            </div>
+            <div class="mock-body">
+              <!-- sidebar -->
+              <aside class="mock-side">
+                <div class="side-ws"><span class="hash">#</span> Acme Inc</div>
+                <div class="side-label">Channels</div>
+                <div class="side-item active"><span class="h">#</span> general</div>
+                <div class="side-item"><span class="h">#</span> engineering <span class="badge">3</span></div>
+                <div class="side-item"><span class="h">#</span> design</div>
+                <div class="side-item"><span class="h">#</span> random</div>
+                <div class="side-label">Direct messages</div>
+                <div class="side-item">Jordan Lee <span class="pdot"></span></div>
+                <div class="side-item">Priya Shah <span class="pdot"></span></div>
+              </aside>
+              <!-- main -->
+              <main class="mock-main">
+                <div class="chan-head">
+                  # general
+                  <span class="topic">— company-wide announcements &amp; watercooler</span>
+                </div>
+                <div class="msgs">
+                  <div class="msg">
+                    <div class="avatar" style="background:#7c6cff">JL</div>
+                    <div class="msg-body">
+                      <div class="msg-head"><span class="name">Jordan Lee</span><span class="time">9:41 AM</span></div>
+                      <div class="msg-text">morning team — shipping the v1 release today. self-hosted, one container, zero drama.</div>
+                      <div class="reacts"><span class="react on">🚀 4</span><span class="react">🎉 2</span></div>
+                    </div>
+                  </div>
+                  <div class="msg">
+                    <div class="avatar" style="background:#3ddc84">PS</div>
+                    <div class="msg-body">
+                      <div class="msg-head"><span class="name">Priya Shah</span><span class="time">9:43 AM</span></div>
+                      <div class="msg-text">love it. moved our whole workspace over the weekend, Postgres backup was painless.</div>
+                      <div class="thread-link">↳ 3 replies · last today at 9:52 AM</div>
+                    </div>
+                  </div>
+                  <div class="msg">
+                    <div class="avatar" style="background:#ff8a5c">MK</div>
+                    <div class="msg-body">
+                      <div class="msg-head"><span class="name">Mika K</span><span class="time">9:50 AM</span></div>
+                      <div class="msg-text">search across every channel is instant now 🔍 @jordan nice work</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="composer">Message #general — Enter to send, Shift+Enter for newline</div>
+              </main>
+              <!-- thread -->
+              <aside class="mock-thread">
+                <div class="thread-head">Thread <span>· 3 replies</span></div>
+                <div class="msg" style="margin-bottom:14px">
+                  <div class="avatar" style="width:30px;height:30px;font-size:12px;background:#3ddc84">PS</div>
+                  <div class="msg-body">
+                    <div class="msg-head"><span class="name">Priya Shah</span></div>
+                    <div class="msg-text">which VPS did you land on?</div>
+                  </div>
+                </div>
+                <div class="msg">
+                  <div class="avatar" style="width:30px;height:30px;font-size:12px;background:#7c6cff">JL</div>
+                  <div class="msg-body">
+                    <div class="msg-head"><span class="name">Jordan Lee</span></div>
+                    <div class="msg-text">a $6 box. Caddy does TLS, done.</div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- ===== Features ===== -->
+    <section id="features">
+      <div class="container">
+        <div class="section-head">
+          <div class="eyebrow">Why sharp</div>
+          <h2>Sharp chat. Truly yours. Everywhere.</h2>
+          <p>Everything a team needs to talk — and nothing that phones home.</p>
+        </div>
+        <div class="features">
+          <div class="card">
+            <div class="icon">#</div>
+            <h3>Sharp chat</h3>
+            <ul>
+              <li>Threads that keep replies out of the way</li>
+              <li>@mentions &amp; emoji reactions</li>
+              <li>Public channels, private groups &amp; DMs</li>
+              <li>Instant Postgres full-text search</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="icon">⌂</div>
+            <h3>Yours</h3>
+            <ul>
+              <li>Self-host on any box you control</li>
+              <li>Backed by plain Postgres — easy backups</li>
+              <li>AGPL-3.0, fork it &amp; ship it</li>
+              <li>Zero telemetry, zero tracking</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="icon">◆</div>
+            <h3>Everywhere</h3>
+            <ul>
+              <li>Web app in any modern browser</li>
+              <li>Native macOS, Windows &amp; Linux</li>
+              <li>Built on Tauri — tiny, fast, native</li>
+              <li>One server, all your devices</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Self-host ===== -->
+    <section id="selfhost" class="selfhost">
+      <div class="container">
+        <div class="section-head">
+          <div class="eyebrow">Self-host</div>
+          <h2>Up and running in 5 minutes</h2>
+          <p>One container plus Postgres. Copy, paste, and you own your team's chat.</p>
+        </div>
+        <div class="code-block">
+          <div class="code-top">
+            <span class="label">bash</span>
+            <button id="copyBtn" class="copy-btn" type="button">Copy</button>
+          </div>
+          <pre><code id="codeText"><span class="cmd">git clone</span> {repo} \
+  && <span class="cmd">cd</span> sharp/deploy \
+  && <span class="cmd">cp</span> .env.example .env \
+  && <span class="cmd">docker compose</span> up -d</code></pre>
+        </div>
+        <div class="steps">
+          <div class="step"><span class="n">1</span> Point DNS at your box</div>
+          <div class="step"><span class="n">2</span> Set secrets in <code>.env</code></div>
+          <div class="step"><span class="n">3</span> Register the first account</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Download ===== -->
+    <section id="download">
+      <div class="container">
+        <div class="section-head">
+          <div class="eyebrow">Download</div>
+          <h2>Get the desktop app</h2>
+          <p>Native builds for every platform. Point it at your server URL and sign in.</p>
+        </div>
+        <div class="dl-grid">
+          <div class="dl-card">
+            <div class="os">🍎</div>
+            <h3>macOS</h3>
+            <p>Apple Silicon &amp; Intel · .dmg</p>
+            <a class="btn btn-primary" href={releases} rel="noopener">Download</a>
+          </div>
+          <div class="dl-card">
+            <div class="os">🪟</div>
+            <h3>Windows</h3>
+            <p>64-bit installer · .exe</p>
+            <a class="btn btn-ghost" href={releases} rel="noopener">Download</a>
+          </div>
+          <div class="dl-card">
+            <div class="os">🐧</div>
+            <h3>Linux</h3>
+            <p>AppImage &amp; .deb</p>
+            <a class="btn btn-ghost" href={releases} rel="noopener">Download</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Footer ===== -->
+    <footer>
+      <div class="container footer-inner">
+        <a class="brand" href="/"><span class="hash" style="color:var(--accent)">#</span> sharp</a>
+        <div class="footer-links">
+          <a href={repo} rel="noopener">GitHub</a>
+          <a href={`${repo}/blob/main/LICENSE`} rel="noopener">AGPL-3.0</a>
+          <a href="#selfhost">Self-host</a>
+          <a href="#download">Download</a>
+        </div>
+        <div>Built in the open.</div>
+      </div>
+    </footer>
+
+    <!-- Tiny inline JS: OS detect for the primary CTA + copy button -->
+    <script is:inline>
+      (function () {
+        var cta = document.getElementById("downloadCta");
+        if (cta) {
+          var ua = navigator.userAgent || "";
+          var os = "macOS";
+          if (/Windows/i.test(ua)) os = "Windows";
+          else if (/Linux|X11/i.test(ua) && !/Android/i.test(ua)) os = "Linux";
+          else if (/Mac/i.test(ua)) os = "macOS";
+          cta.textContent = "Download for " + os;
+        }
+
+        var btn = document.getElementById("copyBtn");
+        var code = document.getElementById("codeText");
+        if (btn && code) {
+          btn.addEventListener("click", function () {
+            var text = code.innerText.replace(/\s+\\\s+/g, " ").trim();
+            navigator.clipboard.writeText(text).then(function () {
+              btn.textContent = "Copied!";
+              btn.classList.add("copied");
+              setTimeout(function () {
+                btn.textContent = "Copy";
+                btn.classList.remove("copied");
+              }, 2000);
+            });
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>

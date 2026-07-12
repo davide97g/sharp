@@ -1,0 +1,34 @@
+# sharp — local development dependencies only (Postgres + Redis).
+#
+# Run the server and web app on the host; point them at these:
+#     DATABASE_URL=postgres://sharp:sharp@localhost:5432/sharp
+#     REDIS_URL=redis://localhost:6379
+#
+#     docker compose -f docker-compose.dev.yml up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sharp
+      POSTGRES_PASSWORD: sharp
+      POSTGRES_DB: sharp
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sharp -d sharp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+volumes:
+  pg_dev_data:

@@ -1,0 +1,35 @@
+# sharp — Caddy reverse proxy with automatic HTTPS.
+#
+# Domains and the ACME email come from the environment (set in .env, passed through
+# by docker-compose.yml). Caddy provisions and renews Let's Encrypt certs on its own.
+
+{
+	email {$ACME_EMAIL}
+}
+
+# --- App: the sharp server (API + web SPA). WebSockets work with no extra config. ---
+{$SHARP_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy sharp:3000
+}
+
+# --- Landing: the static Astro site (built to ../landing/dist, mounted at /srv/landing). ---
+{$LANDING_DOMAIN} {
+	encode zstd gzip
+	root * /srv/landing
+	file_server
+}
+
+# ---------------------------------------------------------------------------
+# Single-domain variant: serve the app at the apex and the marketing landing
+# on www. Comment out the two blocks above and use this instead.
+# ---------------------------------------------------------------------------
+# {$SHARP_DOMAIN} {
+# 	encode zstd gzip
+# 	reverse_proxy sharp:3000
+# }
+# www.{$SHARP_DOMAIN} {
+# 	encode zstd gzip
+# 	root * /srv/landing
+# 	file_server
+# }

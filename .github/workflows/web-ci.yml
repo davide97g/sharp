@@ -1,0 +1,39 @@
+name: web-ci
+
+# Build the web SPA and the Astro landing page on any change to either.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "landing/**"
+      - ".github/workflows/web-ci.yml"
+  pull_request:
+    paths:
+      - "web/**"
+      - "landing/**"
+      - ".github/workflows/web-ci.yml"
+
+jobs:
+  build:
+    name: build ${{ matrix.dir }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: [web, landing]
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Build
+        run: npm run build

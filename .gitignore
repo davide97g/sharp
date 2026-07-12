@@ -1,0 +1,26 @@
+# Rust
+target/
+Cargo.lock.bak
+
+# Node
+node_modules/
+dist/
+dist_verify/
+.astro/
+*.local
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+# Tauri
+desktop/src-tauri/target/
+desktop/src-tauri/gen/

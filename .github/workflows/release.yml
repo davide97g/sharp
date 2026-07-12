@@ -1,0 +1,77 @@
+name: release
+
+# Build the desktop apps and attach them to a GitHub Release whenever a v* tag
+# is pushed (e.g. `git tag v0.1.0 && git push origin v0.1.0`).
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  desktop:
+    name: desktop (${{ matrix.target || matrix.platform }})
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS is built twice — once per architecture — so both Apple Silicon
+          # and Intel users get a native .dmg.
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin"
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            args: "--target x86_64-apple-darwin"
+          # Windows NSIS installer (.exe).
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Install web dependencies
+        run: npm ci || npm install
+        working-directory: web
+
+      - name: Install desktop dependencies
+        run: npm ci || npm install
+        working-directory: desktop
+
+      # Icon binaries are not committed; generate them from the source SVG.
+      - name: Generate app icons
+        run: npm run tauri icon assets/icon.svg
+        working-directory: desktop
+
+      # NOTE: macOS builds are UNSIGNED in v1 — users right-click > Open the first
+      # time (or `xattr -dr com.apple.quarantine`). To sign & notarize later, add
+      # the APPLE_* / signing env vars to this step per the tauri-action docs.
+      - name: Build & release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: "sharp ${{ github.ref_name }}"
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
