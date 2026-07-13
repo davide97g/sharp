@@ -4,6 +4,21 @@ import { BrowserRouter } from 'react-router-dom'
 import { App } from './App'
 import './index.css'
 
+// Tauri on macOS uses titleBarStyle: Overlay — the traffic lights float over
+// the content. Reserve a top inset (via --titlebar-h) and add a draggable
+// strip so the window can still be moved by that region.
+const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+const isMac =
+  typeof navigator !== 'undefined' &&
+  /Mac/i.test(navigator.platform || navigator.userAgent)
+if (isTauri && isMac) {
+  document.documentElement.setAttribute('data-tauri-mac', '')
+  const bar = document.createElement('div')
+  bar.className = 'titlebar-drag'
+  bar.setAttribute('data-tauri-drag-region', '')
+  document.body.appendChild(bar)
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>

@@ -19,12 +19,32 @@
 
 :root {
   color-scheme: dark;
+  /* height reserved at the top of the window for the macOS traffic lights
+     when running inside Tauri (titleBarStyle: Overlay). 0 in the browser. */
+  --titlebar-h: 0px;
+}
+
+:root[data-tauri-mac] {
+  --titlebar-h: 28px;
 }
 
 html,
 body,
 #root {
   height: 100%;
+}
+
+#root {
+  padding-top: var(--titlebar-h);
+  box-sizing: border-box;
+}
+
+/* full-width draggable strip over the traffic lights (Tauri/macOS only) */
+.titlebar-drag {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: var(--titlebar-h);
+  z-index: 50;
 }
 
 body {
