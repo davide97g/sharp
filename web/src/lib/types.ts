@@ -29,6 +29,14 @@ export type Reaction = {
   me: boolean
 }
 
+export type Attachment = {
+  id: string
+  filename: string
+  content_type: string
+  size: number
+  url: string // proxied download path, e.g. /api/v1/files/<id>
+}
+
 export type MessageAuthor = {
   id: string
   display_name: string
@@ -44,8 +52,29 @@ export type Message = {
   edited_at: string | null
   deleted_at: string | null
   reactions: Reaction[]
+  attachments: Attachment[]
   reply_count: number
   last_reply_at: string | null
+}
+
+export type NotificationKind = 'mention' | 'dm' | 'reply'
+
+export type Notification = {
+  id: string
+  kind: NotificationKind
+  actor: MessageAuthor
+  channel_id: string
+  channel_kind: ChannelKind
+  channel_name: string
+  message_id: string | null
+  preview: string
+  created_at: string
+  read_at: string | null
+}
+
+export type Prefs = {
+  dnd: boolean
+  muted_channel_ids: string[]
 }
 
 // --- REST response shapes ---
@@ -58,6 +87,11 @@ export type MessagesResponse = { messages: Message[] }
 export type ThreadResponse = { parent: Message; replies: Message[] }
 export type SearchResult = Message & { channel_name: string }
 export type SearchResponse = { results: SearchResult[] }
+export type NotificationsResponse = {
+  notifications: Notification[]
+  unread_count: number
+}
+export type VapidResponse = { public_key: string | null }
 
 export type ApiError = { error: { code: string; message: string } }
 
@@ -131,3 +165,4 @@ export type TypingPayload = {
   display_name: string
 }
 export type PresencePayload = { user_id: string; status: 'online' | 'offline' }
+export type NotificationCreatedPayload = { notification: Notification }

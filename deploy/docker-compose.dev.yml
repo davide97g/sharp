@@ -30,5 +30,32 @@ services:
     ports:
       - "6379:6379"
 
+  # S3-compatible object storage for file uploads.
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: sharp
+      MINIO_ROOT_PASSWORD: sharp-secret
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # web console
+    volumes:
+      - minio_dev_data:/data
+
+  # One-shot: create the 'sharp' bucket once MinIO is up.
+  createbuckets:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 sharp sharp-secret; do echo 'waiting for minio'; sleep 1; done;
+      mc mb -p local/sharp || true;
+      exit 0;
+      "
+
 volumes:
   pg_dev_data:
+  minio_dev_data:

@@ -17,6 +17,8 @@ export function MessagePane() {
   const loadMessages = useStore((s) => s.loadMessages)
   const loadOlder = useStore((s) => s.loadOlder)
   const markRead = useStore((s) => s.markRead)
+  const mutedChannels = useStore((s) => s.mutedChannels)
+  const toggleMute = useStore((s) => s.toggleMute)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const atBottomRef = useRef(true)
@@ -130,6 +132,13 @@ export function MessagePane() {
             </span>
           </>
         )}
+        <button
+          onClick={() => toggleMute(channel.id)}
+          title={mutedChannels.has(channel.id) ? 'Unmute this channel' : 'Mute this channel'}
+          className="ml-auto shrink-0 rounded-md px-2 py-1 text-sm text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
+        >
+          {mutedChannels.has(channel.id) ? '🔕' : '🔔'}
+        </button>
       </header>
 
       {/* messages */}

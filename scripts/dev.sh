@@ -23,6 +23,15 @@ export REDIS_URL="redis://localhost:6379"
 export JWT_SECRET="dev-only-secret-do-not-use-in-prod"
 export RUST_LOG="${RUST_LOG:-info}"
 
+# File uploads -> local MinIO (from docker-compose.dev.yml).
+export S3_ENDPOINT="http://localhost:9000"
+export S3_BUCKET="sharp"
+export S3_ACCESS_KEY="sharp"
+export S3_SECRET_KEY="sharp-secret"
+export S3_REGION="us-east-1"
+export S3_ALLOW_HTTP="true"
+# Web push: VAPID keys auto-generate + persist on first start (no config needed).
+
 cleanup() {
   echo; echo "==> shutting down"
   [[ -n "${SERVER_PID:-}" ]] && kill "$SERVER_PID" 2>/dev/null || true

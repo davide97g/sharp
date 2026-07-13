@@ -57,6 +57,16 @@ pub struct Reaction {
     pub me: bool,
 }
 
+/// A file attached to a message. `url` is the proxied download path.
+#[derive(Debug, Clone, Serialize)]
+pub struct Attachment {
+    pub id: Uuid,
+    pub filename: String,
+    pub content_type: String,
+    pub size: i64,
+    pub url: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Message {
     #[serde(serialize_with = "ser_i64_string")]
@@ -70,8 +80,26 @@ pub struct Message {
     pub edited_at: Option<DateTime<Utc>>,
     pub deleted_at: Option<DateTime<Utc>>,
     pub reactions: Vec<Reaction>,
+    pub attachments: Vec<Attachment>,
     pub reply_count: i64,
     pub last_reply_at: Option<DateTime<Utc>>,
+}
+
+/// An inbox notification (mention / dm / reply).
+#[derive(Debug, Clone, Serialize)]
+pub struct Notification {
+    #[serde(serialize_with = "ser_i64_string")]
+    pub id: i64,
+    pub kind: String,
+    pub actor: MessageUser,
+    pub channel_id: Uuid,
+    pub channel_kind: String,
+    pub channel_name: String,
+    #[serde(serialize_with = "ser_opt_i64_string")]
+    pub message_id: Option<i64>,
+    pub preview: String,
+    pub created_at: DateTime<Utc>,
+    pub read_at: Option<DateTime<Utc>>,
 }
 
 /// Search result: a message plus the channel name it belongs to.

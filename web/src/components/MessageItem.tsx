@@ -3,6 +3,7 @@ import type { Message } from '../lib/types'
 import { useStore } from '../store'
 import { Avatar } from './Avatar'
 import { Markdown } from './Markdown'
+import { AttachmentList } from './Attachments'
 import { fmtTime } from '../lib/util'
 
 export const REACTION_PALETTE = ['👍', '✅', '👀', '❤️', '😂', '🎉']
@@ -147,13 +148,18 @@ export function MessageItem({
           </div>
         ) : (
           <div className="pr-8">
-            <Markdown content={message.content} />
+            {message.content && <Markdown content={message.content} />}
             {message.edited_at && (
               <span className="ml-1 align-baseline text-[10px] text-[var(--color-text-faint)]">
                 (edited)
               </span>
             )}
           </div>
+        )}
+
+        {/* attachments */}
+        {!isDeleted && !editing && message.attachments.length > 0 && (
+          <AttachmentList attachments={message.attachments} />
         )}
 
         {/* reactions */}

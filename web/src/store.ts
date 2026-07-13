@@ -3,6 +3,7 @@ import { api, clearToken, setToken } from './lib/api'
 import { WsClient } from './lib/ws'
 import { cmpId } from './lib/util'
 import { toastError, toastInfo } from './lib/toast'
+import { initPush, isWebNotifyGranted, requestNotifyPermission, showOsNotification } from './lib/notify'
 import type {
   Channel,
   ChannelCreatedPayload,
@@ -18,6 +19,8 @@ import type {
   MessageCreatedPayload,
   MessageDeletedPayload,
   MessageUpdatedPayload,
+  Notification,
+  NotificationCreatedPayload,
   PresencePayload,
   ReactionPayload,
   TypingPayload,
@@ -81,6 +84,14 @@ type State = {
   mentions: DocMention[]
   unreadMentionCount: number
 
+  // notifications
+  notifications: Notification[]
+  notifUnread: number
+  dnd: boolean
+  mutedChannels: Set<string>
+  notifyEnabled: boolean
+  notifHasMore: boolean
+
   // ws
   ws: WsClient | null
 
@@ -92,7 +103,12 @@ type State = {
   setCurrentChannel: (id: string | null) => void
   loadMessages: (channelId: string) => Promise<void>
   loadOlder: (channelId: string) => Promise<void>
-  sendMessage: (channelId: string, content: string, parentId?: string) => Promise<void>
+  sendMessage: (
+    channelId: string,
+    content: string,
+    parentId?: string,
+    attachmentIds?: string[],
+  ) => Promise<void>
   markRead: (channelId: string, messageId: string) => void
 
   createChannel: (input: {
@@ -139,6 +155,15 @@ type State = {
   loadMentions: () => Promise<void>
   markMentionsRead: (ids: string[]) => Promise<void>
 
+  // notifications + preferences
+  loadInboxAndPrefs: () => Promise<void>
+  loadMoreNotifications: () => Promise<void>
+  markNotifRead: (id: string) => void
+  markAllNotifRead: () => void
+  setDnd: (dnd: boolean) => Promise<void>
+  toggleMute: (channelId: string) => Promise<void>
+  enableDesktopNotifications: () => Promise<void>
+
   applyWsEvent: (env: WsEnvelope) => void
   totalUnread: () => number
 }
@@ -166,6 +191,12 @@ export const useStore = create<State>((set, get) => ({
   docMeta: {},
   mentions: [],
   unreadMentionCount: 0,
+  notifications: [],
+  notifUnread: 0,
+  dnd: false,
+  mutedChannels: new Set(),
+  notifyEnabled: isWebNotifyGranted(),
+  notifHasMore: false,
   ws: null,
 
   async init(token, me) {
@@ -178,6 +209,7 @@ export const useStore = create<State>((set, get) => ({
       onReconnect: () => {
         get().refetchDirectory()
         get().loadMentions()
+        get().loadInboxAndPrefs()
         const cur = get().currentChannelId
         if (cur) get().loadMessages(cur)
       },
@@ -187,7 +219,11 @@ export const useStore = create<State>((set, get) => ({
 
     await get().refetchDirectory()
     get().loadMentions()
+    await get().loadInboxAndPrefs()
     set({ ready: true })
+
+    // If notifications are already granted, (re)subscribe to web push silently.
+    if (isWebNotifyGranted()) void initPush()
   },
 
   logout() {
@@ -213,6 +249,11 @@ export const useStore = create<State>((set, get) => ({
       docMeta: {},
       mentions: [],
       unreadMentionCount: 0,
+      notifications: [],
+      notifUnread: 0,
+      dnd: false,
+      mutedChannels: new Set(),
+      notifHasMore: false,
       ws: null,
     })
   },
@@ -311,9 +352,9 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
-  async sendMessage(channelId, content, parentId) {
+  async sendMessage(channelId, content, parentId, attachmentIds) {
     try {
-      const msg = await api.sendMessage(channelId, content, parentId)
+      const msg = await api.sendMessage(channelId, content, parentId, attachmentIds)
       // Merge immediately; the WS echo will dedupe by id.
       get().applyWsEvent({ type: 'message.created', payload: { message: msg } })
     } catch (e) {
@@ -591,6 +632,21 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
+  async loadInboxAndPrefs() {
+    try {
+      const [inbox, prefs] = await Promise.all([api.notifications(), api.prefs()])
+      set({
+        notifications: inbox.notifications,
+        notifUnread: inbox.unread_count,
+        notifHasMore: inbox.notifications.length >= 30,
+        dnd: prefs.dnd,
+        mutedChannels: new Set(prefs.muted_channel_ids),
+      })
+    } catch (e) {
+      if (e instanceof Error) toastError(e.message)
+    }
+  },
+
   async markMentionsRead(ids) {
     if (ids.length === 0) return
     const idSet = new Set(ids)
@@ -605,6 +661,85 @@ export const useStore = create<State>((set, get) => ({
       await api.markMentionsRead(ids)
     } catch (e) {
       if (e instanceof Error) toastError(e.message)
+    }
+  },
+
+  async loadMoreNotifications() {
+    const cur = get().notifications
+    if (cur.length === 0) return
+    const before = cur[cur.length - 1].id
+    try {
+      const res = await api.notifications(before)
+      set((s) => {
+        const seen = new Set(s.notifications.map((n) => n.id))
+        const older = res.notifications.filter((n) => !seen.has(n.id))
+        return {
+          notifications: [...s.notifications, ...older],
+          notifHasMore: res.notifications.length >= 30,
+        }
+      })
+    } catch (e) {
+      if (e instanceof Error) toastError(e.message)
+    }
+  },
+
+  markNotifRead(id) {
+    set((s) => {
+      const n = s.notifications.find((x) => x.id === id)
+      const wasUnread = !!n && !n.read_at
+      return {
+        notifications: s.notifications.map((x) =>
+          x.id === id ? { ...x, read_at: x.read_at ?? new Date().toISOString() } : x,
+        ),
+        notifUnread: wasUnread ? Math.max(0, s.notifUnread - 1) : s.notifUnread,
+      }
+    })
+    api.markNotificationsRead({ ids: [id] }).catch(() => {})
+  },
+
+  markAllNotifRead() {
+    const now = new Date().toISOString()
+    set((s) => ({
+      notifications: s.notifications.map((n) => (n.read_at ? n : { ...n, read_at: now })),
+      notifUnread: 0,
+    }))
+    api.markNotificationsRead({ all: true }).catch(() => {})
+  },
+
+  async setDnd(dnd) {
+    set({ dnd })
+    try {
+      await api.setDnd(dnd)
+    } catch (e) {
+      set({ dnd: !dnd })
+      if (e instanceof Error) toastError(e.message)
+    }
+  },
+
+  async toggleMute(channelId) {
+    const muted = new Set(get().mutedChannels)
+    const nextMuted = !muted.has(channelId)
+    if (nextMuted) muted.add(channelId)
+    else muted.delete(channelId)
+    set({ mutedChannels: muted })
+    try {
+      await api.setChannelMute(channelId, nextMuted)
+    } catch (e) {
+      const revert = new Set(get().mutedChannels)
+      if (nextMuted) revert.delete(channelId)
+      else revert.add(channelId)
+      set({ mutedChannels: revert })
+      if (e instanceof Error) toastError(e.message)
+    }
+  },
+
+  async enableDesktopNotifications() {
+    const granted = await requestNotifyPermission()
+    set({ notifyEnabled: granted })
+    if (granted) {
+      await initPush()
+    } else {
+      toastError('Notification permission was not granted.')
     }
   },
 
@@ -751,6 +886,36 @@ export const useStore = create<State>((set, get) => ({
               mention.doc.title || 'Untitled'
             }`,
           )
+        }
+        break
+      }
+      case 'notification.created': {
+        const { notification } = env.payload as NotificationCreatedPayload
+        set((s) => {
+          const exists = s.notifications.some((n) => n.id === notification.id)
+          return {
+            notifications: [
+              notification,
+              ...s.notifications.filter((n) => n.id !== notification.id),
+            ],
+            notifUnread:
+              !exists && !notification.read_at ? s.notifUnread + 1 : s.notifUnread,
+          }
+        })
+        // Alert (toast + OS notification) unless DND, or the message's channel is
+        // already open in a focused window.
+        const st = get()
+        const focusedHere =
+          typeof document !== 'undefined' &&
+          document.hasFocus() &&
+          st.currentChannelId === notification.channel_id
+        if (!st.dnd && !focusedHere) {
+          const title =
+            notification.kind === 'dm'
+              ? notification.actor.display_name
+              : `${notification.actor.display_name} in #${notification.channel_name}`
+          toastInfo(notification.preview ? `${title}: ${notification.preview}` : title)
+          void showOsNotification(title, notification.preview, notification.channel_id)
         }
         break
       }

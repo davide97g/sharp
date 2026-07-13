@@ -4,6 +4,7 @@ import { useStore } from '../store'
 import { channelLabel } from '../lib/util'
 import { CreateChannelModal } from './CreateChannelModal'
 import { BrowseChannelsModal } from './BrowseChannelsModal'
+import { NotificationCenter } from './NotificationCenter'
 import type { Channel } from '../lib/types'
 
 export function Sidebar() {
@@ -51,13 +52,16 @@ export function Sidebar() {
           #
         </span>
         <span className="text-base font-bold tracking-tight">sharp</span>
-        <button
-          onClick={() => setQuickSwitcher(true)}
-          title="Quick switcher (⌘K)"
-          className="ml-auto rounded-md border border-[var(--color-border)] px-2 py-1 text-[10px] font-medium text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)]"
-        >
-          ⌘K
-        </button>
+        <div className="ml-auto flex items-center gap-1">
+          <NotificationCenter />
+          <button
+            onClick={() => setQuickSwitcher(true)}
+            title="Quick switcher (⌘K)"
+            className="rounded-md border border-[var(--color-border)] px-2 py-1 text-[10px] font-medium text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)]"
+          >
+            ⌘K
+          </button>
+        </div>
       </div>
 
       {/* search */}

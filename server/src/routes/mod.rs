@@ -1,6 +1,8 @@
 pub mod channels;
 pub mod docs;
+pub mod files;
 pub mod messages;
+pub mod notifications;
 pub mod search;
 pub mod users;
 

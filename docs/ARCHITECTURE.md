@@ -428,6 +428,130 @@ fills (1024 frames) is evicted from the room.
 
 ## Roadmap after v1
 
-Files/uploads (S3/MinIO) → notifications → multi-workspace → ~~Phase 2 docs~~ (shipped:
-BlockNote+Yjs+yrs, in-binary — see above) → Phase 3 canvas (edgeless whiteboard on the
-same doc/sync/permission foundation). Chat stays append-only.
+~~Files/uploads (S3/MinIO)~~ (shipped) → ~~notifications~~ (shipped) → multi-workspace →
+~~Phase 2 docs~~ (shipped: BlockNote+Yjs+yrs, in-binary — see above) → Phase 3 canvas
+(edgeless whiteboard on the same doc/sync/permission foundation). Chat stays append-only.
+(File uploads + notifications: see the section below.)
+
+---
+
+# File uploads (S3-compatible) & Notifications
+
+Two post-v1 features that share the single binary. Files live in S3-compatible object
+storage; notifications are ordinary append-only Postgres rows fanned out over the existing
+WS hub, plus web push for offline recipients.
+
+## Database schema (migrations `0003_files.sql`, `0004_notifications.sql`)
+
+```sql
+files(
+  id uuid PK default gen_random_uuid(),
+  channel_id uuid NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  message_id bigint REFERENCES messages(id) ON DELETE CASCADE,  -- NULL until attached
+  user_id uuid NOT NULL REFERENCES users(id),                   -- uploader
+  key text NOT NULL,                    -- object key: channels/<channel_id>/<file_id>
+  filename text NOT NULL, content_type text NOT NULL, size bigint NOT NULL,
+  created_at timestamptz NOT NULL default now()
+)
+-- indexes: (message_id); (channel_id, user_id) WHERE message_id IS NULL
+
+notifications(
+  id bigint PK GENERATED ALWAYS AS IDENTITY,
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,   -- recipient
+  kind text NOT NULL CHECK (kind IN ('mention','dm','reply')),
+  actor_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  channel_id uuid NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  message_id bigint REFERENCES messages(id) ON DELETE CASCADE,
+  preview text NOT NULL default '', created_at timestamptz NOT NULL default now(),
+  read_at timestamptz
+)
+-- indexes: (user_id, id DESC); (user_id) WHERE read_at IS NULL
+
+channel_prefs(user_id uuid, channel_id uuid, muted boolean NOT NULL default false,
+  PRIMARY KEY (user_id, channel_id))                 -- absence = not muted
+user_prefs(user_id uuid PK, dnd boolean NOT NULL default false)
+push_subscriptions(id uuid PK, user_id uuid, endpoint text UNIQUE NOT NULL,
+  p256dh text NOT NULL, auth text NOT NULL, created_at timestamptz)
+app_meta(key text PK, value text NOT NULL)           -- e.g. auto-generated VAPID keys
+```
+
+## Wire types
+
+Message ids and notification ids are `bigint` → **serialized as strings** (JS safety).
+
+```ts
+Attachment = { id: string, filename: string, content_type: string, size: number,
+               url: string }              // url = proxied path "/api/v1/files/<id>"
+Message = { …, attachments: Attachment[] }  // added to the existing Message shape
+
+NotificationKind = 'mention'|'dm'|'reply'
+Notification = {
+  id: string, kind: NotificationKind,
+  actor: { id: string, display_name: string },
+  channel_id: string, channel_kind: 'public'|'private'|'dm', channel_name: string,
+  message_id: string|null, preview: string,
+  created_at: string, read_at: string|null
+}
+Prefs = { dnd: boolean, muted_channel_ids: string[] }
+```
+
+## REST API additions — base `/api/v1`
+
+| Method | Path | Body → Response |
+|---|---|---|
+| POST | `/channels/{id}/messages` | now also accepts `attachment_ids?: string[]`; content may be empty iff ≥1 attachment |
+| POST | `/channels/{id}/uploads` | multipart `file` → `201 Attachment` (member only; ≤ `MAX_UPLOAD_MB`) |
+| GET | `/files/{id}?download=1` | streamed bytes (member only); `download=1` forces attachment disposition |
+| GET | `/notifications?before=<id>&limit=30` | → `{notifications: Notification[], unread_count}` (newest first) |
+| POST | `/notifications/read` | `{ids?: string[]}` or `{all: true}` → `204` |
+| GET | `/prefs` | → `Prefs` |
+| PUT | `/prefs/dnd` | `{dnd}` → `204` |
+| PUT | `/channels/{id}/prefs` | `{muted}` → `204` |
+| GET | `/push/vapid` | → `{public_key: string\|null}` |
+| POST | `/push/subscribe` | `{endpoint, keys:{p256dh, auth}}` → `204` (upsert by endpoint) |
+| POST | `/push/unsubscribe` | `{endpoint}` → `204` |
+
+Uploads and downloads are **always proxied through the server** (never presigned to the
+browser) so channel-membership auth is enforced on every read. The web client fetches
+attachments as blobs with the `Authorization` header.
+
+## WebSocket event addition (existing `/api/v1/ws`)
+
+- `notification.created` `{notification: Notification}` — to the recipient only.
+
+## Notification semantics
+
+Triggers, computed on message create:
+- **dm** — any message in a `dm` channel notifies the other member(s).
+- **mention** — `@Display Name` matching a channel member (longest match wins) notifies them.
+- **reply** — a thread reply notifies the parent message's author.
+Author is never notified; within a normal channel a mention supersedes a reply for the
+same user.
+
+Controls:
+- **Mute (per channel)** — no notification row is created for that channel (silent).
+- **Do Not Disturb (global)** — inbox row + `notification.created` still happen (bell
+  updates), but **web push is suppressed** and the client suppresses toasts / OS popups.
+- The client also suppresses the toast/OS popup when the message's channel is already
+  open in a focused window.
+
+Delivery: in-app inbox (bell + dropdown) + arrival toast; OS notification when the app is
+open but unfocused (Web Notification API, or `tauri-plugin-notification` in the desktop
+shell); **web push** (service worker `web/public/sw.js`) when the tab is closed and the
+recipient has no live WS connection on this replica.
+
+## Storage & push implementation
+
+- **Storage**: `object_store` crate (feature `aws`) → one config targets AWS S3, MinIO,
+  R2, B2. `server/src/storage.rs`. Object key = `channels/<channel_id>/<file_id>`.
+- **Web push**: `web-push` crate (VAPID / RFC 8291, `hyper-client`). Keys resolve
+  env → `app_meta` → auto-generated P-256 (`p256`) and persisted, so push works with zero
+  config. Public key served at `/push/vapid`; dead subscriptions (404/410) are pruned.
+
+## Env additions
+
+`S3_BUCKET` · `S3_ACCESS_KEY` · `S3_SECRET_KEY` (all three enable uploads) · `S3_ENDPOINT`
+(optional; MinIO/R2) · `S3_REGION` (default `us-east-1`) · `S3_ALLOW_HTTP` (auto-on for
+`http://` endpoints) · `MAX_UPLOAD_MB` (default 25) · `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY`
+(optional; base64url — auto-generated if unset) · `VAPID_SUBJECT` (default
+`mailto:admin@sharp.app`). Dev/local/prod compose add a `minio` service + bucket-init job.

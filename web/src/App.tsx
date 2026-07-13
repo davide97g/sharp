@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { api, getToken, setUnauthorizedHandler } from './lib/api'
-import { setNavigate } from './lib/nav'
+import { setNavigate as setDocNavigate } from './lib/nav'
+import { setNavigate as setNotifyNavigate } from './lib/notify'
 import { useStore } from './store'
 import { Login } from './components/Login'
 import { AppShell } from './components/AppShell'
@@ -31,9 +32,10 @@ export function App() {
     })
   }, [logout, navigate])
 
-  // expose router navigation to non-React callers (doc chips, etc.)
+  // expose router navigation to non-React callers (doc chips + notification deep-links)
   useEffect(() => {
-    setNavigate(navigate)
+    setDocNavigate(navigate)
+    setNotifyNavigate((path) => navigate(path))
   }, [navigate])
 
   // restore session on load
