@@ -258,6 +258,29 @@ async fn is_dnd(pool: &PgPool, user_id: Uuid) -> bool {
         .unwrap_or(false)
 }
 
+/// Best-effort web push for a non-message event (e.g. a doc/canvas mention).
+/// Skips users who are online (they get the realtime toast) or in DND.
+pub async fn push_event(
+    state: &SharedState,
+    user_id: Uuid,
+    title: &str,
+    body: &str,
+    tag: &str,
+    path: &str,
+) {
+    if state.hub.is_online(user_id) || is_dnd(&state.pool, user_id).await {
+        return;
+    }
+    let payload = serde_json::json!({
+        "title": title,
+        "body": body,
+        "tag": tag,
+        "path": path,
+    })
+    .to_string();
+    push::send_payload(state, user_id, &payload).await;
+}
+
 /// Public entry point: best-effort, never fails message creation.
 pub async fn dispatch_message(
     state: &SharedState,
@@ -373,6 +396,25 @@ mod push {
     };
 
     pub async fn send_to_user(state: &SharedState, user_id: Uuid, notif: &Notification) {
+        // Title/body shaped for the service worker.
+        let title = match notif.kind.as_str() {
+            "dm" => notif.actor.display_name.clone(),
+            _ => format!("{} in #{}", notif.actor.display_name, notif.channel_name),
+        };
+        let payload = json!({
+            "title": title,
+            "body": notif.preview,
+            "channel_id": notif.channel_id.to_string(),
+            "kind": notif.kind,
+            "tag": format!("sharp-{}", notif.channel_id),
+            "path": format!("/c/{}", notif.channel_id),
+        })
+        .to_string();
+        send_payload(state, user_id, &payload).await;
+    }
+
+    /// Deliver a ready-made JSON payload to every push subscription of a user.
+    pub async fn send_payload(state: &SharedState, user_id: Uuid, payload: &str) {
         let Some(vapid) = &state.vapid else { return };
 
         let rows = match sqlx::query(
@@ -391,20 +433,6 @@ mod push {
         if rows.is_empty() {
             return;
         }
-
-        // Title/body shaped for the service worker.
-        let title = match notif.kind.as_str() {
-            "dm" => notif.actor.display_name.clone(),
-            _ => format!("{} in #{}", notif.actor.display_name, notif.channel_name),
-        };
-        let payload = json!({
-            "title": title,
-            "body": notif.preview,
-            "channel_id": notif.channel_id.to_string(),
-            "kind": notif.kind,
-            "tag": format!("sharp-{}", notif.channel_id),
-        })
-        .to_string();
 
         let client = web_push::HyperWebPushClient::new();
 

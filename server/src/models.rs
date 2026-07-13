@@ -131,6 +131,7 @@ pub struct Doc {
 #[derive(Debug, Clone, Serialize)]
 pub struct DocMentionDoc {
     pub id: Uuid,
+    pub kind: String,
     pub title: String,
     pub icon: String,
     pub channel_id: Uuid,

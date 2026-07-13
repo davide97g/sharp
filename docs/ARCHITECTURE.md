@@ -323,7 +323,7 @@ Doc = {
 }
 DocMention = {
   id: string,
-  doc: { id: string, title: string, icon: string, channel_id: string },
+  doc: { id: string, kind: 'doc'|'canvas', title: string, icon: string, channel_id: string },
   from_user: { id: string, display_name: string },
   created_at: string, read_at: string|null
 }
@@ -412,13 +412,18 @@ fills (1024 frames) is evicted from the room.
 - **People mentions in docs**: custom BlockNote inline content `mention` with props
   `{userId, name}`, inserted via `@` suggestion menu (channel members). On insert the
   client calls `POST /docs/{id}/mentions`; the server persists it and emits `doc.mention`.
+  Delivery mirrors chat: recipients online get toast + OS popup (unless DND / already
+  viewing the doc); offline recipients get **web push** (deep-links to `/d/` or `/x/` by
+  doc kind). Push payloads carry an explicit `path` the service worker navigates to.
 
 ## Web UI (docs mode)
 
-- **Mode rail**: thin far-left rail with two icons — Chat (`#`) and Docs — switching
-  between the chat UI and the docs UI. Routes: chat keeps `/`, `/c/:channelId`; docs adds
-  `/docs` (home: recent docs + my mentions inbox), `/docs/c/:channelId` (channel doc
-  list + trash), `/d/:docId` (editor). Unread mention count badges the Docs rail icon.
+- **Mode rail**: thin far-left rail with three icons — Chat (`#`), Docs, and Canvas —
+  switching between the chat, docs, and canvas UIs. Routes: chat keeps `/`, `/c/:channelId`;
+  docs adds `/docs` (home: recent docs + my mentions inbox), `/docs/c/:channelId` (channel
+  doc list + trash), `/d/:docId` (editor); canvas adds `/canvas`, `/x/:docId`. Each rail
+  icon carries its own unread badge: Chat = unread chat notifications; Docs = unread
+  mentions on `kind:'doc'` docs; Canvas = unread mentions on `kind:'canvas'` docs.
 - **Docs sidebar**: channels (member ones) with their doc lists, new-doc button, trash
   section per channel, mentions inbox link.
 - **Editor page**: emoji icon + borderless title input (debounced PATCH), BlockNote

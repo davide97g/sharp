@@ -166,7 +166,22 @@ export function Composer({
     if (!el) return
     const caret = el.selectionStart ?? el.value.length
     caretRef.current = caret
-    setTrigger(detectTrigger(el.value, caret))
+    const next = detectTrigger(el.value, caret)
+    // Only replace the trigger when it actually changed — arrow-key navigation
+    // fires keyup with the same trigger, and a fresh object would re-run the
+    // results effect and reset the highlighted item back to the top.
+    setTrigger((prev) => {
+      if (prev === next) return prev
+      if (
+        prev &&
+        next &&
+        prev.type === next.type &&
+        prev.start === next.start &&
+        prev.query === next.query
+      )
+        return prev
+      return next
+    })
   }
 
   function pick(item: PickItem) {

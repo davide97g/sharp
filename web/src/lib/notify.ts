@@ -18,6 +18,10 @@ let navigateFn: ((path: string) => void) | null = null
 export function setNavigate(fn: (path: string) => void) {
   navigateFn = fn
 }
+/** Deep-link into a channel (used by toast / OS-notification clicks). */
+export function navigateToChannel(channelId: string) {
+  if (navigateFn) navigateFn(`/c/${channelId}`)
+}
 
 export function isWebNotifyGranted(): boolean {
   return typeof Notification !== 'undefined' && Notification.permission === 'granted'
@@ -45,12 +49,18 @@ export async function requestNotifyPermission(): Promise<boolean> {
   }
 }
 
-/** Show an OS notification for a just-arrived event (app open, unfocused). */
+/**
+ * Show an OS notification for a just-arrived event (app open, unfocused).
+ * `deepLink` is the in-app path a click should navigate to; `tag` collapses
+ * repeat notifications for the same target.
+ */
 export async function showOsNotification(
   title: string,
   body: string,
-  channelId?: string,
+  opts?: { deepLink?: string; tag?: string },
 ) {
+  const deepLink = opts?.deepLink
+  const tag = opts?.tag
   if (isTauri) {
     try {
       const m = await import('@tauri-apps/plugin-notification')
@@ -64,18 +74,57 @@ export async function showOsNotification(
   }
   if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
     try {
-      const n = new Notification(title, {
-        body,
-        tag: channelId ? `sharp-${channelId}` : undefined,
-      })
+      const n = new Notification(title, { body, tag })
       n.onclick = () => {
         window.focus()
-        if (channelId && navigateFn) navigateFn(`/c/${channelId}`)
+        if (deepLink && navigateFn) navigateFn(deepLink)
         n.close()
       }
     } catch {
       /* ignore */
     }
+  }
+}
+
+// A cute little two-note chime, synthesized on the fly (no asset to ship).
+// A soft triangle "ding-dong" (E6 → B6) with a quick bell-like decay.
+let audioCtx: AudioContext | null = null
+export function playNotifySound() {
+  if (typeof window === 'undefined') return
+  try {
+    const Ctor =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext })
+        .webkitAudioContext
+    if (!Ctor) return
+    if (!audioCtx) audioCtx = new Ctor()
+    const ctx = audioCtx
+    // A gesture may be needed to unlock; resume() is a no-op if already running.
+    void ctx.resume()
+    const t0 = ctx.currentTime
+    const notes = [
+      { freq: 1318.5, at: 0 }, // E6
+      { freq: 1975.5, at: 0.11 }, // B6
+    ]
+    const master = ctx.createGain()
+    master.gain.value = 0.14 // gentle — cute, not startling
+    master.connect(ctx.destination)
+    for (const n of notes) {
+      const osc = ctx.createOscillator()
+      const g = ctx.createGain()
+      osc.type = 'triangle'
+      osc.frequency.value = n.freq
+      const start = t0 + n.at
+      g.gain.setValueAtTime(0.0001, start)
+      g.gain.exponentialRampToValueAtTime(1, start + 0.012) // fast attack
+      g.gain.exponentialRampToValueAtTime(0.0001, start + 0.42) // bell decay
+      osc.connect(g)
+      g.connect(master)
+      osc.start(start)
+      osc.stop(start + 0.45)
+    }
+  } catch {
+    /* audio not available — ignore */
   }
 }
 

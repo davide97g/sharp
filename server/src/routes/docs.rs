@@ -813,12 +813,30 @@ pub async fn create_mention(
     let ev = envelope("doc.mention", json!({ "mention": mention }));
     state.hub.broadcast(ev, vec![target]).await;
 
+    // Web push for offline recipients (canvases live under /x/, docs under /d/).
+    let prefix = if mention.doc.kind == "canvas" { "x" } else { "d" };
+    let title = format!("{} mentioned you", mention.from_user.display_name);
+    let doc_title = if mention.doc.title.is_empty() {
+        "Untitled".to_string()
+    } else {
+        mention.doc.title.clone()
+    };
+    crate::notify::push_event(
+        &state,
+        target,
+        &title,
+        &doc_title,
+        &format!("sharp-doc-{}", mention.doc.id),
+        &format!("/{}/{}", prefix, mention.doc.id),
+    )
+    .await;
+
     Ok(StatusCode::NO_CONTENT)
 }
 
 const MENTION_SELECT: &str = "
     SELECT dm.id, dm.created_at, dm.read_at,
-        d.id AS doc_id, d.title AS doc_title, d.icon AS doc_icon, d.channel_id AS doc_channel_id,
+        d.id AS doc_id, d.kind AS doc_kind, d.title AS doc_title, d.icon AS doc_icon, d.channel_id AS doc_channel_id,
         fu.id AS from_id, fu.display_name AS from_name
     FROM doc_mentions dm
     JOIN docs d ON d.id = dm.doc_id
@@ -830,6 +848,7 @@ fn map_mention_row(row: &PgRow) -> AppResult<DocMention> {
         id: row.try_get("id")?,
         doc: DocMentionDoc {
             id: row.try_get("doc_id")?,
+            kind: row.try_get("doc_kind")?,
             title: row.try_get("doc_title")?,
             icon: row.try_get("doc_icon")?,
             channel_id: row.try_get("doc_channel_id")?,

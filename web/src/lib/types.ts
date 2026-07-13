@@ -138,7 +138,7 @@ export type Doc = {
 
 export type DocMention = {
   id: string
-  doc: { id: string; title: string; icon: string; channel_id: string }
+  doc: { id: string; kind: DocKind; title: string; icon: string; channel_id: string }
   from_user: { id: string; display_name: string }
   created_at: string
   read_at: string | null

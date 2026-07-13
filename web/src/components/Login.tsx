@@ -15,6 +15,7 @@ export function Login() {
   const [server, setServer] = useState(getServerUrl() ?? '')
   const [busy, setBusy] = useState(false)
   const init = useStore((s) => s.init)
+  const enableDesktopNotifications = useStore((s) => s.enableDesktopNotifications)
   const navigate = useNavigate()
 
   async function submit(e: React.FormEvent) {
@@ -34,6 +35,11 @@ export function Login() {
           ? await api.login(email.trim().toLowerCase(), password)
           : await api.register(email.trim().toLowerCase(), password, displayName.trim())
       await init(res.token, res.user)
+      // First sign-in: ask for notification permission once, while we still have
+      // the click gesture. Skip if the user already granted or denied it before.
+      if (typeof Notification === 'undefined' || Notification.permission === 'default') {
+        void enableDesktopNotifications()
+      }
       navigate('/', { replace: true })
     } catch (err) {
       if (err instanceof ApiRequestError) toastError(err.message)

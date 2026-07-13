@@ -2,8 +2,16 @@ import { create } from 'zustand'
 import { api, clearToken, setToken } from './lib/api'
 import { WsClient } from './lib/ws'
 import { cmpId } from './lib/util'
-import { toastError, toastInfo } from './lib/toast'
-import { initPush, isWebNotifyGranted, requestNotifyPermission, showOsNotification } from './lib/notify'
+import { toastError, toastNotify } from './lib/toast'
+import { navigateTo } from './lib/nav'
+import {
+  initPush,
+  isWebNotifyGranted,
+  navigateToChannel,
+  playNotifySound,
+  requestNotifyPermission,
+  showOsNotification,
+} from './lib/notify'
 import type {
   Channel,
   ChannelCreatedPayload,
@@ -885,15 +893,26 @@ export const useStore = create<State>((set, get) => ({
           return { mentions, unreadMentionCount: countUnread(mentions) }
         })
         // Toast unless the user is already looking at the mentioned doc.
+        const prefix = mention.doc.kind === 'canvas' ? 'x' : 'd'
+        const deepLink = `/${prefix}/${mention.doc.id}`
         const viewing =
           typeof window !== 'undefined' &&
-          window.location.pathname === `/d/${mention.doc.id}`
-        if (!viewing) {
-          toastInfo(
-            `${mention.from_user.display_name} mentioned you in ${
-              mention.doc.title || 'Untitled'
-            }`,
-          )
+          window.location.pathname === deepLink
+        if (!viewing && !get().dnd) {
+          const docTitle = mention.doc.title || 'Untitled'
+          const who = mention.from_user.display_name
+          const isCanvas = mention.doc.kind === 'canvas'
+          const title = `${who} in ${isCanvas ? 'canvas' : 'doc'} ${docTitle}`
+          toastNotify('mentioned you', {
+            title,
+            initial: who.trim().charAt(0).toUpperCase() || '?',
+            onClick: () => navigateTo(deepLink),
+          })
+          playNotifySound()
+          void showOsNotification(`${who} mentioned you`, docTitle, {
+            deepLink,
+            tag: `sharp-doc-${mention.doc.id}`,
+          })
         }
         break
       }
@@ -922,8 +941,17 @@ export const useStore = create<State>((set, get) => ({
             notification.kind === 'dm'
               ? notification.actor.display_name
               : `${notification.actor.display_name} in #${notification.channel_name}`
-          toastInfo(notification.preview ? `${title}: ${notification.preview}` : title)
-          void showOsNotification(title, notification.preview, notification.channel_id)
+          const cid = notification.channel_id
+          toastNotify(notification.preview || 'sent you a message', {
+            title,
+            initial: notification.actor.display_name.trim().charAt(0).toUpperCase() || '?',
+            onClick: cid ? () => navigateToChannel(cid) : undefined,
+          })
+          playNotifySound()
+          void showOsNotification(title, notification.preview, {
+            deepLink: `/c/${cid}`,
+            tag: `sharp-${cid}`,
+          })
         }
         break
       }

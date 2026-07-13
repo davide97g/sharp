@@ -53,7 +53,16 @@ export function AppShell() {
 
 function ModeRail({ mode }: { mode: 'chat' | 'docs' | 'canvas' }) {
   const navigate = useNavigate()
-  const unreadMentions = useStore((s) => s.unreadMentionCount)
+  const chatUnread = useStore((s) => s.notifUnread)
+  const mentions = useStore((s) => s.mentions)
+  const docMentions = mentions.reduce(
+    (n, m) => n + (!m.read_at && m.doc.kind !== 'canvas' ? 1 : 0),
+    0,
+  )
+  const canvasMentions = mentions.reduce(
+    (n, m) => n + (!m.read_at && m.doc.kind === 'canvas' ? 1 : 0),
+    0,
+  )
 
   return (
     <nav className="flex w-14 shrink-0 flex-col items-center gap-2 border-r border-[var(--color-border)] bg-[var(--color-ink)] py-3">
@@ -61,13 +70,14 @@ function ModeRail({ mode }: { mode: 'chat' | 'docs' | 'canvas' }) {
         active={mode === 'chat'}
         onClick={() => navigate('/')}
         title="Chat"
+        badge={chatUnread}
         label="#"
       />
       <RailButton
         active={mode === 'docs'}
         onClick={() => navigate('/docs')}
         title="Docs"
-        badge={unreadMentions}
+        badge={docMentions}
         label={
           <svg
             width="18"
@@ -91,6 +101,7 @@ function ModeRail({ mode }: { mode: 'chat' | 'docs' | 'canvas' }) {
         active={mode === 'canvas'}
         onClick={() => navigate('/canvas')}
         title="Canvas"
+        badge={canvasMentions}
         label={
           <svg
             width="18"

@@ -14,15 +14,18 @@ self.addEventListener('push', (event) => {
     body: data.body || '',
     tag: data.tag,
     renotify: !!data.tag,
-    data: { channel_id: data.channel_id || null },
+    data: {
+      channel_id: data.channel_id || null,
+      path: data.path || null,
+    },
   }
   event.waitUntil(self.registration.showNotification(title, options))
 })
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  const channelId = event.notification.data && event.notification.data.channel_id
-  const path = channelId ? `/c/${channelId}` : '/'
+  const d = event.notification.data || {}
+  const path = d.path || (d.channel_id ? `/c/${d.channel_id}` : '/')
   event.waitUntil(
     self.clients
       .matchAll({ type: 'window', includeUncontrolled: true })
