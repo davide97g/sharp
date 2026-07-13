@@ -137,16 +137,19 @@ export function DocEditorInner({
     let results: { id: string; title: string; channelName?: string }[]
     if (q) {
       const res = await api.docSearch(q, 12)
-      results = res.results.map((d) => ({
-        id: d.id,
-        title: d.title || 'Untitled',
-        channelName: d.channel_name,
-      }))
+      // doclink is doc-scoped (navigates to /d/); canvases are excluded.
+      results = res.results
+        .filter((d) => d.kind !== 'canvas')
+        .map((d) => ({
+          id: d.id,
+          title: d.title || 'Untitled',
+          channelName: d.channel_name,
+        }))
     } else {
       const state = useStore.getState()
       const all = Object.values(state.docsByChannel).flat()
       results = all
-        .filter((d) => !d.deleted_at)
+        .filter((d) => !d.deleted_at && d.kind !== 'canvas')
         .sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1))
         .slice(0, 12)
         .map((d) => ({ id: d.id, title: d.title || 'Untitled' }))

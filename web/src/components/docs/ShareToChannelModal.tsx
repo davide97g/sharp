@@ -28,7 +28,7 @@ export function ShareToChannelModal({ doc, onClose }: { doc: Doc; onClose: () =>
   async function share(channelId: string) {
     if (busy) return
     setBusy(channelId)
-    const content = `[[doc:${doc.id}|${doc.title || 'Untitled'}]]`
+    const content = `[[${doc.kind}:${doc.id}|${doc.title || 'Untitled'}]]`
     try {
       await sendMessage(channelId, content)
       toastSuccess('Shared to channel')
@@ -41,7 +41,7 @@ export function ShareToChannelModal({ doc, onClose }: { doc: Doc; onClose: () =>
   }
 
   return (
-    <Modal title="Share doc to a channel" onClose={onClose}>
+    <Modal title={`Share ${doc.kind === 'canvas' ? 'canvas' : 'doc'} to a channel`} onClose={onClose}>
       <input
         autoFocus
         value={q}

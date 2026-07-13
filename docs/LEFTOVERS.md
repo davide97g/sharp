@@ -6,8 +6,19 @@ Tracking what was intentionally skipped while shipping **file uploads** + **noti
 ## Roadmap features not started
 
 - **Multi-workspace / tenancy** — single workspace remains (v1 assumption).
-- **Phase 3 canvas** — edgeless whiteboard on the doc/sync foundation.
-- (Phase 2 docs is being built in parallel on a separate branch — not this one.)
+
+(Phase 2 docs and Phase 3 canvas have shipped — see `ARCHITECTURE.md`.)
+
+## Phase 3 canvas — follow-ups
+
+- **Canvas backlinks / full-text search** — intentional non-features: compaction skips
+  blocknote text/link extraction for canvases, so `content_text` stays empty and no
+  `doc_links` are written (canvas search matches on title only). See ARCHITECTURE.md → Phase 3.
+- **Browser QA** — cross-kind routing (share chip, quick switcher, global search, in-doc
+  link picker) and the editor kind-guard redirects (`/d/` ↔ `/x/`) were fixed and typecheck
+  clean, but not yet exercised in a live browser. Do a manual pass: share a canvas to a
+  channel (expect a 🎨 chip → `/x/`), open a canvas id at `/d/` (expect redirect to `/x/`),
+  and confirm canvas mentions surface in the Canvas-mode inbox.
 
 ## Notifications — follow-ups
 

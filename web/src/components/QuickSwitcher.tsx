@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store'
 import { channelLabel, fuzzyScore } from '../lib/util'
 import { toastError } from '../lib/toast'
+import type { DocKind } from '../lib/types'
 
 type Item =
   | { kind: 'channel'; id: string; label: string; sub: string; icon: string }
   | { kind: 'user'; id: string; label: string; sub: string; icon: string }
-  | { kind: 'doc'; id: string; label: string; sub: string; icon: string }
+  | { kind: 'doc'; id: string; label: string; sub: string; icon: string; docKind: DocKind }
 
 export function QuickSwitcher() {
   const open = useStore((s) => s.quickSwitcherOpen)
@@ -72,8 +73,9 @@ export function QuickSwitcher() {
         kind: 'doc',
         id: d.id,
         label: d.title || 'Untitled',
-        sub: `Doc · #${chanName[d.channel_id] ?? ''}`,
-        icon: d.icon || '📄',
+        sub: `${d.kind === 'canvas' ? 'Canvas' : 'Doc'} · #${chanName[d.channel_id] ?? ''}`,
+        icon: d.icon || (d.kind === 'canvas' ? '🎨' : '📄'),
+        docKind: d.kind,
       }))
     return [...chanItems, ...userItems, ...docItems]
   }, [channels, users, me, online, docsByChannel])
@@ -103,7 +105,7 @@ export function QuickSwitcher() {
     if (it.kind === 'channel') {
       navigate(`/c/${it.id}`)
     } else if (it.kind === 'doc') {
-      navigate(`/d/${it.id}`)
+      navigate(`${it.docKind === 'canvas' ? '/x' : '/d'}/${it.id}`)
     } else {
       try {
         const ch = await openDm(it.id)

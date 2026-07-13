@@ -103,7 +103,7 @@ export function DocsHome() {
 }
 
 function MentionsInbox() {
-  const mentions = useStore((s) => s.mentions)
+  const allMentions = useStore((s) => s.mentions)
   const loadMentions = useStore((s) => s.loadMentions)
   const markMentionsRead = useStore((s) => s.markMentionsRead)
   const navigate = useNavigate()
@@ -113,6 +113,8 @@ function MentionsInbox() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Docs mode shows doc mentions only; canvas mentions live in Canvas mode.
+  const mentions = allMentions.filter((m) => m.doc.kind !== 'canvas')
   const unreadIds = mentions.filter((m) => !m.read_at).map((m) => m.id)
 
   function open(docId: string, id: string, unread: boolean) {

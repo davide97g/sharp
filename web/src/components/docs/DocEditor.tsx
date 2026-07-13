@@ -64,6 +64,12 @@ export function DocEditor() {
     }
   }, [docId, fetchDoc])
 
+  // Kind-guard: a canvas opened at /d/ would bind BlockNote against the wrong
+  // Yjs container. Redirect to the canvas editor once the meta says it's a canvas.
+  useEffect(() => {
+    if (doc && doc.kind === 'canvas') navigate(`/x/${doc.id}`, { replace: true })
+  }, [doc?.kind, doc?.id, navigate])
+
   // Sync the title input from meta when not actively editing.
   useEffect(() => {
     if (doc && !titleFocused.current) setTitle(doc.title)
@@ -123,7 +129,9 @@ export function DocEditor() {
     )
   }
 
-  if (!doc) {
+  // While not loaded — or loaded as a canvas (the kind-guard effect is
+  // redirecting) — show the skeleton and never mount the BlockNote editor.
+  if (!doc || doc.kind === 'canvas') {
     return (
       <div className="flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
         <div className="mx-auto w-full max-w-3xl px-8 py-10">
