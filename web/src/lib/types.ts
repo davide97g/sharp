@@ -119,10 +119,12 @@ export type ChannelMemberPayload = { channel_id: string; user: User }
 // --- Phase 2: Docs ---
 
 export type DocRole = 'owner' | 'editor' | 'viewer' | 'none'
+export type DocKind = 'doc' | 'canvas'
 
 export type Doc = {
   id: string
   channel_id: string
+  kind: DocKind
   title: string
   icon: string
   created_by: string | null

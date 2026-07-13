@@ -143,7 +143,11 @@ type State = {
   // docs actions
   loadChannelDocs: (channelId: string) => Promise<void>
   loadChannelTrash: (channelId: string) => Promise<void>
-  createDoc: (channelId: string, input?: { title?: string; icon?: string }) => Promise<Doc>
+  createDoc: (
+    channelId: string,
+    input?: { title?: string; icon?: string; kind?: 'doc' | 'canvas' },
+  ) => Promise<Doc>
+  createCanvas: (channelId: string, input?: { title?: string; icon?: string }) => Promise<Doc>
   fetchDoc: (id: string) => Promise<Doc>
   patchDoc: (
     id: string,
@@ -585,6 +589,10 @@ export const useStore = create<State>((set, get) => ({
     const doc = await api.createDoc(channelId, input)
     set((s) => placeDoc(s, doc))
     return doc
+  },
+
+  async createCanvas(channelId, input = {}) {
+    return get().createDoc(channelId, { ...input, kind: 'canvas' })
   },
 
   async fetchDoc(id) {

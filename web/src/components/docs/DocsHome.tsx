@@ -34,7 +34,7 @@ export function DocsHome() {
     const all: Doc[] = []
     for (const list of Object.values(docsByChannel)) all.push(...list)
     return all
-      .filter((d) => !d.deleted_at)
+      .filter((d) => !d.deleted_at && d.kind !== 'canvas')
       .sort((a, b) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0))
       .slice(0, 24)
   }, [docsByChannel])

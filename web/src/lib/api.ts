@@ -311,7 +311,10 @@ export const api = {
   channelDocsTrash(channelId: string) {
     return request<DocsResponse>(`/channels/${channelId}/docs/trash`)
   },
-  createDoc(channelId: string, input: { title?: string; icon?: string } = {}) {
+  createDoc(
+    channelId: string,
+    input: { title?: string; icon?: string; kind?: 'doc' | 'canvas' } = {},
+  ) {
     return request<Doc>(`/channels/${channelId}/docs`, {
       method: 'POST',
       body: input,

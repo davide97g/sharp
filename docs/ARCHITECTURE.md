@@ -248,6 +248,8 @@ docs are Yjs CRDTs. Both are served by the same single binary — no sidecar.
 docs(
   id uuid PK default gen_random_uuid(),
   channel_id uuid NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  kind text NOT NULL default 'doc'            -- 'doc' (blocknote) | 'canvas' (tldraw); migration 0006
+    CHECK (kind IN ('doc','canvas')),
   title text NOT NULL default '',            -- shown as 'Untitled' when empty
   icon text NOT NULL default '',              -- emoji, may be empty
   created_by uuid REFERENCES users(id),
@@ -312,7 +314,7 @@ Doc-mention IDs are `bigint` → **serialized as strings** (same invariant as me
 ```ts
 DocRole = 'owner'|'editor'|'viewer'|'none'
 Doc = {
-  id: string, channel_id: string, title: string, icon: string,
+  id: string, channel_id: string, kind: 'doc'|'canvas', title: string, icon: string,
   created_by: string|null, created_at: string, updated_at: string,
   deleted_at: string|null,
   everyone_role: 'editor'|'viewer'|'none',
@@ -333,7 +335,7 @@ DocMention = {
 |---|---|---|
 | GET | `/channels/{id}/docs` | → `{docs: Doc[]}` (not trashed, `my_role != none`, updated_at desc) |
 | GET | `/channels/{id}/docs/trash` | → `{docs: Doc[]}` (trashed, same visibility) |
-| POST | `/channels/{id}/docs` | `{title?, icon?}` → `201 Doc` (members only) |
+| POST | `/channels/{id}/docs` | `{title?, icon?, kind?}` → `201 Doc` (members only; `kind` defaults `'doc'`, or `'canvas'` for a whiteboard) |
 | GET | `/docs/{id}` | → `Doc` |
 | PATCH | `/docs/{id}` | `{title?, icon?, everyone_role?}` → `Doc` (title/icon: editor+; everyone_role: owner; empty body → 422) |
 | DELETE | `/docs/{id}` | → `204` (editor+; soft — sets `deleted_at`) |
@@ -367,6 +369,8 @@ Trashed docs accept read-only connections (restore preview), updates are dropped
 
 The Yjs fragment name is **`blocknote`** — client binds
 `ydoc.getXmlFragment('blocknote')`, server reads `get_or_insert_xml_fragment("blocknote")`.
+(Canvas docs — `kind = 'canvas'` — reuse this exact sync socket but store a tldraw document
+under `ydoc.getMap('tldraw')` instead; the server never interprets it. See Phase 3 below.)
 
 **Persistence & compaction**: every incoming `0x00` inserts a `doc_updates` row and bumps
 `docs.updated_at`. Compaction (merge all rows into one via yrs, refresh `content_text` and
@@ -426,12 +430,36 @@ fills (1024 frames) is evicted from the room.
   `Awareness` instance for BlockNote's `collaboration.provider`.
 - Cursor colors are derived deterministically from the user id.
 
+# Phase 3 — Canvas (edgeless whiteboard)
+
+Collaborative tldraw whiteboards, built entirely on the Phase 2 doc foundation: a canvas
+**is a `docs` row with `kind = 'canvas'`** (migration `0006_doc_kind.sql`). It reuses the
+doc REST surface, the per-channel + per-doc role model, trash/restore, and the
+`/api/v1/docs/{id}/sync` WebSocket **unchanged**.
+
+- **Editor**: `tldraw` v5 — full edgeless toolset (draw, shapes, arrows, text, sticky
+  notes, images) with live multiplayer cursors.
+- **Sync**: the doc-sync socket is content-agnostic (raw Yjs v1 bytes + `yrs` merge). A
+  canvas stores its tldraw document as whole `TLRecord`s in `ydoc.getMap('tldraw')` —
+  document-scope records only, so each viewer keeps its own camera/selection. The client
+  binds it with `useYjsTldrawStore` (`web/src/lib/tldrawYjs.ts`) over the shared
+  `SharpDocProvider`; presence rides the existing `y-protocols` awareness.
+- **Compaction**: `compact_doc` still merges the update log for canvases, but **skips the
+  blocknote text/link extraction** — `content_text` stays empty and no `doc_links` are
+  written, so canvas search matches on title only and canvases have no backlinks.
+- **Wire**: `Doc` carries `kind`; `POST /channels/{id}/docs` accepts optional `kind`.
+  `doc.created`/`doc.updated` carry `kind`, so clients route to the doc editor (`/d/:id`)
+  or the canvas editor (`/x/:id`).
+- **Web**: a third **Canvas** mode in the rail; `web/src/components/canvas/` mirrors
+  `components/docs/` (Home / channel list / sidebar / editor). The tldraw editor chunk is
+  lazy-loaded, and tldraw assets are **self-hosted** (bundled by Vite) — no CDN dependency.
+
 ## Roadmap after v1
 
-~~Files/uploads (S3/MinIO)~~ (shipped) → ~~notifications~~ (shipped) → multi-workspace →
-~~Phase 2 docs~~ (shipped: BlockNote+Yjs+yrs, in-binary — see above) → Phase 3 canvas
-(edgeless whiteboard on the same doc/sync/permission foundation). Chat stays append-only.
-(File uploads + notifications: see the section below.)
+~~Files/uploads (S3/MinIO)~~ (shipped) → ~~notifications~~ (shipped) → ~~Phase 2 docs~~
+(shipped: BlockNote+Yjs+yrs, in-binary) → ~~Phase 3 canvas~~ (shipped: tldraw on the same
+doc/sync/permission foundation — see the Phase 3 section above) → multi-workspace. Chat
+stays append-only. (File uploads + notifications: see the section below.)
 
 ---
 

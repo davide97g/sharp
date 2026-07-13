@@ -1,23 +1,20 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useStore } from '../../store'
 import { channelLabel, fmtDayDivider } from '../../lib/util'
 import { toastError } from '../../lib/toast'
 import type { Doc } from '../../lib/types'
 
-export function ChannelDocs() {
+export function ChannelCanvases() {
   const { channelId } = useParams<{ channelId: string }>()
   const channels = useStore((s) => s.channels)
   const channel = channels.find((c) => c.id === channelId)
   const docs = useStore((s) => (channelId ? s.docsByChannel[channelId] : undefined))
   const trash = useStore((s) => (channelId ? s.trashByChannel[channelId] : undefined))
-  // This is the docs view — canvases (kind === 'canvas') live under /canvas.
-  const docItems = (docs ?? []).filter((d) => d.kind !== 'canvas')
-  const trashItems = (trash ?? []).filter((d) => d.kind !== 'canvas')
   const loaded = useStore((s) => (channelId ? s.docsLoaded.has(channelId) : false))
   const loadChannelDocs = useStore((s) => s.loadChannelDocs)
   const loadChannelTrash = useStore((s) => s.loadChannelTrash)
-  const createDoc = useStore((s) => s.createDoc)
+  const createCanvas = useStore((s) => s.createCanvas)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -26,6 +23,20 @@ export function ChannelDocs() {
     loadChannelTrash(channelId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelId])
+
+  // Store buckets hold both docs and canvases; keep only canvases here.
+  const canvases = useMemo(() => docs?.filter((d) => d.kind === 'canvas'), [docs])
+  const trashedCanvases = useMemo(() => trash?.filter((d) => d.kind === 'canvas'), [trash])
+
+  async function newCanvas() {
+    if (!channelId) return
+    try {
+      const doc = await createCanvas(channelId)
+      navigate(`/x/${doc.id}`)
+    } catch (err) {
+      if (err instanceof Error) toastError(err.message)
+    }
+  }
 
   if (!channelId) return null
   if (!channel) {
@@ -36,27 +47,17 @@ export function ChannelDocs() {
     )
   }
 
-  async function newDoc() {
-    if (!channelId) return
-    try {
-      const doc = await createDoc(channelId)
-      navigate(`/d/${doc.id}`)
-    } catch (err) {
-      if (err instanceof Error) toastError(err.message)
-    }
-  }
-
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
       <header className="flex h-14 items-center gap-2 border-b border-[var(--color-border)] px-5">
         <span className="text-[var(--color-text-faint)]">#</span>
         <span className="font-semibold">{channelLabel(channel)}</span>
-        <span className="text-sm text-[var(--color-text-dim)]">docs</span>
+        <span className="text-sm text-[var(--color-text-dim)]">canvases</span>
         <button
-          onClick={newDoc}
+          onClick={newCanvas}
           className="ml-auto rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)]"
         >
-          + New doc
+          + New canvas
         </button>
       </header>
 
@@ -64,37 +65,32 @@ export function ChannelDocs() {
         <div className="mx-auto max-w-4xl px-6 py-6">
           <section>
             <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-              Docs
+              Canvases
             </h2>
-            {loaded && docItems.length === 0 ? (
+            {loaded && (canvases?.length ?? 0) === 0 ? (
               <div className="rounded-xl border border-dashed border-[var(--color-border)] px-6 py-12 text-center">
-                <div className="mb-2 text-3xl">📄</div>
+                <div className="mb-2 text-3xl">🎨</div>
                 <p className="mb-3 text-sm text-[var(--color-text-dim)]">
-                  No docs in this channel yet.
+                  No canvases in this channel yet.
                 </p>
                 <button
-                  onClick={newDoc}
+                  onClick={newCanvas}
                   className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)]"
                 >
-                  Create the first doc
+                  Create the first canvas
                 </button>
               </div>
             ) : (
               <div className="space-y-1.5">
-                {docItems.map((d) => (
+                {canvases?.map((d) => (
                   <button
                     key={d.id}
-                    onClick={() => navigate(`/d/${d.id}`)}
+                    onClick={() => navigate(`/x/${d.id}`)}
                     className="flex w-full items-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-4 py-3 text-left transition hover:border-[var(--color-accent)] hover:bg-[var(--color-panel-2)]"
                   >
-                    <span className="text-xl">{d.icon || '📄'}</span>
+                    <span className="text-xl">{d.icon || '🎨'}</span>
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-medium">{d.title || 'Untitled'}</div>
-                      {d.preview && (
-                        <div className="truncate text-xs text-[var(--color-text-faint)]">
-                          {d.preview}
-                        </div>
-                      )}
                     </div>
                     <span className="shrink-0 text-[11px] text-[var(--color-text-faint)]">
                       {fmtDayDivider(d.updated_at)}
@@ -105,13 +101,13 @@ export function ChannelDocs() {
             )}
           </section>
 
-          {trashItems.length > 0 && (
+          {(trashedCanvases?.length ?? 0) > 0 && (
             <section className="mt-8">
               <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
                 Trash
               </h2>
               <div className="space-y-1.5">
-                {trashItems.map((d) => (
+                {trashedCanvases?.map((d) => (
                   <TrashRow key={d.id} doc={d} />
                 ))}
               </div>
@@ -148,7 +144,7 @@ function TrashRow({ doc }: { doc: Doc }) {
 
   return (
     <div className="flex items-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-4 py-2.5">
-      <span className="text-lg opacity-60">{doc.icon || '📄'}</span>
+      <span className="text-lg opacity-60">{doc.icon || '🎨'}</span>
       <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-text-dim)]">
         {doc.title || 'Untitled'}
       </span>

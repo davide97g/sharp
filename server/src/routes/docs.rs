@@ -18,9 +18,9 @@ use uuid::Uuid;
 
 // Column list for a `docs` row, unqualified and `d.`-qualified (result names stay bare).
 const DOC_COLS: &str =
-    "id, channel_id, title, icon, created_by, created_at, updated_at, deleted_at, everyone_role, content_text";
+    "id, channel_id, kind, title, icon, created_by, created_at, updated_at, deleted_at, everyone_role, content_text";
 const DOC_COLS_D: &str =
-    "d.id, d.channel_id, d.title, d.icon, d.created_by, d.created_at, d.updated_at, d.deleted_at, d.everyone_role, d.content_text";
+    "d.id, d.channel_id, d.kind, d.title, d.icon, d.created_by, d.created_at, d.updated_at, d.deleted_at, d.everyone_role, d.content_text";
 
 /// Effective role of a user relative to a doc.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +63,7 @@ impl DocRole {
 pub(crate) struct RawDoc {
     pub id: Uuid,
     pub channel_id: Uuid,
+    pub kind: String,
     pub title: String,
     pub icon: String,
     pub created_by: Option<Uuid>,
@@ -77,6 +78,7 @@ fn parse_raw_doc(row: &PgRow) -> AppResult<RawDoc> {
     Ok(RawDoc {
         id: row.try_get("id")?,
         channel_id: row.try_get("channel_id")?,
+        kind: row.try_get("kind")?,
         title: row.try_get("title")?,
         icon: row.try_get("icon")?,
         created_by: row.try_get("created_by")?,
@@ -94,6 +96,7 @@ fn doc_view(raw: &RawDoc, my_role: &str) -> Doc {
     Doc {
         id: raw.id,
         channel_id: raw.channel_id,
+        kind: raw.kind.clone(),
         title: raw.title.clone(),
         icon: raw.icon.clone(),
         created_by: raw.created_by,
@@ -113,6 +116,7 @@ fn redacted_doc_view(raw: &RawDoc) -> Doc {
     Doc {
         id: raw.id,
         channel_id: raw.channel_id,
+        kind: raw.kind.clone(),
         title: String::new(),
         icon: String::new(),
         created_by: raw.created_by,
@@ -250,6 +254,15 @@ fn validate_role_value(role: &str) -> AppResult<()> {
     if !matches!(role, "editor" | "viewer" | "none") {
         return Err(AppError::Validation(
             "role must be 'editor', 'viewer' or 'none'".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_kind(kind: &str) -> AppResult<()> {
+    if !matches!(kind, "doc" | "canvas") {
+        return Err(AppError::Validation(
+            "kind must be 'doc' or 'canvas'".to_string(),
         ));
     }
     Ok(())
@@ -400,6 +413,7 @@ pub async fn list_channel_trash(
 pub struct CreateDocRequest {
     pub title: Option<String>,
     pub icon: Option<String>,
+    pub kind: Option<String>,
 }
 
 pub async fn create_doc(
@@ -411,15 +425,18 @@ pub async fn create_doc(
     require_channel(&state.pool, channel_id, auth.id).await?;
     let title = body.title.unwrap_or_default();
     let icon = body.icon.unwrap_or_default();
+    let kind = body.kind.unwrap_or_else(|| "doc".to_string());
     validate_title(&title)?;
     validate_icon(&icon)?;
+    validate_kind(&kind)?;
 
     let sql = format!(
-        "INSERT INTO docs (channel_id, title, icon, created_by) VALUES ($1, $2, $3, $4) RETURNING {}",
+        "INSERT INTO docs (channel_id, kind, title, icon, created_by) VALUES ($1, $2, $3, $4, $5) RETURNING {}",
         DOC_COLS
     );
     let row = sqlx::query(&sql)
         .bind(channel_id)
+        .bind(&kind)
         .bind(&title)
         .bind(&icon)
         .bind(auth.id)

@@ -115,6 +115,7 @@ pub struct SearchResult {
 pub struct Doc {
     pub id: Uuid,
     pub channel_id: Uuid,
+    pub kind: String,
     pub title: String,
     pub icon: String,
     pub created_by: Option<Uuid>,

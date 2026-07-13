@@ -296,6 +296,20 @@ async fn build_state(blobs: Vec<Vec<u8>>) -> AppResult<(Vec<u8>, Vec<u8>)> {
     .map_err(|e| AppError::Internal(format!("build_state join error: {}", e)))
 }
 
+/// Merge the update log into a single v1 update, WITHOUT any content extraction.
+/// Used to compact a canvas doc, whose Yjs store is a tldraw store (a `Y.Map`), not
+/// a blocknote XML fragment — so there is no plain text / doc-links to extract.
+async fn merge_state(blobs: Vec<Vec<u8>>) -> AppResult<Vec<u8>> {
+    tokio::task::spawn_blocking(move || {
+        let doc = Doc::new();
+        apply_blobs(&doc, &blobs);
+        let txn = doc.transact();
+        txn.encode_state_as_update_v1(&StateVector::default())
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("merge_state join error: {}", e)))
+}
+
 /// Merged full-state update, extracted plain text and doc-link targets. Runs on the
 /// blocking pool for the same reason as [`build_state`].
 async fn compact_state(blobs: Vec<Vec<u8>>) -> AppResult<(Vec<u8>, String, Vec<Uuid>)> {
@@ -430,8 +444,24 @@ async fn compact_doc(state: &SharedState, doc_id: Uuid) -> AppResult<bool> {
         return Ok(false);
     }
 
-    let (merged, text, links) = compact_state(blobs).await?;
-    let valid_links = filter_existing_docs(&state.pool, &links).await?;
+    // Canvas docs store a tldraw Yjs store (a Y.Map), not a blocknote XML fragment,
+    // so merge the update log but skip content_text / doc_link extraction (blocknote-only).
+    let is_canvas = sqlx::query("SELECT kind FROM docs WHERE id = $1")
+        .bind(doc_id)
+        .fetch_optional(&state.pool)
+        .await?
+        .map(|r| r.try_get::<String, _>("kind"))
+        .transpose()?
+        .map(|k| k == "canvas")
+        .unwrap_or(false);
+
+    let (merged, extracted) = if is_canvas {
+        (merge_state(blobs).await?, None)
+    } else {
+        let (merged, text, links) = compact_state(blobs).await?;
+        let valid_links = filter_existing_docs(&state.pool, &links).await?;
+        (merged, Some((text, valid_links)))
+    };
 
     let mut tx = state.pool.begin().await?;
     sqlx::query("DELETE FROM doc_updates WHERE id = ANY($1)")
@@ -443,23 +473,25 @@ async fn compact_doc(state: &SharedState, doc_id: Uuid) -> AppResult<bool> {
         .bind(merged.as_slice())
         .execute(&mut *tx)
         .await?;
-    sqlx::query("UPDATE docs SET content_text = $1 WHERE id = $2")
-        .bind(&text)
-        .bind(doc_id)
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("DELETE FROM doc_links WHERE doc_id = $1")
-        .bind(doc_id)
-        .execute(&mut *tx)
-        .await?;
-    for target in valid_links {
-        sqlx::query(
-            "INSERT INTO doc_links (doc_id, target_doc_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-        )
-        .bind(doc_id)
-        .bind(target)
-        .execute(&mut *tx)
-        .await?;
+    if let Some((text, valid_links)) = extracted {
+        sqlx::query("UPDATE docs SET content_text = $1 WHERE id = $2")
+            .bind(&text)
+            .bind(doc_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM doc_links WHERE doc_id = $1")
+            .bind(doc_id)
+            .execute(&mut *tx)
+            .await?;
+        for target in valid_links {
+            sqlx::query(
+                "INSERT INTO doc_links (doc_id, target_doc_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            )
+            .bind(doc_id)
+            .bind(target)
+            .execute(&mut *tx)
+            .await?;
+        }
     }
     tx.commit().await?;
 

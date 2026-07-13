@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { api, getToken, setUnauthorizedHandler } from './lib/api'
 import { setNavigate as setDocNavigate } from './lib/nav'
@@ -13,6 +13,13 @@ import { Toasts } from './components/Toasts'
 import { DocsHome } from './components/docs/DocsHome'
 import { ChannelDocs } from './components/docs/ChannelDocs'
 import { DocEditor } from './components/docs/DocEditor'
+import { CanvasHome } from './components/canvas/CanvasHome'
+import { ChannelCanvases } from './components/canvas/ChannelCanvases'
+// tldraw is a large dependency; keep it out of the main bundle by loading the
+// canvas editor lazily (only fetched when a whiteboard is actually opened).
+const CanvasEditor = lazy(() =>
+  import('./components/canvas/CanvasEditor').then((m) => ({ default: m.CanvasEditor })),
+)
 
 type Boot = 'loading' | 'authed' | 'anon'
 
@@ -101,6 +108,22 @@ export function App() {
           <Route path="docs" element={<DocsHome />} />
           <Route path="docs/c/:channelId" element={<ChannelDocs />} />
           <Route path="d/:docId" element={<DocEditor />} />
+          <Route path="canvas" element={<CanvasHome />} />
+          <Route path="canvas/c/:channelId" element={<ChannelCanvases />} />
+          <Route
+            path="x/:docId"
+            element={
+              <Suspense
+                fallback={
+                  <div className="flex flex-1 items-center justify-center text-sm text-[var(--color-text-faint)]">
+                    Loading canvas…
+                  </div>
+                }
+              >
+                <CanvasEditor />
+              </Suspense>
+            }
+          />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
