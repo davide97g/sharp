@@ -98,9 +98,45 @@ fn truncate_chars(s: &str, max: usize) -> String {
     out
 }
 
+/// Replace `[[doc:<uuid>|Title]]` / `[[canvas:<uuid>|Title]]` chips with a readable
+/// "📄 Title" / "🎨 Title" so notification previews don't leak raw tokens.
+fn strip_resource_tokens(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("[[") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        let icon = if after.starts_with("canvas:") {
+            Some("🎨")
+        } else if after.starts_with("doc:") {
+            Some("📄")
+        } else {
+            None
+        };
+        match (icon, after.find("]]")) {
+            (Some(icon), Some(end)) => {
+                let inner = &after[..end];
+                let title = inner.split_once('|').map(|(_, t)| t).unwrap_or(inner);
+                out.push_str(icon);
+                out.push(' ');
+                out.push_str(title);
+                rest = &after[end + 2..];
+            }
+            _ => {
+                // Not a resource token: emit the literal "[[" and continue past it.
+                out.push_str("[[");
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Build a one-line inbox preview from a message (falls back to its attachment).
 fn build_preview(content: &str, first_attachment: Option<&str>) -> String {
-    let text = content.trim();
+    let text = strip_resource_tokens(content.trim());
+    let text = text.trim();
     if !text.is_empty() {
         truncate_chars(&text.replace('\n', " "), 140)
     } else if let Some(name) = first_attachment {

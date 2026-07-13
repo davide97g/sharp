@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { api } from '../lib/api'
 import { toastError } from '../lib/toast'
 import { fmtBytes } from '../lib/util'
+import { Avatar } from './Avatar'
 import type { Attachment, Channel } from '../lib/types'
 
 type Pending = {
@@ -16,14 +17,22 @@ type Pending = {
   error?: boolean
 }
 
-type PickItem = { id: string; title: string; channelName?: string }
+// A completion candidate: a person (@) or a resource — doc/canvas (#).
+type PickItem =
+  | { kind: 'user'; id: string; name: string }
+  | { kind: 'doc' | 'canvas'; id: string; title: string; channelName?: string }
 
-// Find an open, unclosed `[[` run ending at the caret.
-function detectDocTrigger(value: string, caret: number): { start: number; query: string } | null {
+type Trigger = { type: '@' | '#'; start: number; query: string }
+
+// Detect an open `@` (people) or `#` (resource) run ending at the caret. The
+// trigger char must sit at a word boundary (start / whitespace / `(`) so it
+// doesn't fire inside emails or words. The query is a single non-space token —
+// the list filters by it (you don't type multi-word names in full).
+function detectTrigger(value: string, caret: number): Trigger | null {
   const upto = value.slice(0, caret)
-  const m = /\[\[([^\]\n]*)$/.exec(upto)
+  const m = /(^|[\s(])([@#])([^\s@#]*)$/.exec(upto)
   if (!m) return null
-  return { start: m.index, query: m[1] }
+  return { type: m[2] as '@' | '#', start: m.index + m[1].length, query: m[3] }
 }
 
 export function Composer({
@@ -47,14 +56,20 @@ export function Composer({
   const sendMessage = useStore((s) => s.sendMessage)
   const sendTyping = useStore((s) => s.sendTyping)
   const joinChannel = useStore((s) => s.joinChannel)
+  const loadMembers = useStore((s) => s.loadMembers)
 
-  // --- [[ doc picker state ---
-  const [trigger, setTrigger] = useState<{ start: number; query: string } | null>(null)
+  // --- @ people / # resource picker state ---
+  const [trigger, setTrigger] = useState<Trigger | null>(null)
   const [results, setResults] = useState<PickItem[]>([])
   const [sel, setSel] = useState(0)
   const caretRef = useRef(0)
 
   const canPost = channel.kind === 'dm' || channel.is_member
+
+  // Ensure channel members are loaded so the @ picker can surface them first.
+  useEffect(() => {
+    if (!useStore.getState().members[channel.id]) loadMembers(channel.id)
+  }, [channel.id, loadMembers])
 
   const autosize = useCallback(() => {
     const el = ref.current
@@ -67,32 +82,68 @@ export function Composer({
     autosize()
   }, [value, autosize])
 
-  // Debounced doc search for the picker.
+  // Populate the picker. People (@) resolve from the already-loaded directory
+  // (channel members first); resources (#) hit the doc/canvas search.
   useEffect(() => {
     if (trigger === null) {
       setResults([])
       return
     }
     const q = trigger.query.trim()
+    const ql = q.toLowerCase()
+
+    // @ — people: synchronous, from the store. Members of this channel rank first.
+    if (trigger.type === '@') {
+      const st = useStore.getState()
+      const memberIds = new Set((st.members[channel.id] ?? []).map((u) => u.id))
+      const people = Object.values(st.users)
+        .filter((u) => !ql || u.display_name.toLowerCase().includes(ql))
+        .sort((a, b) => {
+          const am = memberIds.has(a.id) ? 0 : 1
+          const bm = memberIds.has(b.id) ? 0 : 1
+          if (am !== bm) return am - bm
+          return a.display_name.localeCompare(b.display_name)
+        })
+        .slice(0, 8)
+        .map<PickItem>((u) => ({ kind: 'user', id: u.id, name: u.display_name }))
+      setResults(people)
+      setSel(0)
+      return
+    }
+
+    // # — resources: docs + canvases (debounced search; recents when empty).
     let cancelled = false
     const timer = setTimeout(async () => {
       try {
+        const toItem = (d: {
+          id: string
+          kind: 'doc' | 'canvas'
+          title: string
+          channel_name?: string
+          channelName?: string
+        }): PickItem => ({
+          kind: d.kind === 'canvas' ? 'canvas' : 'doc',
+          id: d.id,
+          title: d.title || 'Untitled',
+          channelName: d.channel_name ?? d.channelName,
+        })
         if (q) {
           const res = await api.docSearch(q, 8)
           if (!cancelled) {
-            setResults(res.results.map((d) => ({ id: d.id, title: d.title || 'Untitled', channelName: d.channel_name })))
+            setResults(res.results.map((d) => toItem({ ...d, title: d.title })))
             setSel(0)
           }
         } else {
-          const state = useStore.getState()
+          const st = useStore.getState()
           const chName: Record<string, string> = {}
-          for (const c of state.channels) chName[c.id] = c.kind === 'dm' ? c.dm_user?.display_name ?? '' : c.name
-          const recent = Object.values(state.docsByChannel)
+          for (const c of st.channels)
+            chName[c.id] = c.kind === 'dm' ? c.dm_user?.display_name ?? '' : c.name
+          const recent = Object.values(st.docsByChannel)
             .flat()
             .filter((d) => !d.deleted_at)
             .sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1))
             .slice(0, 8)
-            .map((d) => ({ id: d.id, title: d.title || 'Untitled', channelName: chName[d.channel_id] }))
+            .map((d) => toItem({ ...d, channelName: chName[d.channel_id] }))
           if (!cancelled) {
             setResults(recent)
             setSel(0)
@@ -101,12 +152,12 @@ export function Composer({
       } catch {
         /* ignore */
       }
-    }, 200)
+    }, 150)
     return () => {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [trigger])
+  }, [trigger, channel.id])
 
   const pickerOpen = trigger !== null && results.length > 0
 
@@ -115,14 +166,17 @@ export function Composer({
     if (!el) return
     const caret = el.selectionStart ?? el.value.length
     caretRef.current = caret
-    setTrigger(detectDocTrigger(el.value, caret))
+    setTrigger(detectTrigger(el.value, caret))
   }
 
   function pick(item: PickItem) {
     if (!trigger) return
     const before = value.slice(0, trigger.start)
     const after = value.slice(caretRef.current)
-    const token = `[[doc:${item.id}|${item.title || 'Untitled'}]]`
+    const token =
+      item.kind === 'user'
+        ? `@${item.name} `
+        : `[[${item.kind}:${item.id}|${item.title || 'Untitled'}]] `
     const next = before + token + after
     setValue(next)
     setTrigger(null)
@@ -227,9 +281,9 @@ export function Composer({
         setSel((s) => Math.max(s - 1, 0))
         return
       }
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
         e.preventDefault()
-        pick(results[sel])
+        if (results[sel]) pick(results[sel])
         return
       }
       if (e.key === 'Escape') {
@@ -247,7 +301,7 @@ export function Composer({
   function onChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     setValue(e.target.value)
     caretRef.current = e.target.selectionStart ?? e.target.value.length
-    setTrigger(detectDocTrigger(e.target.value, caretRef.current))
+    setTrigger(detectTrigger(e.target.value, caretRef.current))
     // throttle typing to 1 per 3s
     const now = Date.now()
     if (now - lastTypingRef.current > 3000) {
@@ -287,12 +341,15 @@ export function Composer({
     <div className="relative px-4 pb-4 pt-1">
       {pickerOpen && (
         <div className="absolute bottom-full left-4 right-4 z-20 mb-1 max-h-64 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1.5 shadow-2xl">
-          <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-            Link a doc
+          <div className="flex items-center justify-between px-2 py-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+              {trigger?.type === '@' ? 'People' : 'Docs & canvases'}
+            </span>
+            <span className="text-[10px] text-[var(--color-text-faint)]">↑↓ · ↵/⇥ · esc</span>
           </div>
           {results.map((r, i) => (
             <button
-              key={r.id}
+              key={`${r.kind}-${r.id}`}
               onMouseEnter={() => setSel(i)}
               onMouseDown={(e) => {
                 e.preventDefault()
@@ -302,12 +359,21 @@ export function Composer({
                 i === sel ? 'bg-[var(--color-accent-soft)]' : 'hover:bg-[var(--color-panel-2)]'
               }`}
             >
-              <span>📄</span>
-              <span className="min-w-0 flex-1 truncate">{r.title}</span>
-              {r.channelName && (
-                <span className="shrink-0 text-[11px] text-[var(--color-text-faint)]">
-                  #{r.channelName}
-                </span>
+              {r.kind === 'user' ? (
+                <>
+                  <Avatar id={r.id} name={r.name} size={22} />
+                  <span className="min-w-0 flex-1 truncate">{r.name}</span>
+                </>
+              ) : (
+                <>
+                  <span>{r.kind === 'canvas' ? '🎨' : '📄'}</span>
+                  <span className="min-w-0 flex-1 truncate">{r.title}</span>
+                  {r.channelName && (
+                    <span className="shrink-0 text-[11px] text-[var(--color-text-faint)]">
+                      #{r.channelName}
+                    </span>
+                  )}
+                </>
               )}
             </button>
           ))}
