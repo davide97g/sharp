@@ -22,7 +22,18 @@ Dokploy brings its own Traefik with automatic Let's Encrypt, so use
    POSTGRES_PASSWORD=<long random string>
    JWT_SECRET=<64 random chars>          # e.g. openssl rand -hex 32
    SHARP_DISABLE_SIGNUP=false
+   S3_SECRET_KEY=<long random string>    # bundled MinIO root password (required)
+   # Optional — sensible defaults exist:
+   # S3_ACCESS_KEY=sharp   S3_BUCKET=sharp   S3_REGION=us-east-1
+   # VAPID_SUBJECT=mailto:you@example.com  # contact URL for web-push
    ```
+
+   The stack bundles **MinIO** for file uploads and **Redis** for multi-replica
+   realtime — both internal-only, no domain needed. `S3_SECRET_KEY` is required
+   (it's MinIO's root password); to use an external S3/R2/B2 instead, drop the
+   `minio`/`createbuckets` services and point the `S3_*` vars at your provider.
+   Web-push VAPID keys auto-generate and persist in Postgres on first startup —
+   nothing to configure.
 
 5. **Domains** tab — add domain:
    - Host: `chat.example.com`
@@ -54,7 +65,9 @@ every push to `main` redeploys.
 
 Dokploy → your Compose service → **Backups**: schedule a Postgres backup of the
 `postgres` service (database `sharp`, user `sharp`) to S3-compatible storage.
-Manual alternative:
+Postgres holds all messages, docs, canvases and web-push keys. Uploaded files
+live in the `minio_data` volume — back that up too (or point `S3_*` at managed
+storage that already has its own durability). Manual alternative:
 
 ```bash
 docker exec $(docker ps -qf name=postgres) pg_dump -U sharp sharp > sharp-$(date +%F).sql

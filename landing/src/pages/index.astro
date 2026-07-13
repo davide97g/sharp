@@ -5,10 +5,10 @@ const GITHUB_OWNER = "davide97g";
 const repo = `https://github.com/${GITHUB_OWNER}/sharp`;
 const releases = `${repo}/releases/latest`;
 
-const title = "sharp — Team chat. Your server. No compromises.";
+const title = "sharp — Team chat, docs & canvas. Your server. No compromises.";
 const description =
-  "An open-source, self-hosted Slack replacement: channels, threads, DMs and full-text search, running on your own server from a single container.";
-const siteUrl = "https://example.com";
+  "An open-source, self-hosted Slack replacement: channels, threads, DMs, collaborative docs and canvas, file uploads and full-text search, running on your own server from a single container.";
+const siteUrl = "https://sharp.davideghiotto.it";
 ---
 
 <!doctype html>
@@ -61,9 +61,10 @@ const siteUrl = "https://example.com";
         <div>
           <span class="pill"><span class="dot"></span> Open source · AGPL-3.0 · self-hosted</span>
         </div>
-        <h1 class="headline">Team chat. Your server. No compromises.</h1>
+        <h1 class="headline">Chat, docs &amp; canvas. Your server.</h1>
         <p class="subline">
-          sharp is an open-source Slack replacement — channels, threads, DMs and
+          sharp is an open-source Slack replacement — channels, threads and DMs,
+          plus real-time collaborative docs and canvas, file uploads and
           full-text search — self-hosted in a single container. Your data never
           leaves your infrastructure.
         </p>
@@ -91,6 +92,9 @@ const siteUrl = "https://example.com";
                 <div class="side-item"><span class="h">#</span> engineering <span class="badge">3</span></div>
                 <div class="side-item"><span class="h">#</span> design</div>
                 <div class="side-item"><span class="h">#</span> random</div>
+                <div class="side-label">Pages</div>
+                <div class="side-item"><span class="h">¶</span> Launch plan</div>
+                <div class="side-item"><span class="h">◈</span> Architecture canvas</div>
                 <div class="side-label">Direct messages</div>
                 <div class="side-item">Jordan Lee <span class="pdot"></span></div>
                 <div class="side-item">Priya Shah <span class="pdot"></span></div>
@@ -122,7 +126,10 @@ const siteUrl = "https://example.com";
                     <div class="avatar" style="background:#ff8a5c">MK</div>
                     <div class="msg-body">
                       <div class="msg-head"><span class="name">Mika K</span><span class="time">9:50 AM</span></div>
-                      <div class="msg-text">search across every channel is instant now 🔍 @jordan nice work</div>
+                      <div class="msg-text">
+                        search across every channel is instant now 🔍 @jordan
+                        wrote it all up in <span class="docchip">¶ Launch plan</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -157,8 +164,8 @@ const siteUrl = "https://example.com";
       <div class="container">
         <div class="section-head">
           <div class="eyebrow">Why sharp</div>
-          <h2>Sharp chat. Truly yours. Everywhere.</h2>
-          <p>Everything a team needs to talk — and nothing that phones home.</p>
+          <h2>One workspace. Chat, docs &amp; canvas.</h2>
+          <p>Everything a team needs to talk, write and draw together — and nothing that phones home.</p>
         </div>
         <div class="features">
           <div class="card">
@@ -168,27 +175,57 @@ const siteUrl = "https://example.com";
               <li>Threads that keep replies out of the way</li>
               <li>@mentions &amp; emoji reactions</li>
               <li>Public channels, private groups &amp; DMs</li>
+              <li>@people &amp; #resource autocomplete in the composer</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="icon">¶</div>
+            <h3>Collaborative docs</h3>
+            <ul>
+              <li>Block-based docs live inside any channel</li>
+              <li>Real-time co-editing, cursors &amp; presence</li>
+              <li>Per-doc roles &amp; live sharing controls</li>
+              <li><code>[[doc]]</code> links bridge chat &amp; docs</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="icon">◈</div>
+            <h3>Shared canvas</h3>
+            <ul>
+              <li>Infinite whiteboards powered by tldraw</li>
+              <li>Sketch, diagram &amp; brainstorm together live</li>
+              <li>Same roles &amp; sharing model as docs</li>
+              <li>One click from any channel</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="icon">⌕</div>
+            <h3>Files &amp; search</h3>
+            <ul>
+              <li>Drag-and-drop uploads, images inline</li>
               <li>Instant Postgres full-text search</li>
+              <li>Files on your own S3/MinIO storage</li>
+              <li>Nothing ever leaves your infrastructure</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="icon">◔</div>
+            <h3>Never miss a mention</h3>
+            <ul>
+              <li>Unified mention inbox across chat, docs &amp; canvas</li>
+              <li>Web push + native OS notifications</li>
+              <li>Per-channel mute &amp; do-not-disturb</li>
+              <li>Toasts while you work, push while away</li>
             </ul>
           </div>
           <div class="card">
             <div class="icon">⌂</div>
-            <h3>Yours</h3>
+            <h3>Yours, everywhere</h3>
             <ul>
-              <li>Self-host on any box you control</li>
-              <li>Backed by plain Postgres — easy backups</li>
-              <li>AGPL-3.0, fork it &amp; ship it</li>
-              <li>Zero telemetry, zero tracking</li>
-            </ul>
-          </div>
-          <div class="card">
-            <div class="icon">◆</div>
-            <h3>Everywhere</h3>
-            <ul>
+              <li>Self-host in one container, plain Postgres</li>
+              <li>AGPL-3.0 · zero telemetry, zero tracking</li>
               <li>Web app in any modern browser</li>
-              <li>Native macOS, Windows &amp; Linux</li>
-              <li>Built on Tauri — tiny, fast, native</li>
-              <li>One server, all your devices</li>
+              <li>Native macOS, Windows &amp; Linux via Tauri</li>
             </ul>
           </div>
         </div>
