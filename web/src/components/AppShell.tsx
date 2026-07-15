@@ -6,6 +6,7 @@ import { CanvasSidebar } from './canvas/CanvasSidebar'
 import { CompactSidebar } from './CompactSidebar'
 import { ThreadPanel } from './ThreadPanel'
 import { QuickSwitcher } from './QuickSwitcher'
+import { InboxPanel } from './NotificationCenter'
 import { VideoStage } from './voice/VideoStage'
 import { useStore } from '../store'
 
@@ -37,6 +38,13 @@ export function AppShell() {
     : docsMode
       ? 'docs'
       : 'chat'
+
+  const setInboxOpen = useStore((s) => s.setInboxOpen)
+
+  // Close the chat inbox when leaving chat mode so it doesn't snap back open.
+  useEffect(() => {
+    if (mode !== 'chat') setInboxOpen(false)
+  }, [mode, setInboxOpen])
 
   // total unread -> document title
   const totalUnread = channels.reduce((sum, c) => sum + (c.unread_count || 0), 0)
@@ -92,6 +100,7 @@ export function AppShell() {
       {mode === 'chat' && <ThreadPanel />}
       {inVoice && <VideoStage />}
       <QuickSwitcher />
+      {mode === 'chat' && <InboxPanel />}
     </div>
   )
 }

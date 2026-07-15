@@ -5,7 +5,7 @@ import { channelLabel } from '../lib/util'
 import { CreateChannelModal } from './CreateChannelModal'
 import { BrowseChannelsModal } from './BrowseChannelsModal'
 import { ChannelSettingsModal } from './ChannelSettingsModal'
-import { NotificationCenter } from './NotificationCenter'
+import { InboxTrigger } from './NotificationCenter'
 import { UserSettingsModal } from './UserSettingsModal'
 import { Avatar } from './Avatar'
 import type { Channel } from '../lib/types'
@@ -58,16 +58,13 @@ export function Sidebar() {
           #
         </span>
         <span className="text-base font-bold tracking-tight">sharp</span>
-        <div className="ml-auto flex items-center gap-1">
-          <NotificationCenter />
-          <button
-            onClick={() => setQuickSwitcher(true)}
-            title="Quick switcher (⌘K)"
-            className="rounded-md border border-[var(--color-border)] px-2 py-1 text-[10px] font-medium text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)]"
-          >
-            ⌘K
-          </button>
-        </div>
+        <button
+          onClick={() => setQuickSwitcher(true)}
+          title="Quick switcher (⌘K)"
+          className="ml-auto rounded-md border border-[var(--color-border)] px-2 py-1 text-[10px] font-medium text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)]"
+        >
+          ⌘K
+        </button>
       </div>
 
       {/* search */}
@@ -79,6 +76,10 @@ export function Sidebar() {
           className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
         />
       </form>
+
+      <div className="px-2 pt-3">
+        <InboxTrigger variant="row" />
+      </div>
 
       <nav className="flex-1 overflow-y-auto px-2 py-3">
         {/* channels */}

@@ -117,6 +117,8 @@ type State = {
 
   // quick switcher
   quickSwitcherOpen: boolean
+  // chat inbox (notifications) panel
+  inboxOpen: boolean
 
   // per-composer draft text, keyed `c:<channelId>` (main) or `t:<parentId>` (thread)
   drafts: Record<string, string>
@@ -206,6 +208,7 @@ type State = {
   closeThread: () => void
 
   setQuickSwitcher: (open: boolean) => void
+  setInboxOpen: (open: boolean) => void
   setDraft: (key: string, text: string) => void
   setReplyTarget: (channelId: string, msg: Message | null) => void
   requestComposerFocus: (key: string) => void
@@ -295,6 +298,7 @@ export const useStore = create<State>((set, get) => ({
   thread: { open: false, parentId: null, parent: null, replies: [], loading: false },
   typing: {},
   quickSwitcherOpen: false,
+  inboxOpen: false,
   drafts: {},
   replyTargets: {},
   focusRequest: null,
@@ -363,6 +367,7 @@ export const useStore = create<State>((set, get) => ({
       thread: { open: false, parentId: null, parent: null, replies: [], loading: false },
       typing: {},
       quickSwitcherOpen: false,
+      inboxOpen: false,
       drafts: {},
       replyTargets: {},
       focusRequest: null,
@@ -679,6 +684,10 @@ export const useStore = create<State>((set, get) => ({
 
   setQuickSwitcher(open) {
     set({ quickSwitcherOpen: open })
+  },
+
+  setInboxOpen(open) {
+    set({ inboxOpen: open })
   },
 
   setDraft(key, text) {
