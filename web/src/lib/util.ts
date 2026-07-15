@@ -1,4 +1,12 @@
-import type { Channel } from './types'
+import type { Channel, User } from './types'
+
+/**
+ * Email is private: only the signed-in user ever sees their own address.
+ * Returns the email to render for `user`, or null when it must stay hidden.
+ */
+export function visibleEmail(user: User, meId: string | null | undefined): string | null {
+  return user.id === meId ? (user.email ?? null) : null
+}
 
 /** Compare two string-encoded bigint message ids. */
 export function cmpId(a: string, b: string): number {

@@ -100,7 +100,7 @@ impl FromRequestParts<SharedState> for AuthUser {
 pub fn user_from_row(row: &sqlx::postgres::PgRow) -> AppResult<User> {
     Ok(User {
         id: row.try_get("id")?,
-        email: row.try_get("email")?,
+        email: Some(row.try_get("email")?),
         display_name: row.try_get("display_name")?,
         avatar_url: row.try_get("avatar_url")?,
         created_at: row.try_get("created_at")?,

@@ -5,6 +5,7 @@ import { api } from '../../lib/api'
 import { useStore } from '../../store'
 import { toastError } from '../../lib/toast'
 import type { Doc } from '../../lib/types'
+import { visibleEmail } from '../../lib/util'
 
 type EveryoneRole = 'editor' | 'viewer' | 'none'
 type MemberRole = 'editor' | 'viewer' | 'none'
@@ -12,6 +13,7 @@ type MemberRole = 'editor' | 'viewer' | 'none'
 export function DocRolesModal({ doc, onClose }: { doc: Doc; onClose: () => void }) {
   const patchDoc = useStore((s) => s.patchDoc)
   const members = useStore((s) => s.members[doc.channel_id])
+  const me = useStore((s) => s.me)
   const loadMembers = useStore((s) => s.loadMembers)
   // Per-user overrides keyed by user id. The server's roles endpoint only
   // returns explicit overrides, so members without one fall back to the
@@ -107,9 +109,11 @@ export function DocRolesModal({ doc, onClose }: { doc: Doc; onClose: () => void 
                 <Avatar id={u.id} name={u.display_name} size={30} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{u.display_name}</div>
-                  <div className="truncate text-[11px] text-[var(--color-text-faint)]">
-                    {u.email}
-                  </div>
+                  {visibleEmail(u, me?.id) && (
+                    <div className="truncate text-[11px] text-[var(--color-text-faint)]">
+                      {visibleEmail(u, me?.id)}
+                    </div>
+                  )}
                 </div>
                 {isCreator ? (
                   <span className="rounded-md border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-faint)]">

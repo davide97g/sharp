@@ -3,6 +3,7 @@ import { Modal } from './Modal'
 import { Avatar } from './Avatar'
 import { useStore } from '../store'
 import { toastError } from '../lib/toast'
+import { visibleEmail } from '../lib/util'
 
 const NAME_RE = /^[a-z0-9-]{1,50}$/
 
@@ -221,6 +222,7 @@ function MembersTab({ channelId }: { channelId: string }) {
   const channel = useStore((s) => s.channels.find((c) => c.id === channelId))
   const members = useStore((s) => s.members[channelId])
   const users = useStore((s) => s.users)
+  const me = useStore((s) => s.me)
   const loadMembers = useStore((s) => s.loadMembers)
   const addChannelMembers = useStore((s) => s.addChannelMembers)
   const removeChannelMember = useStore((s) => s.removeChannelMember)
@@ -242,12 +244,7 @@ function MembersTab({ channelId }: { channelId: string }) {
     const q = query.trim().toLowerCase()
     return Object.values(users)
       .filter((u) => !memberIds.has(u.id))
-      .filter(
-        (u) =>
-          !q ||
-          u.display_name.toLowerCase().includes(q) ||
-          u.email.toLowerCase().includes(q),
-      )
+      .filter((u) => !q || u.display_name.toLowerCase().includes(q))
       .sort((a, b) => a.display_name.localeCompare(b.display_name))
       .slice(0, 8)
   }, [users, members, query])
@@ -305,9 +302,11 @@ function MembersTab({ channelId }: { channelId: string }) {
                   <Avatar id={u.id} name={u.display_name} size={28} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">{u.display_name}</div>
-                    <div className="truncate text-[11px] text-[var(--color-text-faint)]">
-                      {u.email}
-                    </div>
+                    {visibleEmail(u, me?.id) && (
+                      <div className="truncate text-[11px] text-[var(--color-text-faint)]">
+                        {visibleEmail(u, me?.id)}
+                      </div>
+                    )}
                   </div>
                   <span className="text-xs text-[var(--color-accent)]">Add</span>
                 </button>
@@ -335,9 +334,11 @@ function MembersTab({ channelId }: { channelId: string }) {
                 <Avatar id={u.id} name={u.display_name} size={30} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{u.display_name}</div>
-                  <div className="truncate text-[11px] text-[var(--color-text-faint)]">
-                    {u.email}
-                  </div>
+                  {visibleEmail(u, me?.id) && (
+                    <div className="truncate text-[11px] text-[var(--color-text-faint)]">
+                      {visibleEmail(u, me?.id)}
+                    </div>
+                  )}
                 </div>
                 {isCreator ? (
                   <span className="rounded-md border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-faint)]">

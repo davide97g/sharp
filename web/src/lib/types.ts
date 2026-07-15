@@ -3,7 +3,9 @@
 
 export type User = {
   id: string
-  email: string
+  // Private: present only on the signed-in user's own record. The server omits
+  // it for every other viewer, so it's optional here.
+  email?: string
   display_name: string
   avatar_url: string | null
   created_at: string

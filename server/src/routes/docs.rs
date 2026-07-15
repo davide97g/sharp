@@ -644,7 +644,7 @@ pub async fn list_roles(
 
     let mut roles = Vec::with_capacity(rows.len());
     for r in &rows {
-        let user = user_from_row(r)?;
+        let user = user_from_row(r)?.redact_email_for(auth.id);
         let role_str: String = r.try_get("role")?;
         roles.push(json!({ "user": user, "role": role_str }));
     }

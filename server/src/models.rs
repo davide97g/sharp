@@ -24,10 +24,29 @@ where
 #[derive(Debug, Clone, Serialize)]
 pub struct User {
     pub id: Uuid,
-    pub email: String,
+    /// Private: only the account owner ever sees their own address. Redacted
+    /// (omitted from JSON) for every other viewer via `redact_email_for`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
     pub display_name: String,
     pub avatar_url: Option<String>,
     pub created_at: DateTime<Utc>,
+}
+
+impl User {
+    /// Hide the email unless `viewer` owns this account.
+    pub fn redact_email_for(mut self, viewer: Uuid) -> Self {
+        if self.id != viewer {
+            self.email = None;
+        }
+        self
+    }
+
+    /// Unconditionally hide the email — for payloads fanned out to many viewers.
+    pub fn redacted(mut self) -> Self {
+        self.email = None;
+        self
+    }
 }
 
 /// The compact author shape embedded in messages.

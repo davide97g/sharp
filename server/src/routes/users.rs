@@ -28,6 +28,9 @@ async fn load_user(state: &SharedState, id: Uuid) -> AppResult<User> {
 /// Broadcast a profile change to every online user so avatars/names update live.
 async fn broadcast_user_updated(state: &SharedState, user: &User) {
     let targets = state.hub.online_user_ids();
+    // Fanned out to every viewer, so the email must be redacted; recipients
+    // merge only the name/avatar and keep any email they already hold (their own).
+    let user = user.clone().redacted();
     state
         .hub
         .broadcast(envelope("user.updated", json!({ "user": user })), targets)
@@ -40,13 +43,13 @@ pub async fn me(State(state): State<SharedState>, auth: AuthUser) -> AppResult<J
 
 pub async fn list_users(
     State(state): State<SharedState>,
-    _auth: AuthUser,
+    auth: AuthUser,
 ) -> AppResult<Json<serde_json::Value>> {
     let sql = format!("{USER_SELECT} ORDER BY display_name");
     let rows = sqlx::query(&sql).fetch_all(&state.pool).await?;
     let mut users = Vec::with_capacity(rows.len());
     for row in &rows {
-        users.push(user_from_row(row)?);
+        users.push(user_from_row(row)?.redact_email_for(auth.id));
     }
 
     let online: Vec<String> = state

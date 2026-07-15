@@ -54,7 +54,8 @@ async fn dm_other_user(pool: &PgPool, channel_id: Uuid, viewer: Uuid) -> AppResu
     .fetch_optional(pool)
     .await?;
     match row {
-        Some(r) => Ok(Some(user_from_row(&r)?)),
+        // The DM counterpart is always another user — never expose their email.
+        Some(r) => Ok(Some(user_from_row(&r)?.redacted())),
         None => Ok(None),
     }
 }
@@ -393,7 +394,7 @@ pub async fn list_members(
 
     let mut members = Vec::with_capacity(rows.len());
     for row in &rows {
-        members.push(user_from_row(row)?);
+        members.push(user_from_row(row)?.redact_email_for(auth.id));
     }
 
     Ok(Json(json!({ "members": members })))
