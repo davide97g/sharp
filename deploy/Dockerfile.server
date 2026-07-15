@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1
+#
+# sharp — API-only server image (no bundled web SPA), for a split deployment where
+# the web app is served separately (see deploy/Dockerfile.web). With no web-dist
+# present, the server runs API-only and skips the SPA fallback.
+#
+# Build context MUST be the repo root:
+#   docker build -f deploy/Dockerfile.server -t sharp-server .
+
+# ---------- build ----------
+# bookworm (glibc) rather than alpine/musl — friendlier for sqlx & crypto crates.
+FROM rust:1-bookworm AS server
+WORKDIR /src
+COPY server/ ./
+# No compile-time DATABASE_URL needed: the server uses sqlx runtime queries only.
+RUN cargo build --release
+# Copy whichever single executable landed in target/release/ (robust to crate name).
+RUN set -eux; \
+    bin="$(find target/release -maxdepth 1 -type f -executable ! -name '*.d' | head -n1)"; \
+    test -n "$bin"; \
+    cp "$bin" /sharp
+
+# ---------- runtime ----------
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=server /sharp /app/sharp
+
+# No WEB_DIST copied -> the server serves the API only.
+ENV PORT=3000 \
+    RUST_LOG=info
+EXPOSE 3000
+
+CMD ["/app/sharp"]

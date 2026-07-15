@@ -2,9 +2,9 @@
 import { defineConfig } from 'astro/config';
 
 // Static single-page landing site for sharp.
-// Deployable to any static host; also served by the VPS Caddy at the apex domain.
+// Deployable to any static host; served on Dokploy as its own service.
 export default defineConfig({
   output: 'static',
-  // Set `site` to your production apex domain for correct canonical/OG URLs.
-  site: 'https://example.com',
+  // Production apex domain — used for canonical/OG URLs.
+  site: 'https://sharp.davideghiotto.it',
 });

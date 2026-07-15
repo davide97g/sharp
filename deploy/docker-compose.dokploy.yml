@@ -1,8 +1,16 @@
-# sharp — Dokploy compose file
+# sharp — Dokploy compose file (split deployment: 3 subdomains)
 #
 # Dokploy runs its own Traefik reverse proxy with automatic HTTPS, so this file
 # has NO caddy and publishes NO host ports. Route traffic via Dokploy's
-# "Domains" tab: service `sharp`, port 3000 (websockets work out of the box).
+# "Domains" tab (one domain per service):
+#
+#   sharp.davideghiotto.it          -> service `landing`, port 80
+#   app.sharp.davideghiotto.it      -> service `web`,     port 80
+#   server.sharp.davideghiotto.it   -> service `sharp`,   port 3000  (websockets work out of the box)
+#
+# The web SPA is a separate static image that talks cross-origin to the API host
+# (baked in via API_URL below). Server CORS is permissive + auth is a Bearer token,
+# so cross-origin works with no extra config.
 #
 # Dokploy setup: see deploy/DOKPLOY.md
 
@@ -53,10 +61,12 @@ services:
       exit 0;
       "
 
+  # API server (API-only image; the web SPA is the separate `web` service below).
+  # Domain: server.sharp.davideghiotto.it -> port 3000.
   sharp:
     build:
       context: ..
-      dockerfile: deploy/Dockerfile
+      dockerfile: deploy/Dockerfile.server
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://sharp:${POSTGRES_PASSWORD}@postgres:5432/sharp
@@ -73,7 +83,7 @@ services:
       S3_ALLOW_HTTP: "true"
       # Web push: VAPID keys auto-generate + persist on first startup. Only the
       # subject (contact URL) is configurable here.
-      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@sharp.app}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@sharp.davideghiotto.it}
     expose:
       - "3000"
     depends_on:
@@ -85,8 +95,22 @@ services:
       - dokploy-network
       - default
 
-  # Optional: serve the landing page as part of the same stack.
-  # Alternatively deploy it as a separate Dokploy Application (see DOKPLOY.md).
+  # Web SPA (static, nginx). The API base is baked in at build time — point it at
+  # the API host's public URL. Domain: app.sharp.davideghiotto.it -> port 80.
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+      args:
+        VITE_API_URL: ${API_URL:-https://server.sharp.davideghiotto.it}
+    restart: unless-stopped
+    expose:
+      - "80"
+    networks:
+      - dokploy-network
+      - default
+
+  # Static landing page. Domain: sharp.davideghiotto.it (apex) -> port 80.
   landing:
     build:
       context: ..

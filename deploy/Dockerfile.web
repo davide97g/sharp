@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1
+#
+# sharp — standalone web SPA image (nginx), for a split deployment where the web
+# app and the API live on different origins (e.g. app.example.com + server.example.com).
+#
+# The API base URL is baked in at build time via VITE_API_URL, so the SPA talks
+# cross-origin to the API host. The server's CORS is permissive and auth is a
+# Bearer token in localStorage (no cookies), so cross-origin works out of the box.
+#
+# Build context MUST be the repo root:
+#   docker build -f deploy/Dockerfile.web --build-arg VITE_API_URL=https://server.example.com -t sharp-web .
+
+# ---------- build ----------
+FROM oven/bun:1-alpine AS build
+WORKDIR /web
+COPY web/package.json web/bun.lock* ./
+RUN bun install --frozen-lockfile || bun install
+COPY web/ ./
+# API/WS origin the SPA points at. Vite inlines this at build time.
+ARG VITE_API_URL
+ENV VITE_API_URL=${VITE_API_URL}
+RUN bun run build
+
+# ---------- runtime ----------
+FROM nginx:alpine
+COPY deploy/nginx.web.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /web/dist /usr/share/nginx/html
+EXPOSE 80

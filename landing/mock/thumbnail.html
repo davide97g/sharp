@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>sharp — thumbnail</title>
+<link rel="preconnect" href="https://rsms.me/" />
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
+<style>
+  :root{
+    --bg:#0e0e11; --bg-soft:#16161c; --panel:#1a1a22; --panel-2:#202029;
+    --border:#2a2a36; --text:#e9e9f0; --muted:#9a9aad; --faint:#6a6a7d;
+    --accent:#7c6cff; --accent-2:#a99cff; --accent-glow:rgba(124,108,255,.55);
+    --green:#3ddc84; --orange:#ff8a5c; --pink:#ff6ba6; --cyan:#4fd1e8; --yellow:#ffd76b;
+    --font:"Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:#08080b;font-family:var(--font);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+
+  /* fixed stage for a clean screenshot */
+  .stage{
+    width:1600px;height:1000px;position:relative;overflow:hidden;
+    background:
+      radial-gradient(ellipse 70% 55% at 50% -8%, rgba(124,108,255,.28), transparent 60%),
+      radial-gradient(ellipse 50% 40% at 88% 108%, rgba(79,209,232,.10), transparent 60%),
+      #0b0b0f;
+    display:flex;align-items:center;justify-content:center;
+  }
+  /* faint grid */
+  .stage::before{
+    content:"";position:absolute;inset:0;z-index:0;
+    background-image:
+      linear-gradient(to right, rgba(255,255,255,.028) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,.028) 1px, transparent 1px);
+    background-size:52px 52px;
+    -webkit-mask-image:radial-gradient(ellipse 85% 75% at 50% 30%, #000 35%, transparent 100%);
+            mask-image:radial-gradient(ellipse 85% 75% at 50% 30%, #000 35%, transparent 100%);
+  }
+
+  /* ===== App window ===== */
+  .app{
+    position:relative;z-index:1;
+    width:1456px;height:872px;
+    border:1px solid var(--border);border-radius:20px;overflow:hidden;
+    background:var(--bg-soft);
+    box-shadow:0 60px 160px -50px rgba(0,0,0,.95), 0 0 120px -30px var(--accent-glow),
+               inset 0 1px 0 rgba(255,255,255,.05);
+  }
+  .titlebar{
+    display:flex;align-items:center;gap:9px;height:48px;padding:0 20px;
+    background:var(--panel);border-bottom:1px solid var(--border);
+  }
+  .tl{width:13px;height:13px;border-radius:50%}
+  .tl.r{background:#ff5f57}.tl.y{background:#febc2e}.tl.g{background:#28c840}
+  .tb-title{margin-left:14px;font-size:13px;color:var(--faint);font-weight:500}
+  .tb-title b{color:var(--accent);font-weight:800}
+  .tb-right{margin-left:auto;display:flex;align-items:center;gap:16px;color:var(--faint);font-size:13px}
+  .tb-search{
+    display:flex;align-items:center;gap:8px;background:var(--bg-soft);
+    border:1px solid var(--border);border-radius:9px;padding:6px 12px;width:280px;color:var(--faint);font-size:13px;
+  }
+
+  .body{display:grid;grid-template-columns:250px 1fr 372px;height:calc(872px - 48px)}
+
+  /* ===== Sidebar ===== */
+  .side{background:#101016;border-right:1px solid var(--border);padding:18px 12px;display:flex;flex-direction:column}
+  .ws{display:flex;align-items:center;gap:11px;padding:6px 8px 16px;border-bottom:1px solid var(--border);margin-bottom:12px}
+  .ws-logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(160deg,var(--accent-2),var(--accent));
+    display:flex;align-items:center;justify-content:center;font-weight:900;font-size:20px;color:#0b0b10;box-shadow:0 0 22px -4px var(--accent-glow)}
+  .ws-name{font-weight:800;font-size:16px;letter-spacing:-.02em;color:var(--text)}
+  .ws-sub{font-size:11px;color:var(--faint)}
+  .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--faint);margin:16px 8px 7px;font-weight:600}
+  .it{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:8px;color:var(--muted);font-size:14.5px;margin-bottom:1px}
+  .it .h{color:var(--faint);font-weight:600}
+  .it.active{background:rgba(124,108,255,.15);color:var(--text)}
+  .it.active .h{color:var(--accent)}
+  .it .badge{margin-left:auto;font-size:11px;font-weight:800;background:var(--accent);color:#0b0b10;border-radius:999px;padding:1px 8px}
+  .it .pdot{margin-left:auto;width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+  .av-sm{width:22px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#0b0b10}
+  .me{margin-top:auto;display:flex;align-items:center;gap:10px;padding:10px 8px 2px;border-top:1px solid var(--border)}
+  .me .av{width:32px;height:32px;border-radius:9px;background:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:800;color:#0b0b10;font-size:13px}
+  .me .nm{font-size:13.5px;font-weight:700;color:var(--text)}
+  .me .st{font-size:11px;color:var(--green)}
+
+  /* ===== Main chat ===== */
+  .main{display:flex;flex-direction:column;min-width:0;background:var(--bg-soft)}
+  .chead{display:flex;align-items:center;padding:15px 24px;border-bottom:1px solid var(--border);gap:10px}
+  .chead .t{font-weight:800;font-size:17px}
+  .chead .topic{font-weight:400;font-size:13px;color:var(--faint)}
+  .chead .members{margin-left:auto;display:flex;align-items:center}
+  .chead .members .av{width:28px;height:28px;border-radius:8px;border:2px solid var(--bg-soft);margin-left:-8px;font-size:10px;font-weight:800;color:#0b0b10;display:flex;align-items:center;justify-content:center}
+  .chead .members .more{background:var(--panel-2);color:var(--muted);border:2px solid var(--bg-soft)}
+
+  .msgs{padding:18px 24px;display:flex;flex-direction:column;gap:20px;flex:1;overflow:hidden}
+  .day{display:flex;align-items:center;gap:14px;color:var(--faint);font-size:11.5px;font-weight:600}
+  .day::before,.day::after{content:"";height:1px;background:var(--border);flex:1}
+  .msg{display:flex;gap:13px}
+  .av{border-radius:11px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-weight:800;color:#0b0b10}
+  .av.lg{width:42px;height:42px;font-size:15px}
+  .mb{min-width:0}
+  .mh{display:flex;align-items:baseline;gap:9px}
+  .mh .name{font-weight:800;font-size:14.5px;color:var(--text)}
+  .mh .time{font-size:11px;color:var(--faint)}
+  .txt{font-size:14.5px;color:#d3d3e0;line-height:1.55;margin-top:2px}
+  .mention{color:var(--accent-2);background:rgba(124,108,255,.15);border-radius:5px;padding:0 5px;font-weight:600}
+  .docchip{display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:700;color:var(--accent-2);
+    background:rgba(124,108,255,.15);border:1px solid rgba(124,108,255,.34);border-radius:8px;padding:1px 9px}
+  .canvaschip{color:var(--cyan);background:rgba(79,209,232,.13);border:1px solid rgba(79,209,232,.32)}
+  .reacts{display:flex;gap:7px;margin-top:9px}
+  .react{font-size:12.5px;border:1px solid var(--border);background:var(--panel);border-radius:999px;padding:2px 10px;color:var(--muted)}
+  .react.on{border-color:var(--accent);background:rgba(124,108,255,.15);color:var(--accent-2);font-weight:700}
+  .tlink{margin-top:9px;display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--accent-2);font-weight:700}
+  .tlink .facepile{display:flex}
+  .tlink .facepile .av{width:20px;height:20px;border-radius:6px;font-size:9px;margin-left:-5px;border:2px solid var(--bg-soft)}
+
+  /* image attachment */
+  .attach{margin-top:10px;border:1px solid var(--border);border-radius:12px;overflow:hidden;width:340px;background:var(--panel)}
+  .attach .prev{height:120px;background:
+      radial-gradient(circle at 30% 30%, rgba(124,108,255,.5), transparent 45%),
+      radial-gradient(circle at 75% 65%, rgba(79,209,232,.45), transparent 45%),
+      linear-gradient(135deg,#20202b,#15151c)}
+  .attach .meta{padding:8px 12px;font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center}
+  .attach .meta b{color:var(--text);font-weight:700}
+
+  .composer{margin:0 24px 22px;border:1px solid var(--border);border-radius:14px;background:var(--panel);overflow:hidden}
+  .composer .tools{display:flex;align-items:center;gap:16px;padding:9px 14px;border-bottom:1px solid var(--border);color:var(--faint);font-size:15px}
+  .composer .tools .b{font-weight:800;color:var(--muted)}
+  .composer .field{padding:12px 14px;color:var(--muted);font-size:14px;display:flex;align-items:center}
+  .composer .send{margin-left:auto;background:linear-gradient(180deg,var(--accent-2),var(--accent));color:#0b0b10;font-weight:800;font-size:13px;border-radius:8px;padding:6px 14px}
+
+  /* autocomplete popover */
+  .pop{position:absolute;left:24px;bottom:96px;width:290px;background:var(--panel-2);border:1px solid var(--border);
+    border-radius:12px;box-shadow:0 24px 60px -20px rgba(0,0,0,.85);overflow:hidden;z-index:5}
+  .pop .ph{font-size:11px;color:var(--faint);padding:9px 12px 5px;text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+  .pop .row{display:flex;align-items:center;gap:10px;padding:8px 12px;font-size:13.5px;color:var(--muted)}
+  .pop .row.on{background:rgba(124,108,255,.16);color:var(--text)}
+  .pop .row .av{width:24px;height:24px;border-radius:7px;font-size:10px}
+  .pop .row .k{margin-left:auto;font-size:11px;color:var(--faint)}
+
+  /* ===== Right rail: live canvas ===== */
+  .rail{background:#101016;border-left:1px solid var(--border);display:flex;flex-direction:column}
+  .rail-head{padding:15px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:9px}
+  .rail-head .ic{width:26px;height:26px;border-radius:8px;background:rgba(79,209,232,.14);border:1px solid rgba(79,209,232,.32);
+    display:flex;align-items:center;justify-content:center;color:var(--cyan);font-weight:800;font-size:14px}
+  .rail-head .t{font-weight:800;font-size:14.5px}
+  .rail-head .live{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--green);font-weight:700}
+  .rail-head .live .d{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+
+  .canvas{position:relative;flex:1;overflow:hidden;
+    background:
+      radial-gradient(circle, rgba(255,255,255,.05) 1px, transparent 1px);
+    background-size:22px 22px;background-color:#0c0c11}
+  .note{position:absolute;border-radius:10px;padding:10px 12px;font-size:12px;font-weight:600;line-height:1.35;
+    box-shadow:0 10px 26px -10px rgba(0,0,0,.7);color:#1a1a10}
+  .note small{display:block;font-weight:800;font-size:10px;opacity:.6;margin-bottom:3px;text-transform:uppercase;letter-spacing:.05em}
+  .shape{position:absolute;border:2px solid;border-radius:12px}
+  .conn{position:absolute;height:2px;transform-origin:left center;background:var(--faint);opacity:.5}
+  .conn::after{content:"";position:absolute;right:-1px;top:-3px;border-left:7px solid var(--faint);border-top:4px solid transparent;border-bottom:4px solid transparent}
+
+  /* remote cursors */
+  .cursor{position:absolute;z-index:6;pointer-events:none}
+  .cursor svg{display:block;filter:drop-shadow(0 2px 3px rgba(0,0,0,.5))}
+  .cursor .tag{margin-left:14px;margin-top:-4px;font-size:11px;font-weight:800;color:#0b0b10;border-radius:6px;padding:2px 7px;display:inline-block}
+
+  .rail-foot{padding:12px 16px;border-top:1px solid var(--border);display:flex;align-items:center;gap:9px;font-size:12px;color:var(--faint)}
+  .rail-foot .pile{display:flex}
+  .rail-foot .pile .av{width:24px;height:24px;border-radius:7px;font-size:10px;margin-left:-6px;border:2px solid #101016}
+
+  /* toast notification */
+  .toast{position:absolute;right:404px;top:72px;z-index:8;width:330px;height:auto;background:var(--panel-2);
+    border:1px solid rgba(124,108,255,.4);border-radius:14px;padding:14px;display:flex;align-items:flex-start;gap:12px;
+    box-shadow:0 26px 60px -18px rgba(0,0,0,.85), 0 0 40px -14px var(--accent-glow)}
+  .toast>div{min-width:0;flex:1}
+  .toast .av{width:38px;height:38px;border-radius:10px;font-size:14px;flex:0 0 38px}
+  .toast .tt{font-size:12px;color:var(--faint);margin-bottom:2px;font-weight:700;display:flex;align-items:center;gap:6px}
+  .toast .tt .src{color:var(--accent-2)}
+  .toast .msg-line{font-size:13px;color:var(--text);line-height:1.4}
+  .toast .msg-line b{color:var(--accent-2)}
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="app">
+    <!-- title bar -->
+    <div class="titlebar">
+      <span class="tl r"></span><span class="tl y"></span><span class="tl g"></span>
+      <span class="tb-title"><b>#</b> sharp — Acme Inc</span>
+      <div class="tb-search">⌕ Search messages, docs &amp; files…</div>
+      <div class="tb-right">
+        <span>◔ 3</span>
+        <span>⚙</span>
+      </div>
+    </div>
+
+    <div class="body">
+      <!-- ===== sidebar ===== -->
+      <aside class="side">
+        <div class="ws">
+          <div class="ws-logo">#</div>
+          <div>
+            <div class="ws-name">Acme Inc</div>
+            <div class="ws-sub">12 members online</div>
+          </div>
+        </div>
+
+        <div class="lbl">Channels</div>
+        <div class="it active"><span class="h">#</span> general</div>
+        <div class="it"><span class="h">#</span> engineering <span class="badge">3</span></div>
+        <div class="it"><span class="h">#</span> design</div>
+        <div class="it"><span class="h">#</span> random</div>
+
+        <div class="lbl">Pages</div>
+        <div class="it"><span class="h">¶</span> Launch plan</div>
+        <div class="it"><span class="h">◈</span> Architecture canvas</div>
+        <div class="it"><span class="h">¶</span> Q3 roadmap</div>
+
+        <div class="lbl">Direct messages</div>
+        <div class="it"><span class="av-sm" style="background:var(--green)">PS</span> Priya Shah <span class="pdot"></span></div>
+        <div class="it"><span class="av-sm" style="background:var(--orange)">MK</span> Mika K <span class="pdot"></span></div>
+
+        <div class="me">
+          <div class="av">DG</div>
+          <div>
+            <div class="nm">Davide G.</div>
+            <div class="st">● Active</div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- ===== main chat ===== -->
+      <main class="main">
+        <div class="chead">
+          <span class="t"># general</span>
+          <span class="topic">— company-wide announcements &amp; watercooler</span>
+          <div class="members">
+            <div class="av" style="background:var(--accent)">JL</div>
+            <div class="av" style="background:var(--green)">PS</div>
+            <div class="av" style="background:var(--orange)">MK</div>
+            <div class="av more">+9</div>
+          </div>
+        </div>
+
+        <div class="msgs">
+          <div class="day">Today</div>
+
+          <div class="msg">
+            <div class="av lg" style="background:var(--accent)">JL</div>
+            <div class="mb">
+              <div class="mh"><span class="name">Jordan Lee</span><span class="time">9:41 AM</span></div>
+              <div class="txt">morning team — shipping the v1 release today. self-hosted, one container, zero drama. 🚀</div>
+              <div class="reacts"><span class="react on">🚀 5</span><span class="react">🎉 3</span><span class="react">❤️ 2</span></div>
+            </div>
+          </div>
+
+          <div class="msg">
+            <div class="av lg" style="background:var(--green)">PS</div>
+            <div class="mb">
+              <div class="mh"><span class="name">Priya Shah</span><span class="time">9:43 AM</span></div>
+              <div class="txt">moved our whole workspace over the weekend — Postgres backup was painless. wrote the steps in <span class="docchip">¶ Launch plan</span></div>
+              <div class="tlink">
+                <span class="facepile">
+                  <span class="av" style="background:var(--accent)">JL</span>
+                  <span class="av" style="background:var(--orange)">MK</span>
+                </span>
+                ↳ 4 replies · last today at 9:58 AM
+              </div>
+            </div>
+          </div>
+
+          <div class="msg">
+            <div class="av lg" style="background:var(--orange)">MK</div>
+            <div class="mb">
+              <div class="mh"><span class="name">Mika K</span><span class="time">9:52 AM</span></div>
+              <div class="txt">sketching the fanout on the <span class="docchip canvaschip">◈ Architecture canvas</span> right now — jump in <span class="mention">@davide</span></div>
+              <div class="attach">
+                <div class="prev"></div>
+                <div class="meta">🖼 <b>ws-fanout.png</b> · 248 KB · full-text indexed</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- autocomplete popover over composer -->
+        <div class="pop">
+          <div class="ph">People</div>
+          <div class="row on"><span class="av" style="background:var(--accent)">DG</span> Davide Ghiotto <span class="k">@davide</span></div>
+          <div class="row"><span class="av" style="background:var(--green)">PS</span> Priya Shah <span class="k">@priya</span></div>
+          <div class="ph">Resources</div>
+          <div class="row"><span class="docchip" style="padding:0 6px">¶</span> Launch plan <span class="k">#doc</span></div>
+        </div>
+
+        <div class="composer">
+          <div class="tools"><span class="b">B</span><span style="font-style:italic">I</span><span>{ }</span><span>🔗</span><span>@</span><span>#</span><span>🙂</span><span>📎</span></div>
+          <div class="field">Message #general — <span style="color:var(--accent-2);font-weight:600;margin-left:4px">@dav</span>
+            <span class="send">Send ↵</span>
+          </div>
+        </div>
+      </main>
+
+      <!-- ===== right rail: live canvas ===== -->
+      <aside class="rail">
+        <div class="rail-head">
+          <div class="ic">◈</div>
+          <div class="t">Architecture canvas</div>
+          <div class="live"><span class="d"></span> Live</div>
+        </div>
+
+        <div class="canvas">
+          <!-- connectors -->
+          <div class="conn" style="left:64px;top:112px;width:120px;transform:rotate(24deg)"></div>
+          <div class="conn" style="left:70px;top:120px;width:150px;transform:rotate(88deg)"></div>
+          <div class="conn" style="left:196px;top:238px;width:96px;transform:rotate(-28deg)"></div>
+
+          <!-- shapes -->
+          <div class="shape" style="left:40px;top:64px;width:130px;height:64px;border-color:var(--accent);background:rgba(124,108,255,.1)"></div>
+          <div class="note" style="left:52px;top:78px;background:transparent;color:var(--accent-2);box-shadow:none;font-weight:800">axum server<br><small style="color:var(--faint)">single binary</small></div>
+
+          <div class="note" style="left:200px;top:70px;width:118px;background:var(--yellow)">
+            <small>API</small>REST + WS<br>/api/v1
+          </div>
+
+          <div class="shape" style="left:44px;top:236px;width:120px;height:60px;border-color:var(--cyan);background:rgba(79,209,232,.1)"></div>
+          <div class="note" style="left:54px;top:250px;background:transparent;color:var(--cyan);box-shadow:none;font-weight:800">Postgres<br><small style="color:var(--faint)">+ sqlx</small></div>
+
+          <div class="note" style="left:196px;top:250px;width:126px;background:var(--pink)">
+            <small>Realtime</small>Redis pub/sub<br>sharp:events
+          </div>
+
+          <div class="note" style="left:112px;top:392px;width:150px;background:var(--green)">
+            <small>Clients</small>Web · Desktop · Tauri
+          </div>
+
+          <!-- remote cursors -->
+          <div class="cursor" style="left:232px;top:150px">
+            <svg width="20" height="20" viewBox="0 0 24 24"><path d="M4 2l16 7-7 2-2 7z" fill="#ff8a5c"/></svg>
+            <span class="tag" style="background:var(--orange)">Mika</span>
+          </div>
+          <div class="cursor" style="left:120px;top:320px">
+            <svg width="20" height="20" viewBox="0 0 24 24"><path d="M4 2l16 7-7 2-2 7z" fill="#3ddc84"/></svg>
+            <span class="tag" style="background:var(--green)">Priya</span>
+          </div>
+        </div>
+
+        <div class="rail-foot">
+          <div class="pile">
+            <span class="av" style="background:var(--orange)">MK</span>
+            <span class="av" style="background:var(--green)">PS</span>
+            <span class="av" style="background:var(--accent)">JL</span>
+          </div>
+          3 editing now · saved just now
+        </div>
+      </aside>
+    </div>
+
+    <!-- notification toast -->
+    <div class="toast">
+      <div class="av" style="background:var(--orange)">MK</div>
+      <div>
+        <div class="tt">Mika K · <span class="src">◈ mentioned you on canvas</span></div>
+        <div class="msg-line">jump in <b>@davide</b> — sketching the fanout on the Architecture canvas</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
