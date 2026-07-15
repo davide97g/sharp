@@ -71,6 +71,8 @@ type VoiceState = {
   muted: boolean
   speaking: Record<string, boolean>
   cameraStatus: 'off' | 'starting' | 'on'
+  audioDeviceId: string | null
+  videoDeviceId: string | null
   localStream: MediaStream | null
   remoteStreams: Record<string, MediaStream>
   client: VoiceClient | null
@@ -214,6 +216,8 @@ type State = {
   leaveVoice: () => void
   toggleVoiceMute: () => void
   toggleVoiceCamera: () => void
+  setVoiceAudioDevice: (deviceId: string) => Promise<void>
+  setVoiceVideoDevice: (deviceId: string) => Promise<void>
 
   // docs actions
   loadChannelDocs: (channelId: string) => Promise<void>
@@ -264,6 +268,8 @@ function emptyVoiceState(): VoiceState {
     muted: false,
     speaking: {},
     cameraStatus: 'off',
+    audioDeviceId: null,
+    videoDeviceId: null,
     localStream: null,
     remoteStreams: {},
     client: null,
@@ -736,6 +742,8 @@ export const useStore = create<State>((set, get) => ({
         muted: false,
         speaking: {},
         cameraStatus: 'off',
+        audioDeviceId: null,
+        videoDeviceId: null,
         localStream: null,
         remoteStreams: {},
         client: null,
@@ -773,12 +781,14 @@ export const useStore = create<State>((set, get) => ({
         },
         onLocalStream: (stream) => {
           set((s) => {
-            if (s.voice.client !== client) return {}
+            const activeClient = s.voice.client
+            if (!activeClient || activeClient !== client) return {}
             return {
               voice: {
                 ...s.voice,
                 localStream: stream,
                 cameraStatus: stream ? 'on' : 'off',
+                videoDeviceId: activeClient.getVideoDeviceId() ?? s.voice.videoDeviceId,
               },
             }
           })
@@ -797,10 +807,17 @@ export const useStore = create<State>((set, get) => ({
 
       await client.start()
       const active = get().voice
-      if (active.channelId !== channelId || active.client !== client) {
+      const startedClient = active.client
+      if (active.channelId !== channelId || !startedClient || startedClient !== client) {
         client.stop()
         return
       }
+      set((s) => ({
+        voice: {
+          ...s.voice,
+          audioDeviceId: startedClient.getAudioDeviceId(),
+        },
+      }))
       get().ws?.send('voice.join', { channel_id: channelId })
     } catch (e) {
       client?.stop()
@@ -843,6 +860,36 @@ export const useStore = create<State>((set, get) => ({
     }
     set((s) => ({ voice: { ...s.voice, cameraStatus: 'starting' } }))
     get().ws?.send('voice.camera', { channel_id: channelId, enabled: true })
+  },
+
+  async setVoiceAudioDevice(deviceId) {
+    const { channelId, client } = get().voice
+    if (!channelId || !client) return
+    try {
+      await client.setAudioInput(deviceId)
+      if (get().voice.client !== client) return
+      set((s) => ({
+        voice: { ...s.voice, audioDeviceId: client.getAudioDeviceId() },
+      }))
+    } catch (e) {
+      if (e instanceof Error) toastError(e.message)
+      else toastError('Could not switch microphone.')
+    }
+  },
+
+  async setVoiceVideoDevice(deviceId) {
+    const { channelId, client } = get().voice
+    if (!channelId || !client) return
+    try {
+      await client.setVideoInput(deviceId)
+      if (get().voice.client !== client) return
+      set((s) => ({
+        voice: { ...s.voice, videoDeviceId: client.getVideoDeviceId() },
+      }))
+    } catch (e) {
+      if (e instanceof Error) toastError(e.message)
+      else toastError('Could not switch camera.')
+    }
   },
 
   totalUnread() {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../../store'
 import { channelLabel } from '../../lib/util'
 import { Avatar } from '../Avatar'
@@ -11,12 +11,19 @@ type StageParticipant = {
   cameraConnId: string | null
 }
 
+type MediaDeviceOption = {
+  deviceId: string
+  label: string
+}
+
 export function VideoStage() {
   const channelId = useStore((s) => s.voice.channelId)
   const room = useStore((s) => (channelId ? s.voiceRooms[channelId] : undefined))
   const speaking = useStore((s) => s.voice.speaking)
   const muted = useStore((s) => s.voice.muted)
   const cameraStatus = useStore((s) => s.voice.cameraStatus)
+  const audioDeviceId = useStore((s) => s.voice.audioDeviceId)
+  const videoDeviceId = useStore((s) => s.voice.videoDeviceId)
   const localStream = useStore((s) => s.voice.localStream)
   const remoteStreams = useStore((s) => s.voice.remoteStreams)
   const myConnId = useStore((s) => s.myConnId)
@@ -25,7 +32,50 @@ export function VideoStage() {
   const channel = useStore((s) => s.channels.find((candidate) => candidate.id === channelId))
   const toggleVoiceMute = useStore((s) => s.toggleVoiceMute)
   const toggleVoiceCamera = useStore((s) => s.toggleVoiceCamera)
+  const setVoiceAudioDevice = useStore((s) => s.setVoiceAudioDevice)
+  const setVoiceVideoDevice = useStore((s) => s.setVoiceVideoDevice)
   const leaveVoice = useStore((s) => s.leaveVoice)
+  const [mics, setMics] = useState<MediaDeviceOption[]>([])
+  const [cameras, setCameras] = useState<MediaDeviceOption[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function refreshDevices() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices()
+        if (cancelled) return
+        setMics(
+          devices
+            .filter((device) => device.kind === 'audioinput')
+            .map((device, index) => ({
+              deviceId: device.deviceId,
+              label: device.label || `Microphone ${index + 1}`,
+            })),
+        )
+        setCameras(
+          devices
+            .filter((device) => device.kind === 'videoinput')
+            .map((device, index) => ({
+              deviceId: device.deviceId,
+              label: device.label || `Camera ${index + 1}`,
+            })),
+        )
+      } catch {
+        if (!cancelled) {
+          setMics([])
+          setCameras([])
+        }
+      }
+    }
+
+    void refreshDevices()
+    navigator.mediaDevices.addEventListener('devicechange', refreshDevices)
+    return () => {
+      cancelled = true
+      navigator.mediaDevices.removeEventListener('devicechange', refreshDevices)
+    }
+  }, [])
 
   const participants = useMemo(() => {
     const byUser = new Map<string, StageParticipant>()
@@ -72,21 +122,29 @@ export function VideoStage() {
           </div>
         </div>
         <div className="flex items-center gap-1.5">
-          <CallControl
+          <DeviceControl
             label={muted ? 'Unmute microphone' : 'Mute microphone'}
+            menuLabel="Choose microphone"
             active={muted}
             onClick={toggleVoiceMute}
+            devices={mics}
+            selectedDeviceId={audioDeviceId}
+            onSelectDevice={(deviceId) => void setVoiceAudioDevice(deviceId)}
           >
             <MicIcon off={muted} />
-          </CallControl>
-          <CallControl
+          </DeviceControl>
+          <DeviceControl
             label={cameraStatus === 'on' ? 'Turn camera off' : 'Turn camera on'}
+            menuLabel="Choose camera"
             active={cameraStatus !== 'off'}
             disabled={cameraStatus === 'starting'}
             onClick={toggleVoiceCamera}
+            devices={cameras}
+            selectedDeviceId={videoDeviceId}
+            onSelectDevice={(deviceId) => void setVoiceVideoDevice(deviceId)}
           >
             <CameraIcon off={cameraStatus === 'off'} />
-          </CallControl>
+          </DeviceControl>
           <CallControl label="Leave call" danger onClick={leaveVoice}>
             <LeaveIcon />
           </CallControl>
@@ -276,6 +334,149 @@ function CallControl({
     >
       {children}
     </button>
+  )
+}
+
+function DeviceControl({
+  label,
+  menuLabel,
+  active = false,
+  disabled = false,
+  onClick,
+  devices,
+  selectedDeviceId,
+  onSelectDevice,
+  children,
+}: {
+  label: string
+  menuLabel: string
+  active?: boolean
+  disabled?: boolean
+  onClick: () => void
+  devices: MediaDeviceOption[]
+  selectedDeviceId: string | null
+  onSelectDevice: (deviceId: string) => void
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const hasDevices = devices.length > 0
+
+  useEffect(() => {
+    if (!open) return
+    function onPointerDown(event: MouseEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', onPointerDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const shellClass = active
+    ? 'bg-[var(--color-accent)] text-white'
+    : 'bg-[var(--color-panel-2)] text-[var(--color-text)]'
+
+  return (
+    <div ref={rootRef} className="relative flex">
+      <div className={`flex overflow-hidden rounded-full ${shellClass}`}>
+        <button
+          type="button"
+          aria-label={label}
+          title={label}
+          aria-pressed={active}
+          disabled={disabled}
+          onClick={onClick}
+          className="flex h-9 w-9 items-center justify-center outline-none hover:bg-black/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {children}
+        </button>
+        <button
+          type="button"
+          aria-label={menuLabel}
+          title={menuLabel}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          disabled={disabled || !hasDevices}
+          onClick={() => setOpen((value) => !value)}
+          className="flex h-9 w-6 items-center justify-center border-l border-black/15 outline-none hover:bg-black/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <CaretIcon />
+        </button>
+      </div>
+      {open && hasDevices && (
+        <div
+          role="menu"
+          aria-label={menuLabel}
+          className="absolute right-0 top-full z-40 mt-1 max-h-56 min-w-52 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1 shadow-2xl"
+        >
+          {devices.map((device) => {
+            const selected = device.deviceId === selectedDeviceId
+            return (
+              <button
+                key={device.deviceId}
+                type="button"
+                role="menuitemradio"
+                aria-checked={selected}
+                onClick={() => {
+                  setOpen(false)
+                  onSelectDevice(device.deviceId)
+                }}
+                className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm outline-none hover:bg-[var(--color-panel-2)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+                  selected
+                    ? 'text-[var(--color-accent-hover)]'
+                    : 'text-[var(--color-text)]'
+                }`}
+              >
+                <span className="min-w-0 flex-1 truncate">{device.label}</span>
+                {selected && <CheckIcon />}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CaretIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  )
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="m5 12 5 5L20 7" />
+    </svg>
   )
 }
 

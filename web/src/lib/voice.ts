@@ -48,6 +48,8 @@ export class VoiceClient {
 
   private localStream: MediaStream | null = null
   private cameraTrack: MediaStreamTrack | null = null
+  private audioDeviceId: string | null = null
+  private videoDeviceId: string | null = null
   private peers = new Map<string, Peer>()
   private audioContext: AudioContext | null = null
   private speakingDetectors = new Map<string, SpeakingDetector>()
@@ -65,25 +67,93 @@ export class VoiceClient {
     this.onRemoteStream = opts.onRemoteStream
   }
 
-  async start() {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+  async start(audioDeviceId?: string | null) {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: audioConstraints(audioDeviceId),
+    })
     if (this.stopped) {
       for (const track of stream.getTracks()) track.stop()
       return
     }
     this.localStream = stream
+    this.audioDeviceId = trackDeviceId(stream.getAudioTracks()[0]) ?? audioDeviceId ?? null
     this.startSpeakingDetection(this.myConnId, stream)
+  }
+
+  getAudioDeviceId(): string | null {
+    return this.audioDeviceId ?? trackDeviceId(this.localStream?.getAudioTracks()[0])
+  }
+
+  getVideoDeviceId(): string | null {
+    return this.videoDeviceId ?? trackDeviceId(this.cameraTrack)
+  }
+
+  async setAudioInput(deviceId: string) {
+    if (this.stopped || !this.localStream) return
+    if (deviceId === this.getAudioDeviceId()) return
+
+    const nextStream = await navigator.mediaDevices.getUserMedia({
+      audio: audioConstraints(deviceId),
+    })
+    const nextTrack = nextStream.getAudioTracks()[0]
+    if (!nextTrack) {
+      for (const track of nextStream.getTracks()) track.stop()
+      throw new Error('No microphone was found.')
+    }
+    if (this.stopped || !this.localStream) {
+      nextTrack.stop()
+      return
+    }
+
+    const previous = this.localStream.getAudioTracks()[0]
+    nextTrack.enabled = previous?.enabled ?? true
+    if (previous) {
+      this.localStream.removeTrack(previous)
+      previous.stop()
+    }
+    this.localStream.addTrack(nextTrack)
+    this.audioDeviceId = trackDeviceId(nextTrack) ?? deviceId
+    await this.replaceSenderTrack('audio', nextTrack)
+    this.stopSpeakingDetection(this.myConnId)
+    this.startSpeakingDetection(this.myConnId, this.localStream)
+  }
+
+  async setVideoInput(deviceId: string) {
+    if (this.stopped) return
+    this.videoDeviceId = deviceId
+    if (!this.cameraTrack || !this.localStream) return
+    if (deviceId === trackDeviceId(this.cameraTrack)) return
+
+    const cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: videoConstraints(deviceId),
+    })
+    const nextTrack = cameraStream.getVideoTracks()[0]
+    if (!nextTrack) {
+      for (const track of cameraStream.getTracks()) track.stop()
+      throw new Error('No camera was found.')
+    }
+    if (this.stopped || !this.localStream || !this.cameraTrack) {
+      nextTrack.stop()
+      return
+    }
+
+    const previous = this.cameraTrack
+    previous.removeEventListener('ended', this.handleCameraEnded)
+    this.localStream.removeTrack(previous)
+    previous.stop()
+
+    this.cameraTrack = nextTrack
+    this.videoDeviceId = trackDeviceId(nextTrack) ?? deviceId
+    this.localStream.addTrack(nextTrack)
+    nextTrack.addEventListener('ended', this.handleCameraEnded, { once: true })
+    await this.replaceSenderTrack('video', nextTrack)
+    this.onLocalStream?.(this.localStream)
   }
 
   async startCamera() {
     if (this.stopped || !this.localStream || this.cameraTrack) return
     const cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: 'user',
-        width: { ideal: 640 },
-        height: { ideal: 360 },
-        frameRate: { ideal: 20, max: 24 },
-      },
+      video: videoConstraints(this.videoDeviceId),
     })
     const track = cameraStream.getVideoTracks()[0]
     if (!track) {
@@ -96,6 +166,7 @@ export class VoiceClient {
     }
 
     this.cameraTrack = track
+    this.videoDeviceId = trackDeviceId(track) ?? this.videoDeviceId
     this.localStream.addTrack(track)
     track.addEventListener('ended', this.handleCameraEnded, { once: true })
     for (const peer of this.peers.values()) {
@@ -117,6 +188,23 @@ export class VoiceClient {
     }
     track.stop()
     this.onLocalStream?.(null)
+  }
+
+  private async replaceSenderTrack(kind: 'audio' | 'video', track: MediaStreamTrack) {
+    await Promise.all(
+      [...this.peers.values()].map(async (peer) => {
+        const sender = peer.pc.getSenders().find((candidate) => candidate.track?.kind === kind)
+        if (sender) {
+          await sender.replaceTrack(track)
+          if (kind === 'video') void configureVideoSender(sender)
+          return
+        }
+        if (this.localStream) {
+          const added = peer.pc.addTrack(track, this.localStream)
+          if (kind === 'video') void configureVideoSender(added)
+        }
+      }),
+    )
   }
 
   syncPeers(participants: VoiceParticipant[]) {
@@ -420,4 +508,24 @@ async function configureVideoSender(sender: RTCRtpSender) {
   } catch (error) {
     console.warn('Could not apply camera bitrate limit', error)
   }
+}
+
+function trackDeviceId(track?: MediaStreamTrack | null): string | null {
+  const id = track?.getSettings().deviceId
+  return id || null
+}
+
+function audioConstraints(deviceId?: string | null): MediaTrackConstraints | true {
+  if (!deviceId) return true
+  return { deviceId: { exact: deviceId } }
+}
+
+function videoConstraints(deviceId?: string | null): MediaTrackConstraints {
+  const base: MediaTrackConstraints = {
+    width: { ideal: 640 },
+    height: { ideal: 360 },
+    frameRate: { ideal: 20, max: 24 },
+  }
+  if (deviceId) return { ...base, deviceId: { exact: deviceId } }
+  return { ...base, facingMode: 'user' }
 }
