@@ -25,7 +25,6 @@ export function VideoStage() {
   const channel = useStore((s) => s.channels.find((candidate) => candidate.id === channelId))
   const toggleVoiceMute = useStore((s) => s.toggleVoiceMute)
   const toggleVoiceCamera = useStore((s) => s.toggleVoiceCamera)
-  const setVoiceExpanded = useStore((s) => s.setVoiceExpanded)
   const leaveVoice = useStore((s) => s.leaveVoice)
 
   const participants = useMemo(() => {
@@ -58,73 +57,130 @@ export function VideoStage() {
       ? channel.dm_user?.display_name ?? channelLabel(channel)
       : `# ${channel.name}`
     : 'Call'
+  const anyCamera = participants.some((p) => p.cameraConnId)
 
   return (
-    <main className="flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]" aria-label={`${roomName} video call`}>
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border)] px-4">
+    <section
+      className="flex max-h-[45%] min-h-0 shrink-0 flex-col border-b border-[var(--color-border)] bg-[var(--color-ink)]"
+      aria-label={`${roomName} huddle`}
+    >
+      <header className="flex h-11 shrink-0 items-center gap-3 px-4">
         <div className="min-w-0 flex-1">
-          <div className="truncate font-semibold">{roomName}</div>
-          <div className="text-xs text-[var(--color-text-faint)]">
+          <div className="truncate text-sm font-semibold">{roomName}</div>
+          <div className="text-[11px] text-[var(--color-text-faint)]">
             {participants.length} {participants.length === 1 ? 'participant' : 'participants'}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setVoiceExpanded(false)}
-          className="rounded-lg bg-[var(--color-panel)] px-3 py-1.5 text-sm text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
-        >
-          Collapse
-        </button>
+        <div className="flex items-center gap-1.5">
+          <CallControl
+            label={muted ? 'Unmute microphone' : 'Mute microphone'}
+            active={muted}
+            onClick={toggleVoiceMute}
+          >
+            <MicIcon off={muted} />
+          </CallControl>
+          <CallControl
+            label={cameraStatus === 'on' ? 'Turn camera off' : 'Turn camera on'}
+            active={cameraStatus !== 'off'}
+            disabled={cameraStatus === 'starting'}
+            onClick={toggleVoiceCamera}
+          >
+            <CameraIcon off={cameraStatus === 'off'} />
+          </CallControl>
+          <CallControl label="Leave call" danger onClick={leaveVoice}>
+            <LeaveIcon />
+          </CallControl>
+        </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        <div className="mx-auto grid h-full max-w-6xl auto-rows-fr grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {participants.map((participant) => {
-            const local = participant.cameraConnId === myConnId
-            const stream = local
-              ? localStream
-              : participant.cameraConnId
-                ? remoteStreams[participant.cameraConnId]
-                : null
-            const name =
-              users[participant.userId]?.display_name ??
-              (me?.id === participant.userId ? me.display_name : 'Participant')
-            return (
-              <VideoTile
-                key={participant.userId}
-                userId={participant.userId}
-                name={name}
-                stream={stream}
-                local={local}
-                muted={participant.muted}
-                speaking={participant.speaking}
-              />
-            )
-          })}
-        </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-1">
+        {anyCamera ? (
+          <div className="mx-auto grid h-full max-w-5xl auto-rows-fr grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {participants.map((participant) => {
+              const local = participant.cameraConnId === myConnId
+              const stream = local
+                ? localStream
+                : participant.cameraConnId
+                  ? remoteStreams[participant.cameraConnId]
+                  : null
+              const name =
+                users[participant.userId]?.display_name ??
+                (me?.id === participant.userId ? me.display_name : 'Participant')
+              return (
+                <VideoTile
+                  key={participant.userId}
+                  userId={participant.userId}
+                  name={name}
+                  stream={stream}
+                  local={local}
+                  muted={participant.muted}
+                  speaking={participant.speaking}
+                />
+              )
+            })}
+          </div>
+        ) : (
+          <ul
+            aria-label={`${participants.length} participants`}
+            className="flex min-h-28 flex-wrap items-center justify-center gap-6 py-2"
+          >
+            {participants.map((participant) => {
+              const name =
+                users[participant.userId]?.display_name ??
+                (me?.id === participant.userId ? me.display_name : 'Participant')
+              return (
+                <AudioTile
+                  key={participant.userId}
+                  userId={participant.userId}
+                  name={name}
+                  local={me?.id === participant.userId}
+                  muted={participant.muted}
+                  speaking={participant.speaking}
+                />
+              )
+            })}
+          </ul>
+        )}
       </div>
+    </section>
+  )
+}
 
-      <footer className="flex shrink-0 items-center justify-center gap-2 border-t border-[var(--color-border)] bg-[var(--color-ink)] px-4 py-3">
-        <CallControl
-          label={muted ? 'Unmute microphone' : 'Mute microphone'}
-          active={muted}
-          onClick={toggleVoiceMute}
-        >
-          <MicIcon off={muted} />
-        </CallControl>
-        <CallControl
-          label={cameraStatus === 'on' ? 'Turn camera off' : 'Turn camera on'}
-          active={cameraStatus !== 'off'}
-          disabled={cameraStatus === 'starting'}
-          onClick={toggleVoiceCamera}
-        >
-          <CameraIcon off={cameraStatus === 'off'} />
-        </CallControl>
-        <CallControl label="Leave call" danger onClick={leaveVoice}>
-          <LeaveIcon />
-        </CallControl>
-      </footer>
-    </main>
+function AudioTile({
+  userId,
+  name,
+  local,
+  muted,
+  speaking,
+}: {
+  userId: string
+  name: string
+  local: boolean
+  muted: boolean
+  speaking: boolean
+}) {
+  return (
+    <li className="flex w-24 flex-col items-center gap-2 text-center">
+      <div
+        className={`relative rounded-full ${
+          speaking ? 'ring-2 ring-[#4fbf9f] ring-offset-2 ring-offset-[var(--color-ink)]' : ''
+        }`}
+      >
+        <Avatar id={userId} name={name} size={72} />
+        {muted && (
+          <span
+            className="absolute -bottom-0.5 -right-0.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-[var(--color-ink)] bg-[var(--color-panel-2)] text-[var(--color-text-dim)]"
+            title="Muted"
+          >
+            <MicIcon off />
+          </span>
+        )}
+      </div>
+      <span className="w-full truncate text-xs font-medium text-[var(--color-text)]">
+        {name}
+        {local ? ' (you)' : ''}
+      </span>
+    </li>
   )
 }
 
@@ -155,7 +211,7 @@ function VideoTile({
 
   return (
     <article
-      className={`relative flex min-h-48 overflow-hidden rounded-2xl border bg-[var(--color-panel)] ${
+      className={`relative flex min-h-36 overflow-hidden rounded-2xl border bg-[var(--color-panel)] ${
         speaking ? 'border-[#4fbf9f] ring-2 ring-[#4fbf9f]/30' : 'border-[var(--color-border)]'
       }`}
     >
@@ -165,16 +221,23 @@ function VideoTile({
           autoPlay
           playsInline
           muted
-          className={`h-full min-h-48 w-full object-cover ${local ? '-scale-x-100' : ''}`}
+          className={`h-full min-h-36 w-full object-cover ${local ? '-scale-x-100' : ''}`}
         />
       ) : (
-        <div className="flex min-h-48 w-full items-center justify-center bg-[radial-gradient(circle_at_top,var(--color-panel-2),var(--color-panel))]">
-          <Avatar id={userId} name={name} size={72} />
+        <div className="flex min-h-36 w-full items-center justify-center bg-[radial-gradient(circle_at_top,var(--color-panel-2),var(--color-panel))]">
+          <Avatar id={userId} name={name} size={64} />
         </div>
       )}
       <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/75 to-transparent px-3 pb-3 pt-8 text-sm font-medium text-white">
-        <span className="truncate">{name}{local ? ' (you)' : ''}</span>
-        {muted && <span className="ml-auto rounded-full bg-black/45 p-1" title="Muted"><MicIcon off /></span>}
+        <span className="truncate">
+          {name}
+          {local ? ' (you)' : ''}
+        </span>
+        {muted && (
+          <span className="ml-auto rounded-full bg-black/45 p-1" title="Muted">
+            <MicIcon off />
+          </span>
+        )}
       </div>
     </article>
   )
@@ -203,7 +266,7 @@ function CallControl({
       aria-pressed={active}
       disabled={disabled}
       onClick={onClick}
-      className={`flex h-11 w-11 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50 ${
+      className={`flex h-9 w-9 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50 ${
         danger
           ? 'bg-red-500/20 text-red-300 hover:bg-red-500/30'
           : active
@@ -218,7 +281,17 @@ function CallControl({
 
 function MicIcon({ off }: { off: boolean }) {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
       <rect x="9" y="2" width="6" height="12" rx="3" />
       <path d="M5 10a7 7 0 0 0 14 0" />
       <path d="M12 17v5" />
@@ -229,7 +302,17 @@ function MicIcon({ off }: { off: boolean }) {
 
 function CameraIcon({ off }: { off: boolean }) {
   return (
-    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg
+      width="17"
+      height="17"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
       <path d="m16 13 5 3V8l-5 3" />
       <rect x="3" y="6" width="13" height="12" rx="2" />
       {off && <path d="m3 3 18 18" />}
@@ -239,7 +322,17 @@ function CameraIcon({ off }: { off: boolean }) {
 
 function LeaveIcon() {
   return (
-    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg
+      width="17"
+      height="17"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
       <path d="M10 17 5 12l5-5" />
       <path d="M5 12h12" />
       <path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4" />

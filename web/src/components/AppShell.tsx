@@ -6,7 +6,6 @@ import { CanvasSidebar } from './canvas/CanvasSidebar'
 import { CompactSidebar } from './CompactSidebar'
 import { ThreadPanel } from './ThreadPanel'
 import { QuickSwitcher } from './QuickSwitcher'
-import { VoiceBar } from './voice/VoiceBar'
 import { VideoStage } from './voice/VideoStage'
 import { useStore } from '../store'
 
@@ -23,7 +22,7 @@ function isEditableTarget(target: EventTarget | null) {
 export function AppShell() {
   const setQuickSwitcher = useStore((s) => s.setQuickSwitcher)
   const channels = useStore((s) => s.channels)
-  const voiceExpanded = useStore((s) => s.voice.expanded)
+  const inVoice = useStore((s) => s.voice.channelId !== null)
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(
     () => window.localStorage.getItem(SIDEBAR_OPEN_KEY) !== 'false',
@@ -88,10 +87,14 @@ export function AppShell() {
         ) : (
           <CompactSidebar mode={mode} />
         )}
-        <VoiceBar compact={!sidebarOpen} />
       </div>
-      {voiceExpanded ? <VideoStage /> : <Outlet />}
-      {!voiceExpanded && mode === 'chat' && <ThreadPanel />}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {inVoice && <VideoStage />}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <Outlet />
+        </div>
+      </div>
+      {mode === 'chat' && <ThreadPanel />}
       <QuickSwitcher />
     </div>
   )

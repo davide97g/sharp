@@ -71,7 +71,6 @@ type VoiceState = {
   muted: boolean
   speaking: Record<string, boolean>
   cameraStatus: 'off' | 'starting' | 'on'
-  expanded: boolean
   localStream: MediaStream | null
   remoteStreams: Record<string, MediaStream>
   client: VoiceClient | null
@@ -215,7 +214,6 @@ type State = {
   leaveVoice: () => void
   toggleVoiceMute: () => void
   toggleVoiceCamera: () => void
-  setVoiceExpanded: (expanded: boolean) => void
 
   // docs actions
   loadChannelDocs: (channelId: string) => Promise<void>
@@ -266,7 +264,6 @@ function emptyVoiceState(): VoiceState {
     muted: false,
     speaking: {},
     cameraStatus: 'off',
-    expanded: false,
     localStream: null,
     remoteStreams: {},
     client: null,
@@ -739,7 +736,6 @@ export const useStore = create<State>((set, get) => ({
         muted: false,
         speaking: {},
         cameraStatus: 'off',
-        expanded: false,
         localStream: null,
         remoteStreams: {},
         client: null,
@@ -847,11 +843,6 @@ export const useStore = create<State>((set, get) => ({
     }
     set((s) => ({ voice: { ...s.voice, cameraStatus: 'starting' } }))
     get().ws?.send('voice.camera', { channel_id: channelId, enabled: true })
-  },
-
-  setVoiceExpanded(expanded) {
-    if (!get().voice.channelId) return
-    set((s) => ({ voice: { ...s.voice, expanded } }))
   },
 
   totalUnread() {
