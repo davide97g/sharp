@@ -90,6 +90,11 @@ type State = {
 
   // the message the composer is quote-replying to (current channel), or null
   replyTarget: Message | null
+  // message currently under the pointer (keyboard-shortcut target); not subscribed
+  // to by rows, so hovering doesn't re-render them
+  activeMessageId: string | null
+  // which message's reaction palette is open (mouse or keyboard), or null
+  paletteForMessageId: string | null
 
   // --- docs (Phase 2) ---
   docsByChannel: Record<string, Doc[]> // active (non-trashed) docs, updated_at desc
@@ -164,6 +169,8 @@ type State = {
 
   setQuickSwitcher: (open: boolean) => void
   setReplyTarget: (msg: Message | null) => void
+  setActiveMessage: (id: string | null) => void
+  setPaletteFor: (id: string | null) => void
   sendTyping: (channelId: string) => void
   pruneTyping: () => void
 
@@ -223,6 +230,8 @@ export const useStore = create<State>((set, get) => ({
   typing: {},
   quickSwitcherOpen: false,
   replyTarget: null,
+  activeMessageId: null,
+  paletteForMessageId: null,
   docsByChannel: {},
   docsLoaded: new Set(),
   trashByChannel: {},
@@ -283,6 +292,8 @@ export const useStore = create<State>((set, get) => ({
       typing: {},
       quickSwitcherOpen: false,
       replyTarget: null,
+      activeMessageId: null,
+      paletteForMessageId: null,
       docsByChannel: {},
       docsLoaded: new Set(),
       trashByChannel: {},
@@ -315,11 +326,16 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setCurrentChannel(id) {
-    // Dropping into another channel abandons any in-progress quote reply.
-    set((s) => ({
-      currentChannelId: id,
-      replyTarget: id === s.currentChannelId ? s.replyTarget : null,
-    }))
+    // Dropping into another channel abandons any in-progress quote reply / palette.
+    set((s) => {
+      if (id === s.currentChannelId) return { currentChannelId: id }
+      return {
+        currentChannelId: id,
+        replyTarget: null,
+        paletteForMessageId: null,
+        activeMessageId: null,
+      }
+    })
   },
 
   async loadMessages(channelId) {
@@ -595,6 +611,14 @@ export const useStore = create<State>((set, get) => ({
 
   setReplyTarget(msg) {
     set({ replyTarget: msg })
+  },
+
+  setActiveMessage(id) {
+    set({ activeMessageId: id })
+  },
+
+  setPaletteFor(id) {
+    set({ paletteForMessageId: id })
   },
 
   sendTyping(channelId) {

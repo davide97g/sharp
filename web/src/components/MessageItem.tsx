@@ -111,8 +111,19 @@ export function MessageItem({
   const deleteMessage = useStore((s) => s.deleteMessage)
   const openThread = useStore((s) => s.openThread)
   const setReplyTarget = useStore((s) => s.setReplyTarget)
+  const setActiveMessage = useStore((s) => s.setActiveMessage)
+  const setPaletteFor = useStore((s) => s.setPaletteFor)
 
-  const [showPalette, setShowPalette] = useState(false)
+  // Palette open + "actioned" (keyboard/mouse target) come from the store so a
+  // global shortcut handler can drive whichever message is hovered.
+  const showPalette = useStore((s) => s.paletteForMessageId === message.id)
+  const isReplyTarget = useStore((s) => s.replyTarget?.id === message.id)
+  const isThreadTarget = useStore((s) => s.thread.open && s.thread.parentId === message.id)
+  const actioned = showPalette || isReplyTarget || isThreadTarget
+
+  const openPalette = () => setPaletteFor(showPalette ? null : message.id)
+  const closePalette = () => setPaletteFor(null)
+
   const [editing, setEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [draft, setDraft] = useState(message.content)
@@ -210,7 +221,11 @@ export function MessageItem({
         className={`group relative flex px-4 ${grouped ? 'py-0.5' : 'pt-2 mt-1'} ${
           isMine ? 'justify-end' : 'justify-start'
         }`}
-        onMouseLeave={() => setShowPalette(false)}
+        onMouseEnter={() => setActiveMessage(message.id)}
+        onMouseLeave={() => {
+          setActiveMessage(null)
+          if (showPalette) closePalette()
+        }}
       >
         <div className={`relative flex max-w-[75%] flex-col ${isMine ? 'items-end' : 'items-start'}`}>
           {isDeleted ? (
@@ -221,7 +236,11 @@ export function MessageItem({
             <div className="w-full min-w-[16rem]">{editor}</div>
           ) : (
             <div
-              className={`min-w-0 rounded-2xl px-3 py-2 ring-0 ring-inset ring-white/10 transition-[box-shadow] duration-200 ease-in-out group-hover:ring-1 ${
+              className={`min-w-0 rounded-2xl px-3 py-2 ring-inset transition-[box-shadow] duration-200 ease-in-out ${
+                actioned
+                  ? 'ring-2 ring-[var(--color-accent)]'
+                  : 'ring-0 ring-white/10 group-hover:ring-1'
+              } ${
                 isMine
                   ? 'rounded-br-sm bg-[var(--color-accent-soft)]'
                   : 'rounded-bl-sm bg-[var(--color-panel-2)]'
@@ -264,12 +283,14 @@ export function MessageItem({
           {/* hover toolbar */}
           {!isDeleted && !editing && (
             <div
-              className={`pointer-events-none absolute -top-4 flex items-center gap-0.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel-2)]/90 p-1 opacity-0 shadow-lg backdrop-blur-sm transition-opacity duration-150 ease-in-out group-hover:pointer-events-auto group-hover:opacity-100 ${
-                isMine ? 'right-0' : 'left-0'
-              }`}
+              className={`absolute -top-4 flex items-center gap-0.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel-2)]/90 p-1 shadow-lg backdrop-blur-sm transition-opacity duration-150 ease-in-out ${
+                actioned
+                  ? 'pointer-events-auto opacity-100'
+                  : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100'
+              } ${isMine ? 'right-0' : 'left-0'}`}
             >
               <div className="relative">
-                <ToolbarBtn title="Add reaction" onClick={() => setShowPalette((v) => !v)}>
+                <ToolbarBtn title="Add reaction (E)" onClick={openPalette}>
                   <Icon name="react" />
                 </ToolbarBtn>
                 {showPalette && (
@@ -283,7 +304,7 @@ export function MessageItem({
                         key={e}
                         onClick={() => {
                           toggleReaction(message, e)
-                          setShowPalette(false)
+                          closePalette()
                         }}
                         className="rounded-md px-1.5 py-1 text-base transition-transform hover:scale-125 hover:bg-[var(--color-accent-soft)]"
                       >
@@ -293,7 +314,7 @@ export function MessageItem({
                   </div>
                 )}
               </div>
-              <ToolbarBtn title="Reply" onClick={() => setReplyTarget(message)}>
+              <ToolbarBtn title="Reply (R)" onClick={() => setReplyTarget(message)}>
                 <Icon name="reply" />
               </ToolbarBtn>
               {isMine && (
@@ -329,10 +350,16 @@ export function MessageItem({
   return (
     <div
       id={`msg-${message.id}`}
-      className={`group relative flex gap-3 px-4 transition-colors duration-200 ease-in-out hover:bg-[var(--color-panel)]/50 ${
-        grouped ? 'py-0.5' : 'pt-2 pb-0.5 mt-1'
-      }`}
-      onMouseLeave={() => setShowPalette(false)}
+      className={`group relative flex gap-3 px-4 transition-colors duration-200 ease-in-out ${
+        actioned
+          ? 'bg-[var(--color-accent-soft)]/25 ring-1 ring-inset ring-[var(--color-accent)]'
+          : 'hover:bg-[var(--color-panel)]/50'
+      } ${grouped ? 'py-0.5' : 'pt-2 pb-0.5 mt-1'}`}
+      onMouseEnter={() => setActiveMessage(message.id)}
+      onMouseLeave={() => {
+        setActiveMessage(null)
+        if (showPalette) closePalette()
+      }}
     >
       {/* gutter: avatar or hover timestamp */}
       <div className="relative w-9 shrink-0">
@@ -463,9 +490,15 @@ export function MessageItem({
 
       {/* hover toolbar */}
       {!isDeleted && !editing && (
-        <div className="pointer-events-none absolute -top-4 right-2 flex items-center gap-0.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel-2)]/90 p-1 opacity-0 shadow-lg backdrop-blur-sm transition-opacity duration-150 ease-in-out group-hover:pointer-events-auto group-hover:opacity-100">
+        <div
+          className={`absolute -top-4 right-2 flex items-center gap-0.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel-2)]/90 p-1 shadow-lg backdrop-blur-sm transition-opacity duration-150 ease-in-out ${
+            actioned
+              ? 'pointer-events-auto opacity-100'
+              : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100'
+          }`}
+        >
           <div className="relative">
-            <ToolbarBtn title="Add reaction" onClick={() => setShowPalette((v) => !v)}>
+            <ToolbarBtn title="Add reaction (E)" onClick={openPalette}>
               <Icon name="react" />
             </ToolbarBtn>
             {showPalette && (
@@ -475,7 +508,7 @@ export function MessageItem({
                     key={e}
                     onClick={() => {
                       toggleReaction(message, e)
-                      setShowPalette(false)
+                      closePalette()
                     }}
                     className="rounded-md px-1.5 py-1 text-base transition-transform hover:scale-125 hover:bg-[var(--color-accent-soft)]"
                   >
@@ -485,11 +518,11 @@ export function MessageItem({
               </div>
             )}
           </div>
-          <ToolbarBtn title="Reply" onClick={() => setReplyTarget(message)}>
+          <ToolbarBtn title="Reply (R)" onClick={() => setReplyTarget(message)}>
             <Icon name="reply" />
           </ToolbarBtn>
           {showThread && (
-            <ToolbarBtn title="Reply in thread" onClick={() => openThread(message.id)}>
+            <ToolbarBtn title="Reply in thread (T)" onClick={() => openThread(message.id)}>
               <Icon name="thread" />
             </ToolbarBtn>
           )}

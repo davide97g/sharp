@@ -41,6 +41,42 @@ export function MessagePane() {
     return () => setCurrentChannel(null)
   }, [channelId, setCurrentChannel, loadMessages])
 
+  // Keyboard shortcuts acting on the hovered message (e: react, r: reply,
+  // t: thread; Esc: cancel). Disabled while typing in an input/textarea.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const t = e.target as HTMLElement | null
+      const tag = t?.tagName
+      if (t?.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+
+      const st = useStore.getState()
+      if (e.key === 'Escape') {
+        if (st.paletteForMessageId) {
+          st.setPaletteFor(null)
+          e.preventDefault()
+        } else if (st.replyTarget) {
+          st.setReplyTarget(null)
+          e.preventDefault()
+        }
+        return
+      }
+
+      const key = e.key.toLowerCase()
+      if (key !== 'e' && key !== 'r' && key !== 't') return
+      const id = st.activeMessageId
+      const cid = st.currentChannelId
+      const msg = id && cid ? st.byChannel[cid]?.list.find((m) => m.id === id) : undefined
+      if (!msg || msg.deleted_at) return
+      e.preventDefault()
+      if (key === 'e') st.setPaletteFor(msg.id)
+      else if (key === 'r') st.setReplyTarget(msg)
+      else if (key === 't') st.openThread(msg.parent_id ?? msg.id)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   const messages = cm?.list ?? []
   const lastId = messages.length ? messages[messages.length - 1].id : null
 
