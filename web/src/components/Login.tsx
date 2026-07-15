@@ -2,12 +2,23 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, getServerUrl, setServerUrl } from '../lib/api'
 import { ApiRequestError } from '../lib/api'
+import { startBrowserLogin } from '../lib/desktopAuth'
+import type { AuthResponse } from '../lib/types'
 import { useStore } from '../store'
 import { toastError } from '../lib/toast'
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
-export function Login() {
+/**
+ * When `onAuthenticated` is provided, a successful login/register calls it with
+ * the auth response instead of initializing the app + navigating. Used by the
+ * `/desktop-auth` browser bridge, which only needs the token to mint a code.
+ */
+export function Login({
+  onAuthenticated,
+}: {
+  onAuthenticated?: (res: AuthResponse) => void | Promise<void>
+} = {}) {
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -17,6 +28,24 @@ export function Login() {
   const init = useStore((s) => s.init)
   const enableDesktopNotifications = useStore((s) => s.enableDesktopNotifications)
   const navigate = useNavigate()
+
+  async function browserLogin() {
+    if (busy) return
+    const url = server.trim().replace(/\/+$/, '')
+    if (!url) {
+      toastError('Enter your Server URL first.')
+      return
+    }
+    setServerUrl(url)
+    setBusy(true)
+    try {
+      await startBrowserLogin()
+    } catch {
+      toastError('Could not open the browser.')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -34,6 +63,10 @@ export function Login() {
         mode === 'login'
           ? await api.login(email.trim().toLowerCase(), password)
           : await api.register(email.trim().toLowerCase(), password, displayName.trim())
+      if (onAuthenticated) {
+        await onAuthenticated(res)
+        return
+      }
       await init(res.token, res.user)
       // First sign-in: ask for notification permission once, while we still have
       // the click gesture. Skip if the user already granted or denied it before.
@@ -112,6 +145,24 @@ export function Login() {
             {busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
           </button>
         </form>
+
+        {isTauri && !onAuthenticated && (
+          <>
+            <div className="my-4 flex items-center gap-3 text-xs text-[var(--color-text-faint)]">
+              <span className="h-px flex-1 bg-[var(--color-border)]" />
+              or
+              <span className="h-px flex-1 bg-[var(--color-border)]" />
+            </div>
+            <button
+              type="button"
+              onClick={browserLogin}
+              disabled={busy}
+              className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-4 py-2.5 text-sm font-semibold text-[var(--color-text)] transition hover:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)] disabled:opacity-60"
+            >
+              Log in with browser
+            </button>
+          </>
+        )}
 
         <div className="mt-6 text-center text-sm text-[var(--color-text-dim)]">
           {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}

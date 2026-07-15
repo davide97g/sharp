@@ -117,7 +117,7 @@ export function MessageItem({
   // Palette open + "actioned" (keyboard/mouse target) come from the store so a
   // global shortcut handler can drive whichever message is hovered.
   const showPalette = useStore((s) => s.paletteForMessageId === message.id)
-  const isReplyTarget = useStore((s) => s.replyTarget?.id === message.id)
+  const isReplyTarget = useStore((s) => s.replyTargets[message.channel_id]?.id === message.id)
   const isThreadTarget = useStore((s) => s.thread.open && s.thread.parentId === message.id)
   const actioned = showPalette || isReplyTarget || isThreadTarget
 
@@ -314,7 +314,7 @@ export function MessageItem({
                   </div>
                 )}
               </div>
-              <ToolbarBtn title="Reply (R)" onClick={() => setReplyTarget(message)}>
+              <ToolbarBtn title="Reply (R)" onClick={() => setReplyTarget(message.channel_id, message)}>
                 <Icon name="reply" />
               </ToolbarBtn>
               {isMine && (
@@ -518,7 +518,7 @@ export function MessageItem({
               </div>
             )}
           </div>
-          <ToolbarBtn title="Reply (R)" onClick={() => setReplyTarget(message)}>
+          <ToolbarBtn title="Reply (R)" onClick={() => setReplyTarget(message.channel_id, message)}>
             <Icon name="reply" />
           </ToolbarBtn>
           {showThread && (

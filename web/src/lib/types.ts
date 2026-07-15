@@ -9,6 +9,11 @@ export type User = {
   created_at: string
 }
 
+export type DesktopCodeResponse = {
+  code: string
+  expires_in: number
+}
+
 export type ChatLayout = 'bubble' | 'classic'
 
 export type ChannelKind = 'public' | 'private' | 'dm'

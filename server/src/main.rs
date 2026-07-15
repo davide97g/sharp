@@ -101,11 +101,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         doc_rooms: Default::default(),
         storage,
         vapid,
+        desktop_codes: Default::default(),
     });
 
     let api = Router::new()
         .route("/auth/register", post(auth::register))
         .route("/auth/login", post(auth::login))
+        .route("/auth/desktop/code", post(auth::desktop_code))
+        .route("/auth/desktop/exchange", post(auth::desktop_exchange))
         .route("/me", get(routes::users::me).patch(routes::users::update_me))
         .route(
             "/me/avatar",

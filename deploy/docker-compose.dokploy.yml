@@ -126,6 +126,34 @@ services:
       - dokploy-network
       - default
 
+  # Always-on maintenance fallback for the app host. It owns a Traefik router on
+  # the SAME host as `web`, but with the lowest priority (1). Whenever `web` is
+  # up, its higher-priority router wins and this one is idle; when `web` goes
+  # down (redeploy, crash), web's docker router disappears and Traefik falls back
+  # to this router, serving deploy/maintenance.html with a 503. No manual steps,
+  # no changes to the web/API/landing routes. Flips back automatically when web
+  # returns.
+  #
+  # NOTE: `websecure` (entrypoint) and `letsencrypt` (certresolver) are Dokploy's
+  # Traefik defaults. If your instance renamed them, change them below only.
+  maintenance:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.maintenance
+    restart: unless-stopped
+    networks:
+      - dokploy-network
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - "traefik.http.routers.sharp-maint.rule=Host(`app.sharp.davideghiotto.it`)"
+      - traefik.http.routers.sharp-maint.entrypoints=websecure
+      - traefik.http.routers.sharp-maint.tls=true
+      - traefik.http.routers.sharp-maint.tls.certresolver=letsencrypt
+      - traefik.http.routers.sharp-maint.priority=1
+      - traefik.http.routers.sharp-maint.service=sharp-maint
+      - traefik.http.services.sharp-maint.loadbalancer.server.port=80
+
 networks:
   dokploy-network:
     external: true

@@ -1,0 +1,13 @@
+# syntax=docker/dockerfile:1
+#
+# sharp — always-on maintenance page (nginx). Acts as a low-priority Traefik
+# fallback for the app host: when the real `web` container is down (redeploy,
+# crash), its docker router disappears and this one serves the page instead.
+#
+# Build context MUST be the repo root:
+#   docker build -f deploy/Dockerfile.maintenance -t sharp-maintenance .
+
+FROM nginx:alpine
+COPY deploy/nginx.maintenance.conf /etc/nginx/conf.d/default.conf
+COPY deploy/maintenance.html /usr/share/nginx/html/index.html
+EXPOSE 80

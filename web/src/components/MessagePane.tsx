@@ -51,12 +51,13 @@ export function MessagePane() {
       if (t?.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
 
       const st = useStore.getState()
+      const cid = st.currentChannelId
       if (e.key === 'Escape') {
         if (st.paletteForMessageId) {
           st.setPaletteFor(null)
           e.preventDefault()
-        } else if (st.replyTarget) {
-          st.setReplyTarget(null)
+        } else if (cid && st.replyTargets[cid]) {
+          st.setReplyTarget(cid, null)
           e.preventDefault()
         }
         return
@@ -65,13 +66,19 @@ export function MessagePane() {
       const key = e.key.toLowerCase()
       if (key !== 'e' && key !== 'r' && key !== 't') return
       const id = st.activeMessageId
-      const cid = st.currentChannelId
       const msg = id && cid ? st.byChannel[cid]?.list.find((m) => m.id === id) : undefined
       if (!msg || msg.deleted_at) return
       e.preventDefault()
-      if (key === 'e') st.setPaletteFor(msg.id)
-      else if (key === 'r') st.setReplyTarget(msg)
-      else if (key === 't') st.openThread(msg.parent_id ?? msg.id)
+      if (key === 'e') {
+        st.setPaletteFor(msg.id)
+      } else if (key === 'r') {
+        st.setReplyTarget(msg.channel_id, msg)
+        st.requestComposerFocus(`c:${msg.channel_id}`)
+      } else if (key === 't') {
+        const parent = msg.parent_id ?? msg.id
+        st.openThread(parent)
+        st.requestComposerFocus(`t:${parent}`)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -247,7 +254,11 @@ export function MessagePane() {
       </div>
 
       <TypingRow channelId={channelId} />
-      <Composer channel={channel} placeholder={`Message ${isDm ? channelLabel(channel) : '#' + channel.name}`} />
+      <Composer
+        key={channel.id}
+        channel={channel}
+        placeholder={`Message ${isDm ? channelLabel(channel) : '#' + channel.name}`}
+      />
 
       {needsLayoutChoice && <ChatLayoutChooser />}
     </div>

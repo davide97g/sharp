@@ -1,10 +1,13 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
-import { api, getToken, setUnauthorizedHandler } from './lib/api'
+import { api, getToken, setToken, setUnauthorizedHandler } from './lib/api'
 import { setNavigate as setDocNavigate } from './lib/nav'
 import { setNavigate as setNotifyNavigate } from './lib/notify'
+import { isTauri, registerDeepLinkHandler } from './lib/desktopAuth'
+import { toastError } from './lib/toast'
 import { useStore } from './store'
 import { Login } from './components/Login'
+import { DesktopAuth } from './components/DesktopAuth'
 import { AppShell } from './components/AppShell'
 import { MessagePane } from './components/MessagePane'
 import { SearchResults } from './components/SearchResults'
@@ -44,6 +47,25 @@ export function App() {
     setDocNavigate(navigate)
     setNotifyNavigate((path) => navigate(path))
   }, [navigate])
+
+  // native browser-login: receive the `sharp://auth?...` deep link, exchange the
+  // one-time code for a JWT, and sign in (handles both running + cold launch).
+  useEffect(() => {
+    if (!isTauri) return
+    let cleanup: (() => void) | undefined
+    registerDeepLinkHandler(
+      async (res) => {
+        setToken(res.token)
+        await init(res.token, res.user)
+        setBoot('authed')
+        navigate('/', { replace: true })
+      },
+      () => toastError('Browser sign-in failed. Please try again.'),
+    ).then((fn) => {
+      cleanup = fn
+    })
+    return () => cleanup?.()
+  }, [init, navigate])
 
   // restore session on load
   useEffect(() => {
@@ -98,6 +120,7 @@ export function App() {
           path="/login"
           element={authed ? <Navigate to="/" replace /> : <Login />}
         />
+        <Route path="/desktop-auth" element={<DesktopAuth />} />
         <Route
           path="/"
           element={authed ? <AppShell /> : <Navigate to="/login" replace />}

@@ -44,7 +44,16 @@ export function Composer({
   parentId?: string
   placeholder?: string
 }) {
-  const [value, setValue] = useState('')
+  // Draft text is stored per composer so each chat (and each thread) keeps its
+  // own in-progress message instead of one input bleeding across chats.
+  const draftKey = parentId ? `t:${parentId}` : `c:${channel.id}`
+  const value = useStore((s) => s.drafts[draftKey] ?? '')
+  const setDraftStore = useStore((s) => s.setDraft)
+  const setValue = useCallback(
+    (t: string) => setDraftStore(draftKey, t),
+    [setDraftStore, draftKey],
+  )
+
   const [sending, setSending] = useState(false)
   const [pending, setPending] = useState<Pending[]>([])
   const [dragOver, setDragOver] = useState(false)
@@ -57,10 +66,10 @@ export function Composer({
   const sendTyping = useStore((s) => s.sendTyping)
   const joinChannel = useStore((s) => s.joinChannel)
   const loadMembers = useStore((s) => s.loadMembers)
-  const replyTarget = useStore((s) => s.replyTarget)
   const setReplyTarget = useStore((s) => s.setReplyTarget)
+  const focusRequest = useStore((s) => s.focusRequest)
   // Quote-reply applies to the main channel composer only (not the thread composer).
-  const activeReply = parentId ? null : replyTarget
+  const activeReply = useStore((s) => (parentId ? null : s.replyTargets[channel.id] ?? null))
 
   // --- @ people / # resource picker state ---
   const [trigger, setTrigger] = useState<Trigger | null>(null)
@@ -90,6 +99,11 @@ export function Composer({
   useEffect(() => {
     if (activeReply) ref.current?.focus()
   }, [activeReply])
+
+  // Honor an explicit focus request aimed at this composer (keyboard r / t).
+  useEffect(() => {
+    if (focusRequest?.key === draftKey) ref.current?.focus()
+  }, [focusRequest, draftKey])
 
   // Populate the picker. People (@) resolve from the already-loaded directory
   // (channel members first); resources (#) hit the doc/canvas search.
@@ -288,7 +302,7 @@ export function Composer({
         readyIds.length ? readyIds : undefined,
         activeReply?.id,
       )
-      if (activeReply) setReplyTarget(null)
+      if (activeReply) setReplyTarget(channel.id, null)
       // Sent — the staged previews are gone from the UI, so free their blob URLs.
       prevPending.forEach((p) => p.previewUrl && URL.revokeObjectURL(p.previewUrl))
     } catch {
@@ -325,7 +339,7 @@ export function Composer({
     }
     if (e.key === 'Escape' && activeReply && !value) {
       e.preventDefault()
-      setReplyTarget(null)
+      setReplyTarget(channel.id, null)
       return
     }
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -443,7 +457,7 @@ export function Composer({
               </div>
             </div>
             <button
-              onClick={() => setReplyTarget(null)}
+              onClick={() => setReplyTarget(channel.id, null)}
               title="Cancel reply (Esc)"
               className="shrink-0 self-start rounded px-1 text-xs text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
             >

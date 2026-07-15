@@ -8,11 +8,17 @@ use axum::extract::{FromRequestParts, State};
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
 use axum::Json;
+use base64::Engine;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
+use std::time::{Duration as StdDuration, Instant};
 use uuid::Uuid;
+
+/// Time a desktop browser-login code stays valid before it must be exchanged.
+const DESKTOP_CODE_TTL: StdDuration = StdDuration::from_secs(60);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
@@ -200,6 +206,82 @@ pub async fn login(
     if !verify_password(&body.password, &password_hash) {
         return Err(AppError::Unauthorized("invalid credentials".to_string()));
     }
+
+    let user = user_from_row(&row)?;
+    let token = create_token(user.id, &state.config.jwt_secret)?;
+
+    Ok(Json(AuthResponse { token, user }))
+}
+
+#[derive(Serialize)]
+pub struct DesktopCodeResponse {
+    pub code: String,
+    pub expires_in: u64,
+}
+
+/// Mint a short-lived, single-use code bound to the authenticated user. The
+/// desktop app opens the browser here (already-signed-in web session) and hands
+/// the code back to the native app via a deep link, which then exchanges it for
+/// a real JWT (see `desktop_exchange`). Keeps the long-lived token out of the
+/// browser history / OS deep-link launch args.
+pub async fn desktop_code(
+    State(state): State<SharedState>,
+    user: AuthUser,
+) -> AppResult<Json<DesktopCodeResponse>> {
+    let mut bytes = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    let code = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+
+    let now = Instant::now();
+    {
+        let mut codes = state
+            .desktop_codes
+            .lock()
+            .map_err(|_| AppError::Internal("desktop_codes lock poisoned".to_string()))?;
+        // Opportunistically drop expired codes so the map can't grow unbounded.
+        codes.retain(|_, (_, exp)| *exp > now);
+        codes.insert(code.clone(), (user.id, now + DESKTOP_CODE_TTL));
+    }
+
+    Ok(Json(DesktopCodeResponse {
+        code,
+        expires_in: DESKTOP_CODE_TTL.as_secs(),
+    }))
+}
+
+#[derive(Deserialize)]
+pub struct DesktopExchangeRequest {
+    pub code: String,
+}
+
+/// Exchange a one-time desktop-login code for a JWT. Unauthenticated: the code
+/// itself is the credential. The code is consumed (single use) and must not be
+/// expired.
+pub async fn desktop_exchange(
+    State(state): State<SharedState>,
+    Json(body): Json<DesktopExchangeRequest>,
+) -> AppResult<Json<AuthResponse>> {
+    let now = Instant::now();
+    let entry = {
+        let mut codes = state
+            .desktop_codes
+            .lock()
+            .map_err(|_| AppError::Internal("desktop_codes lock poisoned".to_string()))?;
+        codes.remove(&body.code)
+    };
+
+    let user_id = match entry {
+        Some((id, exp)) if exp > now => id,
+        _ => return Err(AppError::Unauthorized("invalid or expired code".to_string())),
+    };
+
+    let row = sqlx::query(
+        "SELECT id, email, display_name, avatar_url, created_at FROM users WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| AppError::Unauthorized("invalid or expired code".to_string()))?;
 
     let user = user_from_row(&row)?;
     let token = create_token(user.id, &state.config.jwt_secret)?;

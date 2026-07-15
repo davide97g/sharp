@@ -3,6 +3,7 @@ import type {
   AuthResponse,
   Channel,
   ChannelsResponse,
+  DesktopCodeResponse,
   Doc,
   DocMentionsResponse,
   DocRolesResponse,
@@ -131,6 +132,18 @@ export const api = {
   },
   me() {
     return request<User>('/me')
+  },
+  // Desktop browser-login: mint a one-time code for the signed-in web session,
+  // then exchange it for a JWT from the native app.
+  desktopCode() {
+    return request<DesktopCodeResponse>('/auth/desktop/code', { method: 'POST' })
+  },
+  desktopExchange(code: string) {
+    return request<AuthResponse>('/auth/desktop/exchange', {
+      method: 'POST',
+      body: { code },
+      auth: false,
+    })
   },
   updateProfile(input: { display_name?: string }) {
     return request<User>('/me', { method: 'PATCH', body: input })

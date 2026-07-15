@@ -3,7 +3,14 @@ use crate::docs_sync::DocRooms;
 use crate::storage::Storage;
 use crate::ws::Hub;
 use sqlx::PgPool;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+use uuid::Uuid;
+
+/// Short-lived, single-use codes for desktop browser-login.
+/// Maps code -> (user id, expiry). In-process, per-replica (see ARCHITECTURE).
+pub type DesktopCodes = Arc<Mutex<HashMap<String, (Uuid, Instant)>>>;
 
 /// Resolved VAPID keypair for web push (from env or auto-generated + persisted).
 #[derive(Clone)]
@@ -24,6 +31,8 @@ pub struct AppState {
     pub storage: Option<Storage>,
     /// Web-push keys; `None` when push is disabled.
     pub vapid: Option<Vapid>,
+    /// One-time codes for the desktop browser-login exchange. Per-replica.
+    pub desktop_codes: DesktopCodes,
 }
 
 pub type SharedState = Arc<AppState>;

@@ -123,6 +123,8 @@ ReplyPreview = { id: string, user: { id, display_name, avatar_url }, content: st
 |---|---|---|
 | POST | `/auth/register` | `{email, password, display_name}` → `201 {token, user}` |
 | POST | `/auth/login` | `{email, password}` → `{token, user}` |
+| POST | `/auth/desktop/code` | (authed) → `{code, expires_in}` — mints a one-time, single-use browser-login code (TTL 60s, in-process/per-replica) bound to the caller. Used by the desktop browser-login bridge. |
+| POST | `/auth/desktop/exchange` | `{code}` → `{token, user}` — unauthenticated; consumes the code (single use, must be unexpired) and issues a JWT. The native app calls this after receiving the `sharp://auth?code=&state=` deep link. |
 | GET | `/me` | → `User` |
 | PATCH | `/me` | `{display_name?}` → `User` (emits `user.updated`) |
 | POST | `/me/avatar` | multipart `file` (raster image, ≤ MAX_UPLOAD_MB) → `User` (stores to `avatars/{uid}`, bumps `avatar_url?v=`, emits `user.updated`) |

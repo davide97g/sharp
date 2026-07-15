@@ -88,8 +88,12 @@ type State = {
   // quick switcher
   quickSwitcherOpen: boolean
 
-  // the message the composer is quote-replying to (current channel), or null
-  replyTarget: Message | null
+  // per-composer draft text, keyed `c:<channelId>` (main) or `t:<parentId>` (thread)
+  drafts: Record<string, string>
+  // per-channel quote-reply target (channelId -> message); each chat keeps its own
+  replyTargets: Record<string, Message>
+  // bumped to ask a specific composer (by draft key) to focus
+  focusRequest: { key: string; n: number } | null
   // message currently under the pointer (keyboard-shortcut target); not subscribed
   // to by rows, so hovering doesn't re-render them
   activeMessageId: string | null
@@ -168,7 +172,9 @@ type State = {
   closeThread: () => void
 
   setQuickSwitcher: (open: boolean) => void
-  setReplyTarget: (msg: Message | null) => void
+  setDraft: (key: string, text: string) => void
+  setReplyTarget: (channelId: string, msg: Message | null) => void
+  requestComposerFocus: (key: string) => void
   setActiveMessage: (id: string | null) => void
   setPaletteFor: (id: string | null) => void
   sendTyping: (channelId: string) => void
@@ -229,7 +235,9 @@ export const useStore = create<State>((set, get) => ({
   thread: { open: false, parentId: null, parent: null, replies: [], loading: false },
   typing: {},
   quickSwitcherOpen: false,
-  replyTarget: null,
+  drafts: {},
+  replyTargets: {},
+  focusRequest: null,
   activeMessageId: null,
   paletteForMessageId: null,
   docsByChannel: {},
@@ -291,7 +299,9 @@ export const useStore = create<State>((set, get) => ({
       thread: { open: false, parentId: null, parent: null, replies: [], loading: false },
       typing: {},
       quickSwitcherOpen: false,
-      replyTarget: null,
+      drafts: {},
+      replyTargets: {},
+      focusRequest: null,
       activeMessageId: null,
       paletteForMessageId: null,
       docsByChannel: {},
@@ -326,15 +336,11 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setCurrentChannel(id) {
-    // Dropping into another channel abandons any in-progress quote reply / palette.
+    // Drafts + reply targets are per-channel and persist; only the transient
+    // hover/palette state resets when leaving a channel.
     set((s) => {
       if (id === s.currentChannelId) return { currentChannelId: id }
-      return {
-        currentChannelId: id,
-        replyTarget: null,
-        paletteForMessageId: null,
-        activeMessageId: null,
-      }
+      return { currentChannelId: id, paletteForMessageId: null, activeMessageId: null }
     })
   },
 
@@ -609,8 +615,26 @@ export const useStore = create<State>((set, get) => ({
     set({ quickSwitcherOpen: open })
   },
 
-  setReplyTarget(msg) {
-    set({ replyTarget: msg })
+  setDraft(key, text) {
+    set((s) => {
+      const drafts = { ...s.drafts }
+      if (text) drafts[key] = text
+      else delete drafts[key]
+      return { drafts }
+    })
+  },
+
+  setReplyTarget(channelId, msg) {
+    set((s) => {
+      const replyTargets = { ...s.replyTargets }
+      if (msg) replyTargets[channelId] = msg
+      else delete replyTargets[channelId]
+      return { replyTargets }
+    })
+  },
+
+  requestComposerFocus(key) {
+    set((s) => ({ focusRequest: { key, n: (s.focusRequest?.n ?? 0) + 1 } }))
   },
 
   setActiveMessage(id) {
