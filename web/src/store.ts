@@ -63,13 +63,17 @@ type ThreadState = {
   loading: boolean
 }
 
-type VoiceRoom = Record<string, { user_id: string; muted: boolean }>
+export type VoiceRoom = Record<string, { user_id: string; muted: boolean; camera_on: boolean }>
 
 type VoiceState = {
   channelId: string | null
   status: 'idle' | 'connecting' | 'connected'
   muted: boolean
   speaking: Record<string, boolean>
+  cameraStatus: 'off' | 'starting' | 'on'
+  expanded: boolean
+  localStream: MediaStream | null
+  remoteStreams: Record<string, MediaStream>
   client: VoiceClient | null
 }
 
@@ -210,6 +214,8 @@ type State = {
   joinVoice: (channelId: string) => Promise<void>
   leaveVoice: () => void
   toggleVoiceMute: () => void
+  toggleVoiceCamera: () => void
+  setVoiceExpanded: (expanded: boolean) => void
 
   // docs actions
   loadChannelDocs: (channelId: string) => Promise<void>
@@ -259,6 +265,10 @@ function emptyVoiceState(): VoiceState {
     status: 'idle',
     muted: false,
     speaking: {},
+    cameraStatus: 'off',
+    expanded: false,
+    localStream: null,
+    remoteStreams: {},
     client: null,
   }
 }
@@ -728,6 +738,10 @@ export const useStore = create<State>((set, get) => ({
         status: 'connecting',
         muted: false,
         speaking: {},
+        cameraStatus: 'off',
+        expanded: false,
+        localStream: null,
+        remoteStreams: {},
         client: null,
       },
     })
@@ -759,6 +773,27 @@ export const useStore = create<State>((set, get) => ({
                 speaking: { ...s.voice.speaking, [connId]: speaking },
               },
             }
+          })
+        },
+        onLocalStream: (stream) => {
+          set((s) => {
+            if (s.voice.client !== client) return {}
+            return {
+              voice: {
+                ...s.voice,
+                localStream: stream,
+                cameraStatus: stream ? 'on' : 'off',
+              },
+            }
+          })
+        },
+        onRemoteStream: (connId, stream) => {
+          set((s) => {
+            if (s.voice.client !== client) return {}
+            const remoteStreams = { ...s.voice.remoteStreams }
+            if (stream?.getVideoTracks().length) remoteStreams[connId] = stream
+            else delete remoteStreams[connId]
+            return { voice: { ...s.voice, remoteStreams } }
           })
         },
       })
@@ -800,6 +835,23 @@ export const useStore = create<State>((set, get) => ({
     client.setMuted(nextMuted)
     set((s) => ({ voice: { ...s.voice, muted: nextMuted } }))
     get().ws?.send('voice.mute', { channel_id: channelId, muted: nextMuted })
+  },
+
+  toggleVoiceCamera() {
+    const { channelId, client, status, cameraStatus } = get().voice
+    if (!channelId || !client || status !== 'connected' || cameraStatus === 'starting') return
+    if (cameraStatus === 'on') {
+      client.stopCamera()
+      get().ws?.send('voice.camera', { channel_id: channelId, enabled: false })
+      return
+    }
+    set((s) => ({ voice: { ...s.voice, cameraStatus: 'starting' } }))
+    get().ws?.send('voice.camera', { channel_id: channelId, enabled: true })
+  },
+
+  setVoiceExpanded(expanded) {
+    if (!get().voice.channelId) return
+    set((s) => ({ voice: { ...s.voice, expanded } }))
   },
 
   totalUnread() {
@@ -1115,6 +1167,7 @@ export const useStore = create<State>((set, get) => ({
               [p.participant.conn_id]: {
                 user_id: p.participant.user_id,
                 muted: p.participant.muted,
+                camera_on: p.participant.camera_on,
               },
             },
           },
@@ -1170,18 +1223,46 @@ export const useStore = create<State>((set, get) => ({
         const p = env.payload as VoiceParticipantUpdatedPayload
         set((s) => {
           const room = s.voiceRooms[p.channel_id]
-          const participant = room?.[p.conn_id]
-          if (!room || !participant) return {}
+          if (!room || !room[p.participant.conn_id]) return {}
           return {
             voiceRooms: {
               ...s.voiceRooms,
               [p.channel_id]: {
                 ...room,
-                [p.conn_id]: { ...participant, muted: p.muted },
+                [p.participant.conn_id]: {
+                  user_id: p.participant.user_id,
+                  muted: p.participant.muted,
+                  camera_on: p.participant.camera_on,
+                },
               },
             },
           }
         })
+
+        const active = get().voice
+        if (p.participant.conn_id === get().myConnId && active.channelId === p.channel_id) {
+          if (p.participant.camera_on && active.cameraStatus === 'starting' && active.client) {
+            const client = active.client
+            void client.startCamera().catch((error) => {
+              if (get().voice.client !== client) return
+              client.stopCamera()
+              get().ws?.send('voice.camera', { channel_id: p.channel_id, enabled: false })
+              set((s) => ({ voice: { ...s.voice, cameraStatus: 'off', localStream: null } }))
+              toastError(error instanceof Error ? error.message : 'Could not start the camera.')
+            })
+          } else if (!p.participant.camera_on) {
+            active.client?.stopCamera()
+            set((s) => ({
+              voice: { ...s.voice, cameraStatus: 'off', localStream: null },
+            }))
+          }
+        } else if (!p.participant.camera_on && active.channelId === p.channel_id) {
+          set((s) => {
+            const remoteStreams = { ...s.voice.remoteStreams }
+            delete remoteStreams[p.participant.conn_id]
+            return { voice: { ...s.voice, remoteStreams } }
+          })
+        }
         break
       }
       case 'voice.signal': {
@@ -1196,6 +1277,11 @@ export const useStore = create<State>((set, get) => ({
       }
       case 'voice.error': {
         const p = env.payload as VoiceErrorPayload
+        if (p.code === 'camera_full') {
+          set((s) => ({ voice: { ...s.voice, cameraStatus: 'off', localStream: null } }))
+          toastError(voiceErrorMessage(p.code))
+          break
+        }
         get().voice.client?.stop()
         set({ voice: emptyVoiceState() })
         toastError(voiceErrorMessage(p.code))
@@ -1410,6 +1496,7 @@ function voiceRoomFromParticipants(
     room[participant.conn_id] = {
       user_id: participant.user_id,
       muted: participant.muted,
+      camera_on: participant.camera_on,
     }
   }
   return room
@@ -1431,6 +1518,8 @@ function voiceErrorMessage(code: string): string {
       return 'You are not a member of this channel.'
     case 'not_in_room':
       return 'You are no longer in this voice room.'
+    case 'camera_full':
+      return 'Four cameras are already active. You are still connected by audio.'
     default:
       return `Voice error: ${code}`
   }

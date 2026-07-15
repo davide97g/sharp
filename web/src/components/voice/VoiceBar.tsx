@@ -8,18 +8,23 @@ type Participant = {
   connIds: string[]
   muted: boolean
   speaking: boolean
+  cameraOn: boolean
 }
 
 export function VoiceBar({ compact = false }: { compact?: boolean }) {
   const channelId = useStore((s) => s.voice.channelId)
   const status = useStore((s) => s.voice.status)
   const muted = useStore((s) => s.voice.muted)
+  const cameraStatus = useStore((s) => s.voice.cameraStatus)
+  const expanded = useStore((s) => s.voice.expanded)
   const speaking = useStore((s) => s.voice.speaking)
   const room = useStore((s) => (channelId ? s.voiceRooms[channelId] : undefined))
   const channel = useStore((s) => s.channels.find((c) => c.id === channelId))
   const users = useStore((s) => s.users)
   const me = useStore((s) => s.me)
   const toggleVoiceMute = useStore((s) => s.toggleVoiceMute)
+  const toggleVoiceCamera = useStore((s) => s.toggleVoiceCamera)
+  const setVoiceExpanded = useStore((s) => s.setVoiceExpanded)
   const leaveVoice = useStore((s) => s.leaveVoice)
 
   const participants = useMemo(() => {
@@ -30,12 +35,14 @@ export function VoiceBar({ compact = false }: { compact?: boolean }) {
         existing.connIds.push(connId)
         existing.muted = existing.muted && entry.muted
         existing.speaking = existing.speaking || Boolean(speaking[connId])
+        existing.cameraOn = existing.cameraOn || entry.camera_on
       } else {
         byUser.set(entry.user_id, {
           userId: entry.user_id,
           connIds: [connId],
           muted: entry.muted,
           speaking: Boolean(speaking[connId]),
+          cameraOn: entry.camera_on,
         })
       }
     }
@@ -79,7 +86,22 @@ export function VoiceBar({ compact = false }: { compact?: boolean }) {
             ))}
           </ul>
         )}
-        <div className="flex gap-1">
+        <div className="grid grid-cols-2 gap-1">
+          <VoiceControl
+            label={cameraStatus === 'on' ? 'Turn camera off' : 'Turn camera on'}
+            active={cameraStatus !== 'off'}
+            disabled={status !== 'connected' || cameraStatus === 'starting'}
+            onClick={toggleVoiceCamera}
+          >
+            <CameraIcon off={cameraStatus === 'off'} />
+          </VoiceControl>
+          <VoiceControl
+            label={expanded ? 'Collapse call stage' : 'Expand call stage'}
+            active={expanded}
+            onClick={() => setVoiceExpanded(!expanded)}
+          >
+            <ExpandIcon expanded={expanded} />
+          </VoiceControl>
           <VoiceControl
             label={muted ? 'Unmute microphone' : 'Mute microphone'}
             active={muted}
@@ -121,6 +143,21 @@ export function VoiceBar({ compact = false }: { compact?: boolean }) {
           </div>
         </div>
         <div className="flex gap-1">
+          <VoiceControl
+            label={cameraStatus === 'on' ? 'Turn camera off' : 'Turn camera on'}
+            active={cameraStatus !== 'off'}
+            disabled={status !== 'connected' || cameraStatus === 'starting'}
+            onClick={toggleVoiceCamera}
+          >
+            <CameraIcon off={cameraStatus === 'off'} />
+          </VoiceControl>
+          <VoiceControl
+            label={expanded ? 'Collapse call stage' : 'Expand call stage'}
+            active={expanded}
+            onClick={() => setVoiceExpanded(!expanded)}
+          >
+            <ExpandIcon expanded={expanded} />
+          </VoiceControl>
           <VoiceControl
             label={muted ? 'Unmute microphone' : 'Mute microphone'}
             active={muted}
@@ -176,7 +213,11 @@ function ParticipantAvatar({
   name: string
   size: number
 }) {
-  const state = [participant.speaking ? 'speaking' : '', participant.muted ? 'muted' : '']
+  const state = [
+    participant.speaking ? 'speaking' : '',
+    participant.muted ? 'muted' : '',
+    participant.cameraOn ? 'camera on' : '',
+  ]
     .filter(Boolean)
     .join(', ')
   return (
@@ -201,12 +242,14 @@ function VoiceControl({
   label,
   active = false,
   danger = false,
+  disabled = false,
   onClick,
   children,
 }: {
   label: string
   active?: boolean
   danger?: boolean
+  disabled?: boolean
   onClick: () => void
   children: React.ReactNode
 }) {
@@ -214,9 +257,10 @@ function VoiceControl({
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       aria-label={label}
       title={label}
-      className={`flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+      className={`flex h-8 w-8 items-center justify-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50 ${
         danger
           ? 'text-[var(--color-text-dim)] hover:bg-red-500/15 hover:text-red-300'
           : active
@@ -226,6 +270,38 @@ function VoiceControl({
     >
       {children}
     </button>
+  )
+}
+
+function CameraIcon({ off }: { off: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="m16 13 5 3V8l-5 3" />
+      <rect x="3" y="6" width="13" height="12" rx="2" />
+      {off && <path d="m3 3 18 18" />}
+    </svg>
+  )
+}
+
+function ExpandIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      {expanded ? (
+        <>
+          <path d="M8 3v5H3" />
+          <path d="m3 8 5-5" />
+          <path d="M16 21v-5h5" />
+          <path d="m21 16-5 5" />
+        </>
+      ) : (
+        <>
+          <path d="M15 3h6v6" />
+          <path d="m21 3-7 7" />
+          <path d="M9 21H3v-6" />
+          <path d="m3 21 7-7" />
+        </>
+      )}
+    </svg>
   )
 }
 

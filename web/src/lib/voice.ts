@@ -7,13 +7,21 @@ type VoiceClientOpts = {
   iceServers: RTCIceServer[]
   send: (type: string, payload: unknown) => void
   onSpeaking?: (connId: string, speaking: boolean) => void
+  onLocalStream?: (stream: MediaStream | null) => void
+  onRemoteStream?: (connId: string, stream: MediaStream | null) => void
 }
 
 type Peer = {
   pc: RTCPeerConnection
   remoteUser: string
-  audio: HTMLAudioElement | null
+  audio: HTMLAudioElement
+  stream: MediaStream
   pendingCandidates: RTCIceCandidateInit[]
+  polite: boolean
+  makingOffer: boolean
+  ignoreOffer: boolean
+  isSettingRemoteAnswerPending: boolean
+  negotiated: boolean
 }
 
 type SpeakingDetector = {
@@ -26,6 +34,7 @@ type SpeakingDetector = {
 
 const SPEAKING_THRESHOLD = 0.04
 const SPEAKING_HYSTERESIS_MS = 150
+const VIDEO_MAX_BITRATE = 500_000
 
 export class VoiceClient {
   private channelId: string
@@ -34,8 +43,11 @@ export class VoiceClient {
   private iceServers: RTCIceServer[]
   private send: (type: string, payload: unknown) => void
   private onSpeaking?: (connId: string, speaking: boolean) => void
+  private onLocalStream?: (stream: MediaStream | null) => void
+  private onRemoteStream?: (connId: string, stream: MediaStream | null) => void
 
   private localStream: MediaStream | null = null
+  private cameraTrack: MediaStreamTrack | null = null
   private peers = new Map<string, Peer>()
   private audioContext: AudioContext | null = null
   private speakingDetectors = new Map<string, SpeakingDetector>()
@@ -49,6 +61,8 @@ export class VoiceClient {
     this.iceServers = opts.iceServers
     this.send = opts.send
     this.onSpeaking = opts.onSpeaking
+    this.onLocalStream = opts.onLocalStream
+    this.onRemoteStream = opts.onRemoteStream
   }
 
   async start() {
@@ -59,6 +73,50 @@ export class VoiceClient {
     }
     this.localStream = stream
     this.startSpeakingDetection(this.myConnId, stream)
+  }
+
+  async startCamera() {
+    if (this.stopped || !this.localStream || this.cameraTrack) return
+    const cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: 'user',
+        width: { ideal: 640 },
+        height: { ideal: 360 },
+        frameRate: { ideal: 20, max: 24 },
+      },
+    })
+    const track = cameraStream.getVideoTracks()[0]
+    if (!track) {
+      for (const mediaTrack of cameraStream.getTracks()) mediaTrack.stop()
+      throw new Error('No camera was found.')
+    }
+    if (this.stopped || !this.localStream) {
+      track.stop()
+      return
+    }
+
+    this.cameraTrack = track
+    this.localStream.addTrack(track)
+    track.addEventListener('ended', this.handleCameraEnded, { once: true })
+    for (const peer of this.peers.values()) {
+      const sender = peer.pc.addTrack(track, this.localStream)
+      void configureVideoSender(sender)
+    }
+    this.onLocalStream?.(this.localStream)
+  }
+
+  stopCamera() {
+    const track = this.cameraTrack
+    if (!track) return
+    this.cameraTrack = null
+    track.removeEventListener('ended', this.handleCameraEnded)
+    this.localStream?.removeTrack(track)
+    for (const peer of this.peers.values()) {
+      const sender = peer.pc.getSenders().find((candidate) => candidate.track === track)
+      if (sender) peer.pc.removeTrack(sender)
+    }
+    track.stop()
+    this.onLocalStream?.(null)
   }
 
   syncPeers(participants: VoiceParticipant[]) {
@@ -91,16 +149,29 @@ export class VoiceClient {
     }
 
     const pc = new RTCPeerConnection({ iceServers: this.iceServers })
+    const stream = new MediaStream()
+    const audio = document.createElement('audio')
+    audio.autoplay = true
+    audio.style.display = 'none'
+    audio.srcObject = stream
+    document.body.appendChild(audio)
     const peer: Peer = {
       pc,
       remoteUser,
-      audio: null,
+      audio,
+      stream,
       pendingCandidates: [],
+      polite: this.myConnId > remoteConn,
+      makingOffer: false,
+      ignoreOffer: false,
+      isSettingRemoteAnswerPending: false,
+      negotiated: false,
     }
     this.peers.set(remoteConn, peer)
 
-    for (const track of this.localStream.getAudioTracks()) {
-      pc.addTrack(track, this.localStream)
+    for (const track of this.localStream.getTracks()) {
+      const sender = pc.addTrack(track, this.localStream)
+      if (track.kind === 'video') void configureVideoSender(sender)
     }
 
     pc.onicecandidate = (event) => {
@@ -109,54 +180,101 @@ export class VoiceClient {
     }
 
     pc.ontrack = (event) => {
-      if (this.stopped || this.peers.get(remoteConn) !== peer || peer.audio) return
-      const stream = event.streams[0] ?? new MediaStream([event.track])
-      const audio = document.createElement('audio')
-      audio.autoplay = true
-      audio.style.display = 'none'
-      audio.srcObject = stream
-      document.body.appendChild(audio)
-      peer.audio = audio
-      this.startSpeakingDetection(remoteConn, stream)
+      if (this.stopped || this.peers.get(remoteConn) !== peer) return
+      if (!stream.getTracks().some((track) => track.id === event.track.id)) {
+        stream.addTrack(event.track)
+      }
+      if (event.track.kind === 'audio') this.startSpeakingDetection(remoteConn, stream)
+      event.track.addEventListener(
+        'ended',
+        () => {
+          stream.removeTrack(event.track)
+          this.onRemoteStream?.(remoteConn, stream.getVideoTracks().length ? stream : null)
+        },
+        { once: true },
+      )
+      this.onRemoteStream?.(remoteConn, stream)
     }
 
-    if (this.myConnId < remoteConn) {
-      void this.createAndSendOffer(remoteConn, peer)
+    pc.onnegotiationneeded = async () => {
+      // Let one deterministic peer make the first offer. Perfect negotiation
+      // handles later simultaneous camera changes after the connection exists.
+      if (!peer.negotiated && this.myConnId > remoteConn) return
+      try {
+        peer.makingOffer = true
+        await pc.setLocalDescription()
+        const description = pc.localDescription
+        if (
+          this.stopped ||
+          this.peers.get(remoteConn) !== peer ||
+          !description ||
+          (description.type !== 'offer' && description.type !== 'answer')
+        ) {
+          return
+        }
+        this.sendSignal(remoteUser, remoteConn, description.type, {
+          type: description.type,
+          sdp: description.sdp,
+        })
+      } catch (error) {
+        if (!this.stopped) console.error('Failed to negotiate voice peer', error)
+      } finally {
+        peer.makingOffer = false
+      }
     }
   }
 
-  async onSignal(p: VoiceSignalPayload) {
-    if (this.stopped || p.to_conn !== this.myConnId || p.channel_id !== this.channelId) return
+  async onSignal(payload: VoiceSignalPayload) {
+    if (
+      this.stopped ||
+      payload.to_conn !== this.myConnId ||
+      payload.channel_id !== this.channelId
+    ) {
+      return
+    }
 
-    this.ensurePeer(p.from_conn, p.from_user)
-    const peer = this.peers.get(p.from_conn)
+    this.ensurePeer(payload.from_conn, payload.from_user)
+    const peer = this.peers.get(payload.from_conn)
     if (!peer) return
 
-    if (p.kind === 'offer') {
-      await peer.pc.setRemoteDescription(p.data as RTCSessionDescriptionInit)
-      await this.flushCandidates(peer)
-      const answer = await peer.pc.createAnswer()
-      await peer.pc.setLocalDescription(answer)
-      if (this.stopped || this.peers.get(p.from_conn) !== peer) return
-      this.sendSignal(p.from_user, p.from_conn, 'answer', {
-        type: answer.type,
-        sdp: answer.sdp,
+    if (payload.kind === 'candidate') {
+      const candidate = payload.data as RTCIceCandidateInit
+      if (!peer.pc.remoteDescription) {
+        peer.pendingCandidates.push(candidate)
+        return
+      }
+      try {
+        await peer.pc.addIceCandidate(candidate)
+      } catch (error) {
+        if (!peer.ignoreOffer) throw error
+      }
+      return
+    }
+
+    const description = payload.data as RTCSessionDescriptionInit
+    const readyForOffer =
+      !peer.makingOffer &&
+      (peer.pc.signalingState === 'stable' || peer.isSettingRemoteAnswerPending)
+    const offerCollision = description.type === 'offer' && !readyForOffer
+    peer.ignoreOffer = !peer.polite && offerCollision
+    if (peer.ignoreOffer) return
+
+    peer.isSettingRemoteAnswerPending = description.type === 'answer'
+    await peer.pc.setRemoteDescription(description)
+    peer.isSettingRemoteAnswerPending = false
+    peer.negotiated = true
+    await this.flushCandidates(peer)
+
+    if (description.type === 'offer') {
+      await peer.pc.setLocalDescription()
+      if (this.stopped || this.peers.get(payload.from_conn) !== peer || !peer.pc.localDescription) {
+        return
+      }
+      this.sendSignal(payload.from_user, payload.from_conn, 'answer', {
+        type: peer.pc.localDescription.type,
+        sdp: peer.pc.localDescription.sdp,
       })
-      return
     }
-
-    if (p.kind === 'answer') {
-      await peer.pc.setRemoteDescription(p.data as RTCSessionDescriptionInit)
-      await this.flushCandidates(peer)
-      return
-    }
-
-    const candidate = p.data as RTCIceCandidateInit
-    if (!peer.pc.remoteDescription) {
-      peer.pendingCandidates.push(candidate)
-      return
-    }
-    await peer.pc.addIceCandidate(candidate)
   }
 
   removePeer(connId: string) {
@@ -165,9 +283,11 @@ export class VoiceClient {
     this.peers.delete(connId)
     peer.pc.onicecandidate = null
     peer.pc.ontrack = null
+    peer.pc.onnegotiationneeded = null
     peer.pc.close()
-    peer.audio?.remove()
-    peer.audio = null
+    peer.audio.remove()
+    for (const track of peer.stream.getTracks()) track.stop()
+    this.onRemoteStream?.(connId, null)
     this.stopSpeakingDetection(connId)
   }
 
@@ -181,6 +301,7 @@ export class VoiceClient {
     if (this.stopped) return
     this.stopped = true
 
+    this.stopCamera()
     for (const connId of [...this.peers.keys()]) this.removePeer(connId)
     for (const track of this.localStream?.getTracks() ?? []) track.stop()
     this.localStream = null
@@ -198,18 +319,10 @@ export class VoiceClient {
     }
   }
 
-  private async createAndSendOffer(remoteConn: string, peer: Peer) {
-    try {
-      const offer = await peer.pc.createOffer()
-      await peer.pc.setLocalDescription(offer)
-      if (this.stopped || this.peers.get(remoteConn) !== peer) return
-      this.sendSignal(peer.remoteUser, remoteConn, 'offer', {
-        type: offer.type,
-        sdp: offer.sdp,
-      })
-    } catch (error) {
-      if (!this.stopped) console.error('Failed to create voice offer', error)
-    }
+  private handleCameraEnded = () => {
+    if (this.stopped || !this.cameraTrack) return
+    this.stopCamera()
+    this.send('voice.camera', { channel_id: this.channelId, enabled: false })
   }
 
   private sendSignal(
@@ -230,12 +343,18 @@ export class VoiceClient {
   private async flushCandidates(peer: Peer) {
     const pending = peer.pendingCandidates.splice(0)
     for (const candidate of pending) {
-      await peer.pc.addIceCandidate(candidate)
+      try {
+        await peer.pc.addIceCandidate(candidate)
+      } catch (error) {
+        if (!peer.ignoreOffer) throw error
+      }
     }
   }
 
   private startSpeakingDetection(connId: string, stream: MediaStream) {
-    if (this.stopped || this.speakingDetectors.has(connId)) return
+    if (this.stopped || this.speakingDetectors.has(connId) || !stream.getAudioTracks().length) {
+      return
+    }
     const context = this.audioContext ?? new AudioContext()
     this.audioContext = context
     void context.resume().catch(() => {})
@@ -289,5 +408,16 @@ export class VoiceClient {
     }
 
     this.speakingFrame = requestAnimationFrame(this.detectSpeaking)
+  }
+}
+
+async function configureVideoSender(sender: RTCRtpSender) {
+  try {
+    const parameters = sender.getParameters()
+    if (!parameters.encodings.length) parameters.encodings.push({})
+    parameters.encodings[0].maxBitrate = VIDEO_MAX_BITRATE
+    await sender.setParameters(parameters)
+  } catch (error) {
+    console.warn('Could not apply camera bitrate limit', error)
   }
 }

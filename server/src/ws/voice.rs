@@ -9,12 +9,14 @@ use std::sync::Mutex;
 use uuid::Uuid;
 
 const MAX_PARTICIPANTS: usize = 8;
+const MAX_CAMERAS: usize = 4;
 
 #[derive(Clone, Serialize)]
 pub struct VoiceParticipant {
     pub conn_id: Uuid,
     pub user_id: Uuid,
     pub muted: bool,
+    pub camera_on: bool,
 }
 
 #[derive(Default)]
@@ -58,6 +60,7 @@ pub async fn handle_voice_event(
         "voice.join" => handle_join(state, user_id, conn_id, &payload, tx).await,
         "voice.leave" => handle_leave(state, user_id, conn_id, &payload, tx).await,
         "voice.mute" => handle_mute(state, conn_id, &payload, tx).await,
+        "voice.camera" => handle_camera(state, conn_id, &payload, tx).await,
         "voice.signal" => handle_signal(state, user_id, conn_id, &payload, tx).await,
         _ => {}
     }
@@ -179,6 +182,7 @@ async fn handle_join(
                 conn_id,
                 user_id,
                 muted: false,
+                camera_on: false,
             };
             room.participants.insert(conn_id, participant.clone());
             JoinResult::Joined(participant, room_participants(room))
@@ -254,19 +258,89 @@ async fn handle_mute(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &W
     let Some(muted) = payload.get("muted").and_then(Value::as_bool) else {
         return;
     };
-    let updated = {
+    let participant = {
         let mut guard = state.voice_rooms.lock().unwrap();
         guard
             .get_mut(&channel_id)
             .and_then(|room| room.participants.get_mut(&conn_id))
-            .map(|participant| participant.muted = muted)
-            .is_some()
+            .map(|participant| {
+                participant.muted = muted;
+                participant.clone()
+            })
     };
-    if !updated {
+    let Some(participant) = participant else {
         send_error(tx, channel_id, "not_in_room");
         return;
+    };
+
+    broadcast_participant_updated(state, channel_id, participant).await;
+}
+
+async fn handle_camera(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &WsSender) {
+    let Some(channel_id) = channel_id(payload) else {
+        return;
+    };
+    let Some(enabled) = payload.get("enabled").and_then(Value::as_bool) else {
+        return;
+    };
+
+    let result = {
+        let mut guard = state.voice_rooms.lock().unwrap();
+        match guard.get_mut(&channel_id) {
+            Some(room) => update_camera(room, conn_id, enabled),
+            None => CameraUpdateResult::Missing,
+        }
+    };
+
+    let participant = match result {
+        CameraUpdateResult::Missing => {
+            send_error(tx, channel_id, "not_in_room");
+            return;
+        }
+        CameraUpdateResult::Full => {
+            send_error(tx, channel_id, "camera_full");
+            return;
+        }
+        CameraUpdateResult::Updated(participant) => participant,
+    };
+
+    broadcast_participant_updated(state, channel_id, participant).await;
+}
+
+enum CameraUpdateResult {
+    Missing,
+    Full,
+    Updated(VoiceParticipant),
+}
+
+fn update_camera(room: &mut VoiceRoom, conn_id: Uuid, enabled: bool) -> CameraUpdateResult {
+    let Some(current) = room.participants.get(&conn_id) else {
+        return CameraUpdateResult::Missing;
+    };
+    if current.camera_on == enabled {
+        return CameraUpdateResult::Updated(current.clone());
+    }
+    if enabled
+        && room
+            .participants
+            .values()
+            .filter(|participant| participant.camera_on)
+            .count()
+            >= MAX_CAMERAS
+    {
+        return CameraUpdateResult::Full;
     }
 
+    let participant = room.participants.get_mut(&conn_id).unwrap();
+    participant.camera_on = enabled;
+    CameraUpdateResult::Updated(participant.clone())
+}
+
+async fn broadcast_participant_updated(
+    state: &SharedState,
+    channel_id: Uuid,
+    participant: VoiceParticipant,
+) {
     let targets = match channel_member_ids(&state.pool, channel_id).await {
         Ok(targets) => targets,
         Err(error) => {
@@ -278,8 +352,7 @@ async fn handle_mute(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &W
         "voice.participant_updated",
         json!({
             "channel_id": channel_id.to_string(),
-            "conn_id": conn_id.to_string(),
-            "muted": muted,
+            "participant": participant,
         }),
     );
     state.hub.broadcast(event, targets).await;
@@ -405,4 +478,108 @@ async fn broadcast_participant_left(
     };
     let event = participant_left_event(channel_id, conn_id, user_id);
     state.hub.broadcast(event, targets).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn participant(camera_on: bool) -> VoiceParticipant {
+        VoiceParticipant {
+            conn_id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            muted: false,
+            camera_on,
+        }
+    }
+
+    fn room_with(camera_states: &[bool]) -> VoiceRoom {
+        let participants = camera_states
+            .iter()
+            .map(|camera_on| participant(*camera_on))
+            .map(|participant| (participant.conn_id, participant))
+            .collect();
+        VoiceRoom { participants }
+    }
+
+    #[test]
+    fn camera_toggle_is_idempotent() {
+        let mut room = room_with(&[false]);
+        let conn_id = *room.participants.keys().next().unwrap();
+
+        assert!(matches!(
+            update_camera(&mut room, conn_id, false),
+            CameraUpdateResult::Updated(participant) if !participant.camera_on
+        ));
+        assert!(matches!(
+            update_camera(&mut room, conn_id, true),
+            CameraUpdateResult::Updated(participant) if participant.camera_on
+        ));
+        assert!(matches!(
+            update_camera(&mut room, conn_id, true),
+            CameraUpdateResult::Updated(participant) if participant.camera_on
+        ));
+    }
+
+    #[test]
+    fn fifth_camera_is_rejected_until_slot_is_released() {
+        let mut room = room_with(&[true, true, true, true, false]);
+        let waiting = room
+            .participants
+            .values()
+            .find(|participant| !participant.camera_on)
+            .unwrap()
+            .conn_id;
+        assert!(matches!(
+            update_camera(&mut room, waiting, true),
+            CameraUpdateResult::Full
+        ));
+
+        let active = room
+            .participants
+            .values()
+            .find(|participant| participant.camera_on)
+            .unwrap()
+            .conn_id;
+        assert!(matches!(
+            update_camera(&mut room, active, false),
+            CameraUpdateResult::Updated(participant) if !participant.camera_on
+        ));
+        assert!(matches!(
+            update_camera(&mut room, waiting, true),
+            CameraUpdateResult::Updated(participant) if participant.camera_on
+        ));
+    }
+
+    #[test]
+    fn camera_toggle_requires_room_participant() {
+        let mut room = room_with(&[false]);
+        assert!(matches!(
+            update_camera(&mut room, Uuid::new_v4(), true),
+            CameraUpdateResult::Missing
+        ));
+    }
+
+    #[test]
+    fn removing_participant_releases_camera_slot() {
+        let mut room = room_with(&[true, true, true, true, false]);
+        let active = room
+            .participants
+            .values()
+            .find(|participant| participant.camera_on)
+            .unwrap()
+            .conn_id;
+        let waiting = room
+            .participants
+            .values()
+            .find(|participant| !participant.camera_on)
+            .unwrap()
+            .conn_id;
+
+        room.participants.remove(&active);
+        assert!(matches!(
+            update_camera(&mut room, waiting, true),
+            CameraUpdateResult::Updated(participant) if participant.camera_on
+        ));
+    }
 }

@@ -7,6 +7,7 @@ import { CompactSidebar } from './CompactSidebar'
 import { ThreadPanel } from './ThreadPanel'
 import { QuickSwitcher } from './QuickSwitcher'
 import { VoiceBar } from './voice/VoiceBar'
+import { VideoStage } from './voice/VideoStage'
 import { useStore } from '../store'
 
 const SIDEBAR_OPEN_KEY = 'sharp.sidebarOpen'
@@ -22,6 +23,7 @@ function isEditableTarget(target: EventTarget | null) {
 export function AppShell() {
   const setQuickSwitcher = useStore((s) => s.setQuickSwitcher)
   const channels = useStore((s) => s.channels)
+  const voiceExpanded = useStore((s) => s.voice.expanded)
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(
     () => window.localStorage.getItem(SIDEBAR_OPEN_KEY) !== 'false',
@@ -88,8 +90,8 @@ export function AppShell() {
         )}
         <VoiceBar compact={!sidebarOpen} />
       </div>
-      <Outlet />
-      {mode === 'chat' && <ThreadPanel />}
+      {voiceExpanded ? <VideoStage /> : <Outlet />}
+      {!voiceExpanded && mode === 'chat' && <ThreadPanel />}
       <QuickSwitcher />
     </div>
   )

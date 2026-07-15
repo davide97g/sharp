@@ -493,10 +493,11 @@ doc REST surface, the per-channel + per-doc role model, trash/restore, and the
   `components/docs/` (Home / channel list / sidebar / editor). The tldraw editor chunk is
   lazy-loaded, and tldraw assets are **self-hosted** (bundled by Vite) — no CDN dependency.
 
-# Phase 4 — Voice rooms (WebRTC mesh)
+# Phase 4 — Voice + camera rooms (WebRTC mesh)
 
-Ephemeral P2P-mesh WebRTC audio rooms on every channel and DM. Browsers connect directly;
-the server does signaling only — no media passes through it and there is no SFU.
+Ephemeral P2P-mesh WebRTC audio rooms with optional webcam video on every channel and DM.
+Browsers connect directly; the server does signaling and media-state coordination only — no
+media passes through it and there is no SFU.
 
 ## Principles
 
@@ -504,17 +505,20 @@ the server does signaling only — no media passes through it and there is no SF
   one voice room. A room exists while it has at least one participant.
 - **Ephemeral state**: rooms have no database tables, persistence, or migration. The room
   registry lives in server memory.
-- **P2P mesh audio**: every eligible participant connects directly to every other eligible
+- **P2P mesh media**: every eligible participant connects directly to every other eligible
   participant. The server relays signaling messages only and never handles media.
-- **Capacity**: the server enforces a maximum of **8 participants** per room.
-- **Audio-only v1**: video, screen sharing, and WebRTC renegotiation are deferred.
+- **Capacity**: the server enforces a maximum of **8 audio participants** and **4 active
+  cameras** per room. A rejected fifth camera stays connected by audio.
+- **Web camera scope**: webcam video is supported in the browser client. Screen sharing,
+  broadcast, recording, virtual backgrounds, mobile support, and desktop-specific camera
+  permission work are deferred.
 
 ## Wire types
 
 All ids are strings in JSON (UUIDs). A WebSocket connection id is the peer identity.
 
 ```ts
-VoiceParticipant = { conn_id: string, user_id: string, muted: boolean }
+VoiceParticipant = { conn_id: string, user_id: string, muted: boolean, camera_on: boolean }
 VoiceRoomSnapshot = { channel_id: string, participants: VoiceParticipant[] }
 VoiceSignalKind = 'offer'|'answer'|'candidate'
 ```
@@ -528,6 +532,7 @@ Client → server:
 - `voice.join` `{channel_id}`
 - `voice.leave` `{channel_id}`
 - `voice.mute` `{channel_id, muted: boolean}`
+- `voice.camera` `{channel_id, enabled: boolean}`
 - `voice.signal` `{channel_id, to_user, to_conn, kind: "offer"|"answer"|"candidate", data: object}`
   — `data` is SDP `{type,sdp}` for an offer/answer, or `RTCIceCandidateInit` for a candidate.
 
@@ -536,31 +541,35 @@ Server → client:
 - `hello` payload is extended with `conn_id: string` and
   `voice_rooms: VoiceRoomSnapshot[]`, where each snapshot is
   `{channel_id, participants: VoiceParticipant[]}` and each participant is
-  `{conn_id, user_id, muted: boolean}`.
+  `{conn_id, user_id, muted: boolean, camera_on: boolean}`.
 - `voice.state` `{channel_id, participants: VoiceParticipant[]}` — sent only to the joining
   connection immediately after a successful join.
 - `voice.participant_joined` `{channel_id, participant: VoiceParticipant}` — broadcast to
   all channel members.
 - `voice.participant_left` `{channel_id, conn_id, user_id}` — broadcast to all channel
   members.
-- `voice.participant_updated` `{channel_id, conn_id, muted}` — broadcast to all channel
-  members.
+- `voice.participant_updated` `{channel_id, participant: VoiceParticipant}` — broadcast to
+  all channel members after mute or camera state changes.
 - `voice.signal` `{channel_id, from_user, from_conn, to_user, to_conn, kind, data}` —
   delivered to `to_user`'s connections; receivers filter on
   `to_conn === my conn_id`.
-- `voice.error` `{channel_id, code: "room_full"|"not_member"|"not_in_room"}` — sent only
-  to the offending connection.
+- `voice.error`
+  `{channel_id, code: "room_full"|"camera_full"|"not_member"|"not_in_room"}` — sent only
+  to the offending connection. `camera_full` does not end the audio call.
 
 ## Server behavior
 
 - `voice.join`: verify membership with `routes::is_member`; check the 8-participant cap and
   send `voice.error` with `code: "room_full"` to the sender only when full. Insert the
-  participant with `muted=false`, reply with `voice.state` on the sender's tx only, then
+  participant with `muted=false, camera_on=false`, reply with `voice.state` on the sender's tx only, then
   call `hub.broadcast(voice.participant_joined, channel_member_ids)`. Joining twice from
   the same conn is idempotent and re-sends `voice.state`.
 - `voice.leave`: remove the sender's conn from the room, drop the room when empty, and
   broadcast `voice.participant_left`.
 - `voice.mute`: update the participant's flag and broadcast `voice.participant_updated`.
+- `voice.camera`: require an active room participant; atomically reserve/release a camera
+  slot and broadcast the complete participant state. Enabling is rejected with `camera_full`
+  when four slots are already reserved. Repeated requests are idempotent.
 - `voice.signal`: the sender must be a participant of `channel_id`; otherwise send
   `voice.error` with `code: "not_in_room"`. Relay with
   `hub.broadcast(envelope, vec![to_user])`, adding `from_user` and `from_conn`.
@@ -575,12 +584,27 @@ Server → client:
 - Peer identity is the WS connection id (`conn_id`, a UUID string). A user may have
   multiple connections, and each is a distinct mesh peer. The main WS `hello` event tells
   the client its own `conn_id`.
-- To avoid offer glare, when two participants must connect, the participant with the
-  **lexicographically smaller conn_id string** creates the WebRTC offer.
+- The lexicographically smaller `conn_id` creates the initial offer. Peers then use WebRTC
+  perfect negotiation for camera track addition/removal; the larger `conn_id` is the polite
+  peer, making simultaneous toggles deterministic and glare-safe.
 - A client never creates a peer connection to a conn whose `user_id` equals its own, which
   prevents self-echo across the user's devices and tabs.
 - ICE candidates are trickled through `voice.signal` as they become available.
-- Audio-only v1 performs no renegotiation.
+- Camera capture uses ideal 640×360 at 20 fps (24 fps maximum), with an approximate
+  500 kbps outgoing-sender cap to constrain mesh upload cost.
+
+## Web camera UI and lifecycle
+
+- Joining remains audio-first. Camera capture starts only after an explicit toggle and a
+  successful server slot reservation.
+- The expandable call stage replaces main content while open. It shows every participant
+  in a responsive grid; camera-off participants retain avatar, mute, and speaking state.
+- Local preview is mirrored; remote video is not. Remote audio continues through hidden
+  audio elements independently of stage visibility.
+- Camera stays active when the stage collapses or navigation changes. The persistent voice
+  bar shows camera state and retains the off control.
+- Camera-off, call leave, logout, page unload, or WebSocket reconnection stops local tracks.
+  Permission/device failure releases the reserved slot and leaves audio connected.
 
 ## REST API addition — base `/api/v1`
 
@@ -608,8 +632,8 @@ it shows a toast and plays a ring chime. Voice v1 has no accept/decline state ma
 ## Desktop
 
 The macOS Tauri build requires `NSMicrophoneUsageDescription` in `Info.plist` and the
-`com.apple.security.device.audio-input` entitlement. Microphone support in the Linux and
-Windows WebViews is unvalidated.
+`com.apple.security.device.audio-input` entitlement for existing audio. Browser camera is
+the supported video target; Tauri camera behavior and Linux/Windows WebViews are unvalidated.
 
 ## Roadmap after v1
 

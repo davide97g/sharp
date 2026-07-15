@@ -124,6 +124,7 @@ export type VoiceParticipant = {
   conn_id: string
   user_id: string
   muted: boolean
+  camera_on: boolean
 }
 
 export type VoiceRoomSnapshot = {
@@ -167,8 +168,7 @@ export type VoiceParticipantLeftPayload = {
 }
 export type VoiceParticipantUpdatedPayload = {
   channel_id: string
-  conn_id: string
-  muted: boolean
+  participant: VoiceParticipant
 }
 export type VoiceSignalPayload = {
   channel_id: string
