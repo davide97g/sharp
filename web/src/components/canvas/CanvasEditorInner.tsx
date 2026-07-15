@@ -13,6 +13,11 @@ export type Peer = { clientId: number; name: string; color: string }
 // once at module scope.
 const assetUrls = getAssetUrlsByImport()
 
+// tldraw commercial license key (removes the watermark). Baked in at build time
+// via VITE_TLDRAW_LICENSE_KEY; undefined in dev falls back to the watermarked
+// non-commercial mode.
+const licenseKey = import.meta.env.VITE_TLDRAW_LICENSE_KEY as string | undefined
+
 export function CanvasEditorInner({
   docId,
   user,
@@ -111,6 +116,7 @@ export function CanvasEditorInner({
         <Tldraw
           store={storeWithStatus}
           assetUrls={assetUrls}
+          licenseKey={licenseKey}
           onMount={(editor) => {
             editorRef.current = editor
             editor.updateInstanceState({ isReadonly: !canEdit })

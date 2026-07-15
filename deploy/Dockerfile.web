@@ -19,6 +19,10 @@ COPY web/ ./
 # API/WS origin the SPA points at. Vite inlines this at build time.
 ARG VITE_API_URL
 ENV VITE_API_URL=${VITE_API_URL}
+# tldraw commercial license key (removes the canvas watermark). Also inlined at
+# build time; it ships in the public client bundle, so it is not a secret.
+ARG VITE_TLDRAW_LICENSE_KEY
+ENV VITE_TLDRAW_LICENSE_KEY=${VITE_TLDRAW_LICENSE_KEY}
 RUN bun run build
 
 # ---------- runtime ----------

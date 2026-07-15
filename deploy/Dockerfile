@@ -21,6 +21,10 @@ RUN bun install --frozen-lockfile || bun install
 COPY web/ ./
 # VITE_API_URL is intentionally unset: the SPA is served same-origin by the server,
 # so it uses window.location.origin for the API/WS base.
+# tldraw commercial license key (removes the canvas watermark). Inlined at build
+# time; it ships in the public client bundle, so it is not a secret.
+ARG VITE_TLDRAW_LICENSE_KEY
+ENV VITE_TLDRAW_LICENSE_KEY=${VITE_TLDRAW_LICENSE_KEY}
 RUN bun run build
 
 # ---------- 2. server builder ----------
