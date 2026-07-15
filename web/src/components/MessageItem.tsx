@@ -243,9 +243,10 @@ export function MessageItem({
       onMouseLeave={() => setShowPalette(false)}
     >
       {/* gutter: avatar or hover timestamp */}
-      <div className="w-9 shrink-0">
+      <div className="relative w-9 shrink-0">
         {grouped ? (
-          <span className="mt-0.5 hidden text-[10px] leading-5 text-[var(--color-text-faint)] group-hover:block">
+          // Absolute + nowrap so the hover timestamp never reflows the row height.
+          <span className="absolute right-0 top-0.5 hidden whitespace-nowrap text-[10px] leading-5 tabular-nums text-[var(--color-text-faint)] group-hover:block">
             {fmtTime(message.created_at)}
           </span>
         ) : (
