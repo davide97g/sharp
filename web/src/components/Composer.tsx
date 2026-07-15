@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
+import { resolveEmojiShortcode, searchEmojis } from '../lib/emoji'
 import { toastError } from '../lib/toast'
 import { fmtBytes } from '../lib/util'
 import { Avatar } from './Avatar'
@@ -17,22 +18,45 @@ type Pending = {
   error?: boolean
 }
 
-// A completion candidate: a person (@) or a resource — doc/canvas (#).
+// A completion candidate: person (@), resource (#), or emoji (:).
 type PickItem =
   | { kind: 'user'; id: string; name: string }
   | { kind: 'doc' | 'canvas'; id: string; title: string; channelName?: string }
+  | { kind: 'emoji'; id: string; name: string; native: string; shortcode: string }
 
-type Trigger = { type: '@' | '#'; start: number; query: string }
+type Trigger = { type: '@' | '#' | ':'; start: number; query: string }
 
-// Detect an open `@` (people) or `#` (resource) run ending at the caret. The
-// trigger char must sit at a word boundary (start / whitespace / `(`) so it
-// doesn't fire inside emails or words. The query is a single non-space token —
-// the list filters by it (you don't type multi-word names in full).
+// Detect an open `@` (people), `#` (resource), or `:` (emoji) run ending at the
+// caret. The trigger char must sit at a word boundary (start / whitespace / `(`)
+// so it doesn't fire inside emails, URLs (`://`), or words. Emoji queries are
+// Slack-style shortcode chars only (`a-z0-9_+-`).
 function detectTrigger(value: string, caret: number): Trigger | null {
   const upto = value.slice(0, caret)
+  const emoji = /(^|[\s(]):([a-zA-Z0-9_+-]*)$/.exec(upto)
+  if (emoji) {
+    return { type: ':', start: emoji.index + emoji[1].length, query: emoji[2] }
+  }
   const m = /(^|[\s(])([@#])([^\s@#]*)$/.exec(upto)
   if (!m) return null
   return { type: m[2] as '@' | '#', start: m.index + m[1].length, query: m[3] }
+}
+
+// If the user just typed a closing colon (`:fire:`), expand to the native
+// glyph. Returns the replacement value + new caret, or null if no match.
+function expandClosedShortcode(
+  value: string,
+  caret: number,
+): { value: string; caret: number } | null {
+  const upto = value.slice(0, caret)
+  const m = /(^|[\s(]):([a-zA-Z0-9_+]+):$/.exec(upto)
+  if (!m) return null
+  const match = resolveEmojiShortcode(m[2])
+  if (!match) return null
+  const start = m.index + m[1].length
+  const before = value.slice(0, start)
+  const after = value.slice(caret)
+  const next = before + match.native + ' ' + after
+  return { value: next, caret: (before + match.native + ' ').length }
 }
 
 export function Composer({
@@ -71,7 +95,7 @@ export function Composer({
   // Quote-reply applies to the main channel composer only (not the thread composer).
   const activeReply = useStore((s) => (parentId ? null : s.replyTargets[channel.id] ?? null))
 
-  // --- @ people / # resource picker state ---
+  // --- @ people / # resource / : emoji picker state ---
   const [trigger, setTrigger] = useState<Trigger | null>(null)
   const [results, setResults] = useState<PickItem[]>([])
   const [sel, setSel] = useState(0)
@@ -106,7 +130,8 @@ export function Composer({
   }, [focusRequest, draftKey])
 
   // Populate the picker. People (@) resolve from the already-loaded directory
-  // (channel members first); resources (#) hit the doc/canvas search.
+  // (channel members first); emoji (:) from the local shortcode index; resources
+  // (#) hit the doc/canvas search.
   useEffect(() => {
     if (trigger === null) {
       setResults([])
@@ -130,6 +155,21 @@ export function Composer({
         .slice(0, 8)
         .map<PickItem>((u) => ({ kind: 'user', id: u.id, name: u.display_name }))
       setResults(people)
+      setSel(0)
+      return
+    }
+
+    // : — emoji shortcodes: synchronous, ranked local search.
+    if (trigger.type === ':') {
+      setResults(
+        searchEmojis(q, 8).map((e) => ({
+          kind: 'emoji' as const,
+          id: e.id,
+          name: e.name,
+          native: e.native,
+          shortcode: e.shortcode,
+        })),
+      )
       setSel(0)
       return
     }
@@ -211,10 +251,24 @@ export function Composer({
     if (!trigger) return
     const before = value.slice(0, trigger.start)
     const after = value.slice(caretRef.current)
-    const token =
-      item.kind === 'user'
-        ? `@${item.name} `
-        : `[[${item.kind}:${item.id}|${item.title || 'Untitled'}]] `
+    let token: string
+    switch (item.kind) {
+      case 'user':
+        token = `@${item.name} `
+        break
+      case 'emoji':
+        token = `${item.native} `
+        break
+      case 'doc':
+      case 'canvas':
+        token = `[[${item.kind}:${item.id}|${item.title || 'Untitled'}]] `
+        break
+      default: {
+        const _exhaustive: never = item
+        void _exhaustive
+        return
+      }
+    }
     const next = before + token + after
     setValue(next)
     setTrigger(null)
@@ -349,9 +403,25 @@ export function Composer({
   }
 
   function onChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    setValue(e.target.value)
-    caretRef.current = e.target.selectionStart ?? e.target.value.length
-    setTrigger(detectTrigger(e.target.value, caretRef.current))
+    let next = e.target.value
+    let caret = e.target.selectionStart ?? next.length
+    // Slack-style: typing `:fire:` expands immediately to 🔥.
+    const expanded = expandClosedShortcode(next, caret)
+    if (expanded) {
+      next = expanded.value
+      caret = expanded.caret
+      setValue(next)
+      caretRef.current = caret
+      setTrigger(null)
+      requestAnimationFrame(() => {
+        const el = ref.current
+        if (el) el.setSelectionRange(caret, caret)
+      })
+    } else {
+      setValue(next)
+      caretRef.current = caret
+      setTrigger(detectTrigger(next, caret))
+    }
     // throttle typing to 1 per 3s
     const now = Date.now()
     if (now - lastTypingRef.current > 3000) {
@@ -393,7 +463,11 @@ export function Composer({
         <div className="absolute bottom-full left-4 right-4 z-20 mb-1 max-h-64 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1.5 shadow-2xl">
           <div className="flex items-center justify-between px-2 py-1">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-              {trigger?.type === '@' ? 'People' : 'Docs & canvases'}
+              {trigger?.type === '@'
+                ? 'People'
+                : trigger?.type === ':'
+                  ? 'Emoji'
+                  : 'Docs & canvases'}
             </span>
             <span className="text-[10px] text-[var(--color-text-faint)]">↑↓ · ↵/⇥ · esc</span>
           </div>
@@ -413,6 +487,18 @@ export function Composer({
                 <>
                   <Avatar id={r.id} name={r.name} size={22} />
                   <span className="min-w-0 flex-1 truncate">{r.name}</span>
+                </>
+              ) : r.kind === 'emoji' ? (
+                <>
+                  <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center text-lg leading-none">
+                    {r.native}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[var(--color-text-dim)]">
+                    :{r.shortcode}:
+                  </span>
+                  <span className="shrink-0 truncate text-[11px] text-[var(--color-text-faint)]">
+                    {r.name}
+                  </span>
                 </>
               ) : (
                 <>

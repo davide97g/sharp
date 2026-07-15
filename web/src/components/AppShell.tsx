@@ -88,13 +88,8 @@ export function AppShell() {
           <CompactSidebar mode={mode} />
         )}
       </div>
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {inVoice && <VideoStage />}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <Outlet />
-        </div>
-      </div>
-      {mode === 'chat' && <ThreadPanel />}
+      {inVoice ? <VideoStage /> : <Outlet />}
+      {!inVoice && mode === 'chat' && <ThreadPanel />}
       <QuickSwitcher />
     </div>
   )

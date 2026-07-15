@@ -110,50 +110,22 @@ export function VideoStage() {
   const anyCamera = participants.some((p) => p.cameraConnId)
 
   return (
-    <section
-      className="flex max-h-[45%] min-h-0 shrink-0 flex-col border-b border-[var(--color-border)] bg-[var(--color-ink)]"
+    <main
+      className="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--color-ink)]"
       aria-label={`${roomName} huddle`}
     >
-      <header className="flex h-11 shrink-0 items-center gap-3 px-4">
+      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border)] px-4">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold">{roomName}</div>
-          <div className="text-[11px] text-[var(--color-text-faint)]">
+          <div className="truncate font-semibold">{roomName}</div>
+          <div className="text-xs text-[var(--color-text-faint)]">
             {participants.length} {participants.length === 1 ? 'participant' : 'participants'}
           </div>
         </div>
-        <div className="flex items-center gap-1.5">
-          <DeviceControl
-            label={muted ? 'Unmute microphone' : 'Mute microphone'}
-            menuLabel="Choose microphone"
-            active={muted}
-            onClick={toggleVoiceMute}
-            devices={mics}
-            selectedDeviceId={audioDeviceId}
-            onSelectDevice={(deviceId) => void setVoiceAudioDevice(deviceId)}
-          >
-            <MicIcon off={muted} />
-          </DeviceControl>
-          <DeviceControl
-            label={cameraStatus === 'on' ? 'Turn camera off' : 'Turn camera on'}
-            menuLabel="Choose camera"
-            active={cameraStatus !== 'off'}
-            disabled={cameraStatus === 'starting'}
-            onClick={toggleVoiceCamera}
-            devices={cameras}
-            selectedDeviceId={videoDeviceId}
-            onSelectDevice={(deviceId) => void setVoiceVideoDevice(deviceId)}
-          >
-            <CameraIcon off={cameraStatus === 'off'} />
-          </DeviceControl>
-          <CallControl label="Leave call" danger onClick={leaveVoice}>
-            <LeaveIcon />
-          </CallControl>
-        </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-1">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {anyCamera ? (
-          <div className="mx-auto grid h-full max-w-5xl auto-rows-fr grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="mx-auto grid h-full max-w-6xl auto-rows-fr grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {participants.map((participant) => {
               const local = participant.cameraConnId === myConnId
               const stream = local
@@ -180,7 +152,7 @@ export function VideoStage() {
         ) : (
           <ul
             aria-label={`${participants.length} participants`}
-            className="flex min-h-28 flex-wrap items-center justify-center gap-6 py-2"
+            className="flex h-full min-h-48 flex-wrap items-center justify-center gap-8 py-6"
           >
             {participants.map((participant) => {
               const name =
@@ -200,7 +172,38 @@ export function VideoStage() {
           </ul>
         )}
       </div>
-    </section>
+
+      <footer className="flex shrink-0 items-center justify-center gap-2 border-t border-[var(--color-border)] bg-[var(--color-ink)] px-4 py-3">
+        <DeviceControl
+          label={muted ? 'Unmute microphone' : 'Mute microphone'}
+          menuLabel="Choose microphone"
+          active={muted}
+          onClick={toggleVoiceMute}
+          devices={mics}
+          selectedDeviceId={audioDeviceId}
+          onSelectDevice={(deviceId) => void setVoiceAudioDevice(deviceId)}
+          menuPlacement="up"
+        >
+          <MicIcon off={muted} />
+        </DeviceControl>
+        <DeviceControl
+          label={cameraStatus === 'on' ? 'Turn camera off' : 'Turn camera on'}
+          menuLabel="Choose camera"
+          active={cameraStatus !== 'off'}
+          disabled={cameraStatus === 'starting'}
+          onClick={toggleVoiceCamera}
+          devices={cameras}
+          selectedDeviceId={videoDeviceId}
+          onSelectDevice={(deviceId) => void setVoiceVideoDevice(deviceId)}
+          menuPlacement="up"
+        >
+          <CameraIcon off={cameraStatus === 'off'} />
+        </DeviceControl>
+        <CallControl label="Leave call" danger onClick={leaveVoice}>
+          <LeaveIcon />
+        </CallControl>
+      </footer>
+    </main>
   )
 }
 
@@ -218,13 +221,13 @@ function AudioTile({
   speaking: boolean
 }) {
   return (
-    <li className="flex w-24 flex-col items-center gap-2 text-center">
+    <li className="flex w-28 flex-col items-center gap-2 text-center">
       <div
         className={`relative rounded-full ${
           speaking ? 'ring-2 ring-[#4fbf9f] ring-offset-2 ring-offset-[var(--color-ink)]' : ''
         }`}
       >
-        <Avatar id={userId} name={name} size={72} />
+        <Avatar id={userId} name={name} size={96} />
         {muted && (
           <span
             className="absolute -bottom-0.5 -right-0.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-[var(--color-ink)] bg-[var(--color-panel-2)] text-[var(--color-text-dim)]"
@@ -269,7 +272,7 @@ function VideoTile({
 
   return (
     <article
-      className={`relative flex min-h-36 overflow-hidden rounded-2xl border bg-[var(--color-panel)] ${
+      className={`relative flex min-h-48 overflow-hidden rounded-2xl border bg-[var(--color-panel)] ${
         speaking ? 'border-[#4fbf9f] ring-2 ring-[#4fbf9f]/30' : 'border-[var(--color-border)]'
       }`}
     >
@@ -279,11 +282,11 @@ function VideoTile({
           autoPlay
           playsInline
           muted
-          className={`h-full min-h-36 w-full object-cover ${local ? '-scale-x-100' : ''}`}
+          className={`h-full min-h-48 w-full object-cover ${local ? '-scale-x-100' : ''}`}
         />
       ) : (
-        <div className="flex min-h-36 w-full items-center justify-center bg-[radial-gradient(circle_at_top,var(--color-panel-2),var(--color-panel))]">
-          <Avatar id={userId} name={name} size={64} />
+        <div className="flex min-h-48 w-full items-center justify-center bg-[radial-gradient(circle_at_top,var(--color-panel-2),var(--color-panel))]">
+          <Avatar id={userId} name={name} size={72} />
         </div>
       )}
       <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/75 to-transparent px-3 pb-3 pt-8 text-sm font-medium text-white">
@@ -346,6 +349,7 @@ function DeviceControl({
   devices,
   selectedDeviceId,
   onSelectDevice,
+  menuPlacement = 'down',
   children,
 }: {
   label: string
@@ -356,6 +360,7 @@ function DeviceControl({
   devices: MediaDeviceOption[]
   selectedDeviceId: string | null
   onSelectDevice: (deviceId: string) => void
+  menuPlacement?: 'up' | 'down'
   children: React.ReactNode
 }) {
   const [open, setOpen] = useState(false)
@@ -392,7 +397,7 @@ function DeviceControl({
           aria-pressed={active}
           disabled={disabled}
           onClick={onClick}
-          className="flex h-9 w-9 items-center justify-center outline-none hover:bg-black/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-11 w-11 items-center justify-center outline-none hover:bg-black/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {children}
         </button>
@@ -404,7 +409,7 @@ function DeviceControl({
           aria-expanded={open}
           disabled={disabled || !hasDevices}
           onClick={() => setOpen((value) => !value)}
-          className="flex h-9 w-6 items-center justify-center border-l border-black/15 outline-none hover:bg-black/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-11 w-7 items-center justify-center border-l border-black/15 outline-none hover:bg-black/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
         >
           <CaretIcon />
         </button>
@@ -413,7 +418,9 @@ function DeviceControl({
         <div
           role="menu"
           aria-label={menuLabel}
-          className="absolute right-0 top-full z-40 mt-1 max-h-56 min-w-52 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1 shadow-2xl"
+          className={`absolute right-0 z-40 max-h-56 min-w-52 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1 shadow-2xl ${
+            menuPlacement === 'up' ? 'bottom-full mb-1' : 'top-full mt-1'
+          }`}
         >
           {devices.map((device) => {
             const selected = device.deviceId === selectedDeviceId

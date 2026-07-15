@@ -597,15 +597,17 @@ Server → client:
 
 - Joining remains audio-first. Camera capture starts only after an explicit toggle and a
   successful server slot reservation.
-- While in a call, a top huddle stage sits above the main content (chat / docs / canvas).
+- While in a call, a full-height huddle stage replaces main content (chat / docs / canvas).
   Camera-off participants show as circular avatars with mute and speaking state; camera-on
-  participants use a responsive video grid. Controls (mute, camera, leave) live on the stage.
-  There is no persistent sidebar voice bar; participant faces appear only on the stage.
+  participants use a responsive video grid. Controls (mute, camera, leave) and Meet-style
+  device pickers live on the stage footer. There is no persistent sidebar voice bar;
+  participant faces appear only on the stage.
 - Local preview is mirrored; remote video is not. Remote audio continues through hidden
-  audio elements independently of which channel or mode is open.
-- Camera stays active across navigation. Camera-off, call leave, logout, page unload, or
-  WebSocket reconnection stops local tracks. Permission/device failure releases the reserved
-  slot and leaves audio connected.
+  audio elements independently of which channel was open when joining.
+- Camera stays active across navigation away from the stage only if the client keeps the
+  voice session; leaving the call, logout, page unload, or WebSocket reconnection stops
+  local tracks. Permission/device failure releases the reserved slot and leaves audio
+  connected.
 
 ## REST API addition — base `/api/v1`
 
