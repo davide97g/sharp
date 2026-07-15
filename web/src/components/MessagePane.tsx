@@ -172,7 +172,7 @@ export function MessagePane() {
       )}
 
       {/* messages */}
-      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto">
+      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto overflow-x-hidden">
         {cm?.loading && messages.length === 0 ? (
           <LoadingSkeleton />
         ) : messages.length === 0 && cm?.loaded ? (

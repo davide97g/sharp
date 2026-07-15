@@ -19,6 +19,60 @@ function scrollToMessage(id: string) {
   )
 }
 
+// Uniform thin line icons for the hover toolbar — monochrome so the row of
+// actions reads as one clean set (emoji rendered in mismatched colors/weights).
+function Icon({ name }: { name: 'react' | 'reply' | 'thread' | 'edit' | 'trash' }) {
+  const p = {
+    width: 15,
+    height: 15,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.75,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+  }
+  switch (name) {
+    case 'react':
+      return (
+        <svg {...p}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M8.5 14.5s1.3 1.7 3.5 1.7 3.5-1.7 3.5-1.7" />
+          <path d="M9 9.5h.01M15 9.5h.01" />
+        </svg>
+      )
+    case 'reply':
+      return (
+        <svg {...p}>
+          <polyline points="9 16 4 11 9 6" />
+          <path d="M4 11h9a6 6 0 0 1 6 6v1" />
+        </svg>
+      )
+    case 'thread':
+      return (
+        <svg {...p}>
+          <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 9 9 0 0 1-4-.9L3 21l1.9-5.5a8.4 8.4 0 0 1-.9-4A8.5 8.5 0 0 1 21 11.5Z" />
+        </svg>
+      )
+    case 'edit':
+      return (
+        <svg {...p}>
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+        </svg>
+      )
+    case 'trash':
+      return (
+        <svg {...p}>
+          <path d="M4 7h16" />
+          <path d="M10 11v6M14 11v6" />
+          <path d="M5 7l1 13a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1l1-13" />
+          <path d="M9 7V4h6v3" />
+        </svg>
+      )
+  }
+}
+
 // The quoted-message chip rendered above a reply's own content.
 function QuotedReply({ reply }: { reply: ReplyPreview }) {
   return (
@@ -167,7 +221,7 @@ export function MessageItem({
             <div className="w-full min-w-[16rem]">{editor}</div>
           ) : (
             <div
-              className={`min-w-0 rounded-2xl px-3 py-2 ${
+              className={`min-w-0 rounded-2xl px-3 py-2 ring-0 ring-inset ring-white/10 transition-[box-shadow] duration-200 ease-in-out group-hover:ring-1 ${
                 isMine
                   ? 'rounded-br-sm bg-[var(--color-accent-soft)]'
                   : 'rounded-bl-sm bg-[var(--color-panel-2)]'
@@ -210,16 +264,20 @@ export function MessageItem({
           {/* hover toolbar */}
           {!isDeleted && !editing && (
             <div
-              className={`absolute -top-3 hidden items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] shadow-md group-hover:flex ${
-                isMine ? 'left-0' : 'right-0'
+              className={`pointer-events-none absolute -top-4 flex items-center gap-0.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel-2)]/90 p-1 opacity-0 shadow-lg backdrop-blur-sm transition-opacity duration-150 ease-in-out group-hover:pointer-events-auto group-hover:opacity-100 ${
+                isMine ? 'right-0' : 'left-0'
               }`}
             >
               <div className="relative">
                 <ToolbarBtn title="Add reaction" onClick={() => setShowPalette((v) => !v)}>
-                  😊
+                  <Icon name="react" />
                 </ToolbarBtn>
                 {showPalette && (
-                  <div className="absolute right-0 top-9 z-20 flex gap-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] p-1.5 shadow-lg">
+                  <div
+                    className={`absolute top-10 z-20 flex gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel-2)] p-1.5 shadow-lg ${
+                      isMine ? 'right-0' : 'left-0'
+                    }`}
+                  >
                     {REACTION_PALETTE.map((e) => (
                       <button
                         key={e}
@@ -227,7 +285,7 @@ export function MessageItem({
                           toggleReaction(message, e)
                           setShowPalette(false)
                         }}
-                        className="rounded-md px-1.5 py-1 text-base hover:bg-[var(--color-accent-soft)]"
+                        className="rounded-md px-1.5 py-1 text-base transition-transform hover:scale-125 hover:bg-[var(--color-accent-soft)]"
                       >
                         {e}
                       </button>
@@ -236,32 +294,29 @@ export function MessageItem({
                 )}
               </div>
               <ToolbarBtn title="Reply" onClick={() => setReplyTarget(message)}>
-                ↩️
+                <Icon name="reply" />
               </ToolbarBtn>
               {isMine && (
                 <ToolbarBtn title="Edit" onClick={() => setEditing(true)}>
-                  ✏️
+                  <Icon name="edit" />
                 </ToolbarBtn>
               )}
               {isMine &&
                 (confirmDelete ? (
-                  <div className="flex items-center gap-1 px-1">
+                  <div className="flex items-center gap-0.5 pl-0.5">
                     <button
                       onClick={doDelete}
-                      className="rounded px-1.5 py-0.5 text-xs font-semibold text-red-300 hover:bg-red-500/20"
+                      className="rounded-md px-2 py-1 text-xs font-semibold text-red-400 transition-colors hover:bg-red-500/15"
                     >
-                      Delete?
+                      Delete
                     </button>
-                    <button
-                      onClick={() => setConfirmDelete(false)}
-                      className="rounded px-1 py-0.5 text-xs text-[var(--color-text-faint)] hover:bg-[var(--color-panel)]"
-                    >
-                      ✕
-                    </button>
+                    <ToolbarBtn title="Cancel" onClick={() => setConfirmDelete(false)}>
+                      <span className="text-xs leading-none">✕</span>
+                    </ToolbarBtn>
                   </div>
                 ) : (
-                  <ToolbarBtn title="Delete" onClick={() => setConfirmDelete(true)}>
-                    🗑️
+                  <ToolbarBtn title="Delete" danger onClick={() => setConfirmDelete(true)}>
+                    <Icon name="trash" />
                   </ToolbarBtn>
                 ))}
             </div>
@@ -274,7 +329,7 @@ export function MessageItem({
   return (
     <div
       id={`msg-${message.id}`}
-      className={`group relative flex gap-3 px-4 hover:bg-[var(--color-panel)]/40 ${
+      className={`group relative flex gap-3 px-4 transition-colors duration-200 ease-in-out hover:bg-[var(--color-panel)]/50 ${
         grouped ? 'py-0.5' : 'pt-2 pb-0.5 mt-1'
       }`}
       onMouseLeave={() => setShowPalette(false)}
@@ -408,13 +463,13 @@ export function MessageItem({
 
       {/* hover toolbar */}
       {!isDeleted && !editing && (
-        <div className="absolute -top-3 right-3 hidden items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] shadow-md group-hover:flex">
+        <div className="pointer-events-none absolute -top-4 right-2 flex items-center gap-0.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel-2)]/90 p-1 opacity-0 shadow-lg backdrop-blur-sm transition-opacity duration-150 ease-in-out group-hover:pointer-events-auto group-hover:opacity-100">
           <div className="relative">
             <ToolbarBtn title="Add reaction" onClick={() => setShowPalette((v) => !v)}>
-              😊
+              <Icon name="react" />
             </ToolbarBtn>
             {showPalette && (
-              <div className="absolute right-0 top-9 z-20 flex gap-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] p-1.5 shadow-lg">
+              <div className="absolute right-0 top-10 z-20 flex gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel-2)] p-1.5 shadow-lg">
                 {REACTION_PALETTE.map((e) => (
                   <button
                     key={e}
@@ -422,7 +477,7 @@ export function MessageItem({
                       toggleReaction(message, e)
                       setShowPalette(false)
                     }}
-                    className="rounded-md px-1.5 py-1 text-base hover:bg-[var(--color-accent-soft)]"
+                    className="rounded-md px-1.5 py-1 text-base transition-transform hover:scale-125 hover:bg-[var(--color-accent-soft)]"
                   >
                     {e}
                   </button>
@@ -431,37 +486,34 @@ export function MessageItem({
             )}
           </div>
           <ToolbarBtn title="Reply" onClick={() => setReplyTarget(message)}>
-            ↩️
+            <Icon name="reply" />
           </ToolbarBtn>
           {showThread && (
             <ToolbarBtn title="Reply in thread" onClick={() => openThread(message.id)}>
-              💬
+              <Icon name="thread" />
             </ToolbarBtn>
           )}
           {isMine && (
             <ToolbarBtn title="Edit" onClick={() => setEditing(true)}>
-              ✏️
+              <Icon name="edit" />
             </ToolbarBtn>
           )}
           {isMine &&
             (confirmDelete ? (
-              <div className="flex items-center gap-1 px-1">
+              <div className="flex items-center gap-0.5 pl-0.5">
                 <button
                   onClick={doDelete}
-                  className="rounded px-1.5 py-0.5 text-xs font-semibold text-red-300 hover:bg-red-500/20"
+                  className="rounded-md px-2 py-1 text-xs font-semibold text-red-400 transition-colors hover:bg-red-500/15"
                 >
-                  Delete?
+                  Delete
                 </button>
-                <button
-                  onClick={() => setConfirmDelete(false)}
-                  className="rounded px-1 py-0.5 text-xs text-[var(--color-text-faint)] hover:bg-[var(--color-panel)]"
-                >
-                  ✕
-                </button>
+                <ToolbarBtn title="Cancel" onClick={() => setConfirmDelete(false)}>
+                  <span className="text-xs leading-none">✕</span>
+                </ToolbarBtn>
               </div>
             ) : (
-              <ToolbarBtn title="Delete" onClick={() => setConfirmDelete(true)}>
-                🗑️
+              <ToolbarBtn title="Delete" danger onClick={() => setConfirmDelete(true)}>
+                <Icon name="trash" />
               </ToolbarBtn>
             ))}
         </div>
@@ -474,16 +526,20 @@ function ToolbarBtn({
   children,
   title,
   onClick,
+  danger,
 }: {
   children: React.ReactNode
   title: string
   onClick: () => void
+  danger?: boolean
 }) {
   return (
     <button
       title={title}
       onClick={onClick}
-      className="px-2 py-1.5 text-sm leading-none hover:bg-[var(--color-panel)]"
+      className={`flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-text-faint)] transition-colors hover:bg-[var(--color-panel)] ${
+        danger ? 'hover:text-red-400' : 'hover:text-[var(--color-text)]'
+      }`}
     >
       {children}
     </button>
