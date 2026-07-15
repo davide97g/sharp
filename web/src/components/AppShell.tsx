@@ -88,8 +88,9 @@ export function AppShell() {
           <CompactSidebar mode={mode} />
         )}
       </div>
-      {inVoice ? <VideoStage /> : <Outlet />}
-      {!inVoice && mode === 'chat' && <ThreadPanel />}
+      <Outlet />
+      {mode === 'chat' && <ThreadPanel />}
+      {inVoice && <VideoStage />}
       <QuickSwitcher />
     </div>
   )

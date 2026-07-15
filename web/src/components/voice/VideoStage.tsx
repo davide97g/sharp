@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useStore } from '../../store'
+import { useStore, type VoiceStageMode } from '../../store'
 import { channelLabel } from '../../lib/util'
 import { Avatar } from '../Avatar'
+import { VoiceMiniWidget } from './VoiceMiniWidget'
 
 type StageParticipant = {
   userId: string
@@ -16,8 +17,27 @@ type MediaDeviceOption = {
   label: string
 }
 
+const STAGE_SIZE: Record<
+  Exclude<VoiceStageMode, 'mini'>,
+  { width: string; height: string; minWidth: number; minHeight: number }
+> = {
+  expanded: {
+    width: 'min(920px, calc(100vw - 2rem))',
+    height: 'min(640px, calc(100vh - 2rem))',
+    minWidth: 480,
+    minHeight: 360,
+  },
+  compact: {
+    width: 'min(420px, calc(100vw - 2rem))',
+    height: 'min(320px, calc(100vh - 2rem))',
+    minWidth: 280,
+    minHeight: 220,
+  },
+}
+
 export function VideoStage() {
   const channelId = useStore((s) => s.voice.channelId)
+  const stageMode = useStore((s) => s.voice.stageMode)
   const room = useStore((s) => (channelId ? s.voiceRooms[channelId] : undefined))
   const speaking = useStore((s) => s.voice.speaking)
   const muted = useStore((s) => s.voice.muted)
@@ -34,9 +54,20 @@ export function VideoStage() {
   const toggleVoiceCamera = useStore((s) => s.toggleVoiceCamera)
   const setVoiceAudioDevice = useStore((s) => s.setVoiceAudioDevice)
   const setVoiceVideoDevice = useStore((s) => s.setVoiceVideoDevice)
+  const setVoiceStageMode = useStore((s) => s.setVoiceStageMode)
   const leaveVoice = useStore((s) => s.leaveVoice)
   const [mics, setMics] = useState<MediaDeviceOption[]>([])
   const [cameras, setCameras] = useState<MediaDeviceOption[]>([])
+  const panelRef = useRef<HTMLElement>(null)
+  const dragRef = useRef<{
+    pointerId: number
+    originX: number
+    originY: number
+    startLeft: number
+    startTop: number
+  } | null>(null)
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
+  const [dragging, setDragging] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -77,6 +108,31 @@ export function VideoStage() {
     }
   }, [])
 
+  useEffect(() => {
+    setPosition(null)
+  }, [stageMode])
+
+  useEffect(() => {
+    function onResize() {
+      setPosition((current) => {
+        const panel = panelRef.current
+        if (!current || !panel) return current
+        return {
+          left: Math.min(
+            Math.max(8, current.left),
+            Math.max(8, window.innerWidth - panel.offsetWidth - 8),
+          ),
+          top: Math.min(
+            Math.max(8, current.top),
+            Math.max(8, window.innerHeight - panel.offsetHeight - 8),
+          ),
+        }
+      })
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
   const participants = useMemo(() => {
     const byUser = new Map<string, StageParticipant>()
     for (const [connId, entry] of Object.entries(room ?? {})) {
@@ -102,30 +158,126 @@ export function VideoStage() {
   }, [myConnId, room, speaking])
 
   if (!channelId) return null
+  if (stageMode === 'mini') return <VoiceMiniWidget />
+
   const roomName = channel
     ? channel.kind === 'dm'
       ? channel.dm_user?.display_name ?? channelLabel(channel)
       : `# ${channel.name}`
     : 'Call'
   const anyCamera = participants.some((p) => p.cameraConnId)
+  const size = STAGE_SIZE[stageMode]
+  const avatarSize = stageMode === 'expanded' ? 88 : 56
+
+  const onHeaderPointerDown = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.button !== 0) return
+    const target = event.target as HTMLElement
+    if (target.closest('button')) return
+    const panel = panelRef.current
+    if (!panel) return
+    const rect = panel.getBoundingClientRect()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    dragRef.current = {
+      pointerId: event.pointerId,
+      originX: event.clientX,
+      originY: event.clientY,
+      startLeft: rect.left,
+      startTop: rect.top,
+    }
+    setPosition({ left: rect.left, top: rect.top })
+    setDragging(true)
+  }
+
+  const onHeaderPointerMove = (event: React.PointerEvent<HTMLElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    const panel = panelRef.current
+    if (!panel) return
+    const width = panel.offsetWidth
+    const height = panel.offsetHeight
+    const left = Math.min(
+      Math.max(8, drag.startLeft + (event.clientX - drag.originX)),
+      window.innerWidth - width - 8,
+    )
+    const top = Math.min(
+      Math.max(8, drag.startTop + (event.clientY - drag.originY)),
+      window.innerHeight - height - 8,
+    )
+    setPosition({ left, top })
+  }
+
+  const onHeaderPointerUp = (event: React.PointerEvent<HTMLElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    dragRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    setDragging(false)
+  }
 
   return (
-    <main
-      className="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--color-ink)]"
+    <section
+      ref={panelRef}
       aria-label={`${roomName} huddle`}
+      className={`fixed z-50 flex flex-col overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-ink)] shadow-2xl ${
+        dragging ? '' : 'transition-[width,height] duration-200 ease-out motion-reduce:transition-none'
+      }`}
+      style={{
+        width: size.width,
+        height: size.height,
+        minWidth: size.minWidth,
+        minHeight: size.minHeight,
+        resize: 'both',
+        ...(position
+          ? { left: position.left, top: position.top }
+          : { right: 16, bottom: 16 }),
+      }}
     >
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border)] px-4">
+      <header
+        className={`flex h-11 shrink-0 items-center gap-2 border-b border-[var(--color-border)] px-3 ${
+          dragging ? 'cursor-grabbing' : 'cursor-grab'
+        }`}
+        onPointerDown={onHeaderPointerDown}
+        onPointerMove={onHeaderPointerMove}
+        onPointerUp={onHeaderPointerUp}
+        onPointerCancel={onHeaderPointerUp}
+      >
         <div className="min-w-0 flex-1">
-          <div className="truncate font-semibold">{roomName}</div>
-          <div className="text-xs text-[var(--color-text-faint)]">
+          <div className="truncate text-sm font-semibold">{roomName}</div>
+          <div className="text-[11px] text-[var(--color-text-faint)]">
             {participants.length} {participants.length === 1 ? 'participant' : 'participants'}
           </div>
         </div>
+        <button
+          type="button"
+          aria-label={stageMode === 'expanded' ? 'Reduce call window' : 'Expand call window'}
+          title={stageMode === 'expanded' ? 'Reduce' : 'Expand'}
+          onClick={() => setVoiceStageMode(stageMode === 'expanded' ? 'compact' : 'expanded')}
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-dim)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+        >
+          {stageMode === 'expanded' ? <ReduceIcon /> : <ExpandIcon />}
+        </button>
+        <button
+          type="button"
+          aria-label="Minimize call"
+          title="Minimize"
+          onClick={() => setVoiceStageMode('mini')}
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-dim)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+        >
+          <MinimizeIcon />
+        </button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {anyCamera ? (
-          <div className="mx-auto grid h-full max-w-6xl auto-rows-fr grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div
+            className={`mx-auto grid h-full auto-rows-fr gap-2 ${
+              stageMode === 'expanded'
+                ? 'max-w-6xl grid-cols-1 sm:grid-cols-2 xl:grid-cols-3'
+                : 'grid-cols-1 sm:grid-cols-2'
+            }`}
+          >
             {participants.map((participant) => {
               const local = participant.cameraConnId === myConnId
               const stream = local
@@ -145,6 +297,7 @@ export function VideoStage() {
                   local={local}
                   muted={participant.muted}
                   speaking={participant.speaking}
+                  compact={stageMode === 'compact'}
                 />
               )
             })}
@@ -152,7 +305,7 @@ export function VideoStage() {
         ) : (
           <ul
             aria-label={`${participants.length} participants`}
-            className="flex h-full min-h-48 flex-wrap items-center justify-center gap-8 py-6"
+            className="flex h-full flex-wrap items-center justify-center gap-5 py-4"
           >
             {participants.map((participant) => {
               const name =
@@ -166,6 +319,7 @@ export function VideoStage() {
                   local={me?.id === participant.userId}
                   muted={participant.muted}
                   speaking={participant.speaking}
+                  size={avatarSize}
                 />
               )
             })}
@@ -173,7 +327,7 @@ export function VideoStage() {
         )}
       </div>
 
-      <footer className="flex shrink-0 items-center justify-center gap-2 border-t border-[var(--color-border)] bg-[var(--color-ink)] px-4 py-3">
+      <footer className="flex shrink-0 items-center justify-center gap-2 border-t border-[var(--color-border)] px-3 py-2.5">
         <DeviceControl
           label={muted ? 'Unmute microphone' : 'Mute microphone'}
           menuLabel="Choose microphone"
@@ -203,7 +357,7 @@ export function VideoStage() {
           <LeaveIcon />
         </CallControl>
       </footer>
-    </main>
+    </section>
   )
 }
 
@@ -213,21 +367,23 @@ function AudioTile({
   local,
   muted,
   speaking,
+  size,
 }: {
   userId: string
   name: string
   local: boolean
   muted: boolean
   speaking: boolean
+  size: number
 }) {
   return (
-    <li className="flex w-28 flex-col items-center gap-2 text-center">
+    <li className="flex w-24 flex-col items-center gap-2 text-center sm:w-28">
       <div
         className={`relative rounded-full ${
           speaking ? 'ring-2 ring-[#4fbf9f] ring-offset-2 ring-offset-[var(--color-ink)]' : ''
         }`}
       >
-        <Avatar id={userId} name={name} size={96} />
+        <Avatar id={userId} name={name} size={size} />
         {muted && (
           <span
             className="absolute -bottom-0.5 -right-0.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-[var(--color-ink)] bg-[var(--color-panel-2)] text-[var(--color-text-dim)]"
@@ -252,6 +408,7 @@ function VideoTile({
   local,
   muted,
   speaking,
+  compact,
 }: {
   userId: string
   name: string
@@ -259,9 +416,11 @@ function VideoTile({
   local: boolean
   muted: boolean
   speaking: boolean
+  compact: boolean
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const hasVideo = Boolean(stream?.getVideoTracks().length)
+  const minH = compact ? 'min-h-28' : 'min-h-40'
 
   useEffect(() => {
     const video = videoRef.current
@@ -272,7 +431,7 @@ function VideoTile({
 
   return (
     <article
-      className={`relative flex min-h-48 overflow-hidden rounded-2xl border bg-[var(--color-panel)] ${
+      className={`relative flex overflow-hidden rounded-2xl border bg-[var(--color-panel)] ${minH} ${
         speaking ? 'border-[#4fbf9f] ring-2 ring-[#4fbf9f]/30' : 'border-[var(--color-border)]'
       }`}
     >
@@ -282,14 +441,16 @@ function VideoTile({
           autoPlay
           playsInline
           muted
-          className={`h-full min-h-48 w-full object-cover ${local ? '-scale-x-100' : ''}`}
+          className={`h-full w-full object-cover ${minH} ${local ? '-scale-x-100' : ''}`}
         />
       ) : (
-        <div className="flex min-h-48 w-full items-center justify-center bg-[radial-gradient(circle_at_top,var(--color-panel-2),var(--color-panel))]">
-          <Avatar id={userId} name={name} size={72} />
+        <div
+          className={`flex w-full items-center justify-center bg-[radial-gradient(circle_at_top,var(--color-panel-2),var(--color-panel))] ${minH}`}
+        >
+          <Avatar id={userId} name={name} size={compact ? 48 : 64} />
         </div>
       )}
-      <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/75 to-transparent px-3 pb-3 pt-8 text-sm font-medium text-white">
+      <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/75 to-transparent px-3 pb-2.5 pt-6 text-sm font-medium text-white">
         <span className="truncate">
           {name}
           {local ? ' (you)' : ''}
@@ -327,7 +488,7 @@ function CallControl({
       aria-pressed={active}
       disabled={disabled}
       onClick={onClick}
-      className={`flex h-9 w-9 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50 ${
+      className={`flex h-11 w-11 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50 ${
         danger
           ? 'bg-red-500/20 text-red-300 hover:bg-red-500/30'
           : active
@@ -483,6 +644,66 @@ function CheckIcon() {
       aria-hidden
     >
       <path d="m5 12 5 5L20 7" />
+    </svg>
+  )
+}
+
+function ExpandIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M15 3h6v6" />
+      <path d="m21 3-7 7" />
+      <path d="M9 21H3v-6" />
+      <path d="m3 21 7-7" />
+    </svg>
+  )
+}
+
+function ReduceIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M8 3v5H3" />
+      <path d="m3 8 5-5" />
+      <path d="M16 21v-5h5" />
+      <path d="m21 16-5 5" />
+    </svg>
+  )
+}
+
+function MinimizeIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M5 12h14" />
     </svg>
   )
 }

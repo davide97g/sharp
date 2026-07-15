@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
 } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { channelLabel } from '../../lib/util'
 import { useStore } from '../../store'
 import { Avatar } from '../Avatar'
@@ -50,7 +49,6 @@ function cornerPosition(corner: Corner, width: number, height: number): Position
 }
 
 export function VoiceMiniWidget() {
-  const navigate = useNavigate()
   const channelId = useStore((s) => s.voice.channelId)
   const room = useStore((s) => (channelId ? s.voiceRooms[channelId] : undefined))
   const speaking = useStore((s) => s.voice.speaking)
@@ -62,6 +60,7 @@ export function VoiceMiniWidget() {
   )
   const toggleVoiceMute = useStore((s) => s.toggleVoiceMute)
   const leaveVoice = useStore((s) => s.leaveVoice)
+  const setVoiceStageMode = useStore((s) => s.setVoiceStageMode)
   const cardRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<DragState | null>(null)
   const [corner, setCorner] = useState<Corner>(storedCorner)
@@ -109,7 +108,7 @@ export function VoiceMiniWidget() {
 
   if (!channelId) return null
 
-  const openCall = () => navigate(`/c/${channelId}`)
+  const expandCall = () => setVoiceStageMode('expanded')
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
@@ -150,7 +149,7 @@ export function VoiceMiniWidget() {
     setDragging(false)
 
     if (distance < DRAG_THRESHOLD && allowClick) {
-      openCall()
+      expandCall()
       return
     }
 
@@ -171,25 +170,26 @@ export function VoiceMiniWidget() {
       ref={cardRef}
       role="button"
       tabIndex={0}
-      aria-label={`Ongoing call in ${roomName} — open`}
+      aria-label={`Ongoing call in ${roomName} — expand`}
       title={`Ongoing call in ${roomName}`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={(event) => finishDrag(event, true)}
       onPointerCancel={(event) => finishDrag(event, false)}
       onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault()
-          openCall()
+          expandCall()
         }
       }}
       onClick={(event) => {
-        if (event.detail === 0) openCall()
+        if (event.detail === 0) expandCall()
       }}
       className={`fixed z-50 flex w-[88px] touch-none select-none flex-col items-center gap-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-panel)] p-2.5 shadow-2xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
         dragging
           ? 'cursor-grabbing'
-          : 'cursor-grab transition-[left,top] duration-200 ease-out'
+          : 'cursor-grab transition-[left,top] duration-200 ease-out motion-reduce:transition-none'
       }`}
       style={position ?? { right: EDGE_MARGIN, bottom: EDGE_MARGIN }}
     >

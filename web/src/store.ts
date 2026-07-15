@@ -65,12 +65,15 @@ type ThreadState = {
 
 export type VoiceRoom = Record<string, { user_id: string; muted: boolean; camera_on: boolean }>
 
+export type VoiceStageMode = 'expanded' | 'compact' | 'mini'
+
 type VoiceState = {
   channelId: string | null
   status: 'idle' | 'connecting' | 'connected'
   muted: boolean
   speaking: Record<string, boolean>
   cameraStatus: 'off' | 'starting' | 'on'
+  stageMode: VoiceStageMode
   audioDeviceId: string | null
   videoDeviceId: string | null
   localStream: MediaStream | null
@@ -218,6 +221,7 @@ type State = {
   toggleVoiceCamera: () => void
   setVoiceAudioDevice: (deviceId: string) => Promise<void>
   setVoiceVideoDevice: (deviceId: string) => Promise<void>
+  setVoiceStageMode: (mode: VoiceStageMode) => void
 
   // docs actions
   loadChannelDocs: (channelId: string) => Promise<void>
@@ -268,6 +272,7 @@ function emptyVoiceState(): VoiceState {
     muted: false,
     speaking: {},
     cameraStatus: 'off',
+    stageMode: 'expanded',
     audioDeviceId: null,
     videoDeviceId: null,
     localStream: null,
@@ -742,6 +747,7 @@ export const useStore = create<State>((set, get) => ({
         muted: false,
         speaking: {},
         cameraStatus: 'off',
+        stageMode: 'expanded',
         audioDeviceId: null,
         videoDeviceId: null,
         localStream: null,
@@ -890,6 +896,11 @@ export const useStore = create<State>((set, get) => ({
       if (e instanceof Error) toastError(e.message)
       else toastError('Could not switch camera.')
     }
+  },
+
+  setVoiceStageMode(mode) {
+    if (!get().voice.channelId) return
+    set((s) => ({ voice: { ...s.voice, stageMode: mode } }))
   },
 
   totalUnread() {
