@@ -106,16 +106,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api = Router::new()
         .route("/auth/register", post(auth::register))
         .route("/auth/login", post(auth::login))
-        .route("/me", get(routes::users::me))
+        .route("/me", get(routes::users::me).patch(routes::users::update_me))
+        .route(
+            "/me/avatar",
+            post(routes::users::upload_avatar)
+                .layer(DefaultBodyLimit::max(upload_limit))
+                .delete(routes::users::delete_avatar),
+        )
         .route("/users", get(routes::users::list_users))
+        .route("/users/:id/avatar", get(routes::users::get_avatar))
         .route(
             "/channels",
             get(routes::channels::list_channels).post(routes::channels::create_channel),
         )
         .route("/channels/dm", post(routes::channels::create_dm))
+        .route(
+            "/channels/:id",
+            patch(routes::channels::update_channel).delete(routes::channels::delete_channel),
+        )
         .route("/channels/:id/join", post(routes::channels::join_channel))
         .route("/channels/:id/leave", post(routes::channels::leave_channel))
-        .route("/channels/:id/members", get(routes::channels::list_members))
+        .route(
+            "/channels/:id/members",
+            get(routes::channels::list_members).post(routes::channels::add_members),
+        )
+        .route(
+            "/channels/:id/members/:user_id",
+            delete(routes::channels::remove_member),
+        )
         .route("/channels/:id/read", post(routes::channels::mark_read))
         .route(
             "/channels/:id/messages",
@@ -144,6 +162,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/notifications/read", post(routes::notifications::mark_read))
         .route("/prefs", get(routes::notifications::get_prefs))
         .route("/prefs/dnd", put(routes::notifications::set_dnd))
+        .route(
+            "/prefs/chat-layout",
+            put(routes::notifications::set_chat_layout),
+        )
         .route(
             "/channels/:id/prefs",
             put(routes::notifications::set_channel_pref),

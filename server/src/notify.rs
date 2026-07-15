@@ -21,7 +21,7 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 const NOTIFICATION_SELECT: &str = "
-    SELECT n.id, n.kind, n.actor_id, a.display_name AS actor_name,
+    SELECT n.id, n.kind, n.actor_id, a.display_name AS actor_name, a.avatar_url AS actor_avatar,
         n.channel_id, c.kind AS channel_kind, c.name AS channel_name,
         n.message_id, n.preview, n.created_at, n.read_at
     FROM notifications n
@@ -36,6 +36,7 @@ pub fn map_notification_row(row: &PgRow) -> AppResult<Notification> {
         actor: MessageUser {
             id: row.try_get("actor_id")?,
             display_name: row.try_get("actor_name")?,
+            avatar_url: row.try_get("actor_avatar")?,
         },
         channel_id: row.try_get("channel_id")?,
         channel_kind: row.try_get("channel_kind")?,

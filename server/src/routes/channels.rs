@@ -44,7 +44,7 @@ fn map_channel_row(row: &PgRow) -> AppResult<Channel> {
 
 async fn dm_other_user(pool: &PgPool, channel_id: Uuid, viewer: Uuid) -> AppResult<Option<User>> {
     let row = sqlx::query(
-        "SELECT u.id, u.email, u.display_name, u.created_at
+        "SELECT u.id, u.email, u.display_name, u.avatar_url, u.created_at
          FROM channel_members cm JOIN users u ON u.id = cm.user_id
          WHERE cm.channel_id = $1 AND cm.user_id <> $2
          LIMIT 1",
@@ -290,7 +290,7 @@ pub async fn create_dm(
 }
 
 async fn fetch_user(pool: &PgPool, user_id: Uuid) -> AppResult<User> {
-    let row = sqlx::query("SELECT id, email, display_name, created_at FROM users WHERE id = $1")
+    let row = sqlx::query("SELECT id, email, display_name, avatar_url, created_at FROM users WHERE id = $1")
         .bind(user_id)
         .fetch_optional(pool)
         .await?
@@ -382,7 +382,7 @@ pub async fn list_members(
     }
 
     let rows = sqlx::query(
-        "SELECT u.id, u.email, u.display_name, u.created_at
+        "SELECT u.id, u.email, u.display_name, u.avatar_url, u.created_at
          FROM channel_members cm JOIN users u ON u.id = cm.user_id
          WHERE cm.channel_id = $1
          ORDER BY u.display_name",
@@ -397,6 +397,286 @@ pub async fn list_members(
     }
 
     Ok(Json(json!({ "members": members })))
+}
+
+#[derive(Deserialize)]
+pub struct UpdateChannelRequest {
+    pub name: Option<String>,
+    pub topic: Option<String>,
+    pub kind: Option<String>,
+}
+
+/// Update a channel's name, topic, and/or visibility. Any member may edit
+/// (delete is owner-only, handled separately). DMs cannot be edited.
+pub async fn update_channel(
+    State(state): State<SharedState>,
+    Path(channel_id): Path<Uuid>,
+    auth: AuthUser,
+    Json(body): Json<UpdateChannelRequest>,
+) -> AppResult<Json<Channel>> {
+    let kind = crate::routes::channel_kind(&state.pool, channel_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("channel not found".to_string()))?;
+    if kind == "dm" {
+        return Err(AppError::BadRequest("cannot edit a direct message".to_string()));
+    }
+    if !is_member(&state.pool, channel_id, auth.id).await? {
+        return Err(AppError::Forbidden("not a member of this channel".to_string()));
+    }
+
+    // Members who could previously see the channel, computed before any change
+    // so a public→private flip can notify the now-excluded non-members.
+    let was_public = kind == "public";
+
+    if let Some(name) = &body.name {
+        let name = name.trim();
+        if !valid_channel_name(name) {
+            return Err(AppError::Validation(
+                "name must match [a-z0-9-]{1,50}".to_string(),
+            ));
+        }
+        let clash = sqlx::query(
+            "SELECT 1 AS x FROM channels WHERE kind <> 'dm' AND lower(name) = lower($1) AND id <> $2",
+        )
+        .bind(name)
+        .bind(channel_id)
+        .fetch_optional(&state.pool)
+        .await?;
+        if clash.is_some() {
+            return Err(AppError::Conflict("channel name already taken".to_string()));
+        }
+        sqlx::query("UPDATE channels SET name = $1 WHERE id = $2")
+            .bind(name)
+            .bind(channel_id)
+            .execute(&state.pool)
+            .await?;
+    }
+
+    if let Some(topic) = &body.topic {
+        sqlx::query("UPDATE channels SET topic = $1 WHERE id = $2")
+            .bind(topic)
+            .bind(channel_id)
+            .execute(&state.pool)
+            .await?;
+    }
+
+    if let Some(new_kind) = &body.kind {
+        if new_kind != "public" && new_kind != "private" {
+            return Err(AppError::Validation(
+                "kind must be 'public' or 'private'".to_string(),
+            ));
+        }
+        sqlx::query("UPDATE channels SET kind = $1 WHERE id = $2")
+            .bind(new_kind)
+            .bind(channel_id)
+            .execute(&state.pool)
+            .await?;
+    }
+
+    let channel = load_channel(&state.pool, channel_id, auth.id).await?;
+
+    // Members always get the update (their per-viewer unread is preserved
+    // client-side; the reducer merges only name/topic/kind).
+    let members = channel_member_ids(&state.pool, channel_id).await?;
+    let ev = envelope("channel.updated", json!({ "channel": &channel }));
+    state.hub.broadcast(ev, members.clone()).await;
+
+    // Reconcile visibility for online non-members.
+    let is_public_now = channel.kind == "public";
+    let others: Vec<Uuid> = state
+        .hub
+        .online_user_ids()
+        .into_iter()
+        .filter(|u| !members.contains(u))
+        .collect();
+    if !others.is_empty() {
+        if is_public_now {
+            // Announce as a browsable (non-member) channel.
+            let mut public_view = channel.clone();
+            public_view.is_member = false;
+            public_view.unread_count = 0;
+            let ev = envelope("channel.created", json!({ "channel": &public_view }));
+            state.hub.broadcast(ev, others).await;
+        } else if was_public {
+            // Went private: it should vanish from non-members' lists.
+            let ev = envelope(
+                "channel.deleted",
+                json!({ "channel_id": channel_id.to_string() }),
+            );
+            state.hub.broadcast(ev, others).await;
+        }
+    }
+
+    Ok(Json(channel))
+}
+
+/// Owner-only hard delete. Cascades to messages, docs, members, etc.
+pub async fn delete_channel(
+    State(state): State<SharedState>,
+    Path(channel_id): Path<Uuid>,
+    auth: AuthUser,
+) -> AppResult<StatusCode> {
+    let row = sqlx::query("SELECT kind, created_by FROM channels WHERE id = $1")
+        .bind(channel_id)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("channel not found".to_string()))?;
+    let kind: String = row.try_get("kind")?;
+    let created_by: Option<Uuid> = row.try_get("created_by")?;
+    if kind == "dm" {
+        return Err(AppError::BadRequest("cannot delete a direct message".to_string()));
+    }
+    if created_by != Some(auth.id) {
+        return Err(AppError::Forbidden(
+            "only the channel creator can delete it".to_string(),
+        ));
+    }
+
+    // Compute recipients before deletion. Public channels are visible to
+    // everyone online, so tell them all to drop it.
+    let mut targets = channel_member_ids(&state.pool, channel_id).await?;
+    if kind == "public" {
+        for u in state.hub.online_user_ids() {
+            if !targets.contains(&u) {
+                targets.push(u);
+            }
+        }
+    }
+
+    sqlx::query("DELETE FROM channels WHERE id = $1")
+        .bind(channel_id)
+        .execute(&state.pool)
+        .await?;
+
+    let ev = envelope(
+        "channel.deleted",
+        json!({ "channel_id": channel_id.to_string() }),
+    );
+    state.hub.broadcast(ev, targets).await;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct AddMembersRequest {
+    pub user_ids: Vec<Uuid>,
+}
+
+/// Add one or more users to a channel. Any member may add others. Not for DMs.
+pub async fn add_members(
+    State(state): State<SharedState>,
+    Path(channel_id): Path<Uuid>,
+    auth: AuthUser,
+    Json(body): Json<AddMembersRequest>,
+) -> AppResult<StatusCode> {
+    let kind = crate::routes::channel_kind(&state.pool, channel_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("channel not found".to_string()))?;
+    if kind == "dm" {
+        return Err(AppError::BadRequest("cannot add members to a DM".to_string()));
+    }
+    if !is_member(&state.pool, channel_id, auth.id).await? {
+        return Err(AppError::Forbidden("not a member of this channel".to_string()));
+    }
+
+    for uid in &body.user_ids {
+        // Skip unknown users silently rather than fail the whole batch.
+        let exists = sqlx::query("SELECT 1 AS x FROM users WHERE id = $1")
+            .bind(uid)
+            .fetch_optional(&state.pool)
+            .await?;
+        if exists.is_none() {
+            continue;
+        }
+        let already = is_member(&state.pool, channel_id, *uid).await?;
+        if already {
+            continue;
+        }
+        sqlx::query(
+            "INSERT INTO channel_members (channel_id, user_id) VALUES ($1, $2)
+             ON CONFLICT (channel_id, user_id) DO NOTHING",
+        )
+        .bind(channel_id)
+        .bind(uid)
+        .execute(&state.pool)
+        .await?;
+
+        let user = fetch_user(&state.pool, *uid).await?;
+        // The new member needs the channel itself (esp. private ones absent
+        // from their list), hydrated from their own viewpoint.
+        let their_view = load_channel(&state.pool, channel_id, *uid).await?;
+        let created_ev = envelope("channel.created", json!({ "channel": &their_view }));
+        state.hub.broadcast(created_ev, vec![*uid]).await;
+
+        // Everyone in the channel (including the new member) sees the join.
+        let targets = channel_member_ids(&state.pool, channel_id).await?;
+        let joined_ev = envelope(
+            "channel.member_joined",
+            json!({ "channel_id": channel_id.to_string(), "user": user }),
+        );
+        state.hub.broadcast(joined_ev, targets).await;
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Remove a member from a channel. Any member may remove others; the creator
+/// (owner) cannot be removed. Not for DMs.
+pub async fn remove_member(
+    State(state): State<SharedState>,
+    Path((channel_id, user_id)): Path<(Uuid, Uuid)>,
+    auth: AuthUser,
+) -> AppResult<StatusCode> {
+    let row = sqlx::query("SELECT kind, created_by FROM channels WHERE id = $1")
+        .bind(channel_id)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("channel not found".to_string()))?;
+    let kind: String = row.try_get("kind")?;
+    let created_by: Option<Uuid> = row.try_get("created_by")?;
+    if kind == "dm" {
+        return Err(AppError::BadRequest("cannot remove members from a DM".to_string()));
+    }
+    if !is_member(&state.pool, channel_id, auth.id).await? {
+        return Err(AppError::Forbidden("not a member of this channel".to_string()));
+    }
+    if created_by == Some(user_id) {
+        return Err(AppError::Forbidden(
+            "cannot remove the channel creator".to_string(),
+        ));
+    }
+
+    let was_member = is_member(&state.pool, channel_id, user_id).await?;
+    if !was_member {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    // Compute targets before removal so the removed user is also notified.
+    let targets = channel_member_ids(&state.pool, channel_id).await?;
+
+    sqlx::query("DELETE FROM channel_members WHERE channel_id = $1 AND user_id = $2")
+        .bind(channel_id)
+        .bind(user_id)
+        .execute(&state.pool)
+        .await?;
+
+    let user = fetch_user(&state.pool, user_id).await?;
+    let ev = envelope(
+        "channel.member_left",
+        json!({ "channel_id": channel_id.to_string(), "user": user }),
+    );
+    state.hub.broadcast(ev, targets).await;
+
+    // A private channel becomes invisible to the removed user; tell their
+    // client to drop it entirely (public channels stay browsable).
+    if kind != "public" {
+        let ev = envelope(
+            "channel.deleted",
+            json!({ "channel_id": channel_id.to_string() }),
+        );
+        state.hub.broadcast(ev, vec![user_id]).await;
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]

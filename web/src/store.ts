@@ -15,7 +15,10 @@ import {
 import type {
   Channel,
   ChannelCreatedPayload,
+  ChannelUpdatedPayload,
+  ChannelDeletedPayload,
   ChannelMemberPayload,
+  ChatLayout,
   Doc,
   DocCreatedPayload,
   DocDeletedPayload,
@@ -33,6 +36,7 @@ import type {
   ReactionPayload,
   TypingPayload,
   User,
+  UserUpdatedPayload,
   WsEnvelope,
 } from './lib/types'
 
@@ -100,6 +104,9 @@ type State = {
   notifyEnabled: boolean
   notifHasMore: boolean
 
+  // chat layout preference: null until the user has chosen (triggers first-run chooser)
+  chatLayout: ChatLayout | null
+
   // ws
   ws: WsClient | null
 
@@ -127,6 +134,13 @@ type State = {
   }) => Promise<Channel>
   joinChannel: (id: string) => Promise<void>
   leaveChannel: (id: string) => Promise<void>
+  updateChannel: (
+    id: string,
+    input: { name?: string; topic?: string; kind?: 'public' | 'private' },
+  ) => Promise<Channel>
+  deleteChannel: (id: string) => Promise<void>
+  addChannelMembers: (id: string, userIds: string[]) => Promise<void>
+  removeChannelMember: (id: string, userId: string) => Promise<void>
   openDm: (userId: string) => Promise<Channel>
   loadMembers: (id: string) => Promise<void>
 
@@ -176,6 +190,12 @@ type State = {
   toggleMute: (channelId: string) => Promise<void>
   enableDesktopNotifications: () => Promise<void>
 
+  // profile + chat layout
+  setChatLayout: (layout: ChatLayout) => Promise<void>
+  updateProfile: (input: { display_name?: string }) => Promise<void>
+  uploadAvatar: (file: Blob, onProgress?: (f: number) => void) => Promise<void>
+  removeAvatar: () => Promise<void>
+
   applyWsEvent: (env: WsEnvelope) => void
   totalUnread: () => number
 }
@@ -209,6 +229,7 @@ export const useStore = create<State>((set, get) => ({
   mutedChannels: new Set(),
   notifyEnabled: isWebNotifyGranted(),
   notifHasMore: false,
+  chatLayout: null,
   ws: null,
 
   async init(token, me) {
@@ -265,6 +286,7 @@ export const useStore = create<State>((set, get) => ({
       notifUnread: 0,
       dnd: false,
       mutedChannels: new Set(),
+      chatLayout: null,
       notifHasMore: false,
       ws: null,
     })
@@ -408,6 +430,34 @@ export const useStore = create<State>((set, get) => ({
     set((s) => ({
       channels: s.channels.map((c) => (c.id === id ? { ...c, is_member: false } : c)),
     }))
+  },
+
+  async updateChannel(id, input) {
+    const ch = await api.updateChannel(id, input)
+    // Merge only the mutable fields; the WS echo does the same for others.
+    set((s) => ({
+      channels: s.channels.map((c) =>
+        c.id === id ? { ...c, name: ch.name, topic: ch.topic, kind: ch.kind } : c,
+      ),
+    }))
+    return ch
+  },
+
+  async deleteChannel(id) {
+    await api.deleteChannel(id)
+    // The channel.deleted WS echo removes it; drop optimistically too.
+    dropChannel(set, get, id)
+  },
+
+  async addChannelMembers(id, userIds) {
+    if (userIds.length === 0) return
+    await api.addMembers(id, userIds)
+    // channel.member_joined events refresh the members cache.
+  },
+
+  async removeChannelMember(id, userId) {
+    await api.removeMember(id, userId)
+    // channel.member_left events refresh the members cache.
   },
 
   async openDm(userId) {
@@ -657,10 +707,37 @@ export const useStore = create<State>((set, get) => ({
         notifHasMore: inbox.notifications.length >= 30,
         dnd: prefs.dnd,
         mutedChannels: new Set(prefs.muted_channel_ids),
+        chatLayout: prefs.chat_layout,
       })
     } catch (e) {
       if (e instanceof Error) toastError(e.message)
     }
+  },
+
+  async setChatLayout(layout) {
+    const prev = get().chatLayout
+    set({ chatLayout: layout })
+    try {
+      await api.setChatLayout(layout)
+    } catch (e) {
+      set({ chatLayout: prev })
+      if (e instanceof Error) toastError(e.message)
+    }
+  },
+
+  async updateProfile(input) {
+    const user = await api.updateProfile(input)
+    set((s) => ({ me: user, users: { ...s.users, [user.id]: user } }))
+  },
+
+  async uploadAvatar(file, onProgress) {
+    const user = await api.uploadAvatar(file, onProgress)
+    set((s) => ({ me: user, users: { ...s.users, [user.id]: user } }))
+  },
+
+  async removeAvatar() {
+    const user = await api.deleteAvatar()
+    set((s) => ({ me: user, users: { ...s.users, [user.id]: user } }))
   },
 
   async markMentionsRead(ids) {
@@ -816,6 +893,14 @@ export const useStore = create<State>((set, get) => ({
         get().applyReaction(p.message_id, p.channel_id, p.emoji, p.user_id, false)
         break
       }
+      case 'user.updated': {
+        const { user } = env.payload as UserUpdatedPayload
+        set((s) => ({
+          users: { ...s.users, [user.id]: user },
+          me: s.me?.id === user.id ? user : s.me,
+        }))
+        break
+      }
       case 'channel.created': {
         const { channel } = env.payload as ChannelCreatedPayload
         set((s) => ({
@@ -823,6 +908,26 @@ export const useStore = create<State>((set, get) => ({
             ? s.channels.map((c) => (c.id === channel.id ? channel : c))
             : [...s.channels, channel],
         }))
+        break
+      }
+      case 'channel.updated': {
+        const { channel } = env.payload as ChannelUpdatedPayload
+        // Merge only mutable metadata so each viewer keeps their own
+        // unread_count / is_member / last_message_at / dm_user.
+        set((s) => ({
+          channels: s.channels.some((c) => c.id === channel.id)
+            ? s.channels.map((c) =>
+                c.id === channel.id
+                  ? { ...c, name: channel.name, topic: channel.topic, kind: channel.kind }
+                  : c,
+              )
+            : [...s.channels, channel],
+        }))
+        break
+      }
+      case 'channel.deleted': {
+        const { channel_id } = env.payload as ChannelDeletedPayload
+        dropChannel(set, get, channel_id)
         break
       }
       case 'channel.member_joined': {
@@ -960,6 +1065,31 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 }))
+
+// --- channel helpers ---
+
+/** Remove a channel and all its cached state; navigate home if it was open. */
+function dropChannel(set: Setter, get: () => State, id: string) {
+  const wasCurrent = get().currentChannelId === id
+  set((s) => {
+    const members = { ...s.members }
+    delete members[id]
+    const byChannel = { ...s.byChannel }
+    delete byChannel[id]
+    const docsByChannel = { ...s.docsByChannel }
+    delete docsByChannel[id]
+    const trashByChannel = { ...s.trashByChannel }
+    delete trashByChannel[id]
+    return {
+      channels: s.channels.filter((c) => c.id !== id),
+      members,
+      byChannel,
+      docsByChannel,
+      trashByChannel,
+    }
+  })
+  if (wasCurrent) navigateTo('/')
+}
 
 // --- doc helpers ---
 

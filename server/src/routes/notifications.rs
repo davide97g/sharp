@@ -85,12 +85,18 @@ pub async fn get_prefs(
     State(state): State<SharedState>,
     auth: AuthUser,
 ) -> AppResult<Json<serde_json::Value>> {
-    let dnd: bool = sqlx::query("SELECT dnd FROM user_prefs WHERE user_id = $1")
+    let prefs_row = sqlx::query("SELECT dnd, chat_layout FROM user_prefs WHERE user_id = $1")
         .bind(auth.id)
         .fetch_optional(&state.pool)
-        .await?
+        .await?;
+    let dnd: bool = prefs_row
+        .as_ref()
         .and_then(|r| r.try_get::<bool, _>("dnd").ok())
         .unwrap_or(false);
+    let chat_layout: Option<String> = prefs_row
+        .as_ref()
+        .and_then(|r| r.try_get::<Option<String>, _>("chat_layout").ok())
+        .flatten();
 
     let rows = sqlx::query(
         "SELECT channel_id FROM channel_prefs WHERE user_id = $1 AND muted = true",
@@ -103,12 +109,40 @@ pub async fn get_prefs(
         muted.push(row.try_get::<Uuid, _>("channel_id")?.to_string());
     }
 
-    Ok(Json(json!({ "dnd": dnd, "muted_channel_ids": muted })))
+    Ok(Json(
+        json!({ "dnd": dnd, "muted_channel_ids": muted, "chat_layout": chat_layout }),
+    ))
 }
 
 #[derive(Deserialize)]
 pub struct DndRequest {
     pub dnd: bool,
+}
+
+#[derive(Deserialize)]
+pub struct ChatLayoutRequest {
+    pub chat_layout: String,
+}
+
+pub async fn set_chat_layout(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Json(body): Json<ChatLayoutRequest>,
+) -> AppResult<StatusCode> {
+    if body.chat_layout != "bubble" && body.chat_layout != "classic" {
+        return Err(AppError::Validation(
+            "chat_layout must be 'bubble' or 'classic'".to_string(),
+        ));
+    }
+    sqlx::query(
+        "INSERT INTO user_prefs (user_id, chat_layout) VALUES ($1, $2)
+         ON CONFLICT (user_id) DO UPDATE SET chat_layout = EXCLUDED.chat_layout",
+    )
+    .bind(auth.id)
+    .bind(&body.chat_layout)
+    .execute(&state.pool)
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn set_dnd(

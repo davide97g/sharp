@@ -1,10 +1,13 @@
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useStore } from '../store'
 import { MessageItem } from './MessageItem'
 import { DayDivider } from './DayDivider'
 import { Composer } from './Composer'
 import { TypingRow } from './TypingRow'
+import { ChannelSettingsModal } from './ChannelSettingsModal'
+import { ChatLayoutChooser } from './ChatLayoutChooser'
+import { Avatar } from './Avatar'
 import { channelLabel, sameDay, withinMinutes } from '../lib/util'
 
 export function MessagePane() {
@@ -19,6 +22,8 @@ export function MessagePane() {
   const markRead = useStore((s) => s.markRead)
   const mutedChannels = useStore((s) => s.mutedChannels)
   const toggleMute = useStore((s) => s.toggleMute)
+  const chatLayout = useStore((s) => s.chatLayout)
+  const [showSettings, setShowSettings] = useState(false)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const atBottomRef = useRef(true)
@@ -98,6 +103,8 @@ export function MessagePane() {
 
   const isDm = channel.kind === 'dm'
   const dmOnline = isDm && channel.dm_user ? online.has(channel.dm_user.id) : undefined
+  const bubbles = isDm && chatLayout === 'bubble'
+  const needsLayoutChoice = isDm && chatLayout === null
 
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
@@ -106,14 +113,22 @@ export function MessagePane() {
         <div className="flex min-w-0 items-center gap-2">
           {isDm ? (
             <span className="flex items-center gap-2 font-semibold">
-              <span
-                className="h-2 w-2 rounded-full"
-                style={{ backgroundColor: dmOnline ? '#4fbf9f' : '#4b4b56' }}
-              />
+              {channel.dm_user && (
+                <Avatar
+                  id={channel.dm_user.id}
+                  name={channel.dm_user.display_name}
+                  size={26}
+                  online={dmOnline}
+                />
+              )}
               {channelLabel(channel)}
             </span>
           ) : (
-            <span className="flex items-center gap-1 font-semibold">
+            <button
+              onClick={() => setShowSettings(true)}
+              title="Channel settings"
+              className="flex items-center gap-1 rounded-md px-1.5 py-1 font-semibold hover:bg-[var(--color-panel)]"
+            >
               <span className="text-[var(--color-text-faint)]">#</span>
               {channel.name}
               {channel.kind === 'private' && (
@@ -121,7 +136,7 @@ export function MessagePane() {
                   🔒
                 </span>
               )}
-            </span>
+            </button>
           )}
         </div>
         {channel.topic && (
@@ -132,14 +147,29 @@ export function MessagePane() {
             </span>
           </>
         )}
-        <button
-          onClick={() => toggleMute(channel.id)}
-          title={mutedChannels.has(channel.id) ? 'Unmute this channel' : 'Mute this channel'}
-          className="ml-auto shrink-0 rounded-md px-2 py-1 text-sm text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
-        >
-          {mutedChannels.has(channel.id) ? '🔕' : '🔔'}
-        </button>
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          {!isDm && (
+            <button
+              onClick={() => setShowSettings(true)}
+              title="Channel settings"
+              className="rounded-md px-2 py-1 text-sm text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
+            >
+              ⚙
+            </button>
+          )}
+          <button
+            onClick={() => toggleMute(channel.id)}
+            title={mutedChannels.has(channel.id) ? 'Unmute this channel' : 'Mute this channel'}
+            className="rounded-md px-2 py-1 text-sm text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
+          >
+            {mutedChannels.has(channel.id) ? '🔕' : '🔔'}
+          </button>
+        </div>
       </header>
+
+      {showSettings && !isDm && (
+        <ChannelSettingsModal channelId={channel.id} onClose={() => setShowSettings(false)} />
+      )}
 
       {/* messages */}
       <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto">
@@ -169,6 +199,8 @@ export function MessagePane() {
                   <MessageItem
                     message={m}
                     grouped={grouped}
+                    dm={bubbles}
+                    showThread={!bubbles}
                     online={isDm ? undefined : online.has(m.user.id) || undefined}
                   />
                 </div>
@@ -180,6 +212,8 @@ export function MessagePane() {
 
       <TypingRow channelId={channelId} />
       <Composer channel={channel} placeholder={`Message ${isDm ? channelLabel(channel) : '#' + channel.name}`} />
+
+      {needsLayoutChoice && <ChatLayoutChooser />}
     </div>
   )
 }

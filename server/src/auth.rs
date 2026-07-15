@@ -96,6 +96,7 @@ pub fn user_from_row(row: &sqlx::postgres::PgRow) -> AppResult<User> {
         id: row.try_get("id")?,
         email: row.try_get("email")?,
         display_name: row.try_get("display_name")?,
+        avatar_url: row.try_get("avatar_url")?,
         created_at: row.try_get("created_at")?,
     })
 }
@@ -162,7 +163,7 @@ pub async fn register(
     let row = sqlx::query(
         "INSERT INTO users (email, password_hash, display_name)
          VALUES ($1, $2, $3)
-         RETURNING id, email, display_name, created_at",
+         RETURNING id, email, display_name, avatar_url, created_at",
     )
     .bind(&email)
     .bind(&password_hash)
@@ -186,7 +187,7 @@ pub async fn login(
     let email = body.email.trim().to_lowercase();
 
     let row = sqlx::query(
-        "SELECT id, email, display_name, created_at, password_hash
+        "SELECT id, email, display_name, avatar_url, created_at, password_hash
          FROM users WHERE email = $1",
     )
     .bind(&email)

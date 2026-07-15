@@ -40,6 +40,8 @@ users(
   email text UNIQUE NOT NULL,            -- store lowercased
   password_hash text NOT NULL,           -- argon2id
   display_name text NOT NULL,
+  avatar_url text,                       -- proxied /api/v1/users/{id}/avatar?v=<token>; null = none
+  avatar_content_type text,              -- stored object's content-type (for the proxy)
   created_at timestamptz NOT NULL default now()
 )
 
@@ -92,7 +94,7 @@ Timestamps are RFC3339 UTC strings. Errors: `{"error": {"code": "...", "message"
 with proper HTTP status (400/401/403/404/409/422).
 
 ```ts
-User    = { id: string, email: string, display_name: string, created_at: string }
+User    = { id: string, email: string, display_name: string, avatar_url: string|null, created_at: string }
 Channel = {
   id: string, name: string, kind: 'public'|'private'|'dm', topic: string,
   created_by: string|null, created_at: string,
@@ -103,7 +105,7 @@ Channel = {
 Reaction = { emoji: string, count: number, me: boolean }
 Message  = {
   id: string, channel_id: string, parent_id: string|null,
-  user: { id: string, display_name: string },
+  user: { id: string, display_name: string, avatar_url: string|null },
   content: string,                                 // '' when deleted
   created_at: string, edited_at: string|null, deleted_at: string|null,
   reactions: Reaction[],
@@ -118,13 +120,21 @@ Message  = {
 | POST | `/auth/register` | `{email, password, display_name}` → `201 {token, user}` |
 | POST | `/auth/login` | `{email, password}` → `{token, user}` |
 | GET | `/me` | → `User` |
+| PATCH | `/me` | `{display_name?}` → `User` (emits `user.updated`) |
+| POST | `/me/avatar` | multipart `file` (raster image, ≤ MAX_UPLOAD_MB) → `User` (stores to `avatars/{uid}`, bumps `avatar_url?v=`, emits `user.updated`) |
+| DELETE | `/me/avatar` | → `User` (clears avatar, emits `user.updated`) |
 | GET | `/users` | → `{users: User[], online_user_ids: string[]}` |
+| GET | `/users/{id}/avatar` | → image bytes (any authed user; `?v=` cache-buster) |
 | GET | `/channels` | → `{channels: Channel[]}` (public ∪ my private/dm) |
 | POST | `/channels` | `{name, kind: 'public'\|'private', topic?, member_ids?}` → `201 Channel` |
 | POST | `/channels/dm` | `{user_id}` → `Channel` (get-or-create) |
+| PATCH | `/channels/{id}` | `{name?, topic?, kind?}` → `Channel` (any member; not DMs) |
+| DELETE | `/channels/{id}` | → `204` (creator/owner only; hard delete, cascades) |
 | POST | `/channels/{id}/join` | → `204` (public only) |
 | POST | `/channels/{id}/leave` | → `204` |
 | GET | `/channels/{id}/members` | → `{members: User[]}` |
+| POST | `/channels/{id}/members` | `{user_ids: string[]}` → `204` (any member adds; not DMs) |
+| DELETE | `/channels/{id}/members/{user_id}` | → `204` (any member; cannot remove creator; not DMs) |
 | POST | `/channels/{id}/read` | `{message_id}` → `204` (sets last_read high-water mark) |
 | GET | `/channels/{id}/messages?before=<id>&limit=50` | → `{messages: Message[]}` top-level only, **ascending**, the `limit` newest with `id < before` (or newest overall) |
 | POST | `/channels/{id}/messages` | `{content, parent_id?}` → `201 Message` |
@@ -135,6 +145,10 @@ Message  = {
 | DELETE | `/messages/{id}/reactions/{emoji}` | → `204` |
 | GET | `/search?q=&limit=20` | → `{results: (Message & {channel_name: string})[]}` (my channels only) |
 | GET | `/healthz` | → `200 {"status":"ok"}` (no auth) |
+
+Channel management: any member may rename, edit topic, change visibility, and add/remove other
+members (the creator/owner cannot be removed). Only the creator/owner may delete the channel.
+DMs cannot be edited, deleted, or have members changed.
 
 Validation: password ≥ 8 chars; channel name `[a-z0-9-]{1,50}`; message content 1–8000 chars.
 Registering the **first user** of an instance is always open; later registrations are open
@@ -147,13 +161,24 @@ Envelope both directions: `{"type": string, "payload": object}`.
 Server → client:
 
 - `hello` `{user_id, online_user_ids: string[]}` — on connect
+- `user.updated` `{user: User}` — broadcast to all online users on a profile change (display name
+  or avatar). Clients patch their `users` directory (and `me` if it's their own id); avatars are
+  resolved from that directory so message/sidebar/header avatars update live.
 - `message.created` `{message: Message}` — to all members of its channel (also to the
   author's other devices). Thread replies carry non-null `parent_id`.
 - `message.updated` `{message: Message}`
 - `message.deleted` `{message_id, channel_id, parent_id}`
 - `reaction.added` / `reaction.removed` `{message_id, channel_id, emoji, user_id}`
 - `channel.created` `{channel: Channel}` — to members (public: to everyone)
-- `channel.member_joined` / `channel.member_left` `{channel_id, user: User}`
+- `channel.updated` `{channel: Channel}` — to members on rename/topic/visibility edit. Clients
+  merge only `name`/`topic`/`kind` (per-viewer `unread_count`/`is_member` are preserved). A
+  public→private flip also sends `channel.deleted` to online non-members; private→public sends
+  them a non-member `channel.created`.
+- `channel.deleted` `{channel_id}` — channel removed, or the recipient can no longer see it
+  (deleted; removed from a private channel). Client drops all cached state and, if it was open,
+  navigates home.
+- `channel.member_joined` / `channel.member_left` `{channel_id, user: User}`. Adding a user to a
+  channel also sends that user a member-view `channel.created` so private channels appear.
 - `typing` `{channel_id, user_id, display_name}` — client shows ~3s
 - `presence` `{user_id, status: 'online'|'offline'}`
 
@@ -502,7 +527,8 @@ notifications(
 
 channel_prefs(user_id uuid, channel_id uuid, muted boolean NOT NULL default false,
   PRIMARY KEY (user_id, channel_id))                 -- absence = not muted
-user_prefs(user_id uuid PK, dnd boolean NOT NULL default false)
+user_prefs(user_id uuid PK, dnd boolean NOT NULL default false,
+  chat_layout text)                                  -- 'bubble'|'classic'; null = not chosen yet
 push_subscriptions(id uuid PK, user_id uuid, endpoint text UNIQUE NOT NULL,
   p256dh text NOT NULL, auth text NOT NULL, created_at timestamptz)
 app_meta(key text PK, value text NOT NULL)           -- e.g. auto-generated VAPID keys
@@ -520,12 +546,13 @@ Message = { …, attachments: Attachment[] }  // added to the existing Message s
 NotificationKind = 'mention'|'dm'|'reply'
 Notification = {
   id: string, kind: NotificationKind,
-  actor: { id: string, display_name: string },
+  actor: { id: string, display_name: string, avatar_url: string|null },
   channel_id: string, channel_kind: 'public'|'private'|'dm', channel_name: string,
   message_id: string|null, preview: string,
   created_at: string, read_at: string|null
 }
-Prefs = { dnd: boolean, muted_channel_ids: string[] }
+ChatLayout = 'bubble' | 'classic'        // DM rendering: WhatsApp-style vs Slack-style rows
+Prefs = { dnd: boolean, muted_channel_ids: string[], chat_layout: ChatLayout | null }
 ```
 
 ## REST API additions — base `/api/v1`
@@ -539,6 +566,7 @@ Prefs = { dnd: boolean, muted_channel_ids: string[] }
 | POST | `/notifications/read` | `{ids?: string[]}` or `{all: true}` → `204` |
 | GET | `/prefs` | → `Prefs` |
 | PUT | `/prefs/dnd` | `{dnd}` → `204` |
+| PUT | `/prefs/chat-layout` | `{chat_layout: 'bubble'\|'classic'}` → `204` |
 | PUT | `/channels/{id}/prefs` | `{muted}` → `204` |
 | GET | `/push/vapid` | → `{public_key: string\|null}` |
 | POST | `/push/subscribe` | `{endpoint, keys:{p256dh, auth}}` → `204` (upsert by endpoint) |

@@ -30,6 +30,7 @@ pub async fn search(
     let rows = sqlx::query(
         "SELECT
             m.id, m.channel_id, m.parent_id, m.user_id, u.display_name AS author_name,
+            u.avatar_url AS author_avatar,
             m.content, m.created_at, m.edited_at, m.deleted_at,
             (SELECT count(*) FROM messages r WHERE r.parent_id = m.id AND r.deleted_at IS NULL) AS reply_count,
             (SELECT max(r.created_at) FROM messages r WHERE r.parent_id = m.id AND r.deleted_at IS NULL) AS last_reply_at,

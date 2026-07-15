@@ -4,7 +4,10 @@ import { useStore } from '../store'
 import { channelLabel } from '../lib/util'
 import { CreateChannelModal } from './CreateChannelModal'
 import { BrowseChannelsModal } from './BrowseChannelsModal'
+import { ChannelSettingsModal } from './ChannelSettingsModal'
 import { NotificationCenter } from './NotificationCenter'
+import { UserSettingsModal } from './UserSettingsModal'
+import { Avatar } from './Avatar'
 import type { Channel } from '../lib/types'
 
 export function Sidebar() {
@@ -16,6 +19,8 @@ export function Sidebar() {
   const navigate = useNavigate()
   const [showCreate, setShowCreate] = useState(false)
   const [showBrowse, setShowBrowse] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const [settingsFor, setSettingsFor] = useState<string | null>(null)
   const [search, setSearch] = useState('')
 
   const myChannels = useMemo(
@@ -94,7 +99,7 @@ export function Sidebar() {
             </button>
           )}
           {myChannels.map((c) => (
-            <ChannelRow key={c.id} channel={c} />
+            <ChannelRow key={c.id} channel={c} onSettings={() => setSettingsFor(c.id)} />
           ))}
         </div>
 
@@ -121,17 +126,21 @@ export function Sidebar() {
 
       {/* footer */}
       <div className="flex items-center gap-2 border-t border-[var(--color-border)] px-3 py-3">
-        <span className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--color-accent)] text-xs font-semibold text-white">
-          {(me?.display_name ?? '?').slice(0, 1).toUpperCase()}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{me?.display_name}</div>
-          <div className="truncate text-[11px] text-[var(--color-text-faint)]">{me?.email}</div>
-        </div>
+        <button
+          onClick={() => setShowSettings(true)}
+          title="Settings"
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left hover:bg-[var(--color-panel-2)]"
+        >
+          {me && <Avatar id={me.id} name={me.display_name} size={28} />}
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium">{me?.display_name}</div>
+            <div className="truncate text-[11px] text-[var(--color-text-faint)]">{me?.email}</div>
+          </div>
+        </button>
         <button
           onClick={logout}
           title="Sign out"
-          className="rounded-md px-2 py-1 text-xs text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
+          className="shrink-0 rounded-md px-2 py-1 text-xs text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
         >
           ⎋
         </button>
@@ -139,6 +148,13 @@ export function Sidebar() {
 
       {showCreate && <CreateChannelModal onClose={() => setShowCreate(false)} />}
       {showBrowse && <BrowseChannelsModal onClose={() => setShowBrowse(false)} />}
+      {showSettings && <UserSettingsModal onClose={() => setShowSettings(false)} />}
+      {settingsFor && (
+        <ChannelSettingsModal
+          channelId={settingsFor}
+          onClose={() => setSettingsFor(null)}
+        />
+      )}
     </aside>
   )
 }
@@ -180,14 +196,20 @@ function IconButton({
   )
 }
 
-function ChannelRow({ channel }: { channel: Channel }) {
+function ChannelRow({
+  channel,
+  onSettings,
+}: {
+  channel: Channel
+  onSettings: () => void
+}) {
   const { channelId } = useParams()
   const active = channelId === channel.id
   const unread = channel.unread_count > 0
   return (
     <NavLink
       to={`/c/${channel.id}`}
-      className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-sm ${
+      className={`group flex items-center gap-1.5 rounded-md px-2 py-1 text-sm ${
         active
           ? 'bg-[var(--color-accent-soft)] text-white'
           : unread
@@ -200,8 +222,19 @@ function ChannelRow({ channel }: { channel: Channel }) {
         {channel.name}
       </span>
       {channel.kind === 'private' && <span className="text-xs opacity-60">🔒</span>}
+      <button
+        onClick={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          onSettings()
+        }}
+        title="Channel settings"
+        className="hidden shrink-0 rounded px-1 text-[var(--color-text-faint)] hover:text-[var(--color-text)] group-hover:block"
+      >
+        ⚙
+      </button>
       {unread && !active && (
-        <span className="ml-auto rounded-full bg-[var(--color-accent)] px-1.5 py-0.5 text-[10px] font-bold text-white">
+        <span className="rounded-full bg-[var(--color-accent)] px-1.5 py-0.5 text-[10px] font-bold text-white">
           {channel.unread_count}
         </span>
       )}

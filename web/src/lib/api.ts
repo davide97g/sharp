@@ -132,6 +132,48 @@ export const api = {
   me() {
     return request<User>('/me')
   },
+  updateProfile(input: { display_name?: string }) {
+    return request<User>('/me', { method: 'PATCH', body: input })
+  },
+  deleteAvatar() {
+    return request<User>('/me/avatar', { method: 'DELETE' })
+  },
+  uploadAvatar(file: Blob, onProgress?: (fraction: number) => void): Promise<User> {
+    return new Promise((resolve, reject) => {
+      const form = new FormData()
+      form.append('file', file, 'avatar.png')
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', `${apiBase()}/me/avatar`)
+      const token = getToken()
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+      xhr.upload.onprogress = (e) => {
+        if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total)
+      }
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText) as User)
+          } catch {
+            reject(new ApiRequestError('bad upload response', 'error', xhr.status))
+          }
+        } else {
+          if (xhr.status === 401) {
+            clearToken()
+            onUnauthorized?.()
+          }
+          let message = `Upload failed (${xhr.status})`
+          try {
+            message = JSON.parse(xhr.responseText)?.error?.message ?? message
+          } catch {
+            /* ignore */
+          }
+          reject(new ApiRequestError(message, 'error', xhr.status))
+        }
+      }
+      xhr.onerror = () => reject(new ApiRequestError('network error', 'error', 0))
+      xhr.send(form)
+    })
+  },
 
   // --- users ---
   users() {
@@ -155,6 +197,24 @@ export const api = {
       method: 'POST',
       body: { user_id },
     })
+  },
+  updateChannel(
+    id: string,
+    input: { name?: string; topic?: string; kind?: 'public' | 'private' },
+  ) {
+    return request<Channel>(`/channels/${id}`, { method: 'PATCH', body: input })
+  },
+  deleteChannel(id: string) {
+    return request<void>(`/channels/${id}`, { method: 'DELETE' })
+  },
+  addMembers(id: string, user_ids: string[]) {
+    return request<void>(`/channels/${id}/members`, {
+      method: 'POST',
+      body: { user_ids },
+    })
+  },
+  removeMember(id: string, userId: string) {
+    return request<void>(`/channels/${id}/members/${userId}`, { method: 'DELETE' })
   },
   joinChannel(id: string) {
     return request<void>(`/channels/${id}/join`, { method: 'POST' })
@@ -279,6 +339,9 @@ export const api = {
   },
   setDnd(dnd: boolean) {
     return request<void>('/prefs/dnd', { method: 'PUT', body: { dnd } })
+  },
+  setChatLayout(chat_layout: 'bubble' | 'classic') {
+    return request<void>('/prefs/chat-layout', { method: 'PUT', body: { chat_layout } })
   },
   setChannelMute(channelId: string, muted: boolean) {
     return request<void>(`/channels/${channelId}/prefs`, {

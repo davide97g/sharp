@@ -5,8 +5,11 @@ export type User = {
   id: string
   email: string
   display_name: string
+  avatar_url: string | null
   created_at: string
 }
+
+export type ChatLayout = 'bubble' | 'classic'
 
 export type ChannelKind = 'public' | 'private' | 'dm'
 
@@ -40,6 +43,7 @@ export type Attachment = {
 export type MessageAuthor = {
   id: string
   display_name: string
+  avatar_url: string | null
 }
 
 export type Message = {
@@ -75,6 +79,7 @@ export type Notification = {
 export type Prefs = {
   dnd: boolean
   muted_channel_ids: string[]
+  chat_layout: ChatLayout | null
 }
 
 // --- REST response shapes ---
@@ -113,7 +118,10 @@ export type ReactionPayload = {
   emoji: string
   user_id: string
 }
+export type UserUpdatedPayload = { user: User }
 export type ChannelCreatedPayload = { channel: Channel }
+export type ChannelUpdatedPayload = { channel: Channel }
+export type ChannelDeletedPayload = { channel_id: string }
 export type ChannelMemberPayload = { channel_id: string; user: User }
 
 // --- Phase 2: Docs ---

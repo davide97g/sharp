@@ -633,7 +633,7 @@ pub async fn list_roles(
     require_visible(role)?;
 
     let rows = sqlx::query(
-        "SELECT u.id, u.email, u.display_name, u.created_at, dr.role
+        "SELECT u.id, u.email, u.display_name, u.avatar_url, u.created_at, dr.role
          FROM doc_roles dr JOIN users u ON u.id = dr.user_id
          WHERE dr.doc_id = $1
          ORDER BY u.display_name",
@@ -837,7 +837,7 @@ pub async fn create_mention(
 const MENTION_SELECT: &str = "
     SELECT dm.id, dm.created_at, dm.read_at,
         d.id AS doc_id, d.kind AS doc_kind, d.title AS doc_title, d.icon AS doc_icon, d.channel_id AS doc_channel_id,
-        fu.id AS from_id, fu.display_name AS from_name
+        fu.id AS from_id, fu.display_name AS from_name, fu.avatar_url AS from_avatar
     FROM doc_mentions dm
     JOIN docs d ON d.id = dm.doc_id
     JOIN users fu ON fu.id = dm.from_user
@@ -856,6 +856,7 @@ fn map_mention_row(row: &PgRow) -> AppResult<DocMention> {
         from_user: MessageUser {
             id: row.try_get("from_id")?,
             display_name: row.try_get("from_name")?,
+            avatar_url: row.try_get("from_avatar")?,
         },
         created_at: row.try_get("created_at")?,
         read_at: row.try_get("read_at")?,

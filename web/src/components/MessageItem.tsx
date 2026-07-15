@@ -13,11 +13,13 @@ export function MessageItem({
   grouped,
   showThread = true,
   online,
+  dm = false,
 }: {
   message: Message
   grouped: boolean
   showThread?: boolean
   online?: boolean
+  dm?: boolean
 }) {
   const me = useStore((s) => s.me)
   const toggleReaction = useStore((s) => s.toggleReaction)
@@ -71,6 +73,166 @@ export function MessageItem({
       /* toast handled */
     }
     setConfirmDelete(false)
+  }
+
+  // Editor (shared between layouts)
+  const editor = (
+    <div className="my-1 rounded-lg border border-[var(--color-accent)] bg-[var(--color-panel)] px-3 py-2 ring-2 ring-[var(--color-accent-soft)]">
+      <textarea
+        ref={editRef}
+        value={draft}
+        onChange={(e) => {
+          setDraft(e.target.value)
+          const el = e.target
+          el.style.height = 'auto'
+          el.style.height = el.scrollHeight + 'px'
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault()
+            saveEdit()
+          } else if (e.key === 'Escape') {
+            setEditing(false)
+          }
+        }}
+        className="max-h-64 w-full resize-none bg-transparent text-sm text-[var(--color-text)] focus:outline-none"
+      />
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          onClick={saveEdit}
+          className="rounded-md bg-[var(--color-accent)] px-2.5 py-1 text-xs font-semibold text-white hover:bg-[var(--color-accent-hover)]"
+        >
+          Save
+        </button>
+        <button
+          onClick={() => setEditing(false)}
+          className="rounded-md border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)]"
+        >
+          Cancel
+        </button>
+        <span className="text-[11px] text-[var(--color-text-faint)]">
+          Enter to save · Esc to cancel
+        </span>
+      </div>
+    </div>
+  )
+
+  // WhatsApp-style DM layout: my messages right, partner's left, chat bubbles.
+  if (dm) {
+    return (
+      <div
+        className={`group relative flex px-4 ${grouped ? 'py-0.5' : 'pt-2 mt-1'} ${
+          isMine ? 'justify-end' : 'justify-start'
+        }`}
+        onMouseLeave={() => setShowPalette(false)}
+      >
+        <div className={`relative flex max-w-[75%] flex-col ${isMine ? 'items-end' : 'items-start'}`}>
+          {isDeleted ? (
+            <div className="rounded-2xl bg-[var(--color-panel-2)] px-3 py-2 text-sm italic text-[var(--color-text-faint)]">
+              This message was deleted.
+            </div>
+          ) : editing ? (
+            <div className="w-full min-w-[16rem]">{editor}</div>
+          ) : (
+            <div
+              className={`min-w-0 rounded-2xl px-3 py-2 ${
+                isMine
+                  ? 'rounded-br-sm bg-[var(--color-accent-soft)]'
+                  : 'rounded-bl-sm bg-[var(--color-panel-2)]'
+              }`}
+            >
+              {message.content && <Markdown content={message.content} />}
+              <span className="ml-2 mt-0.5 inline-block align-baseline text-[10px] text-[var(--color-text-faint)]">
+                {message.edited_at && <span className="mr-1">(edited)</span>}
+                {fmtTime(message.created_at)}
+              </span>
+            </div>
+          )}
+
+          {/* attachments */}
+          {!isDeleted && !editing && message.attachments.length > 0 && (
+            <AttachmentList attachments={message.attachments} />
+          )}
+
+          {/* reactions */}
+          {!isDeleted && message.reactions.length > 0 && (
+            <div className={`mt-1 flex flex-wrap gap-1 ${isMine ? 'justify-end' : 'justify-start'}`}>
+              {message.reactions.map((r) => (
+                <button
+                  key={r.emoji}
+                  onClick={() => toggleReaction(message, r.emoji)}
+                  className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition ${
+                    r.me
+                      ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]'
+                      : 'border-[var(--color-border)] bg-[var(--color-panel)] text-[var(--color-text-dim)] hover:border-[var(--color-text-faint)]'
+                  }`}
+                >
+                  <span>{r.emoji}</span>
+                  <span className="tabular-nums">{r.count}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* hover toolbar */}
+          {!isDeleted && !editing && (
+            <div
+              className={`absolute -top-3 hidden items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] shadow-md group-hover:flex ${
+                isMine ? 'left-0' : 'right-0'
+              }`}
+            >
+              <div className="relative">
+                <ToolbarBtn title="Add reaction" onClick={() => setShowPalette((v) => !v)}>
+                  😊
+                </ToolbarBtn>
+                {showPalette && (
+                  <div className="absolute right-0 top-9 z-20 flex gap-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] p-1.5 shadow-lg">
+                    {REACTION_PALETTE.map((e) => (
+                      <button
+                        key={e}
+                        onClick={() => {
+                          toggleReaction(message, e)
+                          setShowPalette(false)
+                        }}
+                        className="rounded-md px-1.5 py-1 text-base hover:bg-[var(--color-accent-soft)]"
+                      >
+                        {e}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {isMine && (
+                <ToolbarBtn title="Edit" onClick={() => setEditing(true)}>
+                  ✏️
+                </ToolbarBtn>
+              )}
+              {isMine &&
+                (confirmDelete ? (
+                  <div className="flex items-center gap-1 px-1">
+                    <button
+                      onClick={doDelete}
+                      className="rounded px-1.5 py-0.5 text-xs font-semibold text-red-300 hover:bg-red-500/20"
+                    >
+                      Delete?
+                    </button>
+                    <button
+                      onClick={() => setConfirmDelete(false)}
+                      className="rounded px-1 py-0.5 text-xs text-[var(--color-text-faint)] hover:bg-[var(--color-panel)]"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <ToolbarBtn title="Delete" onClick={() => setConfirmDelete(true)}>
+                    🗑️
+                  </ToolbarBtn>
+                ))}
+            </div>
+          )}
+        </div>
+      </div>
+    )
   }
 
   return (

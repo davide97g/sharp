@@ -18,6 +18,7 @@ use uuid::Uuid;
 const MESSAGE_SELECT: &str = "
     SELECT
         m.id, m.channel_id, m.parent_id, m.user_id, u.display_name AS author_name,
+        u.avatar_url AS author_avatar,
         m.content, m.created_at, m.edited_at, m.deleted_at,
         (SELECT count(*) FROM messages r WHERE r.parent_id = m.id AND r.deleted_at IS NULL) AS reply_count,
         (SELECT max(r.created_at) FROM messages r WHERE r.parent_id = m.id AND r.deleted_at IS NULL) AS last_reply_at
@@ -39,6 +40,7 @@ pub(crate) fn map_message_row(row: &PgRow) -> AppResult<Message> {
         user: MessageUser {
             id: row.try_get("user_id")?,
             display_name: row.try_get("author_name")?,
+            avatar_url: row.try_get("author_avatar")?,
         },
         content,
         created_at: row.try_get("created_at")?,

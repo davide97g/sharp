@@ -26,6 +26,7 @@ pub struct User {
     pub id: Uuid,
     pub email: String,
     pub display_name: String,
+    pub avatar_url: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -34,6 +35,7 @@ pub struct User {
 pub struct MessageUser {
     pub id: Uuid,
     pub display_name: String,
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
