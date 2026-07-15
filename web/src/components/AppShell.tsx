@@ -1,16 +1,30 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { DocsSidebar } from './docs/DocsSidebar'
 import { CanvasSidebar } from './canvas/CanvasSidebar'
+import { CompactSidebar } from './CompactSidebar'
 import { ThreadPanel } from './ThreadPanel'
 import { QuickSwitcher } from './QuickSwitcher'
 import { useStore } from '../store'
+
+const SIDEBAR_OPEN_KEY = 'sharp.sidebarOpen'
+
+function isEditableTarget(target: EventTarget | null) {
+  return (
+    target instanceof HTMLElement &&
+    (target.isContentEditable ||
+      target.closest('input, textarea, select, [contenteditable="true"]') !== null)
+  )
+}
 
 export function AppShell() {
   const setQuickSwitcher = useStore((s) => s.setQuickSwitcher)
   const channels = useStore((s) => s.channels)
   const location = useLocation()
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => window.localStorage.getItem(SIDEBAR_OPEN_KEY) !== 'false',
+  )
 
   const docsMode =
     location.pathname.startsWith('/docs') || location.pathname.startsWith('/d/')
@@ -28,22 +42,50 @@ export function AppShell() {
     document.title = totalUnread > 0 ? `(${totalUnread}) sharp` : 'sharp'
   }, [totalUnread])
 
-  // ⌘K / Ctrl+K quick switcher
+  const toggleSidebar = useCallback(() => {
+    setSidebarOpen((open) => !open)
+  }, [])
+
+  useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_OPEN_KEY, String(sidebarOpen))
+  }, [sidebarOpen])
+
+  // Global shortcuts: ⌘K / Ctrl+K for quick switcher, \ for the sidebar.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         setQuickSwitcher(true)
+        return
+      }
+
+      if (e.key === '\\' && !e.repeat && !isEditableTarget(e.target)) {
+        e.preventDefault()
+        toggleSidebar()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [setQuickSwitcher])
+  }, [setQuickSwitcher, toggleSidebar])
 
   return (
     <div className="flex h-full w-full overflow-hidden">
-      <ModeRail mode={mode} />
-      {canvasMode ? <CanvasSidebar /> : docsMode ? <DocsSidebar /> : <Sidebar />}
+      <ModeRail
+        mode={mode}
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={toggleSidebar}
+      />
+      <div
+        id="app-sidebar"
+        className="sidebar-shell relative"
+        data-open={sidebarOpen}
+      >
+        {sidebarOpen ? (
+          canvasMode ? <CanvasSidebar /> : docsMode ? <DocsSidebar /> : <Sidebar />
+        ) : (
+          <CompactSidebar mode={mode} />
+        )}
+      </div>
       <Outlet />
       {mode === 'chat' && <ThreadPanel />}
       <QuickSwitcher />
@@ -51,7 +93,15 @@ export function AppShell() {
   )
 }
 
-function ModeRail({ mode }: { mode: 'chat' | 'docs' | 'canvas' }) {
+function ModeRail({
+  mode,
+  sidebarOpen,
+  onToggleSidebar,
+}: {
+  mode: 'chat' | 'docs' | 'canvas'
+  sidebarOpen: boolean
+  onToggleSidebar: () => void
+}) {
   const navigate = useNavigate()
   const chatUnread = useStore((s) => s.notifUnread)
   const mentions = useStore((s) => s.mentions)
@@ -65,7 +115,10 @@ function ModeRail({ mode }: { mode: 'chat' | 'docs' | 'canvas' }) {
   )
 
   return (
-    <nav className="flex w-14 shrink-0 flex-col items-center gap-2 border-r border-[var(--color-border)] bg-[var(--color-ink)] py-3">
+    <nav
+      aria-label="Workspace sections"
+      className="flex w-14 shrink-0 flex-col items-center gap-2 border-r border-[var(--color-border)] bg-[var(--color-ink)] py-3"
+    >
       <RailButton
         active={mode === 'chat'}
         onClick={() => navigate('/')}
@@ -120,7 +173,39 @@ function ModeRail({ mode }: { mode: 'chat' | 'docs' | 'canvas' }) {
           </svg>
         }
       />
+      <button
+        type="button"
+        onClick={onToggleSidebar}
+        aria-controls="app-sidebar"
+        aria-expanded={sidebarOpen}
+        aria-keyshortcuts="\\"
+        aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+        title={`${sidebarOpen ? 'Collapse' : 'Expand'} sidebar (\\)`}
+        className="mt-auto flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-faint)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-ink)]"
+      >
+        <SidebarToggleIcon open={sidebarOpen} />
+      </button>
     </nav>
+  )
+}
+
+function SidebarToggleIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="19"
+      height="19"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="3" y="4" width="18" height="16" rx="2.5" />
+      <path d="M8.5 4v16" />
+      <path d={open ? 'm15 9-3 3 3 3' : 'm12 9 3 3-3 3'} />
+    </svg>
   )
 }
 

@@ -62,6 +62,28 @@ body {
   transition-timing-function: ease;
 }
 
+/* The mode rail stays put while the contextual sidebar switches density. */
+.sidebar-shell {
+  width: 16rem;
+  flex: none;
+  overflow: hidden;
+  transition: width 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.sidebar-shell > aside {
+  height: 100%;
+}
+
+.sidebar-shell[data-open="false"] {
+  width: 4.5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-shell {
+    transition-duration: 0.01ms;
+  }
+}
+
 /* Scrollbars */
 ::-webkit-scrollbar {
   width: 10px;
