@@ -69,6 +69,16 @@ pub struct Attachment {
     pub url: String,
 }
 
+/// Compact snapshot of the message a quote-reply points at (rendered inline).
+#[derive(Debug, Clone, Serialize)]
+pub struct ReplyPreview {
+    #[serde(serialize_with = "ser_i64_string")]
+    pub id: i64,
+    pub user: MessageUser,
+    pub content: String, // truncated preview; '' when the target was deleted
+    pub deleted: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Message {
     #[serde(serialize_with = "ser_i64_string")]
@@ -85,6 +95,7 @@ pub struct Message {
     pub attachments: Vec<Attachment>,
     pub reply_count: i64,
     pub last_reply_at: Option<DateTime<Utc>>,
+    pub reply_to: Option<ReplyPreview>,
 }
 
 /// An inbox notification (mention / dm / reply).

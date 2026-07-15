@@ -246,10 +246,12 @@ export const api = {
     content: string,
     parent_id?: string,
     attachment_ids?: string[],
+    reply_to_id?: string,
   ) {
     const body: Record<string, unknown> = { content }
     if (parent_id) body.parent_id = parent_id
     if (attachment_ids && attachment_ids.length) body.attachment_ids = attachment_ids
+    if (reply_to_id) body.reply_to_id = reply_to_id
     return request<Message>(`/channels/${channelId}/messages`, {
       method: 'POST',
       body,

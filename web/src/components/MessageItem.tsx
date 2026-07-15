@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Message } from '../lib/types'
+import type { Message, ReplyPreview } from '../lib/types'
 import { useStore } from '../store'
 import { Avatar } from './Avatar'
 import { Markdown } from './Markdown'
@@ -7,6 +7,36 @@ import { AttachmentList } from './Attachments'
 import { fmtTime } from '../lib/util'
 
 export const REACTION_PALETTE = ['👍', '✅', '👀', '❤️', '😂', '🎉']
+
+// Scroll to a quoted message (if it's currently loaded) and flash it.
+function scrollToMessage(id: string) {
+  const el = document.getElementById(`msg-${id}`)
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  el.animate(
+    [{ backgroundColor: 'var(--color-accent-soft)' }, { backgroundColor: 'transparent' }],
+    { duration: 1400, easing: 'ease-out' },
+  )
+}
+
+// The quoted-message chip rendered above a reply's own content.
+function QuotedReply({ reply }: { reply: ReplyPreview }) {
+  return (
+    <button
+      onClick={() => scrollToMessage(reply.id)}
+      className="mb-1 flex w-full items-stretch gap-2 rounded-md border-l-2 border-[var(--color-accent)] bg-black/15 px-2 py-1 text-left transition hover:bg-black/25"
+    >
+      <div className="min-w-0">
+        <div className="text-[11px] font-semibold text-[var(--color-accent-hover)]">
+          {reply.user.display_name}
+        </div>
+        <div className="truncate text-xs text-[var(--color-text-dim)]">
+          {reply.deleted ? 'Deleted message' : reply.content || 'Attachment'}
+        </div>
+      </div>
+    </button>
+  )
+}
 
 export function MessageItem({
   message,
@@ -26,6 +56,7 @@ export function MessageItem({
   const editMessage = useStore((s) => s.editMessage)
   const deleteMessage = useStore((s) => s.deleteMessage)
   const openThread = useStore((s) => s.openThread)
+  const setReplyTarget = useStore((s) => s.setReplyTarget)
 
   const [showPalette, setShowPalette] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -121,6 +152,7 @@ export function MessageItem({
   if (dm) {
     return (
       <div
+        id={`msg-${message.id}`}
         className={`group relative flex px-4 ${grouped ? 'py-0.5' : 'pt-2 mt-1'} ${
           isMine ? 'justify-end' : 'justify-start'
         }`}
@@ -141,6 +173,7 @@ export function MessageItem({
                   : 'rounded-bl-sm bg-[var(--color-panel-2)]'
               }`}
             >
+              {message.reply_to && <QuotedReply reply={message.reply_to} />}
               {message.content && <Markdown content={message.content} />}
               <span className="ml-2 mt-0.5 inline-block align-baseline text-[10px] text-[var(--color-text-faint)]">
                 {message.edited_at && <span className="mr-1">(edited)</span>}
@@ -202,6 +235,9 @@ export function MessageItem({
                   </div>
                 )}
               </div>
+              <ToolbarBtn title="Reply" onClick={() => setReplyTarget(message)}>
+                ↩️
+              </ToolbarBtn>
               {isMine && (
                 <ToolbarBtn title="Edit" onClick={() => setEditing(true)}>
                   ✏️
@@ -237,6 +273,7 @@ export function MessageItem({
 
   return (
     <div
+      id={`msg-${message.id}`}
       className={`group relative flex gap-3 px-4 hover:bg-[var(--color-panel)]/40 ${
         grouped ? 'py-0.5' : 'pt-2 pb-0.5 mt-1'
       }`}
@@ -263,6 +300,12 @@ export function MessageItem({
             <span className="text-[11px] text-[var(--color-text-faint)]">
               {fmtTime(message.created_at)}
             </span>
+          </div>
+        )}
+
+        {!isDeleted && !editing && message.reply_to && (
+          <div className="max-w-xl">
+            <QuotedReply reply={message.reply_to} />
           </div>
         )}
 
@@ -387,6 +430,9 @@ export function MessageItem({
               </div>
             )}
           </div>
+          <ToolbarBtn title="Reply" onClick={() => setReplyTarget(message)}>
+            ↩️
+          </ToolbarBtn>
           {showThread && (
             <ToolbarBtn title="Reply in thread" onClick={() => openThread(message.id)}>
               💬

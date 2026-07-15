@@ -57,6 +57,10 @@ export function Composer({
   const sendTyping = useStore((s) => s.sendTyping)
   const joinChannel = useStore((s) => s.joinChannel)
   const loadMembers = useStore((s) => s.loadMembers)
+  const replyTarget = useStore((s) => s.replyTarget)
+  const setReplyTarget = useStore((s) => s.setReplyTarget)
+  // Quote-reply applies to the main channel composer only (not the thread composer).
+  const activeReply = parentId ? null : replyTarget
 
   // --- @ people / # resource picker state ---
   const [trigger, setTrigger] = useState<Trigger | null>(null)
@@ -81,6 +85,11 @@ export function Composer({
   useEffect(() => {
     autosize()
   }, [value, autosize])
+
+  // Focus the composer when the user picks a message to quote-reply to.
+  useEffect(() => {
+    if (activeReply) ref.current?.focus()
+  }, [activeReply])
 
   // Populate the picker. People (@) resolve from the already-loaded directory
   // (channel members first); resources (#) hit the doc/canvas search.
@@ -272,7 +281,14 @@ export function Composer({
     setTrigger(null)
     setPending([])
     try {
-      await sendMessage(channel.id, content, parentId, readyIds.length ? readyIds : undefined)
+      await sendMessage(
+        channel.id,
+        content,
+        parentId,
+        readyIds.length ? readyIds : undefined,
+        activeReply?.id,
+      )
+      if (activeReply) setReplyTarget(null)
       // Sent — the staged previews are gone from the UI, so free their blob URLs.
       prevPending.forEach((p) => p.previewUrl && URL.revokeObjectURL(p.previewUrl))
     } catch {
@@ -306,6 +322,11 @@ export function Composer({
         setTrigger(null)
         return
       }
+    }
+    if (e.key === 'Escape' && activeReply && !value) {
+      e.preventDefault()
+      setReplyTarget(null)
+      return
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -411,6 +432,26 @@ export function Composer({
             : 'border-[var(--color-border)] focus-within:border-[var(--color-accent)] focus-within:ring-2 focus-within:ring-[var(--color-accent-soft)]'
         }`}
       >
+        {activeReply && (
+          <div className="mb-2 flex items-stretch gap-2 rounded-lg border-l-2 border-[var(--color-accent)] bg-[var(--color-panel-2)] py-1.5 pl-2.5 pr-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] font-semibold text-[var(--color-accent-hover)]">
+                Replying to {activeReply.user.display_name}
+              </div>
+              <div className="truncate text-xs text-[var(--color-text-dim)]">
+                {activeReply.deleted_at ? 'Deleted message' : activeReply.content || 'Attachment'}
+              </div>
+            </div>
+            <button
+              onClick={() => setReplyTarget(null)}
+              title="Cancel reply (Esc)"
+              className="shrink-0 self-start rounded px-1 text-xs text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {pending.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
             {pending.map((p) => (

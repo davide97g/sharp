@@ -88,6 +88,9 @@ type State = {
   // quick switcher
   quickSwitcherOpen: boolean
 
+  // the message the composer is quote-replying to (current channel), or null
+  replyTarget: Message | null
+
   // --- docs (Phase 2) ---
   docsByChannel: Record<string, Doc[]> // active (non-trashed) docs, updated_at desc
   docsLoaded: Set<string> // channel ids whose active docs were fully fetched
@@ -123,6 +126,7 @@ type State = {
     content: string,
     parentId?: string,
     attachmentIds?: string[],
+    replyToId?: string,
   ) => Promise<void>
   markRead: (channelId: string, messageId: string) => void
 
@@ -159,6 +163,7 @@ type State = {
   closeThread: () => void
 
   setQuickSwitcher: (open: boolean) => void
+  setReplyTarget: (msg: Message | null) => void
   sendTyping: (channelId: string) => void
   pruneTyping: () => void
 
@@ -217,6 +222,7 @@ export const useStore = create<State>((set, get) => ({
   thread: { open: false, parentId: null, parent: null, replies: [], loading: false },
   typing: {},
   quickSwitcherOpen: false,
+  replyTarget: null,
   docsByChannel: {},
   docsLoaded: new Set(),
   trashByChannel: {},
@@ -276,6 +282,7 @@ export const useStore = create<State>((set, get) => ({
       thread: { open: false, parentId: null, parent: null, replies: [], loading: false },
       typing: {},
       quickSwitcherOpen: false,
+      replyTarget: null,
       docsByChannel: {},
       docsLoaded: new Set(),
       trashByChannel: {},
@@ -308,7 +315,11 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setCurrentChannel(id) {
-    set({ currentChannelId: id })
+    // Dropping into another channel abandons any in-progress quote reply.
+    set((s) => ({
+      currentChannelId: id,
+      replyTarget: id === s.currentChannelId ? s.replyTarget : null,
+    }))
   },
 
   async loadMessages(channelId) {
@@ -386,9 +397,9 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
-  async sendMessage(channelId, content, parentId, attachmentIds) {
+  async sendMessage(channelId, content, parentId, attachmentIds, replyToId) {
     try {
-      const msg = await api.sendMessage(channelId, content, parentId, attachmentIds)
+      const msg = await api.sendMessage(channelId, content, parentId, attachmentIds, replyToId)
       // Merge immediately; the WS echo will dedupe by id.
       get().applyWsEvent({ type: 'message.created', payload: { message: msg } })
     } catch (e) {
@@ -580,6 +591,10 @@ export const useStore = create<State>((set, get) => ({
 
   setQuickSwitcher(open) {
     set({ quickSwitcherOpen: open })
+  },
+
+  setReplyTarget(msg) {
+    set({ replyTarget: msg })
   },
 
   sendTyping(channelId) {

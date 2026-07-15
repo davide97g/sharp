@@ -32,12 +32,16 @@ pub async fn search(
             m.id, m.channel_id, m.parent_id, m.user_id, u.display_name AS author_name,
             u.avatar_url AS author_avatar,
             m.content, m.created_at, m.edited_at, m.deleted_at,
+            rm.id AS reply_id, rm.content AS reply_content, rm.deleted_at AS reply_deleted_at,
+            ru.id AS reply_user_id, ru.display_name AS reply_user_name, ru.avatar_url AS reply_user_avatar,
             (SELECT count(*) FROM messages r WHERE r.parent_id = m.id AND r.deleted_at IS NULL) AS reply_count,
             (SELECT max(r.created_at) FROM messages r WHERE r.parent_id = m.id AND r.deleted_at IS NULL) AS last_reply_at,
             c.name AS channel_name,
             ts_rank(m.search, websearch_to_tsquery('simple', $2)) AS rank
          FROM messages m
          JOIN users u ON u.id = m.user_id
+         LEFT JOIN messages rm ON rm.id = m.reply_to_id
+         LEFT JOIN users ru ON ru.id = rm.user_id
          JOIN channels c ON c.id = m.channel_id
          JOIN channel_members cm ON cm.channel_id = m.channel_id AND cm.user_id = $1
          WHERE m.deleted_at IS NULL

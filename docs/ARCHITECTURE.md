@@ -68,6 +68,7 @@ messages(
   channel_id uuid NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
   user_id uuid NOT NULL REFERENCES users(id),
   parent_id bigint REFERENCES messages(id),   -- NULL = top-level; one level deep only
+  reply_to_id bigint REFERENCES messages(id) ON DELETE SET NULL, -- quote-reply target (not a thread)
   content text NOT NULL,
   created_at timestamptz NOT NULL default now(),
   edited_at timestamptz,
@@ -109,8 +110,11 @@ Message  = {
   content: string,                                 // '' when deleted
   created_at: string, edited_at: string|null, deleted_at: string|null,
   reactions: Reaction[],
-  reply_count: number, last_reply_at: string|null  // top-level messages only
+  reply_count: number, last_reply_at: string|null, // top-level messages only
+  reply_to: ReplyPreview|null                      // WhatsApp-style quote target (not a thread)
 }
+// Quote-reply snapshot embedded in a message; content is a truncated single-line preview.
+ReplyPreview = { id: string, user: { id, display_name, avatar_url }, content: string, deleted: boolean }
 ```
 
 ## REST API — base `/api/v1`, auth via `Authorization: Bearer <jwt>`
@@ -137,7 +141,7 @@ Message  = {
 | DELETE | `/channels/{id}/members/{user_id}` | → `204` (any member; cannot remove creator; not DMs) |
 | POST | `/channels/{id}/read` | `{message_id}` → `204` (sets last_read high-water mark) |
 | GET | `/channels/{id}/messages?before=<id>&limit=50` | → `{messages: Message[]}` top-level only, **ascending**, the `limit` newest with `id < before` (or newest overall) |
-| POST | `/channels/{id}/messages` | `{content, parent_id?}` → `201 Message` |
+| POST | `/channels/{id}/messages` | `{content, parent_id?, reply_to_id?, attachment_ids?}` → `201 Message` (`reply_to_id`: quote a non-deleted message in the same channel) |
 | GET | `/messages/{id}/thread` | → `{parent: Message, replies: Message[]}` (asc) |
 | PATCH | `/messages/{id}` | `{content}` → `Message` (author only) |
 | DELETE | `/messages/{id}` | → `204` (author only, soft) |

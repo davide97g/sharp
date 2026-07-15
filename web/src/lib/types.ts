@@ -46,6 +46,13 @@ export type MessageAuthor = {
   avatar_url: string | null
 }
 
+export type ReplyPreview = {
+  id: string
+  user: MessageAuthor
+  content: string // truncated preview; '' when the target was deleted
+  deleted: boolean
+}
+
 export type Message = {
   id: string
   channel_id: string
@@ -59,6 +66,7 @@ export type Message = {
   attachments: Attachment[]
   reply_count: number
   last_reply_at: string | null
+  reply_to: ReplyPreview | null
 }
 
 export type NotificationKind = 'mention' | 'dm' | 'reply'

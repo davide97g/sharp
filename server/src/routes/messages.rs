@@ -1,6 +1,6 @@
 use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
-use crate::models::{Attachment, Message, MessageUser, Reaction};
+use crate::models::{Attachment, Message, MessageUser, Reaction, ReplyPreview};
 use crate::notify;
 use crate::routes::{channel_kind, is_member};
 use crate::state::SharedState;
@@ -20,11 +20,25 @@ const MESSAGE_SELECT: &str = "
         m.id, m.channel_id, m.parent_id, m.user_id, u.display_name AS author_name,
         u.avatar_url AS author_avatar,
         m.content, m.created_at, m.edited_at, m.deleted_at,
+        rm.id AS reply_id, rm.content AS reply_content, rm.deleted_at AS reply_deleted_at,
+        ru.id AS reply_user_id, ru.display_name AS reply_user_name, ru.avatar_url AS reply_user_avatar,
         (SELECT count(*) FROM messages r WHERE r.parent_id = m.id AND r.deleted_at IS NULL) AS reply_count,
         (SELECT max(r.created_at) FROM messages r WHERE r.parent_id = m.id AND r.deleted_at IS NULL) AS last_reply_at
     FROM messages m
     JOIN users u ON u.id = m.user_id
+    LEFT JOIN messages rm ON rm.id = m.reply_to_id
+    LEFT JOIN users ru ON ru.id = rm.user_id
 ";
+
+/// A short single-line preview of quoted content (newlines collapsed, truncated).
+fn preview_text(s: &str) -> String {
+    let flat: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() > 140 {
+        flat.chars().take(140).collect::<String>() + "…"
+    } else {
+        flat
+    }
+}
 
 pub(crate) fn map_message_row(row: &PgRow) -> AppResult<Message> {
     let deleted_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("deleted_at")?;
@@ -33,6 +47,30 @@ pub(crate) fn map_message_row(row: &PgRow) -> AppResult<Message> {
     } else {
         row.try_get("content")?
     };
+
+    let reply_id: Option<i64> = row.try_get("reply_id")?;
+    let reply_to = match reply_id {
+        Some(rid) => {
+            let rdel: Option<chrono::DateTime<chrono::Utc>> = row.try_get("reply_deleted_at")?;
+            let rcontent: String = row.try_get("reply_content")?;
+            Some(ReplyPreview {
+                id: rid,
+                user: MessageUser {
+                    id: row.try_get("reply_user_id")?,
+                    display_name: row.try_get("reply_user_name")?,
+                    avatar_url: row.try_get("reply_user_avatar")?,
+                },
+                content: if rdel.is_some() {
+                    String::new()
+                } else {
+                    preview_text(&rcontent)
+                },
+                deleted: rdel.is_some(),
+            })
+        }
+        None => None,
+    };
+
     Ok(Message {
         id: row.try_get("id")?,
         channel_id: row.try_get("channel_id")?,
@@ -50,6 +88,7 @@ pub(crate) fn map_message_row(row: &PgRow) -> AppResult<Message> {
         attachments: Vec::new(),
         reply_count: row.try_get("reply_count")?,
         last_reply_at: row.try_get("last_reply_at")?,
+        reply_to,
     })
 }
 
@@ -243,6 +282,8 @@ pub async fn list_messages(
 pub struct CreateMessageRequest {
     pub content: String,
     pub parent_id: Option<String>,
+    /// Id of a message in the same channel this one quote-replies to (WhatsApp-style).
+    pub reply_to_id: Option<String>,
     /// Ids of the caller's pending uploads to attach to this message.
     pub attachment_ids: Option<Vec<Uuid>>,
 }
@@ -302,14 +343,37 @@ pub async fn create_message(
         _ => None,
     };
 
+    // Quote-reply target: any (non-deleted) message in this same channel.
+    let reply_to_id: Option<i64> = match body.reply_to_id {
+        Some(ref s) if !s.is_empty() => {
+            let rid = s
+                .parse::<i64>()
+                .map_err(|_| AppError::BadRequest("invalid reply_to_id".to_string()))?;
+            let meta = message_meta(&state.pool, rid).await?;
+            if meta.channel_id != channel_id {
+                return Err(AppError::BadRequest(
+                    "quoted message is in a different channel".to_string(),
+                ));
+            }
+            if meta.deleted {
+                return Err(AppError::BadRequest(
+                    "cannot quote a deleted message".to_string(),
+                ));
+            }
+            Some(rid)
+        }
+        _ => None,
+    };
+
     let row = sqlx::query(
-        "INSERT INTO messages (channel_id, user_id, parent_id, content)
-         VALUES ($1, $2, $3, $4) RETURNING id",
+        "INSERT INTO messages (channel_id, user_id, parent_id, content, reply_to_id)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id",
     )
     .bind(channel_id)
     .bind(auth.id)
     .bind(parent_id)
     .bind(&body.content)
+    .bind(reply_to_id)
     .fetch_one(&state.pool)
     .await?;
     let new_id: i64 = row.try_get("id")?;
