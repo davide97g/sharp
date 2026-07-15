@@ -7,7 +7,6 @@ import { isTauri, registerDeepLinkHandler } from './lib/desktopAuth'
 import { toastError } from './lib/toast'
 import { useStore } from './store'
 import { Login } from './components/Login'
-import { DesktopAuth } from './components/DesktopAuth'
 import { AppShell } from './components/AppShell'
 import { MessagePane } from './components/MessagePane'
 import { SearchResults } from './components/SearchResults'
@@ -120,7 +119,6 @@ export function App() {
           path="/login"
           element={authed ? <Navigate to="/" replace /> : <Login />}
         />
-        <Route path="/desktop-auth" element={<DesktopAuth />} />
         <Route
           path="/"
           element={authed ? <AppShell /> : <Navigate to="/login" replace />}

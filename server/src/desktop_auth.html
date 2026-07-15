@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>sharp — desktop login</title>
+    <style>
+      :root {
+        --ink: #0f1115; --panel: #191c22; --border: #2a2f38;
+        --text: #e6e8eb; --dim: #9aa3af; --faint: #6b7280;
+        --accent: #4f46e5; --accent-hover: #6366f1; --danger: #ef4444;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; min-height: 100vh; display: flex; align-items: center;
+        justify-content: center; background: var(--ink); color: var(--text);
+        font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        padding: 24px;
+      }
+      .card { width: 100%; max-width: 360px; }
+      .brand { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 28px; }
+      .logo {
+        height: 56px; width: 56px; display: flex; align-items: center; justify-content: center;
+        border-radius: 12px; background: var(--panel); color: var(--accent);
+        font-size: 30px; font-weight: 800; box-shadow: inset 0 0 0 1px var(--border);
+      }
+      h1 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.02em; }
+      .sub { color: var(--dim); font-size: 13px; margin: 0; }
+      form { display: flex; flex-direction: column; gap: 12px; }
+      label { display: flex; flex-direction: column; gap: 6px; }
+      label span { font-size: 12px; font-weight: 500; color: var(--dim); }
+      input {
+        border: 1px solid var(--border); background: var(--panel); color: var(--text);
+        border-radius: 8px; padding: 10px 12px; font-size: 14px; outline: none;
+      }
+      input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(79,70,229,0.35); }
+      button {
+        margin-top: 8px; border: 0; border-radius: 8px; background: var(--accent);
+        color: #fff; padding: 10px 16px; font-size: 14px; font-weight: 600; cursor: pointer;
+      }
+      button:hover { background: var(--accent-hover); }
+      button:disabled { opacity: 0.6; cursor: default; }
+      .msg { text-align: center; color: var(--dim); font-size: 13px; margin-top: 4px; }
+      .err { color: var(--danger); }
+      .open-btn {
+        display: block; text-align: center; text-decoration: none; margin-top: 16px;
+        border-radius: 8px; background: var(--accent); color: #fff; padding: 10px 16px;
+        font-size: 14px; font-weight: 600;
+      }
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="brand">
+        <div class="logo">#</div>
+        <h1>sharp</h1>
+        <p class="sub">Sign in to open the desktop app</p>
+      </div>
+
+      <form id="form">
+        <label>
+          <span>Email</span>
+          <input id="email" type="email" autocomplete="email" required placeholder="you@example.com" />
+        </label>
+        <label>
+          <span>Password</span>
+          <input id="password" type="password" autocomplete="current-password" required placeholder="••••••••" />
+        </label>
+        <button id="submit" type="submit">Sign in</button>
+        <p id="error" class="msg err hidden"></p>
+      </form>
+
+      <div id="done" class="hidden">
+        <p class="msg">Opening the sharp app… You can close this tab.</p>
+        <a id="openLink" class="open-btn" href="#">Open sharp</a>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        var params = new URLSearchParams(location.search);
+        var state = params.get('state') || '';
+        var scheme = params.get('scheme') || 'sharp';
+        var form = document.getElementById('form');
+        var errEl = document.getElementById('error');
+        var btn = document.getElementById('submit');
+        var doneEl = document.getElementById('done');
+        var openLink = document.getElementById('openLink');
+
+        function showError(msg) {
+          errEl.textContent = msg;
+          errEl.classList.remove('hidden');
+        }
+
+        function finish(code) {
+          var url = scheme + '://auth?code=' + encodeURIComponent(code) + '&state=' + encodeURIComponent(state);
+          openLink.href = url;
+          form.classList.add('hidden');
+          doneEl.classList.remove('hidden');
+          location.href = url;
+        }
+
+        form.addEventListener('submit', function (e) {
+          e.preventDefault();
+          errEl.classList.add('hidden');
+          if (!state) { showError('Missing sign-in state. Return to the app and try again.'); return; }
+          btn.disabled = true;
+          btn.textContent = 'Please wait…';
+          var email = document.getElementById('email').value.trim().toLowerCase();
+          var password = document.getElementById('password').value;
+
+          fetch('/api/v1/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: email, password: password }),
+          })
+            .then(function (r) {
+              return r.json().then(function (d) {
+                if (!r.ok) throw new Error((d.error && d.error.message) || 'Sign in failed');
+                return d.token;
+              });
+            })
+            .then(function (token) {
+              return fetch('/api/v1/auth/desktop/code', {
+                method: 'POST',
+                headers: { Authorization: 'Bearer ' + token },
+              }).then(function (r) {
+                return r.json().then(function (d) {
+                  if (!r.ok) throw new Error((d.error && d.error.message) || 'Could not create login code');
+                  return d.code;
+                });
+              });
+            })
+            .then(function (code) { finish(code); })
+            .catch(function (err) {
+              showError(err.message || 'Something went wrong.');
+              btn.disabled = false;
+              btn.textContent = 'Sign in';
+            });
+        });
+      })();
+    </script>
+  </body>
+</html>

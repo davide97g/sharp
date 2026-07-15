@@ -29,6 +29,15 @@ async fn healthz() -> Json<serde_json::Value> {
     Json(json!({ "status": "ok" }))
 }
 
+/// Self-contained desktop browser-login bridge page. Served by the API host
+/// itself (not the SPA) so it works in every deploy topology — including the
+/// split deploy where the SPA lives on a different subdomain. The desktop app
+/// opens `<server-url>/desktop-auth?state=&scheme=`; this page logs the user in,
+/// mints a one-time code, and redirects to `sharp://auth?code=&state=`.
+async fn desktop_auth_page() -> axum::response::Html<&'static str> {
+    axum::response::Html(include_str!("desktop_auth.html"))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
@@ -218,7 +227,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/healthz", get(healthz))
         .route("/ws", get(ws::ws_handler));
 
-    let mut app: Router<state::SharedState> = Router::new().nest("/api/v1", api);
+    let mut app: Router<state::SharedState> = Router::new()
+        .nest("/api/v1", api)
+        // Desktop browser-login bridge — served on the API host, SPA-independent.
+        .route("/desktop-auth", get(desktop_auth_page));
 
     // Serve the built SPA (if present) with fallback to index.html.
     let dist_path = Path::new(&web_dist);

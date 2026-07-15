@@ -3,22 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { api, getServerUrl, setServerUrl } from '../lib/api'
 import { ApiRequestError } from '../lib/api'
 import { startBrowserLogin } from '../lib/desktopAuth'
-import type { AuthResponse } from '../lib/types'
 import { useStore } from '../store'
 import { toastError } from '../lib/toast'
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
-/**
- * When `onAuthenticated` is provided, a successful login/register calls it with
- * the auth response instead of initializing the app + navigating. Used by the
- * `/desktop-auth` browser bridge, which only needs the token to mint a code.
- */
-export function Login({
-  onAuthenticated,
-}: {
-  onAuthenticated?: (res: AuthResponse) => void | Promise<void>
-} = {}) {
+export function Login() {
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -63,10 +53,6 @@ export function Login({
         mode === 'login'
           ? await api.login(email.trim().toLowerCase(), password)
           : await api.register(email.trim().toLowerCase(), password, displayName.trim())
-      if (onAuthenticated) {
-        await onAuthenticated(res)
-        return
-      }
       await init(res.token, res.user)
       // First sign-in: ask for notification permission once, while we still have
       // the click gesture. Skip if the user already granted or denied it before.
@@ -146,7 +132,7 @@ export function Login({
           </button>
         </form>
 
-        {isTauri && !onAuthenticated && (
+        {isTauri && (
           <>
             <div className="my-4 flex items-center gap-3 text-xs text-[var(--color-text-faint)]">
               <span className="h-px flex-1 bg-[var(--color-border)]" />
