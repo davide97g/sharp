@@ -11,6 +11,7 @@
 //! additionally suppresses toasts/desktop popups while DND is on.
 
 use crate::error::AppResult;
+use crate::expo_push;
 use crate::models::{MessageUser, Notification};
 use crate::state::SharedState;
 use crate::ws::envelope;
@@ -268,6 +269,8 @@ pub async fn push_event(
     body: &str,
     tag: &str,
     path: &str,
+    channel_id: Uuid,
+    kind: &str,
 ) {
     if state.hub.is_online(user_id) || is_dnd(&state.pool, user_id).await {
         return;
@@ -279,7 +282,10 @@ pub async fn push_event(
         "path": path,
     })
     .to_string();
-    push::send_payload(state, user_id, &payload).await;
+    tokio::join!(
+        push::send_payload(state, user_id, &payload),
+        expo_push::send_to_user(state, user_id, title, body, channel_id, kind),
+    );
 }
 
 /// Public entry point: best-effort, never fails message creation.
@@ -377,7 +383,11 @@ async fn dispatch_inner(
 
         // Web push only to recipients who are not connected and not in DND.
         if !state.hub.is_online(uid) && !is_dnd(pool, uid).await {
-            push::send_to_user(state, uid, &notif).await;
+            let (title, body) = push::title_and_body(&notif);
+            tokio::join!(
+                push::send_to_user(state, uid, &notif),
+                expo_push::send_to_user(state, uid, &title, &body, notif.channel_id, &notif.kind),
+            );
         }
     }
 
@@ -396,15 +406,20 @@ mod push {
         WebPushMessageBuilder, URL_SAFE_NO_PAD,
     };
 
-    pub async fn send_to_user(state: &SharedState, user_id: Uuid, notif: &Notification) {
+    pub fn title_and_body(notif: &Notification) -> (String, String) {
         // Title/body shaped for the service worker.
         let title = match notif.kind.as_str() {
             "dm" => notif.actor.display_name.clone(),
             _ => format!("{} in #{}", notif.actor.display_name, notif.channel_name),
         };
+        (title, notif.preview.clone())
+    }
+
+    pub async fn send_to_user(state: &SharedState, user_id: Uuid, notif: &Notification) {
+        let (title, body) = title_and_body(notif);
         let payload = json!({
             "title": title,
-            "body": notif.preview,
+            "body": body,
             "channel_id": notif.channel_id.to_string(),
             "kind": notif.kind,
             "tag": format!("sharp-{}", notif.channel_id),

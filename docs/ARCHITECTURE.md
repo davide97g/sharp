@@ -537,6 +537,8 @@ user_prefs(user_id uuid PK, dnd boolean NOT NULL default false,
   chat_layout text)                                  -- 'bubble'|'classic'; null = not chosen yet
 push_subscriptions(id uuid PK, user_id uuid, endpoint text UNIQUE NOT NULL,
   p256dh text NOT NULL, auth text NOT NULL, created_at timestamptz)
+expo_push_tokens(id uuid PK, user_id uuid REFERENCES users(id), token text UNIQUE NOT NULL,
+  platform text NOT NULL DEFAULT 'ios', created_at timestamptz)
 app_meta(key text PK, value text NOT NULL)           -- e.g. auto-generated VAPID keys
 ```
 
@@ -577,6 +579,8 @@ Prefs = { dnd: boolean, muted_channel_ids: string[], chat_layout: ChatLayout | n
 | GET | `/push/vapid` | → `{public_key: string\|null}` |
 | POST | `/push/subscribe` | `{endpoint, keys:{p256dh, auth}}` → `204` (upsert by endpoint) |
 | POST | `/push/unsubscribe` | `{endpoint}` → `204` |
+| POST | `/push/expo/register` | `{token, platform?: 'ios'}` → `204` (upsert by token) |
+| POST | `/push/expo/unregister` | `{token}` → `204` |
 
 Uploads and downloads are **always proxied through the server** (never presigned to the
 browser) so channel-membership auth is enforced on every read. The web client fetches
@@ -607,6 +611,16 @@ open but unfocused (Web Notification API, or `tauri-plugin-notification` in the 
 shell); **web push** (service worker `web/public/sw.js`) when the tab is closed and the
 recipient has no live WS connection on this replica.
 
+### Mobile push (Expo)
+
+Expo tokens from the native app are stored in `expo_push_tokens` and delivered through the
+Expo Push API alongside web push. The same gate applies: muted channels create nothing;
+the inbox row and WS event always happen; Expo/web push is only sent when the recipient is
+offline and not in DND. `DeviceNotRegistered` tickets prune their token. `EXPO_ACCESS_TOKEN`
+is an optional bearer-token environment variable for Expo projects that require it. The mobile
+wire types in `mobile/src/lib/types.ts` are a copy of `web/src/lib/types.ts` and must be kept
+in sync.
+
 ## Storage & push implementation
 
 - **Storage**: `object_store` crate (feature `aws`) → one config targets AWS S3, MinIO,
@@ -614,6 +628,8 @@ recipient has no live WS connection on this replica.
 - **Web push**: `web-push` crate (VAPID / RFC 8291, `hyper-client`). Keys resolve
   env → `app_meta` → auto-generated P-256 (`p256`) and persisted, so push works with zero
   config. Public key served at `/push/vapid`; dead subscriptions (404/410) are pruned.
+- **Expo push**: `reqwest` sends batched native-device tickets to Expo; invalid-device tickets
+  (`DeviceNotRegistered`) are pruned.
 
 ## Env additions
 
@@ -621,4 +637,5 @@ recipient has no live WS connection on this replica.
 (optional; MinIO/R2) · `S3_REGION` (default `us-east-1`) · `S3_ALLOW_HTTP` (auto-on for
 `http://` endpoints) · `MAX_UPLOAD_MB` (default 25) · `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY`
 (optional; base64url — auto-generated if unset) · `VAPID_SUBJECT` (default
-`mailto:admin@sharp.app`). Dev/local/prod compose add a `minio` service + bucket-init job.
+`mailto:admin@sharp.app`) · `EXPO_ACCESS_TOKEN` (optional). Dev/local/prod compose add a
+`minio` service + bucket-init job.

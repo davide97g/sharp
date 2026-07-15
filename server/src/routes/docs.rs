@@ -828,6 +828,8 @@ pub async fn create_mention(
         &doc_title,
         &format!("sharp-doc-{}", mention.doc.id),
         &format!("/{}/{}", prefix, mention.doc.id),
+        mention.doc.channel_id,
+        "doc_mention",
     )
     .await;
 

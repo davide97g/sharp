@@ -1,0 +1,372 @@
+// keep in sync with web/src/lib/api.ts
+import type {
+  Attachment,
+  AuthResponse,
+  Channel,
+  ChannelsResponse,
+  DesktopCodeResponse,
+  Message,
+  MembersResponse,
+  MessagesResponse,
+  NotificationsResponse,
+  Prefs,
+  SearchResponse,
+  ThreadResponse,
+  User,
+  UsersResponse,
+} from './types'
+import { clearToken, getTokenSync, resolveBaseUrl } from './session'
+
+export function apiBase(): string {
+  return `${resolveBaseUrl()}/api/v1`
+}
+
+/** Custom error carrying the server's error code + HTTP status. */
+export class ApiRequestError extends Error {
+  code: string
+  status: number
+  constructor(message: string, code: string, status: number) {
+    super(message)
+    this.name = 'ApiRequestError'
+    this.code = code
+    this.status = status
+  }
+}
+
+let onUnauthorized: (() => void) | null = null
+export function setUnauthorizedHandler(fn: () => void) {
+  onUnauthorized = fn
+}
+
+type ReqOpts = {
+  method?: string
+  body?: unknown
+  auth?: boolean // default true
+  signal?: AbortSignal
+}
+
+async function request<T>(path: string, opts: ReqOpts = {}): Promise<T> {
+  const { method = 'GET', body, auth = true, signal } = opts
+  const headers: Record<string, string> = {}
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  if (auth) {
+    const token = getTokenSync()
+    if (token) headers['Authorization'] = `Bearer ${token}`
+  }
+
+  const res = await fetch(`${apiBase()}${path}`, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal,
+  })
+
+  if (res.status === 401 && auth) {
+    void clearToken()
+    onUnauthorized?.()
+    throw new ApiRequestError('Unauthorized', 'unauthorized', 401)
+  }
+
+  if (res.status === 204) {
+    return undefined as T
+  }
+
+  const text = await res.text()
+  const data = text ? JSON.parse(text) : undefined
+
+  if (!res.ok) {
+    const code = data?.error?.code ?? 'error'
+    const message = data?.error?.message ?? `Request failed (${res.status})`
+    throw new ApiRequestError(message, code, res.status)
+  }
+
+  return data as T
+}
+
+export const api = {
+  // --- auth ---
+  register(email: string, password: string, display_name: string) {
+    return request<AuthResponse>('/auth/register', {
+      method: 'POST',
+      body: { email, password, display_name },
+      auth: false,
+    })
+  },
+  login(email: string, password: string) {
+    return request<AuthResponse>('/auth/login', {
+      method: 'POST',
+      body: { email, password },
+      auth: false,
+    })
+  },
+  me() {
+    return request<User>('/me')
+  },
+  registerExpoToken(token: string, platform?: string) {
+    return request<void>('/push/expo/register', {
+      method: 'POST',
+      body: { token, ...(platform ? { platform } : {}) },
+    })
+  },
+  unregisterExpoToken(token: string) {
+    return request<void>('/push/expo/unregister', {
+      method: 'POST',
+      body: { token },
+    })
+  },
+  // Desktop browser-login: mint a one-time code for the signed-in web session,
+  // then exchange it for a JWT from the native app.
+  desktopCode() {
+    return request<DesktopCodeResponse>('/auth/desktop/code', { method: 'POST' })
+  },
+  desktopExchange(code: string) {
+    return request<AuthResponse>('/auth/desktop/exchange', {
+      method: 'POST',
+      body: { code },
+      auth: false,
+    })
+  },
+  updateProfile(input: { display_name?: string }) {
+    return request<User>('/me', { method: 'PATCH', body: input })
+  },
+  deleteAvatar() {
+    return request<User>('/me/avatar', { method: 'DELETE' })
+  },
+  uploadAvatar(file: Blob, onProgress?: (fraction: number) => void): Promise<User> {
+    return new Promise((resolve, reject) => {
+      const form = new FormData()
+      form.append('file', file, 'avatar.png')
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', `${apiBase()}/me/avatar`)
+      const token = getTokenSync()
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+      xhr.upload.onprogress = (e) => {
+        if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total)
+      }
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText) as User)
+          } catch {
+            reject(new ApiRequestError('bad upload response', 'error', xhr.status))
+          }
+        } else {
+          if (xhr.status === 401) {
+            void clearToken()
+            onUnauthorized?.()
+          }
+          let message = `Upload failed (${xhr.status})`
+          try {
+            message = JSON.parse(xhr.responseText)?.error?.message ?? message
+          } catch {
+            /* ignore */
+          }
+          reject(new ApiRequestError(message, 'error', xhr.status))
+        }
+      }
+      xhr.onerror = () => reject(new ApiRequestError('network error', 'error', 0))
+      xhr.send(form)
+    })
+  },
+
+  // --- users ---
+  users() {
+    return request<UsersResponse>('/users')
+  },
+
+  // --- channels ---
+  channels() {
+    return request<ChannelsResponse>('/channels')
+  },
+  createChannel(input: {
+    name: string
+    kind: 'public' | 'private'
+    topic?: string
+    member_ids?: string[]
+  }) {
+    return request<Channel>('/channels', { method: 'POST', body: input })
+  },
+  createDm(user_id: string) {
+    return request<Channel>('/channels/dm', {
+      method: 'POST',
+      body: { user_id },
+    })
+  },
+  updateChannel(
+    id: string,
+    input: { name?: string; topic?: string; kind?: 'public' | 'private' },
+  ) {
+    return request<Channel>(`/channels/${id}`, { method: 'PATCH', body: input })
+  },
+  deleteChannel(id: string) {
+    return request<void>(`/channels/${id}`, { method: 'DELETE' })
+  },
+  addMembers(id: string, user_ids: string[]) {
+    return request<void>(`/channels/${id}/members`, {
+      method: 'POST',
+      body: { user_ids },
+    })
+  },
+  removeMember(id: string, userId: string) {
+    return request<void>(`/channels/${id}/members/${userId}`, { method: 'DELETE' })
+  },
+  joinChannel(id: string) {
+    return request<void>(`/channels/${id}/join`, { method: 'POST' })
+  },
+  leaveChannel(id: string) {
+    return request<void>(`/channels/${id}/leave`, { method: 'POST' })
+  },
+  members(id: string) {
+    return request<MembersResponse>(`/channels/${id}/members`)
+  },
+  markRead(id: string, message_id: string) {
+    return request<void>(`/channels/${id}/read`, {
+      method: 'POST',
+      body: { message_id },
+    })
+  },
+
+  // --- messages ---
+  messages(channelId: string, before?: string, limit = 50) {
+    const params = new URLSearchParams()
+    if (before) params.set('before', before)
+    params.set('limit', String(limit))
+    return request<MessagesResponse>(
+      `/channels/${channelId}/messages?${params.toString()}`,
+    )
+  },
+  sendMessage(
+    channelId: string,
+    content: string,
+    parent_id?: string,
+    attachment_ids?: string[],
+    reply_to_id?: string,
+  ) {
+    const body: Record<string, unknown> = { content }
+    if (parent_id) body.parent_id = parent_id
+    if (attachment_ids && attachment_ids.length) body.attachment_ids = attachment_ids
+    if (reply_to_id) body.reply_to_id = reply_to_id
+    return request<Message>(`/channels/${channelId}/messages`, {
+      method: 'POST',
+      body,
+    })
+  },
+  thread(messageId: string) {
+    return request<ThreadResponse>(`/messages/${messageId}/thread`)
+  },
+  editMessage(messageId: string, content: string) {
+    return request<Message>(`/messages/${messageId}`, {
+      method: 'PATCH',
+      body: { content },
+    })
+  },
+  deleteMessage(messageId: string) {
+    return request<void>(`/messages/${messageId}`, { method: 'DELETE' })
+  },
+  addReaction(messageId: string, emoji: string) {
+    return request<void>(
+      `/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`,
+      { method: 'PUT' },
+    )
+  },
+  removeReaction(messageId: string, emoji: string) {
+    return request<void>(
+      `/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`,
+      { method: 'DELETE' },
+    )
+  },
+
+  // --- files ---
+  uploadFile(
+    channelId: string,
+    file: File,
+    onProgress?: (fraction: number) => void,
+  ): Promise<Attachment> {
+    return new Promise((resolve, reject) => {
+      const form = new FormData()
+      form.append('file', file, file.name)
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', `${apiBase()}/channels/${channelId}/uploads`)
+      const token = getTokenSync()
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+      xhr.upload.onprogress = (e) => {
+        if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total)
+      }
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText) as Attachment)
+          } catch {
+            reject(new ApiRequestError('bad upload response', 'error', xhr.status))
+          }
+        } else {
+          if (xhr.status === 401) {
+            void clearToken()
+            onUnauthorized?.()
+          }
+          let message = `Upload failed (${xhr.status})`
+          try {
+            message = JSON.parse(xhr.responseText)?.error?.message ?? message
+          } catch {
+            /* ignore */
+          }
+          reject(new ApiRequestError(message, 'error', xhr.status))
+        }
+      }
+      xhr.onerror = () => reject(new ApiRequestError('network error', 'error', 0))
+      xhr.send(form)
+    })
+  },
+
+  // --- notifications ---
+  notifications(before?: string, limit = 30) {
+    const params = new URLSearchParams()
+    if (before) params.set('before', before)
+    params.set('limit', String(limit))
+    return request<NotificationsResponse>(`/notifications?${params.toString()}`)
+  },
+  markNotificationsRead(opts: { ids?: string[]; all?: boolean }) {
+    return request<void>('/notifications/read', { method: 'POST', body: opts })
+  },
+
+  // --- preferences ---
+  prefs() {
+    return request<Prefs>('/prefs')
+  },
+  setDnd(dnd: boolean) {
+    return request<void>('/prefs/dnd', { method: 'PUT', body: { dnd } })
+  },
+  setChatLayout(chat_layout: 'bubble' | 'classic') {
+    return request<void>('/prefs/chat-layout', { method: 'PUT', body: { chat_layout } })
+  },
+  setChannelMute(channelId: string, muted: boolean) {
+    return request<void>(`/channels/${channelId}/prefs`, {
+      method: 'PUT',
+      body: { muted },
+    })
+  },
+
+  // --- search ---
+  search(q: string, limit = 20) {
+    const params = new URLSearchParams({ q, limit: String(limit) })
+    return request<SearchResponse>(`/search?${params.toString()}`)
+  },
+
+}
+
+/** Absolute URL for a proxied attachment path (handles custom server origins). */
+export function attachmentAbsoluteUrl(url: string): string {
+  return url.startsWith('http') ? url : `${resolveBaseUrl()}${url}`
+}
+
+/** Fetch an attachment as a Blob with the auth header (for <img> / downloads). */
+export async function fetchAttachmentBlob(url: string): Promise<Blob> {
+  const token = getTokenSync()
+  const res = await fetch(attachmentAbsoluteUrl(url), {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) {
+    throw new ApiRequestError(`download failed (${res.status})`, 'error', res.status)
+  }
+  return res.blob()
+}

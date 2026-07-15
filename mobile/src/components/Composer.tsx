@@ -1,0 +1,38 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
+import * as DocumentPicker from 'expo-document-picker'
+import * as ImagePicker from 'expo-image-picker'
+import type { Channel, Message } from '../lib/types'
+import { api } from '../lib/api'
+import { useStore } from '../store'
+
+type Pending = { id: string; name: string; uri: string; mime?: string; progress: number; attachmentId?: string; error?: string }
+const trigger = (value: string, caret: number) => { const m = /(^|[\s(])@([^\s@]*)$/.exec(value.slice(0, caret)); return m ? { start: m.index + m[1].length, query: m[2] } : null }
+
+export function Composer({ channel, parentId, placeholder }: { channel: Channel; parentId?: string; placeholder?: string }) {
+  const key = parentId ? `t:${parentId}` : `c:${channel.id}`
+  const value = useStore((s) => s.drafts[key] ?? '')
+  const setDraft = useStore((s) => s.setDraft); const sendMessage = useStore((s) => s.sendMessage); const sendTyping = useStore((s) => s.sendTyping)
+  const loadMembers = useStore((s) => s.loadMembers); const members = useStore((s) => s.members[channel.id]); const users = useStore((s) => s.users)
+  const reply = useStore((s) => parentId ? null : s.replyTargets[channel.id] ?? null); const setReply = useStore((s) => s.setReplyTarget); const focusRequest = useStore((s) => s.focusRequest)
+  const input = useRef<TextInput>(null); const typingAt = useRef(0); const [selection, setSelection] = useState(0); const [pending, setPending] = useState<Pending[]>([]); const [sending, setSending] = useState(false)
+  useEffect(() => { if (!members) void loadMembers(channel.id) }, [channel.id, loadMembers, members])
+  useEffect(() => { if (reply || focusRequest?.key === key) input.current?.focus() }, [focusRequest, key, reply])
+  const match = trigger(value, selection)
+  const people = useMemo(() => { if (!match) return []; const source = members?.length ? members : Object.values(users); return source.filter((u) => u.display_name.toLowerCase().includes(match.query.toLowerCase())).slice(0, 6) }, [match?.query, members, users])
+  const ready = pending.filter((x) => x.attachmentId).map((x) => x.attachmentId!)
+  const uploading = pending.some((x) => !x.attachmentId && !x.error)
+  function change(text: string) { setDraft(key, text); const now = Date.now(); if (now - typingAt.current > 3000) { typingAt.current = now; sendTyping(channel.id) } }
+  function pickPerson(name: string) { if (!match) return; const next = value.slice(0, match.start) + `@${name} ` + value.slice(selection); setDraft(key, next); setSelection(match.start + name.length + 2); input.current?.focus() }
+  async function upload(file: Omit<Pending, 'id' | 'progress'>) { const id = `${Date.now()}-${Math.random()}`; setPending((p) => [...p, { ...file, id, progress: 0 }]); try { const blob = await (await fetch(file.uri)).blob(); const attachment = await api.uploadFile(channel.id, new File([blob], file.name, { type: file.mime })); setPending((p) => p.map((x) => x.id === id ? { ...x, progress: 1, attachmentId: attachment.id } : x)) } catch (e) { setPending((p) => p.map((x) => x.id === id ? { ...x, error: e instanceof Error ? e.message : 'Upload failed' } : x)) } }
+  async function chooseImages() { const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, quality: 1 }); if (!r.canceled) r.assets.forEach((a) => void upload({ name: a.fileName ?? 'image.jpg', uri: a.uri, mime: a.mimeType ?? undefined })) }
+  async function chooseFiles() { const r = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true }); if (!r.canceled) r.assets.forEach((a) => void upload({ name: a.name, uri: a.uri, mime: a.mimeType ?? undefined })) }
+  async function send() { const content = value.trim(); if (sending || uploading || (!content && !ready.length)) return; const before = value; const files = pending; setSending(true); setDraft(key, ''); setPending([]); try { await sendMessage(channel.id, content, parentId, ready, reply?.id); if (reply) setReply(channel.id, null) } catch (e) { setDraft(key, before); setPending(files); Alert.alert('Message not sent', e instanceof Error ? e.message : 'Please try again.') } finally { setSending(false); input.current?.focus() } }
+  return <View style={styles.wrap}>
+    {reply && <View style={styles.banner}><View style={{ flex: 1 }}><Text style={styles.bannerAuthor}>Replying to {reply.user.display_name}</Text><Text numberOfLines={1} style={styles.bannerText}>{reply.deleted_at ? 'message deleted' : reply.content}</Text></View><Pressable accessibilityLabel="Cancel reply" onPress={() => setReply(channel.id, null)} hitSlop={10}><Text style={styles.close}>×</Text></Pressable></View>}
+    {pending.map((p) => <View key={p.id} style={styles.file}><Text numberOfLines={1} style={{ flex: 1 }}>{p.name}{p.error ? ` · ${p.error}` : ''}</Text>{!p.attachmentId && !p.error && <ActivityIndicator size="small"/>}<Pressable onPress={() => setPending((all) => all.filter((x) => x.id !== p.id))}><Text style={styles.close}>×</Text></Pressable></View>)}
+    {people.length > 0 && <View style={styles.mentions}>{people.map((p) => <Pressable key={p.id} onPress={() => pickPerson(p.display_name)} style={styles.mention}><Text>{p.display_name}</Text></Pressable>)}</View>}
+    <View style={styles.row}><Pressable accessibilityLabel="Choose image" onPress={() => void chooseImages()} style={styles.icon}><Text>▧</Text></Pressable><Pressable accessibilityLabel="Choose file" onPress={() => void chooseFiles()} style={styles.icon}><Text>＋</Text></Pressable><TextInput ref={input} multiline value={value} onChangeText={change} onSelectionChange={(e) => setSelection(e.nativeEvent.selection.start)} placeholder={placeholder ?? 'Message'} style={styles.input} maxLength={8000} textAlignVertical="top"/><Pressable accessibilityLabel="Send message" onPress={() => void send()} disabled={sending || uploading || (!value.trim() && !ready.length)} style={[styles.send, (sending || uploading || (!value.trim() && !ready.length)) && styles.disabled]}>{sending ? <ActivityIndicator color="white"/> : <Text style={styles.sendText}>Send</Text>}</Pressable></View>
+  </View>
+}
+const styles = StyleSheet.create({ wrap: { borderTopWidth: StyleSheet.hairlineWidth, borderColor: '#d8dce3', padding: 8, backgroundColor: 'white' }, row: { flexDirection: 'row', alignItems: 'flex-end', gap: 6 }, input: { flex: 1, minHeight: 44, maxHeight: 132, borderWidth: 1, borderColor: '#d0d5dd', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 10, fontSize: 16, backgroundColor: '#f9fafb' }, icon: { width: 36, height: 44, alignItems: 'center', justifyContent: 'center' }, send: { minHeight: 44, paddingHorizontal: 12, borderRadius: 10, justifyContent: 'center', backgroundColor: '#444ce7' }, disabled: { opacity: .45 }, sendText: { color: 'white', fontWeight: '700' }, banner: { flexDirection: 'row', borderLeftWidth: 3, borderColor: '#6172f3', backgroundColor: '#eef4ff', padding: 7, marginBottom: 7 }, bannerAuthor: { fontWeight: '700', fontSize: 12 }, bannerText: { color: '#475467', fontSize: 13 }, close: { fontSize: 22, color: '#667085', paddingHorizontal: 6 }, mentions: { position: 'absolute', bottom: 70, left: 16, right: 16, maxHeight: 220, borderWidth: 1, borderColor: '#d0d5dd', borderRadius: 10, overflow: 'hidden', backgroundColor: 'white', zIndex: 2 }, mention: { paddingHorizontal: 12, paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#eaecf0' }, file: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 6, marginBottom: 4, borderRadius: 7, backgroundColor: '#f2f4f7' } })

@@ -2,6 +2,7 @@ mod auth;
 mod config;
 mod docs_sync;
 mod error;
+mod expo_push;
 mod models;
 mod notify;
 mod routes;
@@ -188,6 +189,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/push/unsubscribe",
             post(routes::notifications::unsubscribe),
+        )
+        .route(
+            "/push/expo/register",
+            post(routes::notifications::expo_register),
+        )
+        .route(
+            "/push/expo/unregister",
+            post(routes::notifications::expo_unregister),
         )
         .route("/search", get(routes::search::search))
         // --- Phase 2: docs ---

@@ -301,3 +301,54 @@ pub async fn unsubscribe(
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+// ---- Expo mobile push ----
+
+#[derive(Deserialize)]
+pub struct ExpoRegisterRequest {
+    pub token: String,
+    pub platform: Option<String>,
+}
+
+pub async fn expo_register(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Json(body): Json<ExpoRegisterRequest>,
+) -> AppResult<StatusCode> {
+    let token = body.token.trim();
+    if token.is_empty()
+        || token.len() >= 512
+        || !(token.starts_with("ExponentPushToken[") || token.starts_with("ExpoPushToken["))
+    {
+        return Err(AppError::BadRequest("invalid Expo push token".to_string()));
+    }
+    let platform = body.platform.unwrap_or_else(|| "ios".to_string());
+    sqlx::query(
+        "INSERT INTO expo_push_tokens (user_id, token, platform) VALUES ($1, $2, $3)
+         ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, platform = EXCLUDED.platform",
+    )
+    .bind(auth.id)
+    .bind(token)
+    .bind(platform)
+    .execute(&state.pool)
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct ExpoUnregisterRequest {
+    pub token: String,
+}
+
+pub async fn expo_unregister(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Json(body): Json<ExpoUnregisterRequest>,
+) -> AppResult<StatusCode> {
+    sqlx::query("DELETE FROM expo_push_tokens WHERE token = $1 AND user_id = $2")
+        .bind(body.token.trim())
+        .bind(auth.id)
+        .execute(&state.pool)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
