@@ -13,6 +13,7 @@ import type { Channel } from '../lib/types'
 export function Sidebar() {
   const channels = useStore((s) => s.channels)
   const online = useStore((s) => s.online)
+  const voiceRooms = useStore((s) => s.voiceRooms)
   const me = useStore((s) => s.me)
   const logout = useStore((s) => s.logout)
   const setQuickSwitcher = useStore((s) => s.setQuickSwitcher)
@@ -99,7 +100,12 @@ export function Sidebar() {
             </button>
           )}
           {myChannels.map((c) => (
-            <ChannelRow key={c.id} channel={c} onSettings={() => setSettingsFor(c.id)} />
+            <ChannelRow
+              key={c.id}
+              channel={c}
+              voiceRoom={voiceRooms[c.id]}
+              onSettings={() => setSettingsFor(c.id)}
+            />
           ))}
         </div>
 
@@ -119,7 +125,12 @@ export function Sidebar() {
             </button>
           )}
           {dms.map((c) => (
-            <DmRow key={c.id} channel={c} online={c.dm_user ? online.has(c.dm_user.id) : false} />
+            <DmRow
+              key={c.id}
+              channel={c}
+              online={c.dm_user ? online.has(c.dm_user.id) : false}
+              voiceRoom={voiceRooms[c.id]}
+            />
           ))}
         </div>
       </nav>
@@ -198,9 +209,11 @@ function IconButton({
 
 function ChannelRow({
   channel,
+  voiceRoom,
   onSettings,
 }: {
   channel: Channel
+  voiceRoom?: VoiceRoom
   onSettings: () => void
 }) {
   const { channelId } = useParams()
@@ -222,6 +235,7 @@ function ChannelRow({
         {channel.name}
       </span>
       {channel.kind === 'private' && <span className="text-xs opacity-60">🔒</span>}
+      <VoiceRoomIndicator room={voiceRoom} />
       <button
         onClick={(e) => {
           e.preventDefault()
@@ -242,7 +256,15 @@ function ChannelRow({
   )
 }
 
-function DmRow({ channel, online }: { channel: Channel; online: boolean }) {
+function DmRow({
+  channel,
+  online,
+  voiceRoom,
+}: {
+  channel: Channel
+  online: boolean
+  voiceRoom?: VoiceRoom
+}) {
   const { channelId } = useParams()
   const active = channelId === channel.id
   const unread = channel.unread_count > 0
@@ -262,11 +284,36 @@ function DmRow({ channel, online }: { channel: Channel; online: boolean }) {
       <span className={`min-w-0 flex-1 truncate ${unread && !active ? 'font-semibold text-[var(--color-text)]' : ''}`}>
         {channelLabel(channel)}
       </span>
+      <VoiceRoomIndicator room={voiceRoom} />
       {unread && !active && (
         <span className="ml-auto rounded-full bg-[var(--color-accent)] px-1.5 py-0.5 text-[10px] font-bold text-white">
           {channel.unread_count}
         </span>
       )}
     </NavLink>
+  )
+}
+
+type VoiceRoom = Record<string, { user_id: string; muted: boolean }>
+
+function VoiceRoomIndicator({ room }: { room?: VoiceRoom }) {
+  if (!room) return null
+  const count = new Set(Object.values(room).map((participant) => participant.user_id)).size
+  if (count === 0) return null
+  return (
+    <span
+      aria-label={`${count} ${count === 1 ? 'participant' : 'participants'} in voice`}
+      title={`${count} in voice`}
+      className="flex shrink-0 items-center gap-1 text-[10px] font-medium tabular-nums text-[var(--color-accent-hover)]"
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M4 10v4" />
+        <path d="M8 7v10" />
+        <path d="M12 4v16" />
+        <path d="M16 8v8" />
+        <path d="M20 10v4" />
+      </svg>
+      {count}
+    </span>
   )
 }

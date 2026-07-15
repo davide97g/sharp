@@ -108,6 +108,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         pool,
         config,
         hub,
+        voice_rooms: Default::default(),
         doc_rooms: Default::default(),
         storage,
         vapid,
@@ -128,6 +129,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/users", get(routes::users::list_users))
         .route("/users/:id/avatar", get(routes::users::get_avatar))
+        .route("/voice/config", get(routes::voice::voice_config))
         .route(
             "/channels",
             get(routes::channels::list_channels).post(routes::channels::create_channel),

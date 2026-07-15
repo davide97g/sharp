@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { api, clearToken, setToken } from './lib/api'
+import { VoiceClient } from './lib/voice'
 import { WsClient } from './lib/ws'
 import { cmpId } from './lib/util'
 import { toastError, toastNotify } from './lib/toast'
@@ -8,7 +9,10 @@ import {
   initPush,
   isWebNotifyGranted,
   navigateToChannel,
+  playHuddleRingSound,
   playNotifySound,
+  playVoiceJoinSound,
+  playVoiceLeaveSound,
   requestNotifyPermission,
   showOsNotification,
 } from './lib/notify'
@@ -37,6 +41,13 @@ import type {
   TypingPayload,
   User,
   UserUpdatedPayload,
+  VoiceErrorPayload,
+  VoiceParticipantJoinedPayload,
+  VoiceParticipantLeftPayload,
+  VoiceParticipantUpdatedPayload,
+  VoiceRoomSnapshot,
+  VoiceSignalPayload,
+  VoiceStatePayload,
   WsEnvelope,
 } from './lib/types'
 
@@ -50,6 +61,16 @@ type ThreadState = {
   parent: Message | null
   replies: Message[]
   loading: boolean
+}
+
+type VoiceRoom = Record<string, { user_id: string; muted: boolean }>
+
+type VoiceState = {
+  channelId: string | null
+  status: 'idle' | 'connecting' | 'connected'
+  muted: boolean
+  speaking: Record<string, boolean>
+  client: VoiceClient | null
 }
 
 export type ChannelMessages = {
@@ -68,6 +89,7 @@ type State = {
   // directory
   users: Record<string, User>
   online: Set<string>
+  myConnId: string | null
 
   // channels
   channels: Channel[]
@@ -118,6 +140,10 @@ type State = {
 
   // chat layout preference: null until the user has chosen (triggers first-run chooser)
   chatLayout: ChatLayout | null
+
+  // ephemeral voice rooms + this connection's active call
+  voiceRooms: Record<string, VoiceRoom>
+  voice: VoiceState
 
   // ws
   ws: WsClient | null
@@ -180,6 +206,11 @@ type State = {
   sendTyping: (channelId: string) => void
   pruneTyping: () => void
 
+  // voice actions
+  joinVoice: (channelId: string) => Promise<void>
+  leaveVoice: () => void
+  toggleVoiceMute: () => void
+
   // docs actions
   loadChannelDocs: (channelId: string) => Promise<void>
   loadChannelTrash: (channelId: string) => Promise<void>
@@ -222,12 +253,23 @@ function emptyChannelMessages(): ChannelMessages {
   return { list: [], loaded: false, loading: false, hasMore: true }
 }
 
+function emptyVoiceState(): VoiceState {
+  return {
+    channelId: null,
+    status: 'idle',
+    muted: false,
+    speaking: {},
+    client: null,
+  }
+}
+
 export const useStore = create<State>((set, get) => ({
   token: null,
   me: null,
   ready: false,
   users: {},
   online: new Set(),
+  myConnId: null,
   channels: [],
   currentChannelId: null,
   byChannel: {},
@@ -253,6 +295,8 @@ export const useStore = create<State>((set, get) => ({
   notifyEnabled: isWebNotifyGranted(),
   notifHasMore: false,
   chatLayout: null,
+  voiceRooms: {},
+  voice: emptyVoiceState(),
   ws: null,
 
   async init(token, me) {
@@ -283,6 +327,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   logout() {
+    get().leaveVoice()
     const ws = get().ws
     if (ws) ws.close()
     clearToken()
@@ -292,6 +337,7 @@ export const useStore = create<State>((set, get) => ({
       ready: false,
       users: {},
       online: new Set(),
+      myConnId: null,
       channels: [],
       currentChannelId: null,
       byChannel: {},
@@ -316,6 +362,8 @@ export const useStore = create<State>((set, get) => ({
       mutedChannels: new Set(),
       chatLayout: null,
       notifHasMore: false,
+      voiceRooms: {},
+      voice: emptyVoiceState(),
       ws: null,
     })
   },
@@ -665,6 +713,95 @@ export const useStore = create<State>((set, get) => ({
     if (changed) set({ typing: next })
   },
 
+  async joinVoice(channelId) {
+    if (get().voice.channelId) get().leaveVoice()
+
+    const { me, myConnId, ws } = get()
+    if (!me || !myConnId || !ws) {
+      toastError('Voice is not available until the connection is ready.')
+      return
+    }
+
+    set({
+      voice: {
+        channelId,
+        status: 'connecting',
+        muted: false,
+        speaking: {},
+        client: null,
+      },
+    })
+
+    let client: VoiceClient | null = null
+    try {
+      const config = await api.voice.config()
+      const pending = get().voice
+      if (
+        pending.channelId !== channelId ||
+        pending.status !== 'connecting' ||
+        pending.client
+      ) {
+        return
+      }
+
+      client = new VoiceClient({
+        channelId,
+        myConnId,
+        myUserId: me.id,
+        iceServers: config.ice_servers,
+        send: (type, payload) => get().ws!.send(type, payload),
+        onSpeaking: (connId, speaking) => {
+          set((s) => {
+            if (s.voice.client !== client) return {}
+            return {
+              voice: {
+                ...s.voice,
+                speaking: { ...s.voice.speaking, [connId]: speaking },
+              },
+            }
+          })
+        },
+      })
+      set((s) => ({ voice: { ...s.voice, client } }))
+
+      await client.start()
+      const active = get().voice
+      if (active.channelId !== channelId || active.client !== client) {
+        client.stop()
+        return
+      }
+      get().ws?.send('voice.join', { channel_id: channelId })
+    } catch (e) {
+      client?.stop()
+      const active = get().voice
+      if (
+        active.channelId === channelId &&
+        (client === null ? active.client === null : active.client === client)
+      ) {
+        set({ voice: emptyVoiceState() })
+      }
+      if (e instanceof Error) toastError(e.message)
+      else toastError('Could not join the voice room.')
+    }
+  },
+
+  leaveVoice() {
+    const { channelId, client, status } = get().voice
+    if (channelId) get().ws?.send('voice.leave', { channel_id: channelId })
+    client?.stop()
+    set({ voice: emptyVoiceState() })
+    if (channelId && status === 'connected') playVoiceLeaveSound()
+  },
+
+  toggleVoiceMute() {
+    const { channelId, client, muted } = get().voice
+    if (!channelId || !client) return
+    const nextMuted = !muted
+    client.setMuted(nextMuted)
+    set((s) => ({ voice: { ...s.voice, muted: nextMuted } }))
+    get().ws?.send('voice.mute', { channel_id: channelId, muted: nextMuted })
+  },
+
   totalUnread() {
     return get().channels.reduce((sum, c) => sum + (c.unread_count || 0), 0)
   },
@@ -904,7 +1041,18 @@ export const useStore = create<State>((set, get) => ({
     switch (env.type) {
       case 'hello': {
         const p = env.payload as HelloPayload
-        set({ online: new Set(p.online_user_ids) })
+        const previous = get()
+        const voiceReconnected =
+          previous.myConnId !== null &&
+          previous.myConnId !== p.conn_id &&
+          previous.voice.channelId !== null
+        if (voiceReconnected) previous.voice.client?.stop()
+        set({
+          online: new Set(p.online_user_ids),
+          myConnId: p.conn_id,
+          voiceRooms: voiceRoomsFromSnapshots(p.voice_rooms),
+          ...(voiceReconnected ? { voice: emptyVoiceState() } : {}),
+        })
         break
       }
       case 'presence': {
@@ -929,6 +1077,128 @@ export const useStore = create<State>((set, get) => ({
             },
           },
         }))
+        break
+      }
+      case 'voice.state': {
+        const p = env.payload as VoiceStatePayload
+        const joiningThisRoom =
+          get().voice.channelId === p.channel_id && get().voice.status === 'connecting'
+        set((s) => ({
+          voiceRooms: {
+            ...s.voiceRooms,
+            [p.channel_id]: voiceRoomFromParticipants(p.participants),
+          },
+          ...(s.voice.channelId === p.channel_id
+            ? {
+                voice: {
+                  ...s.voice,
+                  status: 'connected' as const,
+                  speaking: {},
+                },
+              }
+            : {}),
+        }))
+        const active = get().voice
+        if (active.channelId === p.channel_id) active.client?.syncPeers(p.participants)
+        if (joiningThisRoom) playVoiceJoinSound()
+        break
+      }
+      case 'voice.participant_joined': {
+        const p = env.payload as VoiceParticipantJoinedPayload
+        const previousRoom = get().voiceRooms[p.channel_id]
+        const huddleStarted = !previousRoom || Object.keys(previousRoom).length === 0
+        set((s) => ({
+          voiceRooms: {
+            ...s.voiceRooms,
+            [p.channel_id]: {
+              ...(s.voiceRooms[p.channel_id] ?? {}),
+              [p.participant.conn_id]: {
+                user_id: p.participant.user_id,
+                muted: p.participant.muted,
+              },
+            },
+          },
+        }))
+        const active = get().voice
+        if (active.channelId === p.channel_id) {
+          active.client?.ensurePeer(p.participant.conn_id, p.participant.user_id)
+          if (p.participant.conn_id !== get().myConnId && p.participant.user_id !== me?.id) {
+            playVoiceJoinSound()
+          }
+        } else {
+          const channel = get().channels.find((candidate) => candidate.id === p.channel_id)
+          if (
+            huddleStarted &&
+            channel?.kind === 'dm' &&
+            me &&
+            p.participant.user_id !== me.id
+          ) {
+            const who = channel.dm_user?.display_name ?? 'Someone'
+            toastNotify('started a huddle', {
+              title: who,
+              initial: who.trim().charAt(0).toUpperCase() || '?',
+              onClick: () => navigateToChannel(channel.id),
+            })
+            playHuddleRingSound()
+          }
+        }
+        break
+      }
+      case 'voice.participant_left': {
+        const p = env.payload as VoiceParticipantLeftPayload
+        const activeBeforeLeave = get().voice
+        set((s) => {
+          const room = { ...(s.voiceRooms[p.channel_id] ?? {}) }
+          delete room[p.conn_id]
+          const voiceRooms = { ...s.voiceRooms }
+          if (Object.keys(room).length === 0) delete voiceRooms[p.channel_id]
+          else voiceRooms[p.channel_id] = room
+          return { voiceRooms }
+        })
+        if (activeBeforeLeave.channelId === p.channel_id) {
+          playVoiceLeaveSound()
+          if (p.conn_id === get().myConnId) {
+            activeBeforeLeave.client?.stop()
+            set({ voice: emptyVoiceState() })
+          } else {
+            activeBeforeLeave.client?.removePeer(p.conn_id)
+          }
+        }
+        break
+      }
+      case 'voice.participant_updated': {
+        const p = env.payload as VoiceParticipantUpdatedPayload
+        set((s) => {
+          const room = s.voiceRooms[p.channel_id]
+          const participant = room?.[p.conn_id]
+          if (!room || !participant) return {}
+          return {
+            voiceRooms: {
+              ...s.voiceRooms,
+              [p.channel_id]: {
+                ...room,
+                [p.conn_id]: { ...participant, muted: p.muted },
+              },
+            },
+          }
+        })
+        break
+      }
+      case 'voice.signal': {
+        const p = env.payload as VoiceSignalPayload
+        const active = get().voice
+        if (active.channelId === p.channel_id && active.client) {
+          void active.client.onSignal(p).catch((error) => {
+            console.error('Failed to handle voice signal', error)
+          })
+        }
+        break
+      }
+      case 'voice.error': {
+        const p = env.payload as VoiceErrorPayload
+        get().voice.client?.stop()
+        set({ voice: emptyVoiceState() })
+        toastError(voiceErrorMessage(p.code))
         break
       }
       case 'message.created': {
@@ -960,7 +1230,8 @@ export const useStore = create<State>((set, get) => ({
         const { user } = env.payload as UserUpdatedPayload
         set((s) => ({
           users: { ...s.users, [user.id]: user },
-          me: s.me?.id === user.id ? user : s.me,
+          // The broadcast redacts email; merge so we keep our own address.
+          me: s.me?.id === user.id ? { ...s.me, ...user } : s.me,
         }))
         break
       }
@@ -1128,6 +1399,42 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 }))
+
+// --- voice helpers ---
+
+function voiceRoomFromParticipants(
+  participants: VoiceRoomSnapshot['participants'],
+): VoiceRoom {
+  const room: VoiceRoom = {}
+  for (const participant of participants) {
+    room[participant.conn_id] = {
+      user_id: participant.user_id,
+      muted: participant.muted,
+    }
+  }
+  return room
+}
+
+function voiceRoomsFromSnapshots(snapshots: VoiceRoomSnapshot[]): Record<string, VoiceRoom> {
+  const rooms: Record<string, VoiceRoom> = {}
+  for (const snapshot of snapshots) {
+    rooms[snapshot.channel_id] = voiceRoomFromParticipants(snapshot.participants)
+  }
+  return rooms
+}
+
+function voiceErrorMessage(code: string): string {
+  switch (code) {
+    case 'room_full':
+      return 'This voice room is full.'
+    case 'not_member':
+      return 'You are not a member of this channel.'
+    case 'not_in_room':
+      return 'You are no longer in this voice room.'
+    default:
+      return `Voice error: ${code}`
+  }
+}
 
 // --- channel helpers ---
 
@@ -1396,4 +1703,8 @@ function applyMessageDeleted(
 // Global typing pruner.
 if (typeof window !== 'undefined') {
   setInterval(() => useStore.getState().pruneTyping(), 1000)
+  window.addEventListener('beforeunload', () => {
+    const { voice, ws } = useStore.getState()
+    if (voice.channelId) ws?.send('voice.leave', { channel_id: voice.channelId })
+  })
 }

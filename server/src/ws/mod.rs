@@ -1,4 +1,5 @@
 pub mod session;
+pub mod voice;
 
 use crate::auth::verify_token;
 use crate::error::AppResult;

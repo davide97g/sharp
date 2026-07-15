@@ -1,4 +1,5 @@
 use crate::state::SharedState;
+use crate::ws::voice;
 use crate::ws::{channel_member_ids, envelope};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
@@ -41,7 +42,12 @@ pub async fn handle_socket(socket: WebSocket, state: SharedState, user_id: Uuid)
         .collect();
     let hello = envelope(
         "hello",
-        json!({ "user_id": user_id.to_string(), "online_user_ids": online }),
+        json!({
+            "user_id": user_id.to_string(),
+            "conn_id": conn_id.to_string(),
+            "online_user_ids": online,
+            "voice_rooms": voice::snapshot_all(&state),
+        }),
     );
     let _ = tx.send(Message::Text(hello.to_string()));
 
@@ -60,7 +66,7 @@ pub async fn handle_socket(socket: WebSocket, state: SharedState, user_id: Uuid)
         match msg {
             Message::Text(text) => {
                 if let Ok(value) = serde_json::from_str::<Value>(&text) {
-                    handle_client_event(&state, user_id, &display_name, &tx, &value).await;
+                    handle_client_event(&state, user_id, conn_id, &display_name, &tx, &value).await;
                 }
             }
             Message::Ping(data) => {
@@ -72,6 +78,7 @@ pub async fn handle_socket(socket: WebSocket, state: SharedState, user_id: Uuid)
     }
 
     // Cleanup.
+    voice::cleanup_conn(&state, user_id, conn_id).await;
     let last = state.hub.remove(user_id, conn_id);
     if last {
         let targets = state.hub.online_user_ids();
@@ -87,6 +94,7 @@ pub async fn handle_socket(socket: WebSocket, state: SharedState, user_id: Uuid)
 async fn handle_client_event(
     state: &SharedState,
     user_id: Uuid,
+    conn_id: Uuid,
     display_name: &str,
     tx: &tokio::sync::mpsc::UnboundedSender<Message>,
     value: &Value,
@@ -116,6 +124,9 @@ async fn handle_client_event(
                     state.hub.broadcast(ev, targets).await;
                 }
             }
+        }
+        "voice.join" | "voice.leave" | "voice.mute" | "voice.signal" => {
+            voice::handle_voice_event(state, user_id, conn_id, event_type, payload, tx).await;
         }
         _ => {}
     }

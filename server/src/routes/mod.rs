@@ -5,6 +5,7 @@ pub mod messages;
 pub mod notifications;
 pub mod search;
 pub mod users;
+pub mod voice;
 
 use crate::error::AppResult;
 use sqlx::{PgPool, Row};

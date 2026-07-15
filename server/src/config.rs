@@ -10,6 +10,7 @@ pub struct Config {
     pub disable_signup: bool,
     /// S3-compatible object storage for file uploads. `None` = uploads disabled.
     pub s3: Option<S3Config>,
+    pub ice: IceConfig,
     /// Max accepted upload size in bytes.
     pub max_upload_bytes: usize,
     /// VAPID keys supplied via env (public_b64, private_pem). If absent, the server
@@ -27,6 +28,19 @@ pub struct S3Config {
     pub access_key: String,
     pub secret_key: String,
     pub allow_http: bool,
+}
+
+#[derive(Clone)]
+pub struct TurnConfig {
+    pub url: String,
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Clone)]
+pub struct IceConfig {
+    pub stun_urls: Vec<String>,
+    pub turn: Option<TurnConfig>,
 }
 
 #[derive(Clone)]
@@ -91,6 +105,30 @@ impl Config {
             _ => None,
         };
 
+        let stun_urls = env_opt("STUN_URLS")
+            .map(|urls| {
+                urls.split(',')
+                    .map(str::trim)
+                    .filter(|url| !url.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|urls| !urls.is_empty())
+            .unwrap_or_else(|| vec!["stun:stun.l.google.com:19302".into()]);
+        let turn = match (
+            env_opt("TURN_URL"),
+            env_opt("TURN_USERNAME"),
+            env_opt("TURN_PASSWORD"),
+        ) {
+            (Some(url), Some(username), Some(password)) => Some(TurnConfig {
+                url,
+                username,
+                password,
+            }),
+            _ => None,
+        };
+        let ice = IceConfig { stun_urls, turn };
+
         let max_upload_bytes = env_opt("MAX_UPLOAD_MB")
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(25)
@@ -114,6 +152,7 @@ impl Config {
             web_dist,
             disable_signup,
             s3,
+            ice,
             max_upload_bytes,
             vapid_env,
             vapid_subject,

@@ -22,6 +22,11 @@ export function MessagePane() {
   const markRead = useStore((s) => s.markRead)
   const mutedChannels = useStore((s) => s.mutedChannels)
   const toggleMute = useStore((s) => s.toggleMute)
+  const activeVoiceChannelId = useStore((s) => s.voice.channelId)
+  const voiceStatus = useStore((s) => s.voice.status)
+  const voiceRoom = useStore((s) => (channelId ? s.voiceRooms[channelId] : undefined))
+  const joinVoice = useStore((s) => s.joinVoice)
+  const leaveVoice = useStore((s) => s.leaveVoice)
   const chatLayout = useStore((s) => s.chatLayout)
   const [showSettings, setShowSettings] = useState(false)
 
@@ -148,6 +153,17 @@ export function MessagePane() {
   const dmOnline = isDm && channel.dm_user ? online.has(channel.dm_user.id) : undefined
   const bubbles = isDm && chatLayout === 'bubble'
   const needsLayoutChoice = isDm && chatLayout === null
+  const inThisVoiceRoom = activeVoiceChannelId === channel.id
+  const voiceOccupancy = new Set(
+    Object.values(voiceRoom ?? {}).map((participant) => participant.user_id),
+  ).size
+  const voiceAction = inThisVoiceRoom
+    ? isDm
+      ? 'Leave huddle'
+      : 'Leave voice'
+    : isDm
+      ? 'Start huddle'
+      : 'Join voice'
 
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
@@ -191,9 +207,30 @@ export function MessagePane() {
           </>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={() => {
+              if (inThisVoiceRoom) leaveVoice()
+              else void joinVoice(channel.id)
+            }}
+            aria-label={voiceAction}
+            aria-pressed={inThisVoiceRoom}
+            title={voiceAction}
+            className={`flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+              inThisVoiceRoom
+                ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)] ring-1 ring-inset ring-[var(--color-accent)]'
+                : 'text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]'
+            }`}
+          >
+            <VoiceIcon connecting={inThisVoiceRoom && voiceStatus === 'connecting'} />
+            {voiceOccupancy > 0 && (
+              <span className="text-[11px] font-semibold tabular-nums">{voiceOccupancy}</span>
+            )}
+          </button>
           {!isDm && (
             <button
               onClick={() => setShowSettings(true)}
+              aria-label="Channel settings"
               title="Channel settings"
               className="rounded-md px-2 py-1 text-sm text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
             >
@@ -202,6 +239,7 @@ export function MessagePane() {
           )}
           <button
             onClick={() => toggleMute(channel.id)}
+            aria-label={mutedChannels.has(channel.id) ? 'Unmute this channel' : 'Mute this channel'}
             title={mutedChannels.has(channel.id) ? 'Unmute this channel' : 'Mute this channel'}
             className="rounded-md px-2 py-1 text-sm text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
           >
@@ -262,6 +300,23 @@ export function MessagePane() {
 
       {needsLayoutChoice && <ChatLayoutChooser />}
     </div>
+  )
+}
+
+function VoiceIcon({ connecting }: { connecting: boolean }) {
+  return (
+    <span className="relative flex">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M3 10v4" />
+        <path d="M7 7v10" />
+        <path d="M11 4v16" />
+        <path d="M15 8v8" />
+        <path d="M19 10v4" />
+      </svg>
+      {connecting && (
+        <span className="absolute -right-1 -top-1 h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--color-accent-hover)]" />
+      )}
+    </span>
   )
 }
 

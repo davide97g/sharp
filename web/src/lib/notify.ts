@@ -89,7 +89,16 @@ export async function showOsNotification(
 // A cute little two-note chime, synthesized on the fly (no asset to ship).
 // A soft triangle "ding-dong" (E6 → B6) with a quick bell-like decay.
 let audioCtx: AudioContext | null = null
-export function playNotifySound() {
+type SynthNote = { freq: number; at: number }
+
+function playSynthNotes(
+  notes: SynthNote[],
+  { volume, decay, wave = 'triangle' }: {
+    volume: number
+    decay: number
+    wave?: OscillatorType
+  },
+) {
   if (typeof window === 'undefined') return
   try {
     const Ctor =
@@ -102,30 +111,71 @@ export function playNotifySound() {
     // A gesture may be needed to unlock; resume() is a no-op if already running.
     void ctx.resume()
     const t0 = ctx.currentTime
-    const notes = [
-      { freq: 1318.5, at: 0 }, // E6
-      { freq: 1975.5, at: 0.11 }, // B6
-    ]
     const master = ctx.createGain()
-    master.gain.value = 0.14 // gentle — cute, not startling
+    master.gain.value = volume
     master.connect(ctx.destination)
     for (const n of notes) {
       const osc = ctx.createOscillator()
       const g = ctx.createGain()
-      osc.type = 'triangle'
+      osc.type = wave
       osc.frequency.value = n.freq
       const start = t0 + n.at
       g.gain.setValueAtTime(0.0001, start)
-      g.gain.exponentialRampToValueAtTime(1, start + 0.012) // fast attack
-      g.gain.exponentialRampToValueAtTime(0.0001, start + 0.42) // bell decay
+      g.gain.exponentialRampToValueAtTime(1, start + 0.012)
+      g.gain.exponentialRampToValueAtTime(0.0001, start + decay)
       osc.connect(g)
       g.connect(master)
       osc.start(start)
-      osc.stop(start + 0.45)
+      osc.stop(start + decay + 0.03)
     }
   } catch {
     /* audio not available — ignore */
   }
+}
+
+export function playNotifySound() {
+  playSynthNotes(
+    [
+      { freq: 1318.5, at: 0 }, // E6
+      { freq: 1975.5, at: 0.11 }, // B6
+    ],
+    { volume: 0.14, decay: 0.42 },
+  )
+}
+
+/** A short, warm ascending cue for joining a room or greeting a participant. */
+export function playVoiceJoinSound() {
+  playSynthNotes(
+    [
+      { freq: 523.25, at: 0 }, // C5
+      { freq: 659.25, at: 0.1 }, // E5
+    ],
+    { volume: 0.1, decay: 0.24, wave: 'sine' },
+  )
+}
+
+/** The matching descending cue for leaving a room or a participant departing. */
+export function playVoiceLeaveSound() {
+  playSynthNotes(
+    [
+      { freq: 659.25, at: 0 }, // E5
+      { freq: 523.25, at: 0.1 }, // C5
+    ],
+    { volume: 0.09, decay: 0.22, wave: 'sine' },
+  )
+}
+
+/** A gentle two-tone huddle invitation, repeated twice. */
+export function playHuddleRingSound() {
+  playSynthNotes(
+    [
+      { freq: 659.25, at: 0 }, // E5
+      { freq: 783.99, at: 0.14 }, // G5
+      { freq: 659.25, at: 0.48 },
+      { freq: 783.99, at: 0.62 },
+    ],
+    { volume: 0.1, decay: 0.28 },
+  )
 }
 
 function urlBase64ToUint8Array(base64: string): Uint8Array {

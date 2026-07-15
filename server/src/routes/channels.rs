@@ -352,6 +352,10 @@ pub async fn leave_channel(
     // Target set computed before removal so the leaver is also notified.
     let targets = channel_member_ids(&state.pool, channel_id).await?;
 
+    if was_member {
+        crate::ws::voice::remove_member_from_room(&state, channel_id, auth.id).await;
+    }
+
     sqlx::query("DELETE FROM channel_members WHERE channel_id = $1 AND user_id = $2")
         .bind(channel_id)
         .bind(auth.id)
@@ -544,6 +548,8 @@ pub async fn delete_channel(
         }
     }
 
+    crate::ws::voice::close_room(&state, channel_id).await;
+
     sqlx::query("DELETE FROM channels WHERE id = $1")
         .bind(channel_id)
         .execute(&state.pool)
@@ -653,6 +659,8 @@ pub async fn remove_member(
     }
     // Compute targets before removal so the removed user is also notified.
     let targets = channel_member_ids(&state.pool, channel_id).await?;
+
+    crate::ws::voice::remove_member_from_room(&state, channel_id, user_id).await;
 
     sqlx::query("DELETE FROM channel_members WHERE channel_id = $1 AND user_id = $2")
         .bind(channel_id)

@@ -112,6 +112,7 @@ export type NotificationsResponse = {
   unread_count: number
 }
 export type VapidResponse = { public_key: string | null }
+export type IceConfigResponse = { ice_servers: RTCIceServer[] }
 
 export type ApiError = { error: { code: string; message: string } }
 
@@ -119,7 +120,23 @@ export type ApiError = { error: { code: string; message: string } }
 
 export type WsEnvelope<P = unknown> = { type: string; payload: P }
 
-export type HelloPayload = { user_id: string; online_user_ids: string[] }
+export type VoiceParticipant = {
+  conn_id: string
+  user_id: string
+  muted: boolean
+}
+
+export type VoiceRoomSnapshot = {
+  channel_id: string
+  participants: VoiceParticipant[]
+}
+
+export type HelloPayload = {
+  user_id: string
+  online_user_ids: string[]
+  conn_id: string
+  voice_rooms: VoiceRoomSnapshot[]
+}
 export type MessageCreatedPayload = { message: Message }
 export type MessageUpdatedPayload = { message: Message }
 export type MessageDeletedPayload = {
@@ -138,6 +155,31 @@ export type ChannelCreatedPayload = { channel: Channel }
 export type ChannelUpdatedPayload = { channel: Channel }
 export type ChannelDeletedPayload = { channel_id: string }
 export type ChannelMemberPayload = { channel_id: string; user: User }
+export type VoiceStatePayload = VoiceRoomSnapshot
+export type VoiceParticipantJoinedPayload = {
+  channel_id: string
+  participant: VoiceParticipant
+}
+export type VoiceParticipantLeftPayload = {
+  channel_id: string
+  conn_id: string
+  user_id: string
+}
+export type VoiceParticipantUpdatedPayload = {
+  channel_id: string
+  conn_id: string
+  muted: boolean
+}
+export type VoiceSignalPayload = {
+  channel_id: string
+  from_user: string
+  from_conn: string
+  to_user: string
+  to_conn: string
+  kind: 'offer' | 'answer' | 'candidate'
+  data: unknown
+}
+export type VoiceErrorPayload = { channel_id: string; code: string }
 
 // --- Phase 2: Docs ---
 

@@ -6,6 +6,7 @@ import { CanvasSidebar } from './canvas/CanvasSidebar'
 import { CompactSidebar } from './CompactSidebar'
 import { ThreadPanel } from './ThreadPanel'
 import { QuickSwitcher } from './QuickSwitcher'
+import { VoiceBar } from './voice/VoiceBar'
 import { useStore } from '../store'
 
 const SIDEBAR_OPEN_KEY = 'sharp.sidebarOpen'
@@ -85,6 +86,7 @@ export function AppShell() {
         ) : (
           <CompactSidebar mode={mode} />
         )}
+        <VoiceBar compact={!sidebarOpen} />
       </div>
       <Outlet />
       {mode === 'chat' && <ThreadPanel />}

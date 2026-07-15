@@ -25,6 +25,8 @@ pub struct AppState {
     pub pool: PgPool,
     pub config: Config,
     pub hub: Arc<Hub>,
+    /// Ephemeral voice rooms, keyed by channel id. Per-replica.
+    pub voice_rooms: crate::ws::voice::VoiceRooms,
     /// Live doc-sync rooms, keyed by doc id. Per-replica (see ARCHITECTURE Phase 2).
     pub doc_rooms: DocRooms,
     /// Object storage for uploads; `None` when S3 is not configured.

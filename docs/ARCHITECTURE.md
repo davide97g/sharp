@@ -95,7 +95,10 @@ Timestamps are RFC3339 UTC strings. Errors: `{"error": {"code": "...", "message"
 with proper HTTP status (400/401/403/404/409/422).
 
 ```ts
-User    = { id: string, email: string, display_name: string, avatar_url: string|null, created_at: string }
+User    = { id: string, email?: string, display_name: string, avatar_url: string|null, created_at: string }
+          // email is private: sent only on the viewer's own record (/auth/me, login, register,
+          // update-me). Omitted for every other user (lists, members, doc roles, dm_user,
+          // user.updated broadcast). Never leaks another user's address to the client.
 Channel = {
   id: string, name: string, kind: 'public'|'private'|'dm', topic: string,
   created_by: string|null, created_at: string,
@@ -489,6 +492,124 @@ doc REST surface, the per-channel + per-doc role model, trash/restore, and the
 - **Web**: a third **Canvas** mode in the rail; `web/src/components/canvas/` mirrors
   `components/docs/` (Home / channel list / sidebar / editor). The tldraw editor chunk is
   lazy-loaded, and tldraw assets are **self-hosted** (bundled by Vite) — no CDN dependency.
+
+# Phase 4 — Voice rooms (WebRTC mesh)
+
+Ephemeral P2P-mesh WebRTC audio rooms on every channel and DM. Browsers connect directly;
+the server does signaling only — no media passes through it and there is no SFU.
+
+## Principles
+
+- **One room per channel/DM**: every channel kind (`public`, `private`, or `dm`) may have
+  one voice room. A room exists while it has at least one participant.
+- **Ephemeral state**: rooms have no database tables, persistence, or migration. The room
+  registry lives in server memory.
+- **P2P mesh audio**: every eligible participant connects directly to every other eligible
+  participant. The server relays signaling messages only and never handles media.
+- **Capacity**: the server enforces a maximum of **8 participants** per room.
+- **Audio-only v1**: video, screen sharing, and WebRTC renegotiation are deferred.
+
+## Wire types
+
+All ids are strings in JSON (UUIDs). A WebSocket connection id is the peer identity.
+
+```ts
+VoiceParticipant = { conn_id: string, user_id: string, muted: boolean }
+VoiceRoomSnapshot = { channel_id: string, participants: VoiceParticipant[] }
+VoiceSignalKind = 'offer'|'answer'|'candidate'
+```
+
+## Main-WS event additions (existing `/api/v1/ws` socket)
+
+The existing envelope remains `{"type": string, "payload": object}` in both directions.
+
+Client → server:
+
+- `voice.join` `{channel_id}`
+- `voice.leave` `{channel_id}`
+- `voice.mute` `{channel_id, muted: boolean}`
+- `voice.signal` `{channel_id, to_user, to_conn, kind: "offer"|"answer"|"candidate", data: object}`
+  — `data` is SDP `{type,sdp}` for an offer/answer, or `RTCIceCandidateInit` for a candidate.
+
+Server → client:
+
+- `hello` payload is extended with `conn_id: string` and
+  `voice_rooms: VoiceRoomSnapshot[]`, where each snapshot is
+  `{channel_id, participants: VoiceParticipant[]}` and each participant is
+  `{conn_id, user_id, muted: boolean}`.
+- `voice.state` `{channel_id, participants: VoiceParticipant[]}` — sent only to the joining
+  connection immediately after a successful join.
+- `voice.participant_joined` `{channel_id, participant: VoiceParticipant}` — broadcast to
+  all channel members.
+- `voice.participant_left` `{channel_id, conn_id, user_id}` — broadcast to all channel
+  members.
+- `voice.participant_updated` `{channel_id, conn_id, muted}` — broadcast to all channel
+  members.
+- `voice.signal` `{channel_id, from_user, from_conn, to_user, to_conn, kind, data}` —
+  delivered to `to_user`'s connections; receivers filter on
+  `to_conn === my conn_id`.
+- `voice.error` `{channel_id, code: "room_full"|"not_member"|"not_in_room"}` — sent only
+  to the offending connection.
+
+## Server behavior
+
+- `voice.join`: verify membership with `routes::is_member`; check the 8-participant cap and
+  send `voice.error` with `code: "room_full"` to the sender only when full. Insert the
+  participant with `muted=false`, reply with `voice.state` on the sender's tx only, then
+  call `hub.broadcast(voice.participant_joined, channel_member_ids)`. Joining twice from
+  the same conn is idempotent and re-sends `voice.state`.
+- `voice.leave`: remove the sender's conn from the room, drop the room when empty, and
+  broadcast `voice.participant_left`.
+- `voice.mute`: update the participant's flag and broadcast `voice.participant_updated`.
+- `voice.signal`: the sender must be a participant of `channel_id`; otherwise send
+  `voice.error` with `code: "not_in_room"`. Relay with
+  `hub.broadcast(envelope, vec![to_user])`, adding `from_user` and `from_conn`.
+- WS disconnect: remove that conn from every room it is in, broadcast
+  `voice.participant_left` for each, and drop empty rooms.
+- Member removed from channel / leaves channel / channel deleted: evict all of that user's
+  conns from the room (all conns for channel delete), with `voice.participant_left`
+  broadcasts.
+
+## Mesh topology and signaling
+
+- Peer identity is the WS connection id (`conn_id`, a UUID string). A user may have
+  multiple connections, and each is a distinct mesh peer. The main WS `hello` event tells
+  the client its own `conn_id`.
+- To avoid offer glare, when two participants must connect, the participant with the
+  **lexicographically smaller conn_id string** creates the WebRTC offer.
+- A client never creates a peer connection to a conn whose `user_id` equals its own, which
+  prevents self-echo across the user's devices and tabs.
+- ICE candidates are trickled through `voice.signal` as they become available.
+- Audio-only v1 performs no renegotiation.
+
+## REST API addition — base `/api/v1`
+
+| Method | Path | Body → Response |
+|---|---|---|
+| GET | `/voice/config` | (Bearer auth) → `{"ice_servers": [{"urls": ["stun:..."]}, {"urls": ["turn:..."], "username": "...", "credential": "..."}]}`; the TURN entry is present only when configured. |
+
+## Server configuration
+
+- `STUN_URLS` — optional, comma-separated; default `stun:stun.l.google.com:19302`
+- `TURN_URL`, `TURN_USERNAME`, `TURN_PASSWORD` — optional; TURN is offered only when all
+  three are set
+
+## Multi-replica behavior
+
+The room registry is per-replica and in memory. Live `voice.*` events converge across
+replicas through the existing Redis fanout in `Hub::broadcast` (`sharp:events`). The cold
+`hello` snapshot is local-replica-only, the same documented limitation as presence.
+
+## Huddle ring
+
+When a client receives `voice.participant_joined` for a DM and is not itself a participant,
+it shows a toast and plays a ring chime. Voice v1 has no accept/decline state machine.
+
+## Desktop
+
+The macOS Tauri build requires `NSMicrophoneUsageDescription` in `Info.plist` and the
+`com.apple.security.device.audio-input` entitlement. Microphone support in the Linux and
+Windows WebViews is unvalidated.
 
 ## Roadmap after v1
 

@@ -9,6 +9,7 @@ import type {
   DocRolesResponse,
   DocSearchResponse,
   DocsResponse,
+  IceConfigResponse,
   Message,
   MembersResponse,
   MessagesResponse,
@@ -115,6 +116,10 @@ async function request<T>(path: string, opts: ReqOpts = {}): Promise<T> {
 }
 
 export const api = {
+  voice: {
+    config: () => request<IceConfigResponse>('/voice/config'),
+  },
+
   // --- auth ---
   register(email: string, password: string, display_name: string) {
     return request<AuthResponse>('/auth/register', {
