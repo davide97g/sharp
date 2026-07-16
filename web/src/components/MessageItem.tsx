@@ -121,6 +121,14 @@ export function MessageItem({
   const isThreadTarget = useStore((s) => s.thread.open && s.thread.parentId === message.id)
   const actioned = showPalette || isReplyTarget || isThreadTarget
 
+  // Landed here from search: sustained highlight + word highlight until the user acts.
+  const isFocused = useStore(
+    (s) => s.focus?.messageId === message.id && s.focus?.channelId === message.channel_id,
+  )
+  const focusQuery = useStore((s) =>
+    s.focus?.messageId === message.id ? s.focus.query : undefined,
+  )
+
   const openPalette = () => setPaletteFor(showPalette ? null : message.id)
   const closePalette = () => setPaletteFor(null)
 
@@ -237,7 +245,7 @@ export function MessageItem({
           ) : (
             <div
               className={`min-w-0 rounded-2xl px-3 py-2 ring-inset transition-[box-shadow] duration-200 ease-in-out ${
-                actioned
+                actioned || isFocused
                   ? 'ring-2 ring-[var(--color-accent)]'
                   : 'ring-0 ring-white/10 group-hover:ring-1'
               } ${
@@ -247,7 +255,7 @@ export function MessageItem({
               }`}
             >
               {message.reply_to && <QuotedReply reply={message.reply_to} />}
-              {message.content && <Markdown content={message.content} />}
+              {message.content && <Markdown content={message.content} highlight={focusQuery} />}
               <span className="ml-2 mt-0.5 inline-block align-baseline text-[10px] text-[var(--color-text-faint)]">
                 {message.edited_at && <span className="mr-1">(edited)</span>}
                 {fmtTime(message.created_at)}
@@ -351,9 +359,11 @@ export function MessageItem({
     <div
       id={`msg-${message.id}`}
       className={`group relative flex gap-3 px-4 transition-colors duration-200 ease-in-out ${
-        actioned
-          ? 'bg-[var(--color-accent-soft)]/25 ring-1 ring-inset ring-[var(--color-accent)]'
-          : 'hover:bg-[var(--color-panel)]/50'
+        isFocused
+          ? 'bg-[var(--color-accent-soft)]/40 ring-2 ring-inset ring-[var(--color-accent)]'
+          : actioned
+            ? 'bg-[var(--color-accent-soft)]/25 ring-1 ring-inset ring-[var(--color-accent)]'
+            : 'hover:bg-[var(--color-panel)]/50'
       } ${grouped ? 'py-0.5' : 'pt-2 pb-0.5 mt-1'}`}
       onMouseEnter={() => setActiveMessage(message.id)}
       onMouseLeave={() => {
@@ -436,7 +446,7 @@ export function MessageItem({
           </div>
         ) : (
           <div className="pr-8">
-            {message.content && <Markdown content={message.content} />}
+            {message.content && <Markdown content={message.content} highlight={focusQuery} />}
             {message.edited_at && (
               <span className="ml-1 align-baseline text-[10px] text-[var(--color-text-faint)]">
                 (edited)

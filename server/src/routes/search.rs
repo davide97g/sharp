@@ -13,6 +13,8 @@ use sqlx::Row;
 pub struct SearchQuery {
     pub q: Option<String>,
     pub limit: Option<i64>,
+    /// Optional scope: restrict results to a single channel (ACL still enforced).
+    pub channel_id: Option<uuid::Uuid>,
 }
 
 pub async fn search(
@@ -27,7 +29,18 @@ pub async fn search(
     }
     let limit = params.limit.unwrap_or(20).clamp(1, 50);
 
-    let rows = sqlx::query(
+    // Optional single-channel scope. When present it binds as $3 and shifts LIMIT to $4.
+    let scope_clause = if params.channel_id.is_some() {
+        "AND m.channel_id = $3"
+    } else {
+        ""
+    };
+    let limit_placeholder = if params.channel_id.is_some() {
+        "$4"
+    } else {
+        "$3"
+    };
+    let sql = format!(
         "SELECT
             m.id, m.channel_id, m.parent_id, m.user_id, u.display_name AS author_name,
             u.avatar_url AS author_avatar,
@@ -37,6 +50,8 @@ pub async fn search(
             (SELECT count(*) FROM messages r WHERE r.parent_id = m.id AND r.deleted_at IS NULL) AS reply_count,
             (SELECT max(r.created_at) FROM messages r WHERE r.parent_id = m.id AND r.deleted_at IS NULL) AS last_reply_at,
             c.name AS channel_name,
+            ts_headline('simple', m.content, websearch_to_tsquery('simple', $2),
+                'StartSel=<<,StopSel=>>,MaxWords=18,MinWords=6,MaxFragments=1') AS snippet,
             ts_rank(m.search, websearch_to_tsquery('simple', $2)) AS rank
          FROM messages m
          JOIN users u ON u.id = m.user_id
@@ -46,22 +61,25 @@ pub async fn search(
          JOIN channel_members cm ON cm.channel_id = m.channel_id AND cm.user_id = $1
          WHERE m.deleted_at IS NULL
            AND m.search @@ websearch_to_tsquery('simple', $2)
+           {scope_clause}
          ORDER BY rank DESC, m.id DESC
-         LIMIT $3",
-    )
-    .bind(auth.id)
-    .bind(&q)
-    .bind(limit)
-    .fetch_all(&state.pool)
-    .await?;
+         LIMIT {limit_placeholder}"
+    );
+    let mut query = sqlx::query(&sql).bind(auth.id).bind(&q);
+    if let Some(cid) = params.channel_id {
+        query = query.bind(cid);
+    }
+    let rows = query.bind(limit).fetch_all(&state.pool).await?;
 
     let mut results = Vec::with_capacity(rows.len());
     for row in &rows {
         let message = map_message_row(row)?;
         let channel_name: String = row.try_get("channel_name")?;
+        let snippet: String = row.try_get("snippet").unwrap_or_default();
         results.push(SearchResult {
             message,
             channel_name,
+            snippet,
         });
     }
 

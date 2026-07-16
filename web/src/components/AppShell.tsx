@@ -6,6 +6,7 @@ import { CanvasSidebar } from './canvas/CanvasSidebar'
 import { CompactSidebar } from './CompactSidebar'
 import { ThreadPanel } from './ThreadPanel'
 import { QuickSwitcher } from './QuickSwitcher'
+import { SearchPalette } from './SearchPalette'
 import { InboxPanel } from './NotificationCenter'
 import { VideoStage } from './voice/VideoStage'
 import { Onboarding } from './Onboarding'
@@ -24,6 +25,7 @@ function isEditableTarget(target: EventTarget | null) {
 
 export function AppShell() {
   const setQuickSwitcher = useStore((s) => s.setQuickSwitcher)
+  const setSearchOpen = useStore((s) => s.setSearchOpen)
   const channels = useStore((s) => s.channels)
   const inVoice = useStore((s) => s.voice.channelId !== null)
   const location = useLocation()
@@ -72,6 +74,13 @@ export function AppShell() {
         return
       }
 
+      // ⌘/Ctrl+F: text search palette (intentionally overrides browser find).
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        setSearchOpen(true)
+        return
+      }
+
       if (e.key === '\\' && !e.repeat && !isEditableTarget(e.target)) {
         e.preventDefault()
         toggleSidebar()
@@ -79,7 +88,7 @@ export function AppShell() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [setQuickSwitcher, toggleSidebar])
+  }, [setQuickSwitcher, setSearchOpen, toggleSidebar])
 
   return (
     <div className="flex h-full w-full overflow-hidden">
@@ -103,6 +112,7 @@ export function AppShell() {
       {mode === 'chat' && <ThreadPanel />}
       {inVoice && <VideoStage />}
       <QuickSwitcher />
+      <SearchPalette />
       {mode === 'chat' && <InboxPanel />}
       {onboarding && <Onboarding onClose={() => setOnboarding(false)} />}
     </div>

@@ -117,6 +117,8 @@ type State = {
 
   // quick switcher
   quickSwitcherOpen: boolean
+  // ⌘/Ctrl+F text search palette
+  searchOpen: boolean
   // chat inbox (notifications) panel
   inboxOpen: boolean
 
@@ -131,6 +133,9 @@ type State = {
   activeMessageId: string | null
   // which message's reaction palette is open (mouse or keyboard), or null
   paletteForMessageId: string | null
+  // a message to scroll to + highlight after landing from search; cleared on the
+  // next user interaction. `query` is the searched text (word-highlighted in the row).
+  focus: { channelId: string; messageId: string; query: string } | null
 
   // --- docs (Phase 2) ---
   docsByChannel: Record<string, Doc[]> // active (non-trashed) docs, updated_at desc
@@ -208,12 +213,14 @@ type State = {
   closeThread: () => void
 
   setQuickSwitcher: (open: boolean) => void
+  setSearchOpen: (open: boolean) => void
   setInboxOpen: (open: boolean) => void
   setDraft: (key: string, text: string) => void
   setReplyTarget: (channelId: string, msg: Message | null) => void
   requestComposerFocus: (key: string) => void
   setActiveMessage: (id: string | null) => void
   setPaletteFor: (id: string | null) => void
+  setFocus: (focus: { channelId: string; messageId: string; query: string } | null) => void
   sendTyping: (channelId: string) => void
   pruneTyping: () => void
 
@@ -299,12 +306,14 @@ export const useStore = create<State>((set, get) => ({
   thread: { open: false, parentId: null, parent: null, replies: [], loading: false },
   typing: {},
   quickSwitcherOpen: false,
+  searchOpen: false,
   inboxOpen: false,
   drafts: {},
   replyTargets: {},
   focusRequest: null,
   activeMessageId: null,
   paletteForMessageId: null,
+  focus: null,
   docsByChannel: {},
   docsLoaded: new Set(),
   trashByChannel: {},
@@ -368,12 +377,14 @@ export const useStore = create<State>((set, get) => ({
       thread: { open: false, parentId: null, parent: null, replies: [], loading: false },
       typing: {},
       quickSwitcherOpen: false,
+      searchOpen: false,
       inboxOpen: false,
       drafts: {},
       replyTargets: {},
       focusRequest: null,
       activeMessageId: null,
       paletteForMessageId: null,
+      focus: null,
       docsByChannel: {},
       docsLoaded: new Set(),
       trashByChannel: {},
@@ -687,6 +698,10 @@ export const useStore = create<State>((set, get) => ({
     set({ quickSwitcherOpen: open })
   },
 
+  setSearchOpen(open) {
+    set({ searchOpen: open })
+  },
+
   setInboxOpen(open) {
     set({ inboxOpen: open })
   },
@@ -719,6 +734,10 @@ export const useStore = create<State>((set, get) => ({
 
   setPaletteFor(id) {
     set({ paletteForMessageId: id })
+  },
+
+  setFocus(focus) {
+    set({ focus })
   },
 
   sendTyping(channelId) {

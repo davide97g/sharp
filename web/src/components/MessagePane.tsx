@@ -29,7 +29,11 @@ export function MessagePane() {
   const joinVoice = useStore((s) => s.joinVoice)
   const leaveVoice = useStore((s) => s.leaveVoice)
   const chatLayout = useStore((s) => s.chatLayout)
+  const focus = useStore((s) => s.focus)
+  const setFocus = useStore((s) => s.setFocus)
   const [showSettings, setShowSettings] = useState(false)
+  const focusTriesRef = useRef(0)
+  const focusedOnceRef = useRef<string | null>(null)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const atBottomRef = useRef(true)
@@ -129,6 +133,58 @@ export function MessagePane() {
       if (readTimerRef.current) clearTimeout(readTimerRef.current)
     }
   }, [channelId, lastId, markRead])
+
+  // Land-from-search: scroll to the focused message, pulling older pages if it
+  // isn't loaded yet (bounded). Runs when messages arrive or the focus changes.
+  useEffect(() => {
+    if (!focus) {
+      focusedOnceRef.current = null
+      return
+    }
+    if (focus.channelId !== channelId) return
+    const el = document.getElementById(`msg-${focus.messageId}`)
+    if (el) {
+      if (focusedOnceRef.current !== focus.messageId) {
+        focusedOnceRef.current = focus.messageId
+        focusTriesRef.current = 0
+        requestAnimationFrame(() =>
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' }),
+        )
+      }
+      return
+    }
+    // Not in the loaded window: page backwards a bounded number of times.
+    const st = useStore.getState().byChannel[channelId]
+    if (st?.hasMore && !st.loading && focusTriesRef.current < 20) {
+      focusTriesRef.current += 1
+      loadOlder(channelId)
+    } else if (!st?.loading) {
+      // Reached the top (or a thread reply we can't show inline): give up quietly.
+      setFocus(null)
+      focusedOnceRef.current = null
+    }
+  }, [focus, channelId, messages.length, loadOlder, setFocus])
+
+  // Clear the search-focus highlight on the next genuine user interaction.
+  useEffect(() => {
+    if (!focus || focus.channelId !== channelId) return
+    let armed = false
+    const t = setTimeout(() => {
+      armed = true
+    }, 500)
+    const clear = () => {
+      if (armed) setFocus(null)
+    }
+    window.addEventListener('pointerdown', clear)
+    window.addEventListener('keydown', clear)
+    window.addEventListener('wheel', clear, { passive: true })
+    return () => {
+      clearTimeout(t)
+      window.removeEventListener('pointerdown', clear)
+      window.removeEventListener('keydown', clear)
+      window.removeEventListener('wheel', clear)
+    }
+  }, [focus, channelId, setFocus])
 
   function onScroll() {
     const el = scrollRef.current

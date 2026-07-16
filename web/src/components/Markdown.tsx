@@ -39,14 +39,60 @@ function ResourceChip({
  * (e.g. "@Ann Marie" beats "@Ann") — mirroring the server's mention detection.
  * Unknown `@handles` fall back to a single-word pill.
  */
-function highlightMentions(text: string, keyPrefix: string, names: string[]): ReactNode[] {
+// Escape a string for safe use inside a RegExp.
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** Build a case-insensitive alternation of the query's word tokens (len ≥ 2). */
+export function buildHighlightRe(query: string | undefined): RegExp | null {
+  if (!query) return null
+  const tokens = query
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((t) => t.length >= 2)
+    .map(escapeRe)
+  if (tokens.length === 0) return null
+  return new RegExp(`(${tokens.join('|')})`, 'giu')
+}
+
+/** Wrap query-term matches in a plain text run with a search-highlight <mark>. */
+function queryNodes(text: string, keyPrefix: string, re: RegExp | null): ReactNode {
+  if (!re) return text
+  re.lastIndex = 0
+  const parts = text.split(re)
+  if (parts.length <= 1) return text
+  return parts.map((part, i) =>
+    // split() with a capture group interleaves matches at odd indices.
+    i % 2 === 1 ? (
+      <mark
+        key={`${keyPrefix}-hl${i}`}
+        className="rounded bg-yellow-300/40 px-0.5 text-[var(--color-text)]"
+      >
+        {part}
+      </mark>
+    ) : (
+      <Fragment key={`${keyPrefix}-hs${i}`}>{part}</Fragment>
+    ),
+  )
+}
+
+function highlightMentions(
+  text: string,
+  keyPrefix: string,
+  names: string[],
+  re: RegExp | null,
+): ReactNode[] {
   const out: ReactNode[] = []
   let i = 0
   let key = 0
   while (i < text.length) {
     const at = text.indexOf('@', i)
     if (at === -1) {
-      out.push(text.slice(i))
+      out.push(
+        <Fragment key={`${keyPrefix}-r${key++}`}>
+          {queryNodes(text.slice(i), `${keyPrefix}-r${key}`, re)}
+        </Fragment>,
+      )
       break
     }
     // '@' only starts a mention at a word boundary (not inside an email/word).
@@ -67,7 +113,12 @@ function highlightMentions(text: string, keyPrefix: string, names: string[]): Re
       }
     }
     if (matchLen > 0) {
-      if (at > i) out.push(text.slice(i, at))
+      if (at > i)
+        out.push(
+          <Fragment key={`${keyPrefix}-r${key++}`}>
+            {queryNodes(text.slice(i, at), `${keyPrefix}-r${key}`, re)}
+          </Fragment>,
+        )
       out.push(
         <span
           key={`${keyPrefix}-m-${key++}`}
@@ -79,7 +130,11 @@ function highlightMentions(text: string, keyPrefix: string, names: string[]): Re
       i = at + 1 + matchLen
     } else {
       // Not a mention — keep the '@' as literal text and move on.
-      out.push(text.slice(i, at + 1))
+      out.push(
+        <Fragment key={`${keyPrefix}-r${key++}`}>
+          {queryNodes(text.slice(i, at + 1), `${keyPrefix}-r${key}`, re)}
+        </Fragment>,
+      )
       i = at + 1
     }
   }
@@ -87,7 +142,12 @@ function highlightMentions(text: string, keyPrefix: string, names: string[]): Re
 }
 
 /** Split a text run on resource chips, highlighting mentions in the gaps. */
-function highlightString(text: string, keyPrefix: string, names: string[]): ReactNode[] {
+function highlightString(
+  text: string,
+  keyPrefix: string,
+  names: string[],
+  re: RegExp | null,
+): ReactNode[] {
   const out: ReactNode[] = []
   let last = 0
   let m: RegExpExecArray | null
@@ -97,7 +157,7 @@ function highlightString(text: string, keyPrefix: string, names: string[]): Reac
     if (m.index > last) {
       out.push(
         <Fragment key={`${keyPrefix}-t${i}`}>
-          {highlightMentions(text.slice(last, m.index), `${keyPrefix}-t${i}`, names)}
+          {highlightMentions(text.slice(last, m.index), `${keyPrefix}-t${i}`, names, re)}
         </Fragment>,
       )
     }
@@ -115,20 +175,25 @@ function highlightString(text: string, keyPrefix: string, names: string[]): Reac
   if (last < text.length) {
     out.push(
       <Fragment key={`${keyPrefix}-t${i}`}>
-        {highlightMentions(text.slice(last), `${keyPrefix}-t${i}`, names)}
+        {highlightMentions(text.slice(last), `${keyPrefix}-t${i}`, names, re)}
       </Fragment>,
     )
   }
   return out
 }
 
-function processChildren(children: ReactNode, keyPrefix: string, names: string[]): ReactNode {
-  if (typeof children === 'string') return highlightString(children, keyPrefix, names)
+function processChildren(
+  children: ReactNode,
+  keyPrefix: string,
+  names: string[],
+  re: RegExp | null,
+): ReactNode {
+  if (typeof children === 'string') return highlightString(children, keyPrefix, names, re)
   if (Array.isArray(children)) {
     return children.map((c, i) =>
       typeof c === 'string' ? (
         <Fragment key={`${keyPrefix}-${i}`}>
-          {highlightString(c, `${keyPrefix}-${i}`, names)}
+          {highlightString(c, `${keyPrefix}-${i}`, names, re)}
         </Fragment>
       ) : (
         c
@@ -138,8 +203,8 @@ function processChildren(children: ReactNode, keyPrefix: string, names: string[]
   return children
 }
 
-function makeComponents(names: string[]): Components {
-  const p = (children: ReactNode, prefix: string) => processChildren(children, prefix, names)
+function makeComponents(names: string[], re: RegExp | null): Components {
+  const p = (children: ReactNode, prefix: string) => processChildren(children, prefix, names, re)
   return {
     p: ({ children }) => <p>{p(children, 'p')}</p>,
     li: ({ children }) => <li>{p(children, 'li')}</li>,
@@ -158,7 +223,13 @@ function makeComponents(names: string[]): Components {
   }
 }
 
-export function Markdown({ content }: { content: string }) {
+export function Markdown({
+  content,
+  highlight,
+}: {
+  content: string
+  highlight?: string
+}) {
   const users = useStore((s) => s.users)
   // Known display names, longest-first, for greedy multi-word mention matching.
   const names = useMemo(
@@ -169,7 +240,8 @@ export function Markdown({ content }: { content: string }) {
         .sort((a, b) => b.length - a.length),
     [users],
   )
-  const components = useMemo(() => makeComponents(names), [names])
+  const re = useMemo(() => buildHighlightRe(highlight), [highlight])
+  const components = useMemo(() => makeComponents(names, re), [names, re])
   return (
     <div className="md text-[0.94rem] text-[var(--color-text)]">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} skipHtml>

@@ -140,6 +140,8 @@ pub struct SearchResult {
     #[serde(flatten)]
     pub message: Message,
     pub channel_name: String,
+    /// Match-centered snippet with `<<`/`>>` markers around matched terms.
+    pub snippet: String,
 }
 
 /// A collaborative doc, serialized with the requesting/receiving user's resolved role.
@@ -185,4 +187,6 @@ pub struct DocSearchResult {
     #[serde(flatten)]
     pub doc: Doc,
     pub channel_name: String,
+    /// Match-centered snippet with `<<`/`>>` markers; empty for canvases (no content_text).
+    pub snippet: String,
 }

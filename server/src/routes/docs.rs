@@ -923,6 +923,8 @@ pub async fn read_mentions(
 pub struct DocSearchQuery {
     pub q: Option<String>,
     pub limit: Option<i64>,
+    /// Optional scope: restrict results to a single doc/canvas (ACL still enforced).
+    pub doc_id: Option<Uuid>,
 }
 
 pub async fn search_docs(
@@ -937,37 +939,46 @@ pub async fn search_docs(
     let limit = params.limit.unwrap_or(20).clamp(1, 50);
     let like = format!("%{}%", q);
 
+    // Optional single-doc scope. When present it binds as $4 and shifts LIMIT to $5.
+    let scope_clause = if params.doc_id.is_some() {
+        "AND d.id = $4"
+    } else {
+        ""
+    };
+    let limit_placeholder = if params.doc_id.is_some() { "$5" } else { "$4" };
     let sql = format!(
         "SELECT {cols}, c.name AS channel_name,
+            ts_headline('simple', d.content_text, websearch_to_tsquery('simple', $2),
+                'StartSel=<<,StopSel=>>,MaxWords=18,MinWords=6,MaxFragments=1') AS snippet,
             ts_rank(d.search, websearch_to_tsquery('simple', $2)) AS rank
          FROM docs d
          JOIN channels c ON c.id = d.channel_id
          JOIN channel_members cm ON cm.channel_id = d.channel_id AND cm.user_id = $1
          WHERE d.deleted_at IS NULL
            AND (d.search @@ websearch_to_tsquery('simple', $2) OR d.title ILIKE $3)
+           {scope_clause}
          ORDER BY rank DESC, d.updated_at DESC
-         LIMIT $4",
+         LIMIT {limit_placeholder}",
         cols = DOC_COLS_D
     );
-    let rows = sqlx::query(&sql)
-        .bind(auth.id)
-        .bind(&q)
-        .bind(&like)
-        .bind(limit)
-        .fetch_all(&state.pool)
-        .await?;
+    let mut query = sqlx::query(&sql).bind(auth.id).bind(&q).bind(&like);
+    if let Some(did) = params.doc_id {
+        query = query.bind(did);
+    }
+    let rows = query.bind(limit).fetch_all(&state.pool).await?;
 
     let mut raws = Vec::with_capacity(rows.len());
     for r in &rows {
         let raw = parse_raw_doc(r)?;
         let channel_name: String = r.try_get("channel_name")?;
-        raws.push((raw, channel_name));
+        let snippet: String = r.try_get("snippet").unwrap_or_default();
+        raws.push((raw, channel_name, snippet));
     }
-    let ids: Vec<Uuid> = raws.iter().map(|(r, _)| r.id).collect();
+    let ids: Vec<Uuid> = raws.iter().map(|(r, _, _)| r.id).collect();
     let overrides = fetch_viewer_overrides(&state.pool, &ids, auth.id).await?;
 
     let mut results = Vec::new();
-    for (raw, channel_name) in raws {
+    for (raw, channel_name, snippet) in raws {
         let role = compute_role(&raw, auth.id, overrides.get(&raw.id).map(|s| s.as_str()));
         if role == DocRole::None {
             continue;
@@ -975,6 +986,7 @@ pub async fn search_docs(
         results.push(DocSearchResult {
             doc: doc_view(&raw, role.as_str()),
             channel_name,
+            snippet,
         });
     }
 

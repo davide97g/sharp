@@ -382,8 +382,9 @@ export const api = {
   },
 
   // --- search ---
-  search(q: string, limit = 20) {
+  search(q: string, limit = 20, channelId?: string) {
     const params = new URLSearchParams({ q, limit: String(limit) })
+    if (channelId) params.set('channel_id', channelId)
     return request<SearchResponse>(`/search?${params.toString()}`)
   },
 
@@ -448,8 +449,9 @@ export const api = {
   markMentionsRead(ids: string[]) {
     return request<void>('/mentions/read', { method: 'POST', body: { ids } })
   },
-  docSearch(q: string, limit = 20) {
+  docSearch(q: string, limit = 20, docId?: string) {
     const params = new URLSearchParams({ q, limit: String(limit) })
+    if (docId) params.set('doc_id', docId)
     return request<DocSearchResponse>(`/docs/search?${params.toString()}`)
   },
 }

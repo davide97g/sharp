@@ -105,7 +105,7 @@ export type ChannelsResponse = { channels: Channel[] }
 export type MembersResponse = { members: User[] }
 export type MessagesResponse = { messages: Message[] }
 export type ThreadResponse = { parent: Message; replies: Message[] }
-export type SearchResult = Message & { channel_name: string }
+export type SearchResult = Message & { channel_name: string; snippet: string }
 export type SearchResponse = { results: SearchResult[] }
 export type NotificationsResponse = {
   notifications: Notification[]
@@ -214,7 +214,7 @@ export type DocsResponse = { docs: Doc[] }
 export type DocRoleEntry = { user: User; role: 'editor' | 'viewer' | 'none' }
 export type DocRolesResponse = { roles: DocRoleEntry[] }
 export type DocMentionsResponse = { mentions: DocMention[] }
-export type DocSearchResult = Doc & { channel_name: string }
+export type DocSearchResult = Doc & { channel_name: string; snippet: string }
 export type DocSearchResponse = { results: DocSearchResult[] }
 
 // Doc WS payloads

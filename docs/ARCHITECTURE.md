@@ -152,7 +152,7 @@ ReplyPreview = { id: string, user: { id, display_name, avatar_url }, content: st
 | DELETE | `/messages/{id}` | → `204` (author only, soft) |
 | PUT | `/messages/{id}/reactions/{emoji}` | → `204` |
 | DELETE | `/messages/{id}/reactions/{emoji}` | → `204` |
-| GET | `/search?q=&limit=20` | → `{results: (Message & {channel_name: string})[]}` (my channels only) |
+| GET | `/search?q=&limit=20&channel_id=` | → `{results: (Message & {channel_name: string, snippet: string})[]}` (my channels only; optional `channel_id` scopes to one channel; `snippet` is a `ts_headline` with `<<`/`>>` markers around matches) |
 | GET | `/healthz` | → `200 {"status":"ok"}` (no auth) |
 
 Channel management: any member may rename, edit topic, change visibility, and add/remove other
@@ -382,7 +382,7 @@ DocMention = {
 | POST | `/docs/{id}/mentions` | `{user_id}` → `204` (editor+; no self-mentions; not on trashed docs; target must be able to see the doc; dedup: skipped if an unread mention of the same user in the same doc exists) |
 | GET | `/mentions` | → `{mentions: DocMention[]}` (mine, unread first then newest, limit 50) |
 | POST | `/mentions/read` | `{ids: string[]}` → `204` (marks mine read) |
-| GET | `/docs/search?q=&limit=20` | → `{results: (Doc & {channel_name: string})[]}` (docs I can see, FTS + title ILIKE) |
+| GET | `/docs/search?q=&limit=20&doc_id=` | → `{results: (Doc & {channel_name: string, snippet: string})[]}` (docs I can see, FTS + title ILIKE; optional `doc_id` scopes to one doc; `snippet` is a `ts_headline` over `content_text` with `<<`/`>>` markers, empty for canvases) |
 
 Validation: title ≤ 200 chars; icon ≤ 16 chars; mention POST is idempotent.
 
