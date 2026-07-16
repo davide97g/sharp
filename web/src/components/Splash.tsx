@@ -41,25 +41,25 @@ export function Splash({ ready, onDone }: { ready: boolean; onDone: () => void }
         {
           pos: { top: '-2rem', left: '-3.5rem' },
           origin: 'top left',
-          tilt: 'rotate(45deg) scaleX(-1)', // head → down-right
+          tilt: 'rotate(45deg) scaleX(1)', // head → down-right
           below: true,
         },
         {
           pos: { top: '-2rem', right: '-3.5rem' },
           origin: 'top right',
-          tilt: 'rotate(-45deg)', // head → down-left
+          tilt: 'rotate(-45deg) scaleX(-1)', // head → down-left
           below: true,
         },
         {
           pos: { bottom: '-2rem', left: '-3.5rem' },
           origin: 'bottom left',
-          tilt: 'rotate(-45deg) scaleX(-1)', // head → up-right
+          tilt: 'rotate(-45deg) scaleX(1)', // head → up-right
           below: false,
         },
         {
           pos: { bottom: '-2rem', right: '-3.5rem' },
           origin: 'bottom right',
-          tilt: 'rotate(45deg)', // head → up-left
+          tilt: 'rotate(-45deg)', // head → up-left
           below: false,
         },
       ] as const
