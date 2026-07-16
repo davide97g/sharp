@@ -84,6 +84,15 @@ services:
       # Web push: VAPID keys auto-generate + persist on first startup. Only the
       # subject (contact URL) is configurable here.
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@sharp.davideghiotto.it}
+      # GIF search (server-side proxy). Key can also be saved from the in-app
+      # Settings → Workspace tab (persisted in Postgres); these are the env
+      # fallbacks. GIPHY is the default provider; Tenor is legacy-only.
+      GIPHY_API_KEY: ${GIPHY_API_KEY:-}
+      TENOR_API_KEY: ${TENOR_API_KEY:-}
+      # Duck GIF suggestions (DeepSeek LLM) — duck is disabled when unset.
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
     expose:
       - "3000"
     depends_on:

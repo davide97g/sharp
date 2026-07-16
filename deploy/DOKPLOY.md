@@ -41,6 +41,11 @@ web image at build time (`API_URL` below) — change the domain there, not at ru
    # API_URL=https://server.sharp.davideghiotto.it
    # Optional — sensible defaults exist:
    # S3_ACCESS_KEY=sharp   S3_BUCKET=sharp   S3_REGION=us-east-1
+   # GIFs & duck suggestions (optional; can also set the GIF key in-app,
+   # Settings → Workspace — the env var is a fallback):
+   # GIPHY_API_KEY=<key from developers.giphy.com>
+   # DEEPSEEK_API_KEY=<key from platform.deepseek.com>   # duck disabled if unset
+   # DEEPSEEK_MODEL=deepseek-chat   DEEPSEEK_BASE_URL=https://api.deepseek.com
    ```
 
    The stack bundles **MinIO** for file uploads and **Redis** for multi-replica
