@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
-import type { GifSettings } from '../lib/types'
+import type { DuckContext, DuckCooldownSecs, GifSettings } from '../lib/types'
 import { toastError } from '../lib/toast'
 import { Modal } from './Modal'
 import { Avatar } from './Avatar'
@@ -120,6 +120,8 @@ export function UserSettingsModal({ onClose }: { onClose: () => void }) {
     provider?: string
     api_key?: string
     duck_enabled?: boolean
+    duck_cooldown_secs?: DuckCooldownSecs
+    duck_context?: DuckContext
   }) {
     setGifSaving(true)
     try {
@@ -138,10 +140,22 @@ export function UserSettingsModal({ onClose }: { onClose: () => void }) {
 
   async function saveGifSettings() {
     if (!gifSettings || !savedGifSettings) return
-    const body: { provider?: string; api_key?: string; duck_enabled?: boolean } = {}
+    const body: {
+      provider?: string
+      api_key?: string
+      duck_enabled?: boolean
+      duck_cooldown_secs?: DuckCooldownSecs
+      duck_context?: DuckContext
+    } = {}
     if (gifSettings.provider !== savedGifSettings.provider) body.provider = gifSettings.provider
     if (gifSettings.duck_enabled !== savedGifSettings.duck_enabled) {
       body.duck_enabled = gifSettings.duck_enabled
+    }
+    if (gifSettings.duck_cooldown_secs !== savedGifSettings.duck_cooldown_secs) {
+      body.duck_cooldown_secs = gifSettings.duck_cooldown_secs
+    }
+    if (gifSettings.duck_context !== savedGifSettings.duck_context) {
+      body.duck_context = gifSettings.duck_context
     }
     if (gifApiKey) body.api_key = gifApiKey
     await updateGifSettings(body)
@@ -333,10 +347,71 @@ export function UserSettingsModal({ onClose }: { onClose: () => void }) {
                 Duck GIF suggestions
               </span>
               <span className="mt-1 block text-xs text-[var(--color-text-faint)]">
-                An AI duck watches the conversation and suggests a fitting GIF.
+                An AI duck watches fast chat streaks and suggests a roast GIF.
               </span>
             </span>
           </label>
+
+          {gifSettings.duck_enabled ? (
+            <>
+              <div>
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+                  Suggestion slow mode
+                </label>
+                <select
+                  value={gifSettings.duck_cooldown_secs}
+                  onChange={(event) =>
+                    setGifSettings((settings) =>
+                      settings
+                        ? {
+                            ...settings,
+                            duck_cooldown_secs: Number(event.target.value) as DuckCooldownSecs,
+                          }
+                        : settings,
+                    )
+                  }
+                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
+                >
+                  <option value={30}>30 seconds</option>
+                  <option value={60}>1 minute</option>
+                  <option value={120}>2 minutes</option>
+                  <option value={300}>5 minutes</option>
+                </select>
+                <p className="mt-1.5 text-xs text-[var(--color-text-faint)]">
+                  Minimum wait between duck suggestions in a channel.
+                </p>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+                  Suggestion context
+                </label>
+                <select
+                  value={gifSettings.duck_context}
+                  onChange={(event) =>
+                    setGifSettings((settings) =>
+                      settings
+                        ? {
+                            ...settings,
+                            duck_context: event.target.value as DuckContext,
+                          }
+                        : settings,
+                    )
+                  }
+                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
+                >
+                  <option value="streak">Last message streak</option>
+                  <option value="1m">Last 1 minute</option>
+                  <option value="2m">Last 2 minutes</option>
+                  <option value="3m">Last 3 minutes</option>
+                </select>
+                <p className="mt-1.5 text-xs text-[var(--color-text-faint)]">
+                  Which messages the duck reads when picking a GIF. Triggers still require a fast
+                  streak (≥3 messages within 20s).
+                </p>
+              </div>
+            </>
+          ) : null}
 
           <div className="rounded-lg border border-[var(--color-border)] px-3 py-2.5 text-sm text-[var(--color-text-dim)]">
             DeepSeek (duck AI):{' '}

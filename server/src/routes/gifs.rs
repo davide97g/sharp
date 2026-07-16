@@ -1,25 +1,27 @@
 use crate::auth::AuthUser;
 use crate::deepseek;
 use crate::error::{AppError, AppResult};
-use crate::gif::{self, GifResult, GifSettings};
+use crate::gif::{self, GifResult, GifSettings, DEFAULT_DUCK_CONTEXT, STREAK_GAP_SECS};
 use crate::routes::{channel_kind, is_member};
 use crate::state::SharedState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::Row;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
-const SUGGEST_COOLDOWN: Duration = Duration::from_secs(120);
-const COOLDOWN_RETENTION: Duration = Duration::from_secs(600);
+const COOLDOWN_RETENTION: Duration = Duration::from_secs(900);
 
 #[derive(Serialize)]
 pub struct GifConfigResponse {
     enabled: bool,
     duck: bool,
     provider: String,
+    duck_cooldown_secs: u64,
+    duck_context: String,
 }
 
 pub async fn get_config(
@@ -32,6 +34,8 @@ pub async fn get_config(
         enabled,
         duck: duck_enabled(&state, &settings, enabled),
         provider: settings.provider,
+        duck_cooldown_secs: settings.duck_cooldown_secs,
+        duck_context: settings.duck_context,
     }))
 }
 
@@ -66,6 +70,8 @@ pub struct GifSettingsResponse {
     provider: String,
     has_api_key: bool,
     duck_enabled: bool,
+    duck_cooldown_secs: u64,
+    duck_context: String,
     deepseek_configured: bool,
 }
 
@@ -74,6 +80,8 @@ fn settings_response(state: &SharedState, settings: GifSettings) -> GifSettingsR
         provider: settings.provider,
         has_api_key: settings.api_key.is_some(),
         duck_enabled: settings.duck_enabled,
+        duck_cooldown_secs: settings.duck_cooldown_secs,
+        duck_context: settings.duck_context,
         deepseek_configured: state.config.deepseek.is_some(),
     }
 }
@@ -91,6 +99,8 @@ pub struct PutSettingsRequest {
     provider: Option<String>,
     api_key: Option<String>,
     duck_enabled: Option<bool>,
+    duck_cooldown_secs: Option<u64>,
+    duck_context: Option<String>,
 }
 
 pub async fn put_settings(
@@ -107,11 +117,27 @@ pub async fn put_settings(
             "provider must be tenor or giphy".to_string(),
         ));
     }
+    if let Some(secs) = body.duck_cooldown_secs {
+        if gif::parse_duck_cooldown_secs(Some(&secs.to_string())).is_none() {
+            return Err(AppError::BadRequest(
+                "duck_cooldown_secs must be 30, 60, 120, or 300".to_string(),
+            ));
+        }
+    }
+    if let Some(ref context) = body.duck_context {
+        if gif::parse_duck_context(Some(context)).is_none() {
+            return Err(AppError::BadRequest(
+                "duck_context must be streak, 1m, 2m, or 3m".to_string(),
+            ));
+        }
+    }
     gif::save_settings(
         &state.pool,
         body.provider.as_deref(),
         body.api_key.as_deref(),
         body.duck_enabled,
+        body.duck_cooldown_secs,
+        body.duck_context.as_deref(),
     )
     .await?;
     let settings = gif::load_settings(&state.pool, &state.config).await;
@@ -139,37 +165,7 @@ pub async fn suggest(
             AppError::ServiceUnavailable("gif suggestion not configured".to_string())
         })?;
 
-    let rows = sqlx::query(
-        "SELECT u.display_name, m.content
-         FROM messages m
-         JOIN users u ON u.id = m.user_id
-         WHERE m.channel_id = $1
-           AND m.parent_id IS NULL
-           AND m.deleted_at IS NULL
-           AND m.content <> ''
-         ORDER BY m.id DESC
-         LIMIT 15",
-    )
-    .bind(channel_id)
-    .fetch_all(&state.pool)
-    .await?;
-    let mut transcript: Vec<(String, String)> = rows
-        .into_iter()
-        .filter_map(|row| {
-            let display_name: String = row.try_get("display_name").ok()?;
-            let content: String = row.try_get("content").ok()?;
-            if content.trim().is_empty() {
-                None
-            } else {
-                Some((display_name, content))
-            }
-        })
-        .collect();
-    if transcript.len() < 2 {
-        return Ok(empty_suggestion());
-    }
-    transcript.reverse();
-
+    let cooldown = Duration::from_secs(settings.duck_cooldown_secs);
     let now = Instant::now();
     {
         let mut cooldowns = state
@@ -179,11 +175,16 @@ pub async fn suggest(
         cooldowns.retain(|_, last_attempt| now.duration_since(*last_attempt) < COOLDOWN_RETENTION);
         if cooldowns
             .get(&channel_id)
-            .is_some_and(|last_attempt| now.duration_since(*last_attempt) < SUGGEST_COOLDOWN)
+            .is_some_and(|last_attempt| now.duration_since(*last_attempt) < cooldown)
         {
             return Ok(empty_suggestion());
         }
         cooldowns.insert(channel_id, now);
+    }
+
+    let transcript = load_transcript(&state, channel_id, &settings.duck_context).await?;
+    if transcript.len() < 2 {
+        return Ok(empty_suggestion());
     }
 
     let query = deepseek::suggest_query(deepseek_config, &transcript)
@@ -192,11 +193,93 @@ pub async fn suggest(
             tracing::warn!("GIF suggestion failed: {}", error);
             AppError::ServiceUnavailable("suggestion failed".to_string())
         })?;
-    let results = provider.search(&query, 12).await.map_err(|error| {
+    let results = provider.search(&query, 1).await.map_err(|error| {
         tracing::warn!("GIF suggestion search failed: {}", error);
         AppError::ServiceUnavailable("gif search failed".to_string())
     })?;
     Ok(Json(json!({ "query": query, "results": results })))
+}
+
+struct TranscriptRow {
+    display_name: String,
+    content: String,
+    created_at: DateTime<Utc>,
+}
+
+async fn load_transcript(
+    state: &SharedState,
+    channel_id: Uuid,
+    duck_context: &str,
+) -> AppResult<Vec<(String, String)>> {
+    let context = gif::parse_duck_context(Some(duck_context))
+        .unwrap_or_else(|| DEFAULT_DUCK_CONTEXT.to_string());
+
+    let rows = sqlx::query(
+        "SELECT u.display_name, m.content, m.created_at
+         FROM messages m
+         JOIN users u ON u.id = m.user_id
+         WHERE m.channel_id = $1
+           AND m.parent_id IS NULL
+           AND m.deleted_at IS NULL
+           AND m.content <> ''
+         ORDER BY m.id DESC
+         LIMIT 40",
+    )
+    .bind(channel_id)
+    .fetch_all(&state.pool)
+    .await?;
+
+    let mut messages: Vec<TranscriptRow> = rows
+        .into_iter()
+        .filter_map(|row| {
+            let display_name: String = row.try_get("display_name").ok()?;
+            let content: String = row.try_get("content").ok()?;
+            let created_at: DateTime<Utc> = row.try_get("created_at").ok()?;
+            if content.trim().is_empty() {
+                None
+            } else {
+                Some(TranscriptRow {
+                    display_name,
+                    content,
+                    created_at,
+                })
+            }
+        })
+        .collect();
+
+    // Newest-first from SQL; keep that order while filtering, then reverse for chronological.
+    match context.as_str() {
+        "1m" | "2m" | "3m" => {
+            let minutes: i64 = match context.as_str() {
+                "1m" => 1,
+                "2m" => 2,
+                _ => 3,
+            };
+            let cutoff = Utc::now() - ChronoDuration::minutes(minutes);
+            messages.retain(|row| row.created_at >= cutoff);
+        }
+        _ => {
+            // "streak" — keep only the newest fast burst (gaps ≤ STREAK_GAP_SECS).
+            if !messages.is_empty() {
+                let mut streak_end = 1;
+                while streak_end < messages.len() {
+                    let newer = messages[streak_end - 1].created_at;
+                    let older = messages[streak_end].created_at;
+                    if newer - older > ChronoDuration::seconds(STREAK_GAP_SECS) {
+                        break;
+                    }
+                    streak_end += 1;
+                }
+                messages.truncate(streak_end);
+            }
+        }
+    }
+
+    messages.reverse();
+    Ok(messages
+        .into_iter()
+        .map(|row| (row.display_name, row.content))
+        .collect())
 }
 
 fn duck_enabled(state: &SharedState, settings: &GifSettings, provider_enabled: bool) -> bool {

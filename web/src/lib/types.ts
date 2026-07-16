@@ -115,11 +115,21 @@ export type GifResult = {
   height: number
   title: string
 }
-export type GifConfig = { enabled: boolean; duck: boolean; provider?: string }
+export type GifConfig = {
+  enabled: boolean
+  duck: boolean
+  provider?: string
+  duck_cooldown_secs: number
+  duck_context: DuckContext
+}
+export type DuckContext = 'streak' | '1m' | '2m' | '3m'
+export type DuckCooldownSecs = 30 | 60 | 120 | 300
 export type GifSettings = {
   provider: string
   has_api_key: boolean
   duck_enabled: boolean
+  duck_cooldown_secs: DuckCooldownSecs
+  duck_context: DuckContext
   deepseek_configured: boolean
 }
 export type GifSuggestResponse = { query: string | null; results: GifResult[] }

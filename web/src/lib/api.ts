@@ -448,7 +448,13 @@ export const api = {
   getGifSettings() {
     return request<GifSettings>('/gifs/settings')
   },
-  putGifSettings(body: { provider?: string; api_key?: string; duck_enabled?: boolean }) {
+  putGifSettings(body: {
+    provider?: string
+    api_key?: string
+    duck_enabled?: boolean
+    duck_cooldown_secs?: number
+    duck_context?: string
+  }) {
     return request<GifSettings>('/gifs/settings', { method: 'PUT', body })
   },
   gifSuggest(channelId: string) {

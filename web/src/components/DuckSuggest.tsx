@@ -3,32 +3,33 @@ import { api } from '../lib/api'
 import { buildGifToken } from '../lib/gif'
 import type { GifResult } from '../lib/types'
 import { useStore } from '../store'
-import { GifPicker } from './GifPicker'
+
+/** Quiet pause after a fast streak before asking the server for a GIF. */
+const STREAK_QUIET_MS = 5_000
 
 const lastSuggestAt = new Map<string, number>()
 
 export function DuckSuggest({ channelId }: { channelId: string }) {
   const duck = useStore((state) => state.gifConfig?.duck)
+  const cooldownMs = (useStore((state) => state.gifConfig?.duck_cooldown_secs) ?? 120) * 1000
   const activity = useStore((state) => state.duckActivity[channelId])
   const resetDuckActivity = useStore((state) => state.resetDuckActivity)
-  const [suggestion, setSuggestion] = useState<{
-    query: string
-    results: GifResult[]
-  } | null>(null)
-  const [pickerOpen, setPickerOpen] = useState(false)
+  const [gif, setGif] = useState<GifResult | null>(null)
+  const [sending, setSending] = useState(false)
 
   useEffect(() => {
-    setSuggestion(null)
-    setPickerOpen(false)
+    setGif(null)
+    setSending(false)
   }, [channelId])
 
   useEffect(() => {
+    // Fast streak: ≥3 rapid messages from others, then a short quiet window.
     if (!duck || (activity?.count ?? 0) < 3) return
 
     let cancelled = false
     const timer = window.setTimeout(() => {
       const previous = lastSuggestAt.get(channelId) ?? 0
-      if (Date.now() - previous <= 120_000) return
+      if (Date.now() - previous <= cooldownMs) return
 
       void api
         .gifSuggest(channelId)
@@ -38,50 +39,48 @@ export function DuckSuggest({ channelId }: { channelId: string }) {
             resetDuckActivity(channelId)
             return
           }
-          if (results.length === 0) return
+          const best = results[0]
+          if (!best) return
 
           lastSuggestAt.set(channelId, Date.now())
-          setSuggestion({ query, results })
-          setPickerOpen(false)
+          setGif(best)
+          setSending(false)
           resetDuckActivity(channelId)
         })
         .catch(() => {
           // Suggestions are an optional easter egg; network failures stay silent.
         })
-    }, 5_000)
+    }, STREAK_QUIET_MS)
 
     return () => {
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [activity?.count, activity?.lastAt, channelId, duck, resetDuckActivity])
+  }, [activity?.count, activity?.lastAt, channelId, cooldownMs, duck, resetDuckActivity])
 
-  if (!duck || !suggestion) return null
+  if (!duck || !gif) return null
+
+  async function sendSuggestedGif() {
+    if (sending || !gif) return
+    setSending(true)
+    try {
+      await useStore.getState().sendMessage(channelId, buildGifToken(gif))
+      setGif(null)
+    } catch {
+      setSending(false)
+    }
+  }
 
   return (
     <div className="duck-suggest-pop pointer-events-auto absolute bottom-2 right-6 z-30">
-      {pickerOpen ? (
-        <div className="absolute bottom-full right-0 mb-2">
-          <GifPicker
-            initialQuery={suggestion.query}
-            initialResults={suggestion.results}
-            onPick={(gif) => {
-              void useStore.getState().sendMessage(channelId, buildGifToken(gif))
-              setPickerOpen(false)
-              setSuggestion(null)
-            }}
-            onClose={() => setPickerOpen(false)}
-          />
-        </div>
-      ) : null}
-
       <button
         type="button"
-        onClick={() => setPickerOpen(true)}
-        aria-label="Open suggested GIF"
-        className="duck-suggest-bob relative block h-14 w-[60px] cursor-pointer overflow-visible outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+        onClick={() => void sendSuggestedGif()}
+        disabled={sending}
+        aria-label="Send suggested GIF"
+        className="duck-suggest-bob relative block h-14 w-[60px] cursor-pointer overflow-visible outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:cursor-wait"
       >
-        {!pickerOpen ? <span className="duck-suggest-bubble">gif is ready</span> : null}
+        <span className="duck-suggest-bubble">gif is ready</span>
         <span className="absolute inset-0 overflow-hidden rounded-xl">
           <img
             src="/duck.png"

@@ -849,7 +849,7 @@ in sync.
 
 GIF search proxied through the server (provider API keys never reach the client), a GIF
 picker in chat + docs, and an optional "duck": an LLM-powered (DeepSeek) suggester that
-watches the recent conversation and proposes a snarky/dark-humor GIF.
+watches fast chat streaks and auto-picks a mean roast GIF to send.
 
 ## Providers & settings
 
@@ -857,20 +857,23 @@ watches the recent conversation and proposes a snarky/dark-humor GIF.
   (default) and **Tenor v2** (legacy — Tenor accepts no new API clients since Jan 2026).
   Adding a provider = new impl + `resolve_provider` match arm.
 - Settings persist in `app_meta` (no migration): `gif.provider` (default `giphy`),
-  `gif.api_key`, `gif.duck_enabled` (default `true`). API key resolution: `app_meta` →
+  `gif.api_key`, `gif.duck_enabled` (default `true`), `gif.duck_cooldown_secs`
+  (default `120`; allowed `30|60|120|300`), `gif.duck_context` (default `streak`;
+  allowed `streak|1m|2m|3m`). API key resolution: `app_meta` →
   provider-matching env fallback (`GIPHY_API_KEY` / `TENOR_API_KEY`).
 - **Any authenticated member may read/update settings** (v1 has no admin role — deliberate
   simplification). The key is write-only: never echoed back by the API.
-- Web UI: Settings → Workspace tab (provider select, API key, duck toggle, DeepSeek status).
+- Web UI: Settings → Workspace tab (provider select, API key, duck toggle, slow mode,
+  context window, DeepSeek status).
 
 ## REST API additions — base `/api/v1`
 
 | Method | Path | Body → Response |
 |---|---|---|
-| GET | `/gifs/config` | → `{enabled, duck, provider}` — `enabled` = provider+key resolvable; `duck` = enabled ∧ DeepSeek configured ∧ `gif.duck_enabled` |
+| GET | `/gifs/config` | → `{enabled, duck, provider, duck_cooldown_secs, duck_context}` — `enabled` = provider+key resolvable; `duck` = enabled ∧ DeepSeek configured ∧ `gif.duck_enabled` |
 | GET | `/gifs/search?q=&limit=` | → `{results: [GifResult]}`; `q` required (400), `limit` 1..=30 default 24; 503 `unavailable` when unconfigured or upstream fails |
-| GET | `/gifs/settings` | → `{provider, has_api_key, duck_enabled, deepseek_configured}` |
-| PUT | `/gifs/settings` | `{provider?, api_key?, duck_enabled?}` → same as GET; provider ∈ `giphy\|tenor`; `api_key: ""` clears, absent keeps |
+| GET | `/gifs/settings` | → `{provider, has_api_key, duck_enabled, duck_cooldown_secs, duck_context, deepseek_configured}` |
+| PUT | `/gifs/settings` | `{provider?, api_key?, duck_enabled?, duck_cooldown_secs?, duck_context?}` → same as GET; provider ∈ `giphy\|tenor`; cooldown ∈ `30\|60\|120\|300`; context ∈ `streak\|1m\|2m\|3m`; `api_key: ""` clears, absent keeps |
 | POST | `/channels/{id}/gif-suggest` | (member-only) → `{query, results}`; on cooldown returns 200 `{query: null, results: []}`; 503 when duck disabled |
 
 `GifResult = {id, url, preview_url, width, height, title}` — `url` is the provider-CDN GIF
@@ -886,17 +889,20 @@ docs and canvas are not integrated.
 
 ## Duck flow
 
-1. Client counts incoming top-level messages from others in the open channel
-   (`store.duckActivity`); own message resets the counter.
-2. ≥3 messages + 5s quiet + >2 min since last suggestion → `POST /channels/{id}/gif-suggest`.
-3. Server (member-guarded): per-channel in-memory cooldown 120s, **per replica**
-   (`AppState.gif_suggest_cooldowns`, stamped before the LLM call); loads last 15 non-deleted
-   top-level messages; DeepSeek chat completion returns ONE short GIF search query
-   (snarky/dark-humor roast tone, no slurs/NSFW; `max_tokens` 20, temp 1.1, 10s timeout);
-   runs provider search (limit 12).
+1. Client tracks **fast streaks** of incoming top-level messages from others in the open
+   channel (`store.duckActivity`): gaps >20s reset the burst; own message resets the
+   counter.
+2. ≥3 messages in a fast streak + 5s quiet + cooldown elapsed (from
+   `gifConfig.duck_cooldown_secs`, default 2 min) → `POST /channels/{id}/gif-suggest`.
+3. Server (member-guarded): per-channel in-memory cooldown from settings, **per replica**
+   (`AppState.gif_suggest_cooldowns`, stamped before the LLM call); loads context messages
+   by `duck_context` — `streak` = newest burst with ≤20s gaps, or `1m`/`2m`/`3m` = messages
+   in that wall-clock window (up to 40); DeepSeek chat completion returns ONE short GIF
+   search query (vicious/disrespectful roast tone, no slurs/NSFW; `max_tokens` 20, temp 1.1,
+   10s timeout); runs provider search (limit 1 — top hit is the pick).
 4. Client: duck (`/duck.png`) pops above the composer with a "gif is ready" bubble; click
-   opens the GIF picker prefilled; picking sends the token message. Duck hidden entirely
-   when `/gifs/config.duck` is false.
+   immediately sends that GIF as a message (no picker). Duck hidden entirely when
+   `/gifs/config.duck` is false.
 
 ## Env additions
 

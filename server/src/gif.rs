@@ -12,6 +12,14 @@ const GIPHY_SEARCH_URL: &str = "https://api.giphy.com/v1/gifs/search";
 const META_PROVIDER: &str = "gif.provider";
 const META_API_KEY: &str = "gif.api_key";
 const META_DUCK_ENABLED: &str = "gif.duck_enabled";
+const META_DUCK_COOLDOWN_SECS: &str = "gif.duck_cooldown_secs";
+const META_DUCK_CONTEXT: &str = "gif.duck_context";
+
+pub const DUCK_COOLDOWN_OPTIONS: &[u64] = &[30, 60, 120, 300];
+pub const DEFAULT_DUCK_COOLDOWN_SECS: u64 = 120;
+pub const DEFAULT_DUCK_CONTEXT: &str = "streak";
+/// Max gap between consecutive messages that still counts as one fast streak.
+pub const STREAK_GAP_SECS: i64 = 20;
 
 fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -195,6 +203,21 @@ pub struct GifSettings {
     pub provider: String,
     pub api_key: Option<String>,
     pub duck_enabled: bool,
+    pub duck_cooldown_secs: u64,
+    pub duck_context: String,
+}
+
+pub fn parse_duck_cooldown_secs(raw: Option<&str>) -> Option<u64> {
+    let secs = raw?.trim().parse::<u64>().ok()?;
+    DUCK_COOLDOWN_OPTIONS.contains(&secs).then_some(secs)
+}
+
+pub fn parse_duck_context(raw: Option<&str>) -> Option<String> {
+    let value = raw?.trim();
+    match value {
+        "streak" | "1m" | "2m" | "3m" => Some(value.to_string()),
+        _ => None,
+    }
 }
 
 pub async fn load_settings(pool: &PgPool, config: &Config) -> GifSettings {
@@ -202,6 +225,8 @@ pub async fn load_settings(pool: &PgPool, config: &Config) -> GifSettings {
         META_PROVIDER.to_string(),
         META_API_KEY.to_string(),
         META_DUCK_ENABLED.to_string(),
+        META_DUCK_COOLDOWN_SECS.to_string(),
+        META_DUCK_CONTEXT.to_string(),
     ];
     let rows = match sqlx::query("SELECT key, value FROM app_meta WHERE key = ANY($1)")
         .bind(keys)
@@ -238,11 +263,19 @@ pub async fn load_settings(pool: &PgPool, config: &Config) -> GifSettings {
         .get(META_DUCK_ENABLED)
         .map(|value| value == "true")
         .unwrap_or(true);
+    let duck_cooldown_secs = parse_duck_cooldown_secs(
+        values.get(META_DUCK_COOLDOWN_SECS).map(String::as_str),
+    )
+    .unwrap_or(DEFAULT_DUCK_COOLDOWN_SECS);
+    let duck_context = parse_duck_context(values.get(META_DUCK_CONTEXT).map(String::as_str))
+        .unwrap_or_else(|| DEFAULT_DUCK_CONTEXT.to_string());
 
     GifSettings {
         provider,
         api_key,
         duck_enabled,
+        duck_cooldown_secs,
+        duck_context,
     }
 }
 
@@ -251,6 +284,8 @@ pub async fn save_settings(
     provider: Option<&str>,
     api_key: Option<&str>,
     duck_enabled: Option<bool>,
+    duck_cooldown_secs: Option<u64>,
+    duck_context: Option<&str>,
 ) -> Result<(), sqlx::Error> {
     if let Some(provider) = provider {
         set_meta(pool, META_PROVIDER, provider).await?;
@@ -272,6 +307,17 @@ pub async fn save_settings(
             if duck_enabled { "true" } else { "false" },
         )
         .await?;
+    }
+    if let Some(duck_cooldown_secs) = duck_cooldown_secs {
+        set_meta(
+            pool,
+            META_DUCK_COOLDOWN_SECS,
+            &duck_cooldown_secs.to_string(),
+        )
+        .await?;
+    }
+    if let Some(duck_context) = duck_context {
+        set_meta(pool, META_DUCK_CONTEXT, duck_context).await?;
     }
     Ok(())
 }

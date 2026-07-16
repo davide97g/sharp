@@ -130,7 +130,7 @@ type State = {
   // messages keyed by channel id
   byChannel: Record<string, ChannelMessages>
 
-  // GIF feature flags + per-channel activity used by duck suggestions
+  // GIF feature flags + per-channel fast-streak activity used by duck suggestions
   gifConfig: GifConfig | null
   duckActivity: Record<string, { count: number; lastAt: number }>
 
@@ -2080,11 +2080,14 @@ function applyMessageCreated(set: Setter, message: Message, myId: string | null)
     let duckActivity = s.duckActivity
     if (!fromMe && isCurrent) {
       const previous = s.duckActivity[message.channel_id]
+      const now = Date.now()
+      // Fast streak: messages more than 20s apart start a new burst.
+      const continuesStreak = previous != null && previous.count > 0 && now - previous.lastAt <= 20_000
       duckActivity = {
         ...s.duckActivity,
         [message.channel_id]: {
-          count: (previous?.count ?? 0) + 1,
-          lastAt: Date.now(),
+          count: continuesStreak ? previous.count + 1 : 1,
+          lastAt: now,
         },
       }
     } else if (fromMe) {
