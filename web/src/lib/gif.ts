@@ -1,10 +1,11 @@
 import type { GifResult } from './types'
 
-export const GIF_TOKEN = /\[\[gif:(https?:\/\/[^\s|\]]+)\|([^\]]*)\]\]/g
+/** Matches manual `[[gif:url|alt]]` and duck-roast `[[gif:url|alt|duck]]`. */
+export const GIF_TOKEN = /\[\[gif:(https?:\/\/[^\s|\]]+)\|([^|\]]*)(?:\|duck)?\]\]/g
 
-export function buildGifToken(g: GifResult): string {
+export function buildGifToken(g: GifResult, opts?: { duck?: boolean }): string {
   const alt = g.title.replace(/[|\]]/g, '').trim() || 'gif'
-  return `[[gif:${g.url}|${alt}]]`
+  return opts?.duck ? `[[gif:${g.url}|${alt}|duck]]` : `[[gif:${g.url}|${alt}]]`
 }
 
 /** Human-readable form for message content shown outside the full chat renderer. */

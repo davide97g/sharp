@@ -862,8 +862,8 @@ watches fast chat streaks and auto-picks a mean roast GIF to send.
   Adding a provider = new impl + `resolve_provider` match arm.
 - Settings persist in `app_meta` (no migration): `gif.provider` (default `giphy`),
   `gif.api_key`, `gif.duck_enabled` (default `true`), `gif.duck_cooldown_secs`
-  (default `120`; allowed `30|60|120|300`), `gif.duck_context` (default `streak`;
-  allowed `streak|1m|2m|3m`). API key resolution: `app_meta` →
+  (default `120`; allowed `30|60|120|300`), `gif.duck_context` (default `1m`;
+  allowed `1m|2m|3m`). API key resolution: `app_meta` →
   provider-matching env fallback (`GIPHY_API_KEY` / `TENOR_API_KEY`).
 - **Any authenticated member may read/update settings** (v1 has no admin role — deliberate
   simplification). The key is write-only: never echoed back by the API.
@@ -877,7 +877,7 @@ watches fast chat streaks and auto-picks a mean roast GIF to send.
 | GET | `/gifs/config` | → `{enabled, duck, provider, duck_cooldown_secs, duck_context}` — `enabled` = provider+key resolvable; `duck` = enabled ∧ DeepSeek configured ∧ `gif.duck_enabled` |
 | GET | `/gifs/search?q=&limit=` | → `{results: [GifResult]}`; `q` required (400), `limit` 1..=30 default 24; 503 `unavailable` when unconfigured or upstream fails |
 | GET | `/gifs/settings` | → `{provider, has_api_key, duck_enabled, duck_cooldown_secs, duck_context, deepseek_configured}` |
-| PUT | `/gifs/settings` | `{provider?, api_key?, duck_enabled?, duck_cooldown_secs?, duck_context?}` → same as GET; provider ∈ `giphy\|tenor`; cooldown ∈ `30\|60\|120\|300`; context ∈ `streak\|1m\|2m\|3m`; `api_key: ""` clears, absent keeps |
+| PUT | `/gifs/settings` | `{provider?, api_key?, duck_enabled?, duck_cooldown_secs?, duck_context?}` → same as GET; provider ∈ `giphy\|tenor`; cooldown ∈ `30\|60\|120\|300`; context ∈ `1m\|2m\|3m`; `api_key: ""` clears, absent keeps |
 | POST | `/channels/{id}/gif-suggest` | (member-only) → `{query, results}`; on cooldown returns 200 `{query: null, results: []}`; 503 when duck disabled |
 
 `GifResult = {id, url, preview_url, width, height, title}` — `url` is the provider-CDN GIF
@@ -886,10 +886,12 @@ watches fast chat streaks and auto-picks a mean roast GIF to send.
 ## Message content token
 
 A sent GIF is plain message content: `[[gif:<url>|<alt>]]` (alt = provider title, `|`/`]`
-stripped). The web client pre-splits content on this token **before** react-markdown
-(remark-gfm would autolink the embedded URL) and renders an `<img>` linked to the source;
-same family as the `[[doc:…]]`/`[[canvas:…]]` chips. Chat-only (channels/DMs/threads);
-docs and canvas are not integrated.
+stripped). Duck-automation roast GIFs append `|duck`: `[[gif:<url>|<alt>|duck]]` so
+suggestion context can skip prior roasts while still rendering them like normal GIFs.
+Manual GIF sends stay unmarked. The web client pre-splits content on this token **before**
+react-markdown (remark-gfm would autolink the embedded URL) and renders an `<img>` linked
+to the source; same family as the `[[doc:…]]`/`[[canvas:…]]` chips. Chat-only
+(channels/DMs/threads); docs and canvas are not integrated.
 
 ## Duck flow
 
@@ -903,9 +905,10 @@ docs and canvas are not integrated.
 3. Clicking the duck CTA → `POST /channels/{id}/gif-suggest` (cooldown from
    `gifConfig.duck_cooldown_secs`) → auto-sends the top GIF; server resets the
    shared streak and broadcasts `duck.streak` `{channel_id, duck_streak:{count:0,…}}`.
-4. Server suggest: loads context by `duck_context` (`streak` / `1m` / `2m` / `3m`);
-   DeepSeek returns one roast query; provider search limit 1. Duck hidden when
-   `/gifs/config.duck` is false.
+4. Server suggest: loads the last **1 / 2 / 3 minutes** of top-level messages
+   (from `duck_context`, default 1m, up to 40), **excluding** prior duck-roast GIFs
+   (`|duck` token); DeepSeek returns one roast query; provider search limit 1. Duck
+   hidden when `/gifs/config.duck` is false.
 
 ## Env additions
 

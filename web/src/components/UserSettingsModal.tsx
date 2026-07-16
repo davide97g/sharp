@@ -400,14 +400,12 @@ export function UserSettingsModal({ onClose }: { onClose: () => void }) {
                   }
                   className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
                 >
-                  <option value="streak">Last message streak</option>
                   <option value="1m">Last 1 minute</option>
                   <option value="2m">Last 2 minutes</option>
                   <option value="3m">Last 3 minutes</option>
                 </select>
                 <p className="mt-1.5 text-xs text-[var(--color-text-faint)]">
-                  Which messages the duck reads when picking a GIF. The composer streak fills from
-                  every member&apos;s messages; at 3+ the duck CTA unlocks.
+                  How much recent chat the duck reads when picking a GIF.
                 </p>
               </div>
             </>

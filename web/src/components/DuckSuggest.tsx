@@ -62,7 +62,7 @@ export function DuckSuggest({ channelId }: { channelId: string }) {
       }
       const best: GifResult = results[0]
       lastSuggestAt.set(channelId, Date.now())
-      await useStore.getState().sendMessage(channelId, buildGifToken(best))
+      await useStore.getState().sendMessage(channelId, buildGifToken(best, { duck: true }))
       setArmed(false)
     } catch {
       // Optional easter egg — keep the CTA so they can retry.

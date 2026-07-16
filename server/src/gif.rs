@@ -19,7 +19,7 @@ const META_DUCK_CONTEXT: &str = "gif.duck_context";
 
 pub const DUCK_COOLDOWN_OPTIONS: &[u64] = &[30, 60, 120, 300];
 pub const DEFAULT_DUCK_COOLDOWN_SECS: u64 = 120;
-pub const DEFAULT_DUCK_CONTEXT: &str = "streak";
+pub const DEFAULT_DUCK_CONTEXT: &str = "1m";
 /// Max gap between consecutive messages that still counts as one fast streak.
 pub const STREAK_GAP_SECS: i64 = 20;
 
@@ -45,6 +45,26 @@ pub fn is_standalone_gif(content: &str) -> bool {
         return false;
     }
     trimmed.matches("[[gif:").count() == 1
+}
+
+/// Duck-automation roast GIF (`[[gif:url|alt|duck]]`) — excluded from suggest context.
+pub fn is_duck_roast_gif(content: &str) -> bool {
+    let trimmed = content.trim();
+    is_standalone_gif(trimmed) && trimmed.ends_with("|duck]]")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_duck_roast_gif, is_standalone_gif};
+
+    #[test]
+    fn detects_manual_vs_duck_gifs() {
+        assert!(is_standalone_gif("[[gif:https://x/a.gif|hi]]"));
+        assert!(is_standalone_gif("[[gif:https://x/a.gif|hi|duck]]"));
+        assert!(!is_duck_roast_gif("[[gif:https://x/a.gif|hi]]"));
+        assert!(is_duck_roast_gif("[[gif:https://x/a.gif|hi|duck]]"));
+        assert!(!is_duck_roast_gif("lol [[gif:https://x/a.gif|hi|duck]]"));
+    }
 }
 
 /// Bump the shared channel streak for a top-level chat message from any member.
@@ -276,11 +296,22 @@ pub fn parse_duck_cooldown_secs(raw: Option<&str>) -> Option<u64> {
     DUCK_COOLDOWN_OPTIONS.contains(&secs).then_some(secs)
 }
 
+/// Window of recent messages the duck reads: `1m` / `2m` / `3m` (default `1m`).
 pub fn parse_duck_context(raw: Option<&str>) -> Option<String> {
     let value = raw?.trim();
     match value {
-        "streak" | "1m" | "2m" | "3m" => Some(value.to_string()),
+        "1m" | "2m" | "3m" => Some(value.to_string()),
+        // Legacy `streak` value maps to the default 1-minute window.
+        "streak" => Some(DEFAULT_DUCK_CONTEXT.to_string()),
         _ => None,
+    }
+}
+
+pub fn duck_context_minutes(context: &str) -> i64 {
+    match context {
+        "2m" => 2,
+        "3m" => 3,
+        _ => 1,
     }
 }
 

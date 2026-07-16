@@ -1,13 +1,12 @@
 use crate::auth::AuthUser;
 use crate::deepseek;
 use crate::error::{AppError, AppResult};
-use crate::gif::{self, GifResult, GifSettings, DEFAULT_DUCK_CONTEXT, STREAK_GAP_SECS};
+use crate::gif::{self, GifResult, GifSettings};
 use crate::routes::{channel_kind, is_member};
 use crate::state::SharedState;
 use crate::ws::{channel_member_ids, envelope};
 use axum::extract::{Path, Query, State};
 use axum::Json;
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::Row;
@@ -125,12 +124,11 @@ pub async fn put_settings(
             ));
         }
     }
-    if let Some(ref context) = body.duck_context {
-        if gif::parse_duck_context(Some(context)).is_none() {
-            return Err(AppError::BadRequest(
-                "duck_context must be streak, 1m, 2m, or 3m".to_string(),
-            ));
-        }
+    let duck_context = body.duck_context.as_deref();
+    if duck_context.is_some_and(|context| !matches!(context, "1m" | "2m" | "3m")) {
+        return Err(AppError::BadRequest(
+            "duck_context must be 1m, 2m, or 3m".to_string(),
+        ));
     }
     gif::save_settings(
         &state.pool,
@@ -138,7 +136,7 @@ pub async fn put_settings(
         body.api_key.as_deref(),
         body.duck_enabled,
         body.duck_cooldown_secs,
-        body.duck_context.as_deref(),
+        duck_context,
     )
     .await?;
     let settings = gif::load_settings(&state.pool, &state.config).await;
@@ -214,86 +212,45 @@ pub async fn suggest(
     Ok(Json(json!({ "query": query, "results": results })))
 }
 
-struct TranscriptRow {
-    display_name: String,
-    content: String,
-    created_at: DateTime<Utc>,
-}
-
 async fn load_transcript(
     state: &SharedState,
     channel_id: Uuid,
     duck_context: &str,
 ) -> AppResult<Vec<(String, String)>> {
-    let context = gif::parse_duck_context(Some(duck_context))
-        .unwrap_or_else(|| DEFAULT_DUCK_CONTEXT.to_string());
-
+    let minutes = gif::duck_context_minutes(duck_context);
     let rows = sqlx::query(
-        "SELECT u.display_name, m.content, m.created_at
+        "SELECT u.display_name, m.content
          FROM messages m
          JOIN users u ON u.id = m.user_id
          WHERE m.channel_id = $1
            AND m.parent_id IS NULL
            AND m.deleted_at IS NULL
            AND m.content <> ''
+           AND m.created_at >= NOW() - ($2 * INTERVAL '1 minute')
          ORDER BY m.id DESC
          LIMIT 40",
     )
     .bind(channel_id)
+    .bind(minutes)
     .fetch_all(&state.pool)
     .await?;
 
-    let mut messages: Vec<TranscriptRow> = rows
+    let mut messages: Vec<(String, String)> = rows
         .into_iter()
         .filter_map(|row| {
             let display_name: String = row.try_get("display_name").ok()?;
             let content: String = row.try_get("content").ok()?;
-            let created_at: DateTime<Utc> = row.try_get("created_at").ok()?;
-            if content.trim().is_empty() {
+            if content.trim().is_empty() || gif::is_duck_roast_gif(&content) {
+                // Skip duck-automation roasts so they aren't fed back into the next pick.
                 None
             } else {
-                Some(TranscriptRow {
-                    display_name,
-                    content,
-                    created_at,
-                })
+                Some((display_name, content))
             }
         })
         .collect();
 
-    // Newest-first from SQL; keep that order while filtering, then reverse for chronological.
-    match context.as_str() {
-        "1m" | "2m" | "3m" => {
-            let minutes: i64 = match context.as_str() {
-                "1m" => 1,
-                "2m" => 2,
-                _ => 3,
-            };
-            let cutoff = Utc::now() - ChronoDuration::minutes(minutes);
-            messages.retain(|row| row.created_at >= cutoff);
-        }
-        _ => {
-            // "streak" — keep only the newest fast burst (gaps ≤ STREAK_GAP_SECS).
-            if !messages.is_empty() {
-                let mut streak_end = 1;
-                while streak_end < messages.len() {
-                    let newer = messages[streak_end - 1].created_at;
-                    let older = messages[streak_end].created_at;
-                    if newer - older > ChronoDuration::seconds(STREAK_GAP_SECS) {
-                        break;
-                    }
-                    streak_end += 1;
-                }
-                messages.truncate(streak_end);
-            }
-        }
-    }
-
     messages.reverse();
-    Ok(messages
-        .into_iter()
-        .map(|row| (row.display_name, row.content))
-        .collect())
+    Ok(messages)
 }
 
 fn duck_enabled(state: &SharedState, settings: &GifSettings, provider_enabled: bool) -> bool {

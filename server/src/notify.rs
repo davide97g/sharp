@@ -202,10 +202,10 @@ mod tests {
     }
 
     #[test]
-    fn leaves_incomplete_gif_token_unchanged() {
+    fn humanizes_standalone_duck_roast_gif_token() {
         assert_eq!(
-            preview_text("[[gif:https://media.example/cat.gif|Cat"),
-            "[[gif:https://media.example/cat.gif|Cat"
+            preview_text("[[gif:https://media.example/roast.gif|Gotcha|duck]]"),
+            "sent a GIF"
         );
     }
 }

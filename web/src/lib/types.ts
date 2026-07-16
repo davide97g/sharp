@@ -122,7 +122,7 @@ export type GifConfig = {
   duck_cooldown_secs: number
   duck_context: DuckContext
 }
-export type DuckContext = 'streak' | '1m' | '2m' | '3m'
+export type DuckContext = '1m' | '2m' | '3m'
 export type DuckCooldownSecs = 30 | 60 | 120 | 300
 export type GifSettings = {
   provider: string
