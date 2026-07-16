@@ -500,8 +500,9 @@ doc REST surface, the per-channel + per-doc role model, trash/restore, and the
 # Phase 4 — Voice + camera rooms (WebRTC mesh)
 
 Ephemeral P2P-mesh WebRTC audio rooms with optional webcam video on every channel and DM.
-Browsers connect directly; the server does signaling and media-state coordination only — no
-media passes through it and there is no SFU.
+Browsers connect directly; the server does signaling, media-state coordination, and buffering
+of member-submitted speech-recognition phrases for roast GIF suggestions. No media passes
+through it and there is no SFU.
 
 ## Principles
 
@@ -523,7 +524,7 @@ media passes through it and there is no SFU.
 All ids are strings in JSON (UUIDs). A WebSocket connection id is the peer identity.
 
 ```ts
-VoiceParticipant = { conn_id: string, user_id: string, display_name: string, guest: boolean, muted: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null }
+VoiceParticipant = { conn_id: string, user_id: string, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null }
 VoiceRoomSnapshot = { channel_id: string, participants: VoiceParticipant[] }
 VoiceSignalKind = 'offer'|'answer'|'candidate'
 ```
@@ -537,6 +538,11 @@ Client → server:
 - `voice.join` `{channel_id}`
 - `voice.leave` `{channel_id}`
 - `voice.mute` `{channel_id, muted: boolean}`
+- `voice.transcribe` `{channel_id, enabled: boolean}` — member-only; opt in or out of sending
+  locally transcribed phrases for the participant's active room connection.
+- `voice.phrase` `{channel_id, text: string}` — member-only; accepted only from an active
+  participant with `transcribing=true`. Text is trimmed, capped at 500 characters, and empty
+  phrases are ignored.
 - `voice.camera` `{channel_id, enabled: boolean}`
 - `voice.screen` `{channel_id, enabled: boolean, stream_id?: string}` — `stream_id` is the
   msid of the sharer's screen `MediaStream`, sent only when enabling.
@@ -548,7 +554,7 @@ Server → client:
 - `hello` payload is extended with `conn_id: string` and
   `voice_rooms: VoiceRoomSnapshot[]`, where each snapshot is
   `{channel_id, participants: VoiceParticipant[]}` and each participant is
-  `{conn_id, user_id, display_name: string, guest: boolean, muted: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null}`.
+  `{conn_id, user_id, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null}`.
   `display_name` is filled server-side for everyone (users from the `users` table,
   guests from their token) so clients can render names without `/users` access; `guest`
   marks public voice-link joiners.
@@ -559,7 +565,10 @@ Server → client:
 - `voice.participant_left` `{channel_id, conn_id, user_id}` — broadcast to the room
   audience.
 - `voice.participant_updated` `{channel_id, participant: VoiceParticipant}` — broadcast to
-  the room audience after mute, camera, or screen-share state changes.
+  the room audience after mute, transcription, camera, or screen-share state changes.
+- `voice.roast_armed` `{channel_id, armed: boolean}` — broadcast to the room audience when
+  three phrases with gaps of at most 20 seconds arm a voice roast, and with `armed=false`
+  after a successful voice GIF suggestion consumes it.
 - `voice.signal` `{channel_id, from_user, from_conn, to_user, to_conn, kind, data}` —
   delivered to `to_user`'s connections; receivers filter on
   `to_conn === my conn_id`.
@@ -578,8 +587,10 @@ Server → client:
   to the sender only when full. Insert the participant with `muted=false, camera_on=false`
   and its resolved `display_name`/`guest`, reply with `voice.state` on the sender's tx only,
   then broadcast `voice.participant_joined` to the room audience. Joining twice from the same
-  conn is idempotent and re-sends `voice.state`.
-- **Broadcast targeting**: every voice broadcast (`participant_joined`/`left`/`updated`)
+  conn is idempotent and re-sends `voice.state`. New participants start with
+  `transcribing=false`.
+- **Broadcast targeting**: every voice broadcast (`participant_joined`/`left`/`updated` and
+  `voice.roast_armed`)
   targets the **union** of the channel's member ids and the user-ids currently in the room's
   participant map (computed at broadcast time; `participant_left` additionally includes the
   just-removed user's id). This is required so guests — who are not channel members — receive
@@ -587,6 +598,14 @@ Server → client:
 - `voice.leave`: remove the sender's conn from the room, drop the room when empty, and
   broadcast `voice.participant_left`.
 - `voice.mute`: update the participant's flag and broadcast `voice.participant_updated`.
+- `voice.transcribe`: require an active room participant, update `transcribing`, and broadcast
+  the complete participant through `voice.participant_updated`. Disabling transcription keeps
+  already buffered phrases.
+- `voice.phrase`: require an active participant with `transcribing=true`; append the server-known
+  display name and trimmed text to the room's oldest-first transcript buffer (maximum 50 phrases).
+  A phrase within 20 seconds of the previous phrase increments the room streak; otherwise it
+  starts a new streak at one. The first transition to three or more phrases broadcasts
+  `voice.roast_armed {armed:true}`.
 - `voice.camera`: require an active room participant; atomically reserve/release a camera
   slot and broadcast the complete participant state. Enabling is rejected with `camera_full`
   when four slots are already reserved. Repeated requests are idempotent.
@@ -644,6 +663,7 @@ Server → client:
 | Method | Path | Body → Response |
 |---|---|---|
 | GET | `/voice/config` | (any valid token — **user OR guest**) → `{"ice_servers": [{"urls": ["stun:..."]}, {"urls": ["turn:..."], "username": "...", "credential": "..."}]}`; the TURN entry is present only when configured. This is the **only** endpoint guests may call; all other REST endpoints reject guest tokens with 401. |
+| GET | `/channels/{id}/gifs/suggest-voice` | (member-only) → `{query, results}` from recent buffered voice phrases; fewer than two phrases or shared channel cooldown returns 200 `{query: null, results: []}`; 503 when duck suggestions are disabled. Success resets only the voice phrase streak/armed state and broadcasts `voice.roast_armed {armed:false}`. |
 | GET | `/channels/{id}/voice-link` | (Bearer auth, channel member) → `{"token": string \| null}` — the channel's current public voice-link token, or `null` if none exists. |
 | POST | `/channels/{id}/voice-link` | (Bearer auth, channel member) → `{"token": string}` — generate a fresh 32-byte URL-safe token, **replacing** (revoking) any previous value. |
 | GET | `/call-links/{token}` | (public, no auth) → `{"channel_name": string}`; `404` if no channel has this token. For DM channels the literal `"Call"` is returned instead of the hidden DM name. |
@@ -667,8 +687,10 @@ REST.
 - **Guest restrictions**: the `AuthUser` extractor rejects any token with `guest: true`
   (401), so guests cannot reach REST endpoints; `/voice/config` uses a separate
   `VoiceConfigAuth` extractor that accepts both. On the main WS, a guest may only send `ping`
-  and the `voice.*` events, and only when the event's `channel_id` matches its bound channel
-  (other events are silently dropped). Guest connect/disconnect does **not** emit presence.
+  plus `voice.join`, `voice.leave`, `voice.mute`, `voice.camera`, `voice.screen`, and
+  `voice.signal`, and only when the event's `channel_id` matches its bound channel. Member-only
+  `voice.transcribe` and `voice.phrase`, plus all other events, are silently dropped. Guest
+  connect/disconnect does **not** emit presence.
 - **Revocation at join**: `voice.join` re-checks the guest token's `link` against the
   channel's current `voice_link_token`. If a member has regenerated (or the link was removed),
   the guest gets `voice.error` `code: "link_revoked"` and cannot join, even with an
@@ -682,9 +704,10 @@ REST.
 
 ## Multi-replica behavior
 
-The room registry is per-replica and in memory. Live `voice.*` events converge across
-replicas through the existing Redis fanout in `Hub::broadcast` (`sharp:events`). The cold
-`hello` snapshot is local-replica-only, the same documented limitation as presence.
+The room registry, buffered transcript, phrase streak, and armed state are per-replica and in
+memory. Live `voice.*` events converge across replicas through the existing Redis fanout in
+`Hub::broadcast` (`sharp:events`). The cold `hello` snapshot and transcript used for a voice
+suggestion are local-replica-only, the same documented limitation as presence.
 
 ## Huddle ring
 

@@ -5,13 +5,18 @@ use axum::extract::ws::Message;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sqlx::Row;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 const MAX_PARTICIPANTS: usize = 8;
 const MAX_CAMERAS: usize = 4;
 const MAX_SCREENS: usize = 1;
+const MAX_TRANSCRIPT_PHRASES: usize = 50;
+const MAX_PHRASE_CHARS: usize = 500;
+const PHRASE_STREAK_THRESHOLD: u32 = 3;
+const PHRASE_STREAK_GAP: Duration = Duration::from_secs(20);
 
 #[derive(Clone, Serialize)]
 pub struct VoiceParticipant {
@@ -20,9 +25,16 @@ pub struct VoiceParticipant {
     pub display_name: String,
     pub guest: bool,
     pub muted: bool,
+    pub transcribing: bool,
     pub camera_on: bool,
     pub screen_on: bool,
     pub screen_stream_id: Option<String>,
+}
+
+pub struct VoicePhrase {
+    pub display_name: String,
+    pub text: String,
+    pub at: Instant,
 }
 
 /// Resolve the audience for a voice broadcast: the union of the channel's
@@ -69,6 +81,10 @@ async fn current_voice_link_token(
 #[derive(Default)]
 pub struct VoiceRoom {
     pub participants: HashMap<Uuid, VoiceParticipant>,
+    pub transcript: VecDeque<VoicePhrase>,
+    pub phrase_count: u32,
+    pub last_phrase_at: Option<Instant>,
+    pub roast_armed: bool,
 }
 
 pub type VoiceRooms = Mutex<HashMap<Uuid, VoiceRoom>>;
@@ -95,6 +111,52 @@ pub fn snapshot_all(state: &SharedState) -> Value {
         .collect::<Vec<_>>())
 }
 
+pub fn snapshot_transcript(
+    state: &SharedState,
+    channel_id: Uuid,
+    minutes: i64,
+) -> Vec<(String, String)> {
+    let now = Instant::now();
+    let seconds = u64::try_from(minutes).unwrap_or_default().saturating_mul(60);
+    let cutoff = now
+        .checked_sub(Duration::from_secs(seconds))
+        .unwrap_or(now);
+    let guard = state.voice_rooms.lock().unwrap();
+    guard
+        .get(&channel_id)
+        .map(|room| {
+            room.transcript
+                .iter()
+                .filter(|phrase| phrase.at >= cutoff)
+                .map(|phrase| (phrase.display_name.clone(), phrase.text.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub fn consume_roast_armed(state: &SharedState, channel_id: Uuid) -> bool {
+    let mut guard = state.voice_rooms.lock().unwrap();
+    let Some(room) = guard.get_mut(&channel_id) else {
+        return false;
+    };
+    let was_armed = room.roast_armed;
+    room.phrase_count = 0;
+    room.roast_armed = false;
+    was_armed
+}
+
+pub async fn broadcast_roast_armed(state: &SharedState, channel_id: Uuid, armed: bool) {
+    let targets = voice_targets(state, channel_id, &[]).await;
+    let event = envelope(
+        "voice.roast_armed",
+        json!({
+            "channel_id": channel_id.to_string(),
+            "armed": armed,
+        }),
+    );
+    state.hub.broadcast(event, targets).await;
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_voice_event(
     state: &SharedState,
@@ -110,6 +172,8 @@ pub async fn handle_voice_event(
         "voice.join" => handle_join(state, user_id, conn_id, display_name, guest, &payload, tx).await,
         "voice.leave" => handle_leave(state, user_id, conn_id, &payload, tx).await,
         "voice.mute" => handle_mute(state, conn_id, &payload, tx).await,
+        "voice.transcribe" => handle_transcribe(state, conn_id, &payload, tx).await,
+        "voice.phrase" => handle_phrase(state, conn_id, &payload, tx).await,
         "voice.camera" => handle_camera(state, conn_id, &payload, tx).await,
         "voice.screen" => handle_screen(state, conn_id, &payload, tx).await,
         "voice.signal" => handle_signal(state, user_id, conn_id, &payload, tx).await,
@@ -252,6 +316,7 @@ async fn handle_join(
                 display_name: display_name.to_string(),
                 guest: guest.is_some(),
                 muted: false,
+                transcribing: false,
                 camera_on: false,
                 screen_on: false,
                 screen_stream_id: None,
@@ -340,6 +405,97 @@ async fn handle_mute(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &W
     };
 
     broadcast_participant_updated(state, channel_id, participant).await;
+}
+
+async fn handle_transcribe(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &WsSender) {
+    let Some(channel_id) = channel_id(payload) else {
+        return;
+    };
+    let Some(enabled) = payload.get("enabled").and_then(Value::as_bool) else {
+        return;
+    };
+    let participant = {
+        let mut guard = state.voice_rooms.lock().unwrap();
+        guard
+            .get_mut(&channel_id)
+            .and_then(|room| room.participants.get_mut(&conn_id))
+            .map(|participant| {
+                participant.transcribing = enabled;
+                participant.clone()
+            })
+    };
+    let Some(participant) = participant else {
+        send_error(tx, channel_id, "not_in_room");
+        return;
+    };
+
+    broadcast_participant_updated(state, channel_id, participant).await;
+}
+
+async fn handle_phrase(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &WsSender) {
+    let Some(channel_id) = channel_id(payload) else {
+        return;
+    };
+    let Some(text) = payload.get("text").and_then(Value::as_str) else {
+        return;
+    };
+    let text: String = text.trim().chars().take(MAX_PHRASE_CHARS).collect();
+    if text.is_empty() {
+        return;
+    }
+
+    let result = {
+        let mut guard = state.voice_rooms.lock().unwrap();
+        let Some(room) = guard.get_mut(&channel_id) else {
+            return send_error(tx, channel_id, "not_in_room");
+        };
+        let Some(participant) = room.participants.get(&conn_id) else {
+            return send_error(tx, channel_id, "not_in_room");
+        };
+        if !participant.transcribing {
+            false
+        } else {
+            let display_name = participant.display_name.clone();
+            record_phrase(room, display_name, text, Instant::now())
+        }
+    };
+
+    if result {
+        broadcast_roast_armed(state, channel_id, true).await;
+    }
+}
+
+fn record_phrase(
+    room: &mut VoiceRoom,
+    display_name: String,
+    text: String,
+    now: Instant,
+) -> bool {
+    room.transcript.push_back(VoicePhrase {
+        display_name,
+        text,
+        at: now,
+    });
+    if room.transcript.len() > MAX_TRANSCRIPT_PHRASES {
+        room.transcript.pop_front();
+    }
+
+    if room
+        .last_phrase_at
+        .is_some_and(|last| now.duration_since(last) <= PHRASE_STREAK_GAP)
+    {
+        room.phrase_count = room.phrase_count.saturating_add(1);
+    } else {
+        room.phrase_count = 1;
+    }
+    room.last_phrase_at = Some(now);
+
+    if room.phrase_count >= PHRASE_STREAK_THRESHOLD && !room.roast_armed {
+        room.roast_armed = true;
+        true
+    } else {
+        false
+    }
 }
 
 async fn handle_camera(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &WsSender) {
@@ -617,6 +773,7 @@ mod tests {
             display_name: "Tester".to_string(),
             guest: false,
             muted: false,
+            transcribing: false,
             camera_on,
             screen_on: false,
             screen_stream_id: None,
@@ -629,7 +786,10 @@ mod tests {
             .map(|camera_on| participant(*camera_on))
             .map(|participant| (participant.conn_id, participant))
             .collect();
-        VoiceRoom { participants }
+        VoiceRoom {
+            participants,
+            ..Default::default()
+        }
     }
 
     fn screen_participant(screen_on: bool) -> VoiceParticipant {
@@ -639,6 +799,7 @@ mod tests {
             display_name: "Tester".to_string(),
             guest: false,
             muted: false,
+            transcribing: false,
             camera_on: false,
             screen_on,
             screen_stream_id: if screen_on {
@@ -655,7 +816,57 @@ mod tests {
             .map(|screen_on| screen_participant(*screen_on))
             .map(|participant| (participant.conn_id, participant))
             .collect();
-        VoiceRoom { participants }
+        VoiceRoom {
+            participants,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn phrase_streak_arms_once_and_resets_after_gap() {
+        let start = Instant::now();
+        let mut room = VoiceRoom::default();
+
+        assert!(!record_phrase(
+            &mut room,
+            "Tester".to_string(),
+            "one".to_string(),
+            start,
+        ));
+        assert!(!record_phrase(
+            &mut room,
+            "Tester".to_string(),
+            "two".to_string(),
+            start + Duration::from_secs(20),
+        ));
+        assert!(record_phrase(
+            &mut room,
+            "Tester".to_string(),
+            "three".to_string(),
+            start + Duration::from_secs(40),
+        ));
+        assert!(!record_phrase(
+            &mut room,
+            "Tester".to_string(),
+            "four".to_string(),
+            start + Duration::from_secs(41),
+        ));
+
+        let mut expired = VoiceRoom::default();
+        record_phrase(
+            &mut expired,
+            "Tester".to_string(),
+            "one".to_string(),
+            start,
+        );
+        record_phrase(
+            &mut expired,
+            "Tester".to_string(),
+            "two".to_string(),
+            start + Duration::from_secs(21),
+        );
+        assert_eq!(expired.phrase_count, 1);
+        assert!(!expired.roast_armed);
     }
 
     #[test]

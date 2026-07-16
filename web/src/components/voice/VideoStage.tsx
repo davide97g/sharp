@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../lib/api'
+import { isSpeechSupported } from '../../lib/speech'
 import { useStore, type VoiceStageMode } from '../../store'
 import { channelLabel } from '../../lib/util'
 import { toastError, toastSuccess } from '../../lib/toast'
 import { Avatar } from '../Avatar'
 import { VoiceMiniWidget } from './VoiceMiniWidget'
 import { CallChatRail } from './CallChatRail'
+import { VoiceDuckSuggest } from './VoiceDuckSuggest'
 import { useVoicePip } from './VoicePip'
 
 type StageParticipant = {
@@ -14,6 +16,7 @@ type StageParticipant = {
   displayName: string
   guest: boolean
   muted: boolean
+  transcribing: boolean
   speaking: boolean
   cameraConnId: string | null
 }
@@ -57,6 +60,8 @@ export function VideoStage() {
   const room = useStore((s) => (channelId ? s.voiceRooms[channelId] : undefined))
   const speaking = useStore((s) => s.voice.speaking)
   const muted = useStore((s) => s.voice.muted)
+  const transcribing = useStore((s) => s.voice.transcribing)
+  const voiceStatus = useStore((s) => s.voice.status)
   const cameraStatus = useStore((s) => s.voice.cameraStatus)
   const screenStatus = useStore((s) => s.voice.screenStatus)
   const audioDeviceId = useStore((s) => s.voice.audioDeviceId)
@@ -71,6 +76,7 @@ export function VideoStage() {
   const isGuest = useStore((s) => s.isGuest)
   const channel = useStore((s) => s.channels.find((candidate) => candidate.id === channelId))
   const toggleVoiceMute = useStore((s) => s.toggleVoiceMute)
+  const toggleTranscription = useStore((s) => s.toggleTranscription)
   const toggleVoiceCamera = useStore((s) => s.toggleVoiceCamera)
   const toggleVoiceScreen = useStore((s) => s.toggleVoiceScreen)
   const setVoiceAudioDevice = useStore((s) => s.setVoiceAudioDevice)
@@ -180,6 +186,7 @@ export function VideoStage() {
       if (existing) {
         existing.connIds.push(connId)
         existing.muted = existing.muted && entry.muted
+        existing.transcribing = existing.transcribing || entry.transcribing
         existing.speaking = existing.speaking || Boolean(speaking[connId])
         if (entry.camera_on && (!existing.cameraConnId || connId === myConnId)) {
           existing.cameraConnId = connId
@@ -191,6 +198,7 @@ export function VideoStage() {
           displayName: entry.display_name,
           guest: entry.guest,
           muted: entry.muted,
+          transcribing: entry.transcribing,
           speaking: Boolean(speaking[connId]),
           cameraConnId: entry.camera_on ? connId : null,
         })
@@ -290,6 +298,7 @@ export function VideoStage() {
                   guest={participant.guest}
                   local={me?.id === participant.userId}
                   muted={participant.muted}
+                  transcribing={participant.transcribing}
                   speaking={participant.speaking}
                   size={40}
                 />
@@ -310,6 +319,7 @@ export function VideoStage() {
                   stream={stream}
                   local={local}
                   muted={participant.muted}
+                  transcribing={participant.transcribing}
                   speaking={participant.speaking}
                   compact
                 />
@@ -344,6 +354,7 @@ export function VideoStage() {
               stream={stream}
               local={local}
               muted={participant.muted}
+              transcribing={participant.transcribing}
               speaking={participant.speaking}
               compact={stageMode === 'compact'}
             />
@@ -366,6 +377,7 @@ export function VideoStage() {
             guest={participant.guest}
             local={me?.id === participant.userId}
             muted={participant.muted}
+            transcribing={participant.transcribing}
             speaking={participant.speaking}
             size={avatarSize}
           />
@@ -388,6 +400,16 @@ export function VideoStage() {
       >
         <MicIcon off={muted} />
       </DeviceControl>
+      {!isGuest && isSpeechSupported() && (
+        <CallControl
+          label={transcribing ? 'Stop transcribing' : 'Transcribe microphone'}
+          active={transcribing}
+          disabled={voiceStatus !== 'connected'}
+          onClick={toggleTranscription}
+        >
+          <CaptionsIcon />
+        </CallControl>
+      )}
       <DeviceControl
         label={cameraStatus === 'on' ? 'Turn camera off' : 'Turn camera on'}
         menuLabel="Choose camera"
@@ -483,7 +505,10 @@ export function VideoStage() {
             </div>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-hidden px-8 pb-24 pt-2">{stageBody}</div>
+          <div className="relative min-h-0 flex-1 overflow-hidden px-8 pb-24 pt-2">
+            {stageBody}
+            <VoiceDuckSuggest />
+          </div>
 
           <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center">
             <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-ink)]/90 px-3 py-2 shadow-2xl backdrop-blur">
@@ -631,7 +656,10 @@ export function VideoStage() {
         </button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">{stageBody}</div>
+      <div className="relative min-h-0 flex-1 overflow-y-auto p-3">
+        {stageBody}
+        <VoiceDuckSuggest />
+      </div>
 
       <footer className="flex shrink-0 items-center justify-center gap-2 border-t border-[var(--color-border)] px-3 py-2.5">
         {stageControls}
@@ -646,6 +674,7 @@ function AudioTile({
   guest = false,
   local,
   muted,
+  transcribing,
   speaking,
   size,
 }: {
@@ -654,6 +683,7 @@ function AudioTile({
   guest?: boolean
   local: boolean
   muted: boolean
+  transcribing: boolean
   speaking: boolean
   size: number
 }) {
@@ -671,6 +701,14 @@ function AudioTile({
             title="Muted"
           >
             <MicIcon off />
+          </span>
+        )}
+        {transcribing && (
+          <span
+            className="absolute -bottom-0.5 -left-0.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-[var(--color-ink)] bg-[var(--color-panel-2)] text-[var(--color-accent-hover)]"
+            title="Transcribing"
+          >
+            <CaptionsIcon compact />
           </span>
         )}
       </div>
@@ -692,6 +730,7 @@ function VideoTile({
   stream,
   local,
   muted,
+  transcribing,
   speaking,
   compact,
 }: {
@@ -701,6 +740,7 @@ function VideoTile({
   stream: MediaStream | null
   local: boolean
   muted: boolean
+  transcribing: boolean
   speaking: boolean
   compact: boolean
 }) {
@@ -741,9 +781,21 @@ function VideoTile({
           {local ? ' (you)' : ''}
         </span>
         {guest && <GuestBadge onDark />}
-        {muted && (
-          <span className="ml-auto rounded-full bg-black/45 p-1" title="Muted">
-            <MicIcon off />
+        {(transcribing || muted) && (
+          <span className="ml-auto flex items-center gap-1">
+            {transcribing && (
+              <span
+                className="rounded-full bg-black/45 p-1 text-[var(--color-accent-hover)]"
+                title="Transcribing"
+              >
+                <CaptionsIcon compact />
+              </span>
+            )}
+            {muted && (
+              <span className="rounded-full bg-black/45 p-1" title="Muted">
+                <MicIcon off />
+              </span>
+            )}
           </span>
         )}
       </div>
@@ -1235,6 +1287,26 @@ function MinimizeIcon() {
       aria-hidden
     >
       <path d="M5 12h14" />
+    </svg>
+  )
+}
+
+function CaptionsIcon({ compact = false }: { compact?: boolean }) {
+  const size = compact ? 14 : 18
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M7 11h2M13 11h4M7 15h4M15 15h2" />
     </svg>
   )
 }

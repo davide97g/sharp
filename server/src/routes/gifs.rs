@@ -4,7 +4,7 @@ use crate::error::{AppError, AppResult};
 use crate::gif::{self, GifResult, GifSettings};
 use crate::routes::{channel_kind, is_member};
 use crate::state::SharedState;
-use crate::ws::{channel_member_ids, envelope};
+use crate::ws::{channel_member_ids, envelope, voice};
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
@@ -237,6 +237,61 @@ pub async fn suggest(
         }),
     );
     state.hub.broadcast(reset, targets).await;
+
+    Ok(Json(json!({ "query": query, "results": results })))
+}
+
+pub async fn suggest_voice(
+    State(state): State<SharedState>,
+    Path(channel_id): Path<Uuid>,
+    auth: AuthUser,
+) -> AppResult<Json<serde_json::Value>> {
+    require_member(&state, channel_id, auth.id).await?;
+
+    let settings = gif::load_settings(&state.pool, &state.config).await;
+    let enabled = gif::resolve_provider(&settings).is_some();
+    if !duck_enabled(&state, &settings, enabled) {
+        return Err(AppError::ServiceUnavailable(
+            "gif suggestion not configured".to_string(),
+        ));
+    }
+    let provider = gif::resolve_provider(&settings)
+        .ok_or_else(|| AppError::ServiceUnavailable("gif suggestion not configured".to_string()))?;
+    let deepseek_config = state
+        .config
+        .deepseek
+        .as_ref()
+        .ok_or_else(|| AppError::ServiceUnavailable("gif suggestion not configured".to_string()))?;
+
+    let cooldown = Duration::from_secs(settings.duck_cooldown_secs);
+    let now = Instant::now();
+    {
+        let mut cooldowns = state
+            .gif_suggest_cooldowns
+            .lock()
+            .map_err(|_| AppError::Internal("gif_suggest_cooldowns lock poisoned".to_string()))?;
+        cooldowns.retain(|_, last_attempt| now.duration_since(*last_attempt) < COOLDOWN_RETENTION);
+        if cooldowns
+            .get(&channel_id)
+            .is_some_and(|last_attempt| now.duration_since(*last_attempt) < cooldown)
+        {
+            return Ok(empty_suggestion());
+        }
+        cooldowns.insert(channel_id, now);
+    }
+
+    let minutes = gif::duck_context_minutes(&settings.duck_context);
+    let transcript = voice::snapshot_transcript(&state, channel_id, minutes);
+    if transcript.len() < 2 {
+        return Ok(empty_suggestion());
+    }
+
+    let (query, results) =
+        suggest_best_gif(&state, &settings.provider, deepseek_config, provider.as_ref(), &transcript)
+            .await?;
+
+    voice::consume_roast_armed(&state, channel_id);
+    voice::broadcast_roast_armed(&state, channel_id, false).await;
 
     Ok(Json(json!({ "query": query, "results": results })))
 }

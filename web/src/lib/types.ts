@@ -172,6 +172,7 @@ export type VoiceParticipant = {
   // True for unregistered visitors who joined via a public call link.
   guest: boolean
   muted: boolean
+  transcribing: boolean
   camera_on: boolean
   screen_on: boolean
   screen_stream_id: string | null

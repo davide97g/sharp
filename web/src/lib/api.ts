@@ -462,6 +462,9 @@ export const api = {
       method: 'POST',
     })
   },
+  gifSuggestVoice(channelId: string) {
+    return request<GifSuggestResponse>(`/channels/${channelId}/gifs/suggest-voice`)
+  },
 
   // --- docs ---
   channelDocs(channelId: string) {

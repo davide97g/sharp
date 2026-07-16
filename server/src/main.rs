@@ -163,6 +163,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/channels/:id/read", post(routes::channels::mark_read))
         .route("/channels/:id/gif-suggest", post(routes::gifs::suggest))
         .route(
+            "/channels/:id/gifs/suggest-voice",
+            get(routes::gifs::suggest_voice),
+        )
+        .route(
             "/channels/:id/voice-link",
             get(routes::call_links::get_voice_link).post(routes::call_links::create_voice_link),
         )

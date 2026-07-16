@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { api, clearToken, setSessionToken, setToken } from './lib/api'
 import { VoiceClient } from './lib/voice'
+import { isSpeechSupported, PhraseRecognizer } from './lib/speech'
 import { WsClient } from './lib/ws'
 import { cmpId } from './lib/util'
 import { gifPreviewText } from './lib/gif'
@@ -56,6 +57,13 @@ import type {
 
 const PAGE = 50
 
+let voiceRecognizer: PhraseRecognizer | null = null
+
+function stopVoiceRecognizer() {
+  voiceRecognizer?.stop()
+  voiceRecognizer = null
+}
+
 type TypingEntry = { display_name: string; expiresAt: number }
 
 type ThreadState = {
@@ -73,6 +81,7 @@ export type VoiceRoom = Record<
     display_name: string
     guest: boolean
     muted: boolean
+    transcribing: boolean
     camera_on: boolean
     screen_on: boolean
     screen_stream_id: string | null
@@ -85,6 +94,8 @@ type VoiceState = {
   channelId: string | null
   status: 'idle' | 'connecting' | 'connected'
   muted: boolean
+  transcribing: boolean
+  roastArmed: boolean
   speaking: Record<string, boolean>
   cameraStatus: 'off' | 'starting' | 'on'
   screenStatus: 'off' | 'starting' | 'on'
@@ -269,6 +280,7 @@ type State = {
   ) => Promise<void>
   leaveVoice: () => void
   toggleVoiceMute: () => void
+  toggleTranscription: () => void
   toggleVoiceCamera: () => void
   toggleVoiceScreen: () => Promise<void>
   setVoiceAudioDevice: (deviceId: string) => Promise<void>
@@ -323,6 +335,8 @@ function emptyVoiceState(): VoiceState {
     channelId: null,
     status: 'idle',
     muted: false,
+    transcribing: false,
+    roastArmed: false,
     speaking: {},
     cameraStatus: 'off',
     screenStatus: 'off',
@@ -903,6 +917,8 @@ export const useStore = create<State>((set, get) => ({
         channelId,
         status: 'connecting',
         muted: false,
+        transcribing: false,
+        roastArmed: false,
         speaking: {},
         cameraStatus: 'off',
         screenStatus: 'off',
@@ -1024,6 +1040,7 @@ export const useStore = create<State>((set, get) => ({
   leaveVoice() {
     const { channelId, client, status } = get().voice
     if (channelId) get().ws?.send('voice.leave', { channel_id: channelId })
+    stopVoiceRecognizer()
     client?.stop()
     set({ voice: emptyVoiceState() })
     if (channelId && status === 'connected') playVoiceLeaveSound()
@@ -1035,7 +1052,49 @@ export const useStore = create<State>((set, get) => ({
     const nextMuted = !muted
     client.setMuted(nextMuted)
     set((s) => ({ voice: { ...s.voice, muted: nextMuted } }))
+    if (get().voice.transcribing) {
+      if (nextMuted) voiceRecognizer?.pause()
+      else voiceRecognizer?.resume()
+    }
     get().ws?.send('voice.mute', { channel_id: channelId, muted: nextMuted })
+  },
+
+  toggleTranscription() {
+    const { isGuest, voice, ws } = get()
+    if (isGuest || !isSpeechSupported() || !voice.channelId || voice.status !== 'connected') {
+      return
+    }
+
+    const channelId = voice.channelId
+    if (voice.transcribing) {
+      stopVoiceRecognizer()
+      set((s) => ({ voice: { ...s.voice, transcribing: false } }))
+      ws?.send('voice.transcribe', { channel_id: channelId, enabled: false })
+      return
+    }
+
+    stopVoiceRecognizer()
+    const recognizer = new PhraseRecognizer({
+      onPhrase: (text) => {
+        const current = get()
+        if (!current.voice.transcribing || current.voice.channelId !== channelId) return
+        current.ws?.send('voice.phrase', { channel_id: channelId, text })
+      },
+      onError: () => {
+        if (voiceRecognizer !== recognizer) return
+        voiceRecognizer = null
+        const current = get()
+        if (!current.voice.transcribing || current.voice.channelId !== channelId) return
+        set((s) => ({ voice: { ...s.voice, transcribing: false } }))
+        current.ws?.send('voice.transcribe', { channel_id: channelId, enabled: false })
+        toastError('Speech recognition permission was denied.')
+      },
+    })
+    voiceRecognizer = recognizer
+    set((s) => ({ voice: { ...s.voice, transcribing: true } }))
+    recognizer.start()
+    if (voice.muted) recognizer.pause()
+    ws?.send('voice.transcribe', { channel_id: channelId, enabled: true })
   },
 
   toggleVoiceCamera() {
@@ -1377,7 +1436,10 @@ export const useStore = create<State>((set, get) => ({
           previous.myConnId !== null &&
           previous.myConnId !== p.conn_id &&
           previous.voice.channelId !== null
-        if (voiceReconnected) previous.voice.client?.stop()
+        if (voiceReconnected) {
+          stopVoiceRecognizer()
+          previous.voice.client?.stop()
+        }
         set({
           online: new Set(p.online_user_ids),
           myConnId: p.conn_id,
@@ -1465,6 +1527,7 @@ export const useStore = create<State>((set, get) => ({
                 display_name: p.participant.display_name,
                 guest: p.participant.guest,
                 muted: p.participant.muted,
+                transcribing: p.participant.transcribing,
                 camera_on: p.participant.camera_on,
                 screen_on: p.participant.screen_on,
                 screen_stream_id: p.participant.screen_stream_id,
@@ -1521,6 +1584,7 @@ export const useStore = create<State>((set, get) => ({
         if (activeBeforeLeave.channelId === p.channel_id) {
           playVoiceLeaveSound()
           if (p.conn_id === get().myConnId) {
+            stopVoiceRecognizer()
             activeBeforeLeave.client?.stop()
             set({ voice: emptyVoiceState() })
           } else {
@@ -1550,6 +1614,7 @@ export const useStore = create<State>((set, get) => ({
                   display_name: p.participant.display_name,
                   guest: p.participant.guest,
                   muted: p.participant.muted,
+                  transcribing: p.participant.transcribing,
                   camera_on: p.participant.camera_on,
                   screen_on: p.participant.screen_on,
                   screen_stream_id: p.participant.screen_stream_id,
@@ -1602,6 +1667,15 @@ export const useStore = create<State>((set, get) => ({
         }
         break
       }
+      case 'voice.roast_armed': {
+        const p = env.payload as { channel_id: string; armed: boolean }
+        set((s) =>
+          s.voice.channelId === p.channel_id
+            ? { voice: { ...s.voice, roastArmed: p.armed } }
+            : {},
+        )
+        break
+      }
       case 'voice.signal': {
         const p = env.payload as VoiceSignalPayload
         const active = get().voice
@@ -1630,11 +1704,13 @@ export const useStore = create<State>((set, get) => ({
           // The guest's call link was regenerated — non-recoverable for this
           // token. Tear the call down and mark the guest session revoked so the
           // guest page shows the invalid-link state instead of Rejoin.
+          stopVoiceRecognizer()
           get().voice.client?.stop()
           set({ voice: emptyVoiceState(), guestRevoked: true, guestPendingJoin: false })
           toastError(voiceErrorMessage(p.code))
           break
         }
+        stopVoiceRecognizer()
         get().voice.client?.stop()
         set({ voice: emptyVoiceState() })
         toastError(voiceErrorMessage(p.code))
@@ -1866,6 +1942,7 @@ function voiceRoomFromParticipants(
       display_name: participant.display_name,
       guest: participant.guest,
       muted: participant.muted,
+      transcribing: participant.transcribing,
       camera_on: participant.camera_on,
       screen_on: participant.screen_on,
       screen_stream_id: participant.screen_stream_id,
