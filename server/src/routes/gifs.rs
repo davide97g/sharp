@@ -186,16 +186,8 @@ pub async fn suggest(
         return Ok(empty_suggestion());
     }
 
-    let query = deepseek::suggest_query(deepseek_config, &transcript)
-        .await
-        .map_err(|error| {
-            tracing::warn!("GIF suggestion failed: {}", error);
-            AppError::ServiceUnavailable("suggestion failed".to_string())
-        })?;
-    let results = provider.search(&query, 1).await.map_err(|error| {
-        tracing::warn!("GIF suggestion search failed: {}", error);
-        AppError::ServiceUnavailable("gif search failed".to_string())
-    })?;
+    let (query, results) =
+        suggest_best_gif(deepseek_config, provider.as_ref(), &transcript).await?;
 
     // Someone pulled the trigger — clear the shared streak for every member.
     gif::reset_streak(&state.duck_streaks, channel_id);
@@ -210,6 +202,75 @@ pub async fn suggest(
     state.hub.broadcast(reset, targets).await;
 
     Ok(Json(json!({ "query": query, "results": results })))
+}
+
+/// Query → multi-search → soft-rank → LLM pick (with one retry on junk-heavy results).
+async fn suggest_best_gif(
+    deepseek_config: &crate::config::DeepSeekConfig,
+    provider: &dyn gif::GifProvider,
+    transcript: &[(String, String)],
+) -> AppResult<(String, Vec<GifResult>)> {
+    let mut query = deepseek::suggest_query(deepseek_config, transcript)
+        .await
+        .map_err(|error| {
+            tracing::warn!("GIF suggestion failed: {}", error);
+            AppError::ServiceUnavailable("suggestion failed".to_string())
+        })?;
+
+    let mut ranked = search_and_rank(provider, &query, transcript).await?;
+    if gif::needs_query_retry(&ranked) {
+        // One retry when the top hit looks like watermark/spam junk.
+        if let Ok(retry_query) = deepseek::suggest_query(deepseek_config, transcript).await {
+            if retry_query != query {
+                if let Ok(retry_ranked) = search_and_rank(provider, &retry_query, transcript).await
+                {
+                    if !retry_ranked.is_empty() {
+                        query = retry_query;
+                        ranked = retry_ranked;
+                    }
+                }
+            }
+        }
+    }
+
+    if ranked.is_empty() {
+        return Err(AppError::ServiceUnavailable("gif search failed".to_string()));
+    }
+
+    let pick_n = ranked.len().min(gif::SUGGEST_PICK_CANDIDATES);
+    let candidates = &ranked[..pick_n];
+    let best = match deepseek::pick_gif(deepseek_config, transcript, &query, candidates).await {
+        Ok(Some(id)) => candidates
+            .iter()
+            .find(|gif| gif.id == id)
+            .cloned()
+            .unwrap_or_else(|| candidates[0].clone()),
+        Ok(None) => {
+            tracing::info!("GIF pick returned unknown id; using local rank #1");
+            candidates[0].clone()
+        }
+        Err(error) => {
+            tracing::warn!("GIF pick failed, using local rank #1: {}", error);
+            candidates[0].clone()
+        }
+    };
+
+    Ok((query, vec![best]))
+}
+
+async fn search_and_rank(
+    provider: &dyn gif::GifProvider,
+    query: &str,
+    transcript: &[(String, String)],
+) -> AppResult<Vec<GifResult>> {
+    let results = provider
+        .search(query, gif::SUGGEST_SEARCH_LIMIT)
+        .await
+        .map_err(|error| {
+            tracing::warn!("GIF suggestion search failed: {}", error);
+            AppError::ServiceUnavailable("gif search failed".to_string())
+        })?;
+    Ok(gif::rank_suggest_candidates(results, query, transcript))
 }
 
 async fn load_transcript(

@@ -55,7 +55,20 @@ pub fn is_duck_roast_gif(content: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_duck_roast_gif, is_standalone_gif};
+    use super::{
+        is_duck_roast_gif, is_standalone_gif, needs_query_retry, rank_suggest_candidates, GifResult,
+    };
+
+    fn gif(id: &str, title: &str) -> GifResult {
+        GifResult {
+            id: id.into(),
+            url: format!("https://example/{id}.gif"),
+            preview_url: format!("https://example/{id}.gif"),
+            width: 100,
+            height: 100,
+            title: title.into(),
+        }
+    }
 
     #[test]
     fn detects_manual_vs_duck_gifs() {
@@ -64,6 +77,22 @@ mod tests {
         assert!(!is_duck_roast_gif("[[gif:https://x/a.gif|hi]]"));
         assert!(is_duck_roast_gif("[[gif:https://x/a.gif|hi|duck]]"));
         assert!(!is_duck_roast_gif("lol [[gif:https://x/a.gif|hi|duck]]"));
+    }
+
+    #[test]
+    fn ranks_reaction_over_watermark() {
+        let ranked = rank_suggest_candidates(
+            vec![
+                gif("1", "RATIO SUCCESS @alextekah"),
+                gif("2", "gemini ai fail facepalm"),
+                gif("3", ""),
+            ],
+            "gemini ai fail",
+            &[("dav".into(), "gemini = rubbish".into())],
+        );
+        assert_eq!(ranked[0].id, "2");
+        assert!(needs_query_retry(&[gif("1", "RATIO SUCCESS @alextekah")]));
+        assert!(!needs_query_retry(&[gif("2", "gemini ai fail facepalm")]));
     }
 }
 
@@ -118,6 +147,143 @@ pub struct GifResult {
     pub width: i32,
     pub height: i32,
     pub title: String,
+}
+
+/// How many GIFs duck suggest fetches before ranking / LLM pick.
+pub const SUGGEST_SEARCH_LIMIT: u8 = 10;
+/// Candidates passed to the LLM picker after local ranking.
+pub const SUGGEST_PICK_CANDIDATES: usize = 6;
+
+const REACTION_HINTS: &[&str] = &[
+    "facepalm",
+    "laugh",
+    "cringe",
+    "yikes",
+    "fail",
+    "trash",
+    "garbage",
+    "dumpster",
+    "eye roll",
+    "eyeroll",
+    "mic drop",
+    "this is fine",
+    "nope",
+    "awkward",
+    "disappointed",
+    "shocked",
+    "clap",
+    "slow clap",
+    "burn",
+    "roast",
+    "sucks",
+    "terrible",
+    "awful",
+];
+
+const JUNK_HINTS: &[&str] = &[
+    "watermark",
+    "subscribe",
+    "follow me",
+    "tiktok",
+    "instagram",
+    "clickbait",
+    "free download",
+];
+
+/// Soft-rank provider results for duck suggest: prefer reaction titles that
+/// overlap the query/chat, demote empty/watermark/spam titles.
+pub fn rank_suggest_candidates(
+    results: Vec<GifResult>,
+    query: &str,
+    transcript: &[(String, String)],
+) -> Vec<GifResult> {
+    let query_tokens = tokenize(query);
+    let mut chat_tokens = Vec::new();
+    for (_, content) in transcript.iter().rev().take(5) {
+        chat_tokens.extend(tokenize(content));
+    }
+    chat_tokens.sort_unstable();
+    chat_tokens.dedup();
+
+    let mut scored: Vec<(i32, GifResult)> = results
+        .into_iter()
+        .map(|gif| {
+            let score = score_gif(&gif, &query_tokens, &chat_tokens);
+            (score, gif)
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.id.cmp(&b.1.id)));
+    scored.into_iter().map(|(_, gif)| gif).collect()
+}
+
+/// True when the top-ranked result looks too junk-y to trust without a retry.
+pub fn needs_query_retry(ranked: &[GifResult]) -> bool {
+    match ranked.first() {
+        None => true,
+        Some(gif) => title_junk_penalty(&gif.title) <= -4,
+    }
+}
+
+fn score_gif(gif: &GifResult, query_tokens: &[String], chat_tokens: &[String]) -> i32 {
+    let title = gif.title.to_lowercase();
+    let title_tokens = tokenize(&gif.title);
+    let mut score = 0i32;
+
+    score += title_junk_penalty(&gif.title);
+
+    if title.trim().is_empty() {
+        score -= 6;
+    }
+
+    for token in query_tokens {
+        if title_tokens.iter().any(|t| t == token) {
+            score += 3;
+        }
+    }
+    for token in chat_tokens {
+        if token.len() >= 4 && title_tokens.iter().any(|t| t == token) {
+            score += 2;
+        }
+    }
+    for hint in REACTION_HINTS {
+        if title.contains(hint) {
+            score += 2;
+        }
+    }
+    score
+}
+
+fn title_junk_penalty(title: &str) -> i32 {
+    let lower = title.to_lowercase();
+    let mut penalty = 0i32;
+    if lower.contains('@') {
+        penalty -= 4;
+    }
+    for hint in JUNK_HINTS {
+        if lower.contains(hint) {
+            penalty -= 3;
+        }
+    }
+    // Long "Description by ArtistName" style titles often aren't reaction GIFs.
+    if lower.len() > 80 {
+        penalty -= 2;
+    }
+    penalty
+}
+
+fn tokenize(value: &str) -> Vec<String> {
+    value
+        .to_lowercase()
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|token| token.len() >= 2)
+        .filter(|token| {
+            !matches!(
+                *token,
+                "the" | "and" | "for" | "you" | "are" | "this" | "that" | "with" | "gif" | "giphy"
+            )
+        })
+        .map(str::to_string)
+        .collect()
 }
 
 #[async_trait]

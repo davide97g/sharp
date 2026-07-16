@@ -907,8 +907,13 @@ to the source; same family as the `[[doc:…]]`/`[[canvas:…]]` chips. Chat-onl
    shared streak and broadcasts `duck.streak` `{channel_id, duck_streak:{count:0,…}}`.
 4. Server suggest: loads the last **1 / 2 / 3 minutes** of top-level messages
    (from `duck_context`, default 1m, up to 40), **excluding** prior duck-roast GIFs
-   (`|duck` token); DeepSeek returns one roast query; provider search limit 1. Duck
-   hidden when `/gifs/config.duck` is false.
+   (`|duck` token); packages a punchline-focused transcript for DeepSeek; DeepSeek
+   returns one **classic reaction-style** roast query (topic-grounded when a product/
+   person is named); provider search fetches **10** results; server soft-ranks by
+   title overlap + reaction hints vs watermark/spam penalties; if the top hit looks
+   junk-heavy, regenerates the query **once**; DeepSeek then picks the best id from
+   the top **6** ranked candidates (falls back to local rank #1). Response still
+   returns a single GIF in `results`. Duck hidden when `/gifs/config.duck` is false.
 
 ## Env additions
 
