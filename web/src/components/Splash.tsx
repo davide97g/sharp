@@ -34,12 +34,34 @@ export function Splash({ ready, onDone }: { ready: boolean; onDone: () => void }
 
   const duck = useRef(
     (() => {
-      // negative anchors so the duck tucks into the corner and peeks in
+      // negative anchors so the duck tucks into the corner and peeks in. The
+      // duck art faces left; `tilt` rotates (and flips where needed) so its head
+      // always points toward screen center, on a 45° diagonal.
       const corners = [
-        { pos: { top: '-2rem', left: '-3.5rem' }, origin: 'top left', below: true },
-        { pos: { top: '-2rem', right: '-3.5rem' }, origin: 'top right', below: true },
-        { pos: { bottom: '-2rem', left: '-3.5rem' }, origin: 'bottom left', below: false },
-        { pos: { bottom: '-2rem', right: '-3.5rem' }, origin: 'bottom right', below: false },
+        {
+          pos: { top: '-2rem', left: '-3.5rem' },
+          origin: 'top left',
+          tilt: 'rotate(45deg) scaleX(-1)', // head → down-right
+          below: true,
+        },
+        {
+          pos: { top: '-2rem', right: '-3.5rem' },
+          origin: 'top right',
+          tilt: 'rotate(-45deg)', // head → down-left
+          below: true,
+        },
+        {
+          pos: { bottom: '-2rem', left: '-3.5rem' },
+          origin: 'bottom left',
+          tilt: 'rotate(-45deg) scaleX(-1)', // head → up-right
+          below: false,
+        },
+        {
+          pos: { bottom: '-2rem', right: '-3.5rem' },
+          origin: 'bottom right',
+          tilt: 'rotate(45deg)', // head → up-left
+          below: false,
+        },
       ] as const
       return corners[Math.floor(Math.random() * corners.length)]
     })(),
@@ -135,14 +157,18 @@ export function Splash({ ready, onDone }: { ready: boolean; onDone: () => void }
         className="splash-duck-wrap pointer-events-none absolute select-none"
         style={duck.pos as React.CSSProperties}
       >
-        <img
-          src="/duck.png"
-          alt=""
-          draggable={false}
-          onAnimationEnd={onDuckLanded}
-          className="splash-duck"
-          style={{ transformOrigin: duck.origin } as React.CSSProperties}
-        />
+        {/* tilt wrapper points the duck's head toward center; the pop scale
+            animation lives on the img inside it (bubble stays upright, outside) */}
+        <div className="splash-duck-tilt" style={{ transform: duck.tilt } as React.CSSProperties}>
+          <img
+            src="/duck.png"
+            alt=""
+            draggable={false}
+            onAnimationEnd={onDuckLanded}
+            className="splash-duck"
+            style={{ transformOrigin: duck.origin } as React.CSSProperties}
+          />
+        </div>
         <div
           className="splash-bubble-pos"
           data-side={duck.below ? 'below' : 'above'}
