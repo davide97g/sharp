@@ -4,6 +4,7 @@ import { VoiceClient } from './lib/voice'
 import { WsClient } from './lib/ws'
 import { cmpId } from './lib/util'
 import { gifPreviewText } from './lib/gif'
+import { STREAK_GAP_MS } from './lib/duckStreak'
 import { toastError, toastNotify } from './lib/toast'
 import { navigateTo } from './lib/nav'
 import {
@@ -2081,8 +2082,9 @@ function applyMessageCreated(set: Setter, message: Message, myId: string | null)
     if (!fromMe && isCurrent) {
       const previous = s.duckActivity[message.channel_id]
       const now = Date.now()
-      // Fast streak: messages more than 20s apart start a new burst.
-      const continuesStreak = previous != null && previous.count > 0 && now - previous.lastAt <= 20_000
+      // Fast streak: messages more than STREAK_GAP_MS apart start a new burst.
+      const continuesStreak =
+        previous != null && previous.count > 0 && now - previous.lastAt <= STREAK_GAP_MS
       duckActivity = {
         ...s.duckActivity,
         [message.channel_id]: {

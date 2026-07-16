@@ -7,6 +7,7 @@ import { toastError } from '../lib/toast'
 import { fmtBytes } from '../lib/util'
 import { Avatar } from './Avatar'
 import { GifPicker, type GifPickerHandle } from './GifPicker'
+import { DuckStreakBar } from './DuckStreakBar'
 import type { Attachment, Channel, GifResult } from '../lib/types'
 
 type Pending = {
@@ -599,12 +600,13 @@ export function Composer({
           setDragOver(false)
           if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files)
         }}
-        className={`composer-shell rounded-xl border bg-[var(--color-panel)] px-3 py-2 transition ${
+        className={`composer-shell relative rounded-xl border bg-[var(--color-panel)] px-3 py-2 transition ${
           dragOver
             ? 'border-[var(--color-accent)] ring-2 ring-[var(--color-accent-soft)]'
             : 'border-[var(--color-border)] focus-within:border-[var(--color-accent)] focus-within:ring-2 focus-within:ring-[var(--color-accent-soft)]'
         }`}
       >
+        {!parentId ? <DuckStreakBar channelId={channel.id} /> : null}
         {activeReply && (
           <div className="mb-2 flex items-stretch gap-2 rounded-lg border-l-2 border-[var(--color-accent)] bg-[var(--color-panel-2)] py-1.5 pl-2.5 pr-2">
             <div className="min-w-0 flex-1">

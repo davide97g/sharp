@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
+import { STREAK_QUIET_MS, STREAK_TARGET } from '../lib/duckStreak'
 import { buildGifToken } from '../lib/gif'
 import type { GifResult } from '../lib/types'
 import { useStore } from '../store'
-
-/** Quiet pause after a fast streak before asking the server for a GIF. */
-const STREAK_QUIET_MS = 5_000
 
 const lastSuggestAt = new Map<string, number>()
 
@@ -23,8 +21,8 @@ export function DuckSuggest({ channelId }: { channelId: string }) {
   }, [channelId])
 
   useEffect(() => {
-    // Fast streak: ≥3 rapid messages from others, then a short quiet window.
-    if (!duck || (activity?.count ?? 0) < 3) return
+    // Fast streak: ≥target rapid messages from others, then a short quiet window.
+    if (!duck || (activity?.count ?? 0) < STREAK_TARGET) return
 
     let cancelled = false
     const timer = window.setTimeout(() => {
