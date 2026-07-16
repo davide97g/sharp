@@ -83,6 +83,11 @@ export function VoiceMiniWidget() {
     return [...byUser.values()]
   }, [room, speaking])
 
+  const anyScreen = useMemo(
+    () => Object.values(room ?? {}).some((entry) => entry.screen_on),
+    [room],
+  )
+
   const roomName = channel
     ? channel.kind === 'dm'
       ? channel.dm_user?.display_name ?? channelLabel(channel)
@@ -199,6 +204,15 @@ export function VoiceMiniWidget() {
           className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-[var(--color-panel)] bg-[#4fbf9f]"
           aria-label="Connected"
         />
+        {anyScreen && (
+          <span
+            className="absolute -bottom-0.5 -left-0.5 flex h-4 w-4 items-center justify-center rounded-full border-2 border-[var(--color-panel)] bg-[var(--color-accent)] text-white"
+            aria-label="Someone is sharing their screen"
+            title="Someone is sharing their screen"
+          >
+            <MonitorIcon />
+          </span>
+        )}
       </div>
 
       <div className="flex flex-col items-center -space-y-2" aria-label="Call participants">
@@ -279,6 +293,26 @@ function WaveformIcon() {
       <path d="M13 4v16" />
       <path d="M17 8v8" />
       <path d="M21 10v4" />
+    </svg>
+  )
+}
+
+function MonitorIcon() {
+  return (
+    <svg
+      width="9"
+      height="9"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="2" y="4" width="20" height="13" rx="2" />
+      <path d="M8 21h8" />
+      <path d="M12 17v4" />
     </svg>
   )
 }

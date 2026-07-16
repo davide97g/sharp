@@ -63,7 +63,16 @@ type ThreadState = {
   loading: boolean
 }
 
-export type VoiceRoom = Record<string, { user_id: string; muted: boolean; camera_on: boolean }>
+export type VoiceRoom = Record<
+  string,
+  {
+    user_id: string
+    muted: boolean
+    camera_on: boolean
+    screen_on: boolean
+    screen_stream_id: string | null
+  }
+>
 
 export type VoiceStageMode = 'expanded' | 'compact' | 'mini'
 
@@ -73,11 +82,14 @@ type VoiceState = {
   muted: boolean
   speaking: Record<string, boolean>
   cameraStatus: 'off' | 'starting' | 'on'
+  screenStatus: 'off' | 'starting' | 'on'
   stageMode: VoiceStageMode
   audioDeviceId: string | null
   videoDeviceId: string | null
   localStream: MediaStream | null
   remoteStreams: Record<string, MediaStream>
+  localScreenStream: MediaStream | null
+  remoteScreenStreams: Record<string, MediaStream>
   client: VoiceClient | null
 }
 
@@ -229,6 +241,7 @@ type State = {
   leaveVoice: () => void
   toggleVoiceMute: () => void
   toggleVoiceCamera: () => void
+  toggleVoiceScreen: () => Promise<void>
   setVoiceAudioDevice: (deviceId: string) => Promise<void>
   setVoiceVideoDevice: (deviceId: string) => Promise<void>
   setVoiceStageMode: (mode: VoiceStageMode) => void
@@ -283,11 +296,14 @@ function emptyVoiceState(): VoiceState {
     muted: false,
     speaking: {},
     cameraStatus: 'off',
+    screenStatus: 'off',
     stageMode: 'expanded',
     audioDeviceId: null,
     videoDeviceId: null,
     localStream: null,
     remoteStreams: {},
+    localScreenStream: null,
+    remoteScreenStreams: {},
     client: null,
   }
 }
@@ -776,11 +792,14 @@ export const useStore = create<State>((set, get) => ({
         muted: false,
         speaking: {},
         cameraStatus: 'off',
+        screenStatus: 'off',
         stageMode: 'expanded',
         audioDeviceId: null,
         videoDeviceId: null,
         localStream: null,
         remoteStreams: {},
+        localScreenStream: null,
+        remoteScreenStreams: {},
         client: null,
       },
     })
@@ -835,6 +854,27 @@ export const useStore = create<State>((set, get) => ({
             if (stream?.getVideoTracks().length) remoteStreams[connId] = stream
             else delete remoteStreams[connId]
             return { voice: { ...s.voice, remoteStreams } }
+          })
+        },
+        onLocalScreen: (stream) => {
+          set((s) => {
+            if (s.voice.client !== client) return {}
+            return {
+              voice: {
+                ...s.voice,
+                localScreenStream: stream,
+                screenStatus: stream ? 'on' : 'off',
+              },
+            }
+          })
+        },
+        onRemoteScreen: (connId, stream) => {
+          set((s) => {
+            if (s.voice.client !== client) return {}
+            const remoteScreenStreams = { ...s.voice.remoteScreenStreams }
+            if (stream?.getVideoTracks().length) remoteScreenStreams[connId] = stream
+            else delete remoteScreenStreams[connId]
+            return { voice: { ...s.voice, remoteScreenStreams } }
           })
         },
       })
@@ -895,6 +935,38 @@ export const useStore = create<State>((set, get) => ({
     }
     set((s) => ({ voice: { ...s.voice, cameraStatus: 'starting' } }))
     get().ws?.send('voice.camera', { channel_id: channelId, enabled: true })
+  },
+
+  async toggleVoiceScreen() {
+    const { channelId, client, status, screenStatus } = get().voice
+    if (!channelId || !client || status !== 'connected' || screenStatus === 'starting') return
+    if (screenStatus === 'on') {
+      client.stopScreenShare()
+      get().ws?.send('voice.screen', { channel_id: channelId, enabled: false })
+      return
+    }
+    set((s) => ({ voice: { ...s.voice, screenStatus: 'starting' } }))
+    let streamId: string
+    try {
+      // Acquire in the click gesture (getDisplayMedia needs transient user
+      // activation); publish only once the server echoes participant_updated.
+      streamId = await client.acquireScreen()
+    } catch {
+      // Picker cancelled / permission denied — reset silently.
+      if (get().voice.client === client) {
+        set((s) => ({ voice: { ...s.voice, screenStatus: 'off' } }))
+      }
+      return
+    }
+    if (get().voice.client !== client) {
+      client.stopScreenShare()
+      return
+    }
+    get().ws?.send('voice.screen', {
+      channel_id: channelId,
+      enabled: true,
+      stream_id: streamId,
+    })
   },
 
   async setVoiceAudioDevice(deviceId) {
@@ -1245,7 +1317,16 @@ export const useStore = create<State>((set, get) => ({
             : {}),
         }))
         const active = get().voice
-        if (active.channelId === p.channel_id) active.client?.syncPeers(p.participants)
+        if (active.channelId === p.channel_id) {
+          active.client?.syncPeers(p.participants)
+          for (const participant of p.participants) {
+            if (participant.conn_id === get().myConnId) continue
+            active.client?.updateRemoteScreen(
+              participant.conn_id,
+              participant.screen_on ? participant.screen_stream_id : null,
+            )
+          }
+        }
         if (joiningThisRoom) playVoiceJoinSound()
         break
       }
@@ -1262,6 +1343,8 @@ export const useStore = create<State>((set, get) => ({
                 user_id: p.participant.user_id,
                 muted: p.participant.muted,
                 camera_on: p.participant.camera_on,
+                screen_on: p.participant.screen_on,
+                screen_stream_id: p.participant.screen_stream_id,
               },
             },
           },
@@ -1269,6 +1352,12 @@ export const useStore = create<State>((set, get) => ({
         const active = get().voice
         if (active.channelId === p.channel_id) {
           active.client?.ensurePeer(p.participant.conn_id, p.participant.user_id)
+          if (p.participant.conn_id !== get().myConnId && p.participant.screen_on) {
+            active.client?.updateRemoteScreen(
+              p.participant.conn_id,
+              p.participant.screen_stream_id,
+            )
+          }
           if (p.participant.conn_id !== get().myConnId && p.participant.user_id !== me?.id) {
             playVoiceJoinSound()
           }
@@ -1309,6 +1398,12 @@ export const useStore = create<State>((set, get) => ({
             set({ voice: emptyVoiceState() })
           } else {
             activeBeforeLeave.client?.removePeer(p.conn_id)
+            set((s) => {
+              if (s.voice.client !== activeBeforeLeave.client) return {}
+              const remoteScreenStreams = { ...s.voice.remoteScreenStreams }
+              delete remoteScreenStreams[p.conn_id]
+              return { voice: { ...s.voice, remoteScreenStreams } }
+            })
           }
         }
         break
@@ -1327,6 +1422,8 @@ export const useStore = create<State>((set, get) => ({
                   user_id: p.participant.user_id,
                   muted: p.participant.muted,
                   camera_on: p.participant.camera_on,
+                  screen_on: p.participant.screen_on,
+                  screen_stream_id: p.participant.screen_stream_id,
                 },
               },
             },
@@ -1334,7 +1431,9 @@ export const useStore = create<State>((set, get) => ({
         })
 
         const active = get().voice
-        if (p.participant.conn_id === get().myConnId && active.channelId === p.channel_id) {
+        if (active.channelId !== p.channel_id) break
+        if (p.participant.conn_id === get().myConnId) {
+          // camera
           if (p.participant.camera_on && active.cameraStatus === 'starting' && active.client) {
             const client = active.client
             void client.startCamera().catch((error) => {
@@ -1350,12 +1449,27 @@ export const useStore = create<State>((set, get) => ({
               voice: { ...s.voice, cameraStatus: 'off', localStream: null },
             }))
           }
-        } else if (!p.participant.camera_on && active.channelId === p.channel_id) {
-          set((s) => {
-            const remoteStreams = { ...s.voice.remoteStreams }
-            delete remoteStreams[p.participant.conn_id]
-            return { voice: { ...s.voice, remoteStreams } }
-          })
+          // screen — publish only once the server echoes our own enable.
+          if (p.participant.screen_on && active.screenStatus === 'starting' && active.client) {
+            active.client.publishScreen()
+          } else if (!p.participant.screen_on && active.screenStatus !== 'off') {
+            active.client?.stopScreenShare()
+            set((s) => ({
+              voice: { ...s.voice, screenStatus: 'off', localScreenStream: null },
+            }))
+          }
+        } else {
+          if (!p.participant.camera_on) {
+            set((s) => {
+              const remoteStreams = { ...s.voice.remoteStreams }
+              delete remoteStreams[p.participant.conn_id]
+              return { voice: { ...s.voice, remoteStreams } }
+            })
+          }
+          active.client?.updateRemoteScreen(
+            p.participant.conn_id,
+            p.participant.screen_on ? p.participant.screen_stream_id : null,
+          )
         }
         break
       }
@@ -1373,6 +1487,13 @@ export const useStore = create<State>((set, get) => ({
         const p = env.payload as VoiceErrorPayload
         if (p.code === 'camera_full') {
           set((s) => ({ voice: { ...s.voice, cameraStatus: 'off', localStream: null } }))
+          toastError(voiceErrorMessage(p.code))
+          break
+        }
+        if (p.code === 'screen_taken') {
+          // Non-fatal: discard the acquired-but-unpublished share and stay in the call.
+          get().voice.client?.stopScreenShare()
+          set((s) => ({ voice: { ...s.voice, screenStatus: 'off', localScreenStream: null } }))
           toastError(voiceErrorMessage(p.code))
           break
         }
@@ -1600,6 +1721,8 @@ function voiceRoomFromParticipants(
       user_id: participant.user_id,
       muted: participant.muted,
       camera_on: participant.camera_on,
+      screen_on: participant.screen_on,
+      screen_stream_id: participant.screen_stream_id,
     }
   }
   return room
@@ -1623,6 +1746,8 @@ function voiceErrorMessage(code: string): string {
       return 'You are no longer in this voice room.'
     case 'camera_full':
       return 'Four cameras are already active. You are still connected by audio.'
+    case 'screen_taken':
+      return 'Someone else is already sharing their screen.'
     default:
       return `Voice error: ${code}`
   }

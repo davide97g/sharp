@@ -125,7 +125,8 @@ async fn handle_client_event(
                 }
             }
         }
-        "voice.join" | "voice.leave" | "voice.mute" | "voice.camera" | "voice.signal" => {
+        "voice.join" | "voice.leave" | "voice.mute" | "voice.camera" | "voice.screen"
+        | "voice.signal" => {
             voice::handle_voice_event(state, user_id, conn_id, event_type, payload, tx).await;
         }
         _ => {}

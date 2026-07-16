@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 const MAX_PARTICIPANTS: usize = 8;
 const MAX_CAMERAS: usize = 4;
+const MAX_SCREENS: usize = 1;
 
 #[derive(Clone, Serialize)]
 pub struct VoiceParticipant {
@@ -17,6 +18,8 @@ pub struct VoiceParticipant {
     pub user_id: Uuid,
     pub muted: bool,
     pub camera_on: bool,
+    pub screen_on: bool,
+    pub screen_stream_id: Option<String>,
 }
 
 #[derive(Default)]
@@ -61,6 +64,7 @@ pub async fn handle_voice_event(
         "voice.leave" => handle_leave(state, user_id, conn_id, &payload, tx).await,
         "voice.mute" => handle_mute(state, conn_id, &payload, tx).await,
         "voice.camera" => handle_camera(state, conn_id, &payload, tx).await,
+        "voice.screen" => handle_screen(state, conn_id, &payload, tx).await,
         "voice.signal" => handle_signal(state, user_id, conn_id, &payload, tx).await,
         _ => {}
     }
@@ -183,6 +187,8 @@ async fn handle_join(
                 user_id,
                 muted: false,
                 camera_on: false,
+                screen_on: false,
+                screen_stream_id: None,
             };
             room.participants.insert(conn_id, participant.clone());
             JoinResult::Joined(participant, room_participants(room))
@@ -334,6 +340,76 @@ fn update_camera(room: &mut VoiceRoom, conn_id: Uuid, enabled: bool) -> CameraUp
     let participant = room.participants.get_mut(&conn_id).unwrap();
     participant.camera_on = enabled;
     CameraUpdateResult::Updated(participant.clone())
+}
+
+async fn handle_screen(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &WsSender) {
+    let Some(channel_id) = channel_id(payload) else {
+        return;
+    };
+    let Some(enabled) = payload.get("enabled").and_then(Value::as_bool) else {
+        return;
+    };
+    let stream_id = payload
+        .get("stream_id")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+
+    let result = {
+        let mut guard = state.voice_rooms.lock().unwrap();
+        match guard.get_mut(&channel_id) {
+            Some(room) => update_screen(room, conn_id, enabled, stream_id),
+            None => ScreenUpdateResult::Missing,
+        }
+    };
+
+    let participant = match result {
+        ScreenUpdateResult::Missing => {
+            send_error(tx, channel_id, "not_in_room");
+            return;
+        }
+        ScreenUpdateResult::Full => {
+            send_error(tx, channel_id, "screen_taken");
+            return;
+        }
+        ScreenUpdateResult::Updated(participant) => participant,
+    };
+
+    broadcast_participant_updated(state, channel_id, participant).await;
+}
+
+enum ScreenUpdateResult {
+    Missing,
+    Full,
+    Updated(VoiceParticipant),
+}
+
+fn update_screen(
+    room: &mut VoiceRoom,
+    conn_id: Uuid,
+    enabled: bool,
+    stream_id: Option<String>,
+) -> ScreenUpdateResult {
+    let Some(current) = room.participants.get(&conn_id) else {
+        return ScreenUpdateResult::Missing;
+    };
+    if current.screen_on == enabled {
+        return ScreenUpdateResult::Updated(current.clone());
+    }
+    if enabled
+        && room
+            .participants
+            .values()
+            .filter(|participant| participant.screen_on)
+            .count()
+            >= MAX_SCREENS
+    {
+        return ScreenUpdateResult::Full;
+    }
+
+    let participant = room.participants.get_mut(&conn_id).unwrap();
+    participant.screen_on = enabled;
+    participant.screen_stream_id = if enabled { stream_id } else { None };
+    ScreenUpdateResult::Updated(participant.clone())
 }
 
 async fn broadcast_participant_updated(
@@ -490,6 +566,8 @@ mod tests {
             user_id: Uuid::new_v4(),
             muted: false,
             camera_on,
+            screen_on: false,
+            screen_stream_id: None,
         }
     }
 
@@ -497,6 +575,30 @@ mod tests {
         let participants = camera_states
             .iter()
             .map(|camera_on| participant(*camera_on))
+            .map(|participant| (participant.conn_id, participant))
+            .collect();
+        VoiceRoom { participants }
+    }
+
+    fn screen_participant(screen_on: bool) -> VoiceParticipant {
+        VoiceParticipant {
+            conn_id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            muted: false,
+            camera_on: false,
+            screen_on,
+            screen_stream_id: if screen_on {
+                Some("stream-existing".to_string())
+            } else {
+                None
+            },
+        }
+    }
+
+    fn room_with_screens(screen_states: &[bool]) -> VoiceRoom {
+        let participants = screen_states
+            .iter()
+            .map(|screen_on| screen_participant(*screen_on))
             .map(|participant| (participant.conn_id, participant))
             .collect();
         VoiceRoom { participants }
@@ -580,6 +682,89 @@ mod tests {
         assert!(matches!(
             update_camera(&mut room, waiting, true),
             CameraUpdateResult::Updated(participant) if participant.camera_on
+        ));
+    }
+
+    #[test]
+    fn screen_toggle_is_idempotent() {
+        let mut room = room_with_screens(&[false]);
+        let conn_id = *room.participants.keys().next().unwrap();
+
+        assert!(matches!(
+            update_screen(&mut room, conn_id, false, None),
+            ScreenUpdateResult::Updated(participant)
+                if !participant.screen_on && participant.screen_stream_id.is_none()
+        ));
+        assert!(matches!(
+            update_screen(&mut room, conn_id, true, Some("stream-a".to_string())),
+            ScreenUpdateResult::Updated(participant)
+                if participant.screen_on
+                    && participant.screen_stream_id.as_deref() == Some("stream-a")
+        ));
+        // Enabling again while already on is a no-op that preserves existing state.
+        assert!(matches!(
+            update_screen(&mut room, conn_id, true, Some("stream-b".to_string())),
+            ScreenUpdateResult::Updated(participant)
+                if participant.screen_on
+                    && participant.screen_stream_id.as_deref() == Some("stream-a")
+        ));
+    }
+
+    #[test]
+    fn second_screen_is_rejected_until_slot_is_released() {
+        let mut room = room_with_screens(&[true, false]);
+        let waiting = room
+            .participants
+            .values()
+            .find(|participant| !participant.screen_on)
+            .unwrap()
+            .conn_id;
+        assert!(matches!(
+            update_screen(&mut room, waiting, true, Some("stream-new".to_string())),
+            ScreenUpdateResult::Full
+        ));
+
+        let active = room
+            .participants
+            .values()
+            .find(|participant| participant.screen_on)
+            .unwrap()
+            .conn_id;
+        assert!(matches!(
+            update_screen(&mut room, active, false, None),
+            ScreenUpdateResult::Updated(participant)
+                if !participant.screen_on && participant.screen_stream_id.is_none()
+        ));
+        assert!(matches!(
+            update_screen(&mut room, waiting, true, Some("stream-new".to_string())),
+            ScreenUpdateResult::Updated(participant)
+                if participant.screen_on
+                    && participant.screen_stream_id.as_deref() == Some("stream-new")
+        ));
+    }
+
+    #[test]
+    fn removing_participant_releases_screen_slot() {
+        let mut room = room_with_screens(&[true, false]);
+        let active = room
+            .participants
+            .values()
+            .find(|participant| participant.screen_on)
+            .unwrap()
+            .conn_id;
+        let waiting = room
+            .participants
+            .values()
+            .find(|participant| !participant.screen_on)
+            .unwrap()
+            .conn_id;
+
+        room.participants.remove(&active);
+        assert!(matches!(
+            update_screen(&mut room, waiting, true, Some("stream-new".to_string())),
+            ScreenUpdateResult::Updated(participant)
+                if participant.screen_on
+                    && participant.screen_stream_id.as_deref() == Some("stream-new")
         ));
     }
 }

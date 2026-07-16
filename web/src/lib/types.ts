@@ -125,6 +125,8 @@ export type VoiceParticipant = {
   user_id: string
   muted: boolean
   camera_on: boolean
+  screen_on: boolean
+  screen_stream_id: string | null
 }
 
 export type VoiceRoomSnapshot = {

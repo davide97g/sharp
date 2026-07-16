@@ -507,10 +507,11 @@ media passes through it and there is no SFU.
   registry lives in server memory.
 - **P2P mesh media**: every eligible participant connects directly to every other eligible
   participant. The server relays signaling messages only and never handles media.
-- **Capacity**: the server enforces a maximum of **8 audio participants** and **4 active
-  cameras** per room. A rejected fifth camera stays connected by audio.
-- **Web camera scope**: webcam video is supported in the browser client. Screen sharing,
-  broadcast, recording, virtual backgrounds, mobile support, and desktop-specific camera
+- **Capacity**: the server enforces a maximum of **8 audio participants**, **4 active
+  cameras**, and **1 screen share** per room (all server-authoritative). A rejected fifth
+  camera stays connected by audio; a rejected second screen share is non-fatal.
+- **Web camera scope**: webcam video and screen sharing are supported in the browser client.
+  Broadcast, recording, virtual backgrounds, mobile support, and desktop-specific camera
   permission work are deferred.
 
 ## Wire types
@@ -518,7 +519,7 @@ media passes through it and there is no SFU.
 All ids are strings in JSON (UUIDs). A WebSocket connection id is the peer identity.
 
 ```ts
-VoiceParticipant = { conn_id: string, user_id: string, muted: boolean, camera_on: boolean }
+VoiceParticipant = { conn_id: string, user_id: string, muted: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null }
 VoiceRoomSnapshot = { channel_id: string, participants: VoiceParticipant[] }
 VoiceSignalKind = 'offer'|'answer'|'candidate'
 ```
@@ -533,6 +534,8 @@ Client → server:
 - `voice.leave` `{channel_id}`
 - `voice.mute` `{channel_id, muted: boolean}`
 - `voice.camera` `{channel_id, enabled: boolean}`
+- `voice.screen` `{channel_id, enabled: boolean, stream_id?: string}` — `stream_id` is the
+  msid of the sharer's screen `MediaStream`, sent only when enabling.
 - `voice.signal` `{channel_id, to_user, to_conn, kind: "offer"|"answer"|"candidate", data: object}`
   — `data` is SDP `{type,sdp}` for an offer/answer, or `RTCIceCandidateInit` for a candidate.
 
@@ -541,7 +544,7 @@ Server → client:
 - `hello` payload is extended with `conn_id: string` and
   `voice_rooms: VoiceRoomSnapshot[]`, where each snapshot is
   `{channel_id, participants: VoiceParticipant[]}` and each participant is
-  `{conn_id, user_id, muted: boolean, camera_on: boolean}`.
+  `{conn_id, user_id, muted: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null}`.
 - `voice.state` `{channel_id, participants: VoiceParticipant[]}` — sent only to the joining
   connection immediately after a successful join.
 - `voice.participant_joined` `{channel_id, participant: VoiceParticipant}` — broadcast to
@@ -549,13 +552,14 @@ Server → client:
 - `voice.participant_left` `{channel_id, conn_id, user_id}` — broadcast to all channel
   members.
 - `voice.participant_updated` `{channel_id, participant: VoiceParticipant}` — broadcast to
-  all channel members after mute or camera state changes.
+  all channel members after mute, camera, or screen-share state changes.
 - `voice.signal` `{channel_id, from_user, from_conn, to_user, to_conn, kind, data}` —
   delivered to `to_user`'s connections; receivers filter on
   `to_conn === my conn_id`.
 - `voice.error`
-  `{channel_id, code: "room_full"|"camera_full"|"not_member"|"not_in_room"}` — sent only
-  to the offending connection. `camera_full` does not end the audio call.
+  `{channel_id, code: "room_full"|"camera_full"|"screen_taken"|"not_member"|"not_in_room"}`
+  — sent only to the offending connection. `camera_full` and `screen_taken` do not end the
+  audio call.
 
 ## Server behavior
 
@@ -570,6 +574,11 @@ Server → client:
 - `voice.camera`: require an active room participant; atomically reserve/release a camera
   slot and broadcast the complete participant state. Enabling is rejected with `camera_full`
   when four slots are already reserved. Repeated requests are idempotent.
+- `voice.screen`: require an active room participant; atomically reserve/release the single
+  screen-share slot and broadcast the complete participant state. On enable, store
+  `screen_stream_id` from the request's `stream_id`; on disable, clear it to `null`. Enabling
+  is rejected with `screen_taken` when another participant already holds the slot. Repeated
+  requests are idempotent (state unchanged → re-broadcast current state).
 - `voice.signal`: the sender must be a participant of `channel_id`; otherwise send
   `voice.error` with `code: "not_in_room"`. Relay with
   `hub.broadcast(envelope, vec![to_user])`, adding `from_user` and `from_conn`.
@@ -592,6 +601,11 @@ Server → client:
 - ICE candidates are trickled through `voice.signal` as they become available.
 - Camera capture uses ideal 640×360 at 20 fps (24 fps maximum), with an approximate
   500 kbps outgoing-sender cap to constrain mesh upload cost.
+- Screen-share tracks are published under a **separate `MediaStream`** (distinct from the
+  camera/mic stream) whose id the sharer advertises out-of-band as `screen_stream_id` in the
+  `voice.screen` message. Receivers classify each inbound track by comparing
+  `event.streams[0].id` against the participant's advertised `screen_stream_id`, so a
+  simultaneous camera + screen sharer's two video tracks route to the correct surface.
 
 ## Web camera UI and lifecycle
 

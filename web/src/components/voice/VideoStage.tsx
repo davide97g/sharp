@@ -43,16 +43,20 @@ export function VideoStage() {
   const speaking = useStore((s) => s.voice.speaking)
   const muted = useStore((s) => s.voice.muted)
   const cameraStatus = useStore((s) => s.voice.cameraStatus)
+  const screenStatus = useStore((s) => s.voice.screenStatus)
   const audioDeviceId = useStore((s) => s.voice.audioDeviceId)
   const videoDeviceId = useStore((s) => s.voice.videoDeviceId)
   const localStream = useStore((s) => s.voice.localStream)
   const remoteStreams = useStore((s) => s.voice.remoteStreams)
+  const localScreenStream = useStore((s) => s.voice.localScreenStream)
+  const remoteScreenStreams = useStore((s) => s.voice.remoteScreenStreams)
   const myConnId = useStore((s) => s.myConnId)
   const me = useStore((s) => s.me)
   const users = useStore((s) => s.users)
   const channel = useStore((s) => s.channels.find((candidate) => candidate.id === channelId))
   const toggleVoiceMute = useStore((s) => s.toggleVoiceMute)
   const toggleVoiceCamera = useStore((s) => s.toggleVoiceCamera)
+  const toggleVoiceScreen = useStore((s) => s.toggleVoiceScreen)
   const setVoiceAudioDevice = useStore((s) => s.setVoiceAudioDevice)
   const setVoiceVideoDevice = useStore((s) => s.setVoiceVideoDevice)
   const setVoiceStageMode = useStore((s) => s.setVoiceStageMode)
@@ -162,6 +166,29 @@ export function VideoStage() {
     }
     return [...byUser.values()]
   }, [myConnId, room, speaking])
+
+  const screenShares = useMemo(() => {
+    const shares: { connId: string; userId: string; local: boolean; stream: MediaStream | null }[] =
+      []
+    for (const [connId, entry] of Object.entries(room ?? {})) {
+      if (!entry.screen_on) continue
+      const local = connId === myConnId
+      shares.push({
+        connId,
+        userId: entry.user_id,
+        local,
+        stream: local ? localScreenStream : remoteScreenStreams[connId] ?? null,
+      })
+    }
+    return shares
+  }, [room, myConnId, localScreenStream, remoteScreenStreams])
+
+  const activeScreen = screenShares[0] ?? null
+  const otherSharer = screenShares.find((share) => !share.local)
+  const someoneElseSharing = Boolean(otherSharer)
+  const otherSharerName = otherSharer
+    ? users[otherSharer.userId]?.display_name ?? 'Someone'
+    : ''
 
   if (!channelId) return null
   if (pip.pipWindow) {
@@ -301,7 +328,65 @@ export function VideoStage() {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {anyCamera ? (
+        {activeScreen ? (
+          <div className="flex h-full min-h-0 flex-col gap-2">
+            <div className="min-h-0 flex-1">
+              <ScreenTile
+                name={
+                  activeScreen.local
+                    ? me?.display_name ?? 'You'
+                    : users[activeScreen.userId]?.display_name ?? 'Participant'
+                }
+                stream={activeScreen.stream}
+                local={activeScreen.local}
+              />
+            </div>
+            {participants.length > 0 && (
+              <ul
+                aria-label="Call participants"
+                className="flex shrink-0 items-center gap-2 overflow-x-auto pt-0.5"
+              >
+                {participants.map((participant) => {
+                  const name =
+                    users[participant.userId]?.display_name ??
+                    (me?.id === participant.userId ? me.display_name : 'Participant')
+                  if (stageMode === 'compact') {
+                    return (
+                      <AudioTile
+                        key={participant.userId}
+                        userId={participant.userId}
+                        name={name}
+                        local={me?.id === participant.userId}
+                        muted={participant.muted}
+                        speaking={participant.speaking}
+                        size={40}
+                      />
+                    )
+                  }
+                  const local = participant.cameraConnId === myConnId
+                  const stream = local
+                    ? localStream
+                    : participant.cameraConnId
+                      ? remoteStreams[participant.cameraConnId]
+                      : null
+                  return (
+                    <li key={participant.userId} className="w-40 shrink-0">
+                      <VideoTile
+                        userId={participant.userId}
+                        name={name}
+                        stream={stream}
+                        local={local}
+                        muted={participant.muted}
+                        speaking={participant.speaking}
+                        compact
+                      />
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        ) : anyCamera ? (
           <div
             className={`mx-auto grid h-full auto-rows-fr gap-2 ${
               stageMode === 'expanded'
@@ -384,6 +469,20 @@ export function VideoStage() {
         >
           <CameraIcon off={cameraStatus === 'off'} />
         </DeviceControl>
+        <CallControl
+          label={
+            someoneElseSharing
+              ? `${otherSharerName} is sharing`
+              : screenStatus === 'on'
+                ? 'Stop sharing screen'
+                : 'Share screen'
+          }
+          active={screenStatus !== 'off'}
+          disabled={screenStatus === 'starting' || someoneElseSharing}
+          onClick={() => void toggleVoiceScreen()}
+        >
+          <ScreenShareIcon />
+        </CallControl>
         <CallControl label="Leave call" danger onClick={leaveVoice}>
           <LeaveIcon />
         </CallControl>
@@ -493,6 +592,51 @@ function VideoTile({
             <MicIcon off />
           </span>
         )}
+      </div>
+    </article>
+  )
+}
+
+function ScreenTile({
+  name,
+  stream,
+  local,
+}: {
+  name: string
+  stream: MediaStream | null
+  local: boolean
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const hasVideo = Boolean(stream?.getVideoTracks().length)
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    video.srcObject = hasVideo ? stream : null
+    if (hasVideo) void video.play().catch(() => {})
+  }, [hasVideo, stream])
+
+  return (
+    <article className="relative flex h-full w-full overflow-hidden rounded-2xl border border-[var(--color-border)] bg-black">
+      {hasVideo ? (
+        // Never mirrored; object-contain keeps the whole surface visible. Muted —
+        // remote system/tab audio plays via the engine's hidden screenAudio element.
+        <video
+          ref={videoRef}
+          data-voice-video
+          autoPlay
+          playsInline
+          muted
+          className="h-full w-full object-contain"
+        />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-sm text-[var(--color-text-dim)]">
+          Waiting for screen…
+        </div>
+      )}
+      <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/75 to-transparent px-3 pb-2.5 pt-6 text-sm font-medium text-white">
+        <ScreenShareIcon />
+        <span className="truncate">{local ? 'Your screen' : `${name}'s screen`}</span>
       </div>
     </article>
   )
@@ -817,6 +961,28 @@ function LeaveIcon() {
       <path d="M10 17 5 12l5-5" />
       <path d="M5 12h12" />
       <path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4" />
+    </svg>
+  )
+}
+
+function ScreenShareIcon() {
+  return (
+    <svg
+      width="17"
+      height="17"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="2" y="4" width="20" height="13" rx="2" />
+      <path d="M8 21h8" />
+      <path d="M12 17v4" />
+      <path d="m9 11 3-3 3 3" />
+      <path d="M12 8v6" />
     </svg>
   )
 }
