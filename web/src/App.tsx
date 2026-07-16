@@ -125,6 +125,10 @@ export function App() {
         >
           <Route index element={<Home />} />
           <Route path="c/:channelId" element={<MessagePane />} />
+          {/* Slack-style in-channel tabs: docs/canvas galleries that stay in
+              chat mode (channel sidebar stays put). */}
+          <Route path="c/:channelId/docs" element={<ChannelDocs />} />
+          <Route path="c/:channelId/canvas" element={<ChannelCanvases />} />
           <Route path="search" element={<SearchResults />} />
           <Route path="docs" element={<DocsHome />} />
           <Route path="docs/c/:channelId" element={<ChannelDocs />} />

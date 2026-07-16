@@ -30,11 +30,35 @@ const KIND_META: Record<
   },
 }
 
-export function InboxTrigger({ variant }: { variant: 'row' | 'icon' }) {
+export function InboxTrigger({ variant }: { variant: 'row' | 'icon' | 'header' }) {
   const open = useStore((s) => s.inboxOpen)
   const setInboxOpen = useStore((s) => s.setInboxOpen)
   const unread = useStore((s) => s.notifUnread)
   const dnd = useStore((s) => s.dnd)
+
+  if (variant === 'header') {
+    return (
+      <button
+        type="button"
+        onClick={() => setInboxOpen(!open)}
+        aria-label={unread > 0 ? `Inbox, ${unread} unread` : 'Inbox'}
+        aria-expanded={open}
+        title="Inbox"
+        className={`relative flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+          open
+            ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)] ring-1 ring-inset ring-[var(--color-accent)]'
+            : 'text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]'
+        }`}
+      >
+        <BellIcon dnd={dnd} />
+        {unread > 0 && !dnd && (
+          <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--color-accent)] px-1 text-[10px] font-bold leading-none text-white">
+            {unread > 99 ? '99+' : unread}
+          </span>
+        )}
+      </button>
+    )
+  }
 
   if (variant === 'icon') {
     return (

@@ -8,6 +8,8 @@ import { ThreadPanel } from './ThreadPanel'
 import { QuickSwitcher } from './QuickSwitcher'
 import { InboxPanel } from './NotificationCenter'
 import { VideoStage } from './voice/VideoStage'
+import { Onboarding } from './Onboarding'
+import { isOnboardingDone } from '../lib/onboarding'
 import { useStore } from '../store'
 
 const SIDEBAR_OPEN_KEY = 'sharp.sidebarOpen'
@@ -28,6 +30,7 @@ export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(
     () => window.localStorage.getItem(SIDEBAR_OPEN_KEY) !== 'false',
   )
+  const [onboarding, setOnboarding] = useState(() => !isOnboardingDone())
 
   const docsMode =
     location.pathname.startsWith('/docs') || location.pathname.startsWith('/d/')
@@ -101,6 +104,7 @@ export function AppShell() {
       {inVoice && <VideoStage />}
       <QuickSwitcher />
       {mode === 'chat' && <InboxPanel />}
+      {onboarding && <Onboarding onClose={() => setOnboarding(false)} />}
     </div>
   )
 }

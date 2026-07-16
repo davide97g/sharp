@@ -5,7 +5,6 @@ import { channelLabel } from '../lib/util'
 import { CreateChannelModal } from './CreateChannelModal'
 import { BrowseChannelsModal } from './BrowseChannelsModal'
 import { ChannelSettingsModal } from './ChannelSettingsModal'
-import { InboxTrigger } from './NotificationCenter'
 import { UserSettingsModal } from './UserSettingsModal'
 import { Avatar } from './Avatar'
 import type { Channel } from '../lib/types'
@@ -77,11 +76,7 @@ export function Sidebar() {
         />
       </form>
 
-      <div className="px-2 pt-3">
-        <InboxTrigger variant="row" />
-      </div>
-
-      <nav className="flex-1 overflow-y-auto px-2 py-3">
+      <nav className="flex-1 overflow-y-auto px-2 pb-3 pt-4">
         {/* channels */}
         <SectionHeader label="Channels">
           <IconButton title="Browse channels" onClick={() => setShowBrowse(true)}>

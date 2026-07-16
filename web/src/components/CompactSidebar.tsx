@@ -3,7 +3,6 @@ import { NavLink, useLocation } from 'react-router-dom'
 import { useStore } from '../store'
 import { channelLabel } from '../lib/util'
 import { Avatar } from './Avatar'
-import { InboxTrigger } from './NotificationCenter'
 import { UserSettingsModal } from './UserSettingsModal'
 import type { Channel } from '../lib/types'
 
@@ -68,8 +67,6 @@ export function CompactSidebar({ mode }: { mode: Mode }) {
         >
           <SearchIcon />
         </button>
-
-        {mode === 'chat' && <InboxTrigger variant="icon" />}
 
         {mode !== 'chat' && (
           <CompactLink

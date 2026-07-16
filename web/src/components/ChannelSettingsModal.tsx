@@ -71,6 +71,8 @@ function AboutTab({ channelId, onClose }: { channelId: string; onClose: () => vo
   const me = useStore((s) => s.me)
   const updateChannel = useStore((s) => s.updateChannel)
   const deleteChannel = useStore((s) => s.deleteChannel)
+  const muted = useStore((s) => s.mutedChannels.has(channelId))
+  const toggleMute = useStore((s) => s.toggleMute)
 
   const [name, setName] = useState(channel?.name ?? '')
   const [topic, setTopic] = useState(channel?.topic ?? '')
@@ -162,6 +164,39 @@ function AboutTab({ channelId, onClose }: { channelId: string; onClose: () => vo
             desc="Invite only"
           />
         </div>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <span className="text-xs font-medium text-[var(--color-text-dim)]">
+          Notifications
+        </span>
+        <button
+          type="button"
+          onClick={() => toggleMute(channel.id)}
+          className="flex items-center justify-between gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2.5 text-left hover:border-[var(--color-accent)]"
+        >
+          <span className="min-w-0">
+            <span className="block text-sm font-medium">Mute this channel</span>
+            <span className="block text-[11px] text-[var(--color-text-faint)]">
+              {muted
+                ? 'Muted — no unread badges, toasts, or push.'
+                : 'Silence unread badges, toasts, and push for this channel.'}
+            </span>
+          </span>
+          <span
+            role="switch"
+            aria-checked={muted}
+            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+              muted ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-border)]'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
+                muted ? 'translate-x-[18px]' : 'translate-x-0.5'
+              }`}
+            />
+          </span>
+        </button>
       </div>
 
       <div className="flex justify-end pt-1">

@@ -7,6 +7,8 @@ import { Composer } from './Composer'
 import { TypingRow } from './TypingRow'
 import { ChannelSettingsModal } from './ChannelSettingsModal'
 import { ChatLayoutChooser } from './ChatLayoutChooser'
+import { InboxTrigger } from './NotificationCenter'
+import { ChannelTabs } from './ChannelTabs'
 import { Avatar } from './Avatar'
 import { channelLabel, sameDay, withinMinutes } from '../lib/util'
 
@@ -20,8 +22,7 @@ export function MessagePane() {
   const loadMessages = useStore((s) => s.loadMessages)
   const loadOlder = useStore((s) => s.loadOlder)
   const markRead = useStore((s) => s.markRead)
-  const mutedChannels = useStore((s) => s.mutedChannels)
-  const toggleMute = useStore((s) => s.toggleMute)
+  const markChannelNotifsRead = useStore((s) => s.markChannelNotifsRead)
   const activeVoiceChannelId = useStore((s) => s.voice.channelId)
   const voiceStatus = useStore((s) => s.voice.status)
   const voiceRoom = useStore((s) => (channelId ? s.voiceRooms[channelId] : undefined))
@@ -45,6 +46,12 @@ export function MessagePane() {
     if (!st?.loaded && !st?.loading) loadMessages(channelId)
     return () => setCurrentChannel(null)
   }, [channelId, setCurrentChannel, loadMessages])
+
+  // Opening a channel means we've "seen" its notifications: clear this
+  // channel's inbox entries while leaving unread items from other channels.
+  useEffect(() => {
+    if (channelId) markChannelNotifsRead(channelId)
+  }, [channelId, markChannelNotifsRead])
 
   // Keyboard shortcuts acting on the hovered message (e: react, r: reply,
   // t: thread; Esc: cancel). Disabled while typing in an input/textarea.
@@ -237,16 +244,11 @@ export function MessagePane() {
               ⚙
             </button>
           )}
-          <button
-            onClick={() => toggleMute(channel.id)}
-            aria-label={mutedChannels.has(channel.id) ? 'Unmute this channel' : 'Mute this channel'}
-            title={mutedChannels.has(channel.id) ? 'Unmute this channel' : 'Mute this channel'}
-            className="rounded-md px-2 py-1 text-sm text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
-          >
-            {mutedChannels.has(channel.id) ? '🔕' : '🔔'}
-          </button>
+          <InboxTrigger variant="header" />
         </div>
       </header>
+
+      <ChannelTabs channelId={channel.id} active="chat" />
 
       {showSettings && !isDm && (
         <ChannelSettingsModal channelId={channel.id} onClose={() => setShowSettings(false)} />

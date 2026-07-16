@@ -1,9 +1,11 @@
 import { useEffect, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useStore } from '../../store'
-import { channelLabel, fmtDayDivider } from '../../lib/util'
+import { fmtDayDivider } from '../../lib/util'
 import { toastError } from '../../lib/toast'
 import type { Doc } from '../../lib/types'
+import { ChannelTabs } from '../ChannelTabs'
+import { ChannelPaneHeader } from '../ChannelPaneHeader'
 
 export function ChannelCanvases() {
   const { channelId } = useParams<{ channelId: string }>()
@@ -49,17 +51,19 @@ export function ChannelCanvases() {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
-      <header className="flex h-14 items-center gap-2 border-b border-[var(--color-border)] px-5">
-        <span className="text-[var(--color-text-faint)]">#</span>
-        <span className="font-semibold">{channelLabel(channel)}</span>
-        <span className="text-sm text-[var(--color-text-dim)]">canvases</span>
-        <button
-          onClick={newCanvas}
-          className="ml-auto rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)]"
-        >
-          + New canvas
-        </button>
-      </header>
+      <ChannelPaneHeader
+        channel={channel}
+        actions={
+          <button
+            onClick={newCanvas}
+            className="rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)]"
+          >
+            + New canvas
+          </button>
+        }
+      />
+
+      <ChannelTabs channelId={channelId} active="canvas" />
 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-4xl px-6 py-6">
@@ -81,18 +85,16 @@ export function ChannelCanvases() {
                 </button>
               </div>
             ) : (
-              <div className="space-y-1.5">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
                 {canvases?.map((d) => (
                   <button
                     key={d.id}
                     onClick={() => navigate(`/x/${d.id}`)}
-                    className="flex w-full items-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-4 py-3 text-left transition hover:border-[var(--color-accent)] hover:bg-[var(--color-panel-2)]"
+                    className="flex h-40 flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-4 text-left transition hover:border-[var(--color-accent)] hover:bg-[var(--color-panel-2)]"
                   >
-                    <span className="text-xl">{d.icon || '🎨'}</span>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium">{d.title || 'Untitled'}</div>
-                    </div>
-                    <span className="shrink-0 text-[11px] text-[var(--color-text-faint)]">
+                    <span className="text-3xl">{d.icon || '🎨'}</span>
+                    <div className="mt-2 line-clamp-2 font-medium">{d.title || 'Untitled'}</div>
+                    <span className="mt-auto pt-2 text-[11px] text-[var(--color-text-faint)]">
                       {fmtDayDivider(d.updated_at)}
                     </span>
                   </button>

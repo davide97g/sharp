@@ -250,6 +250,7 @@ type State = {
   loadMoreNotifications: () => Promise<void>
   markNotifRead: (id: string) => void
   markAllNotifRead: () => void
+  markChannelNotifsRead: (channelId: string) => void
   setDnd: (dnd: boolean) => Promise<void>
   toggleMute: (channelId: string) => Promise<void>
   enableDesktopNotifications: () => Promise<void>
@@ -1109,6 +1110,22 @@ export const useStore = create<State>((set, get) => ({
     api.markNotificationsRead({ all: true }).catch(() => {})
   },
 
+  markChannelNotifsRead(channelId) {
+    const ids = get()
+      .notifications.filter((n) => !n.read_at && n.channel_id === channelId)
+      .map((n) => n.id)
+    if (ids.length === 0) return
+    const idSet = new Set(ids)
+    const now = new Date().toISOString()
+    set((s) => ({
+      notifications: s.notifications.map((n) =>
+        idSet.has(n.id) ? { ...n, read_at: n.read_at ?? now } : n,
+      ),
+      notifUnread: Math.max(0, s.notifUnread - ids.length),
+    }))
+    api.markNotificationsRead({ ids }).catch(() => {})
+  },
+
   async setDnd(dnd) {
     set({ dnd })
     try {
@@ -1501,24 +1518,33 @@ export const useStore = create<State>((set, get) => ({
       }
       case 'notification.created': {
         const { notification } = env.payload as NotificationCreatedPayload
-        set((s) => {
-          const exists = s.notifications.some((n) => n.id === notification.id)
-          return {
-            notifications: [
-              notification,
-              ...s.notifications.filter((n) => n.id !== notification.id),
-            ],
-            notifUnread:
-              !exists && !notification.read_at ? s.notifUnread + 1 : s.notifUnread,
-          }
-        })
-        // Alert (toast + OS notification) unless DND, or the message's channel is
-        // already open in a focused window.
-        const st = get()
+        // If its channel is already open in a focused window, treat it as seen:
+        // land it in the inbox pre-read so it never lingers as unread.
         const focusedHere =
           typeof document !== 'undefined' &&
           document.hasFocus() &&
-          st.currentChannelId === notification.channel_id
+          get().currentChannelId === notification.channel_id
+        const incoming =
+          focusedHere && !notification.read_at
+            ? { ...notification, read_at: new Date().toISOString() }
+            : notification
+        set((s) => {
+          const exists = s.notifications.some((n) => n.id === incoming.id)
+          return {
+            notifications: [
+              incoming,
+              ...s.notifications.filter((n) => n.id !== incoming.id),
+            ],
+            notifUnread:
+              !exists && !incoming.read_at ? s.notifUnread + 1 : s.notifUnread,
+          }
+        })
+        if (focusedHere && !notification.read_at) {
+          api.markNotificationsRead({ ids: [notification.id] }).catch(() => {})
+        }
+        // Alert (toast + OS notification) unless DND, or the message's channel is
+        // already open in a focused window.
+        const st = get()
         if (!st.dnd && !focusedHere) {
           const title =
             notification.kind === 'dm'
