@@ -263,7 +263,10 @@ type State = {
   pruneTyping: () => void
 
   // voice actions
-  joinVoice: (channelId: string) => Promise<void>
+  joinVoice: (
+    channelId: string,
+    opts?: { stageMode?: VoiceStageMode },
+  ) => Promise<void>
   leaveVoice: () => void
   toggleVoiceMute: () => void
   toggleVoiceCamera: () => void
@@ -886,7 +889,7 @@ export const useStore = create<State>((set, get) => ({
     if (changed) set({ typing: next })
   },
 
-  async joinVoice(channelId) {
+  async joinVoice(channelId, opts) {
     if (get().voice.channelId) get().leaveVoice()
 
     const { me, myConnId, ws } = get()
@@ -903,7 +906,7 @@ export const useStore = create<State>((set, get) => ({
         speaking: {},
         cameraStatus: 'off',
         screenStatus: 'off',
-        stageMode: 'expanded',
+        stageMode: opts?.stageMode ?? 'expanded',
         audioDeviceId: null,
         videoDeviceId: null,
         localStream: null,
@@ -1493,7 +1496,11 @@ export const useStore = create<State>((set, get) => ({
             toastNotify('started a huddle', {
               title: who,
               initial: who.trim().charAt(0).toUpperCase() || '?',
-              onClick: () => navigateToChannel(channel.id),
+              onClick: () => {
+                navigateToChannel(channel.id)
+                // Mic only — no camera; mini widget keeps it audio-first.
+                void get().joinVoice(channel.id, { stageMode: 'mini' })
+              },
             })
             playHuddleRingSound()
           }
