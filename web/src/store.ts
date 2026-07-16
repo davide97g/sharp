@@ -74,7 +74,7 @@ export type VoiceRoom = Record<
   }
 >
 
-export type VoiceStageMode = 'expanded' | 'compact' | 'mini'
+export type VoiceStageMode = 'expanded' | 'compact' | 'mini' | 'full'
 
 type VoiceState = {
   channelId: string | null

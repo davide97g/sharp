@@ -3,6 +3,7 @@ import { useStore, type VoiceStageMode } from '../../store'
 import { channelLabel } from '../../lib/util'
 import { Avatar } from '../Avatar'
 import { VoiceMiniWidget } from './VoiceMiniWidget'
+import { CallChatRail } from './CallChatRail'
 import { useVoicePip } from './VoicePip'
 
 type StageParticipant = {
@@ -18,8 +19,18 @@ type MediaDeviceOption = {
   label: string
 }
 
+// Adaptive video grid: how many columns for N tiles so everything fits and
+// partial last rows can be centered. 1→1, 2→2, 3→3 across, 4→2x2, else √n.
+function gridColsFor(count: number): number {
+  if (count <= 1) return 1
+  if (count === 2) return 2
+  if (count === 3) return 3
+  if (count === 4) return 2
+  return Math.ceil(Math.sqrt(count))
+}
+
 const STAGE_SIZE: Record<
-  Exclude<VoiceStageMode, 'mini'>,
+  Exclude<VoiceStageMode, 'mini' | 'full'>,
   { width: string; height: string; minWidth: number; minHeight: number }
 > = {
   expanded: {
@@ -73,6 +84,7 @@ export function VideoStage() {
   } | null>(null)
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
   const [dragging, setDragging] = useState(false)
+  const [chatOpen, setChatOpen] = useState(true)
   const hasFallbackVideo = Boolean(
     localStream?.getVideoTracks().length ||
       Object.values(remoteStreams).some((stream) => stream.getVideoTracks().length > 0),
@@ -121,6 +133,19 @@ export function VideoStage() {
   useEffect(() => {
     setPosition(null)
   }, [stageMode])
+
+  // Esc leaves full screen (Slack-style). Skip if something already handled the
+  // key (e.g. the composer closing its mention picker calls preventDefault).
+  useEffect(() => {
+    if (stageMode !== 'full') return
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      event.preventDefault()
+      setVoiceStageMode('expanded')
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [stageMode, setVoiceStageMode])
 
   useEffect(() => {
     function onResize() {
@@ -213,8 +238,252 @@ export function VideoStage() {
       : `# ${channel.name}`
     : 'Call'
   const anyCamera = participants.some((p) => p.cameraConnId)
+  const avatarSize = stageMode === 'compact' ? 56 : 88
+  const cols = gridColsFor(participants.length)
+  const headerBtnClass =
+    'flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-dim)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]'
+
+  const stageBody = activeScreen ? (
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      <div className="min-h-0 flex-1">
+        <ScreenTile
+          name={
+            activeScreen.local
+              ? me?.display_name ?? 'You'
+              : users[activeScreen.userId]?.display_name ?? 'Participant'
+          }
+          stream={activeScreen.stream}
+          local={activeScreen.local}
+        />
+      </div>
+      {participants.length > 0 && (
+        <ul
+          aria-label="Call participants"
+          className="flex shrink-0 items-center gap-2 overflow-x-auto pt-0.5"
+        >
+          {participants.map((participant) => {
+            const name =
+              users[participant.userId]?.display_name ??
+              (me?.id === participant.userId ? me.display_name : 'Participant')
+            if (stageMode === 'compact') {
+              return (
+                <AudioTile
+                  key={participant.userId}
+                  userId={participant.userId}
+                  name={name}
+                  local={me?.id === participant.userId}
+                  muted={participant.muted}
+                  speaking={participant.speaking}
+                  size={40}
+                />
+              )
+            }
+            const local = participant.cameraConnId === myConnId
+            const stream = local
+              ? localStream
+              : participant.cameraConnId
+                ? remoteStreams[participant.cameraConnId]
+                : null
+            return (
+              <li key={participant.userId} className="w-40 shrink-0">
+                <VideoTile
+                  userId={participant.userId}
+                  name={name}
+                  stream={stream}
+                  local={local}
+                  muted={participant.muted}
+                  speaking={participant.speaking}
+                  compact
+                />
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  ) : anyCamera ? (
+    // Adaptive grid via flex-wrap: `cols` tiles per row (see gridColsFor) sized to
+    // fill the row width, so a partial final row stays centered.
+    <div className="flex h-full flex-wrap content-center items-center justify-center gap-3">
+      {participants.map((participant) => {
+        const local = participant.cameraConnId === myConnId
+        const stream = local
+          ? localStream
+          : participant.cameraConnId
+            ? remoteStreams[participant.cameraConnId]
+            : null
+        const name =
+          users[participant.userId]?.display_name ??
+          (me?.id === participant.userId ? me.display_name : 'Participant')
+        return (
+          <div
+            key={participant.userId}
+            className="min-w-0 shrink-0"
+            style={{ width: `calc((100% - ${(cols - 1) * 0.75}rem) / ${cols})` }}
+          >
+            <VideoTile
+              userId={participant.userId}
+              name={name}
+              stream={stream}
+              local={local}
+              muted={participant.muted}
+              speaking={participant.speaking}
+              compact={stageMode === 'compact'}
+            />
+          </div>
+        )
+      })}
+    </div>
+  ) : (
+    <ul
+      aria-label={`${participants.length} participants`}
+      className="flex h-full flex-wrap content-center items-center justify-center gap-5 py-4"
+    >
+      {participants.map((participant) => {
+        const name =
+          users[participant.userId]?.display_name ??
+          (me?.id === participant.userId ? me.display_name : 'Participant')
+        return (
+          <AudioTile
+            key={participant.userId}
+            userId={participant.userId}
+            name={name}
+            local={me?.id === participant.userId}
+            muted={participant.muted}
+            speaking={participant.speaking}
+            size={avatarSize}
+          />
+        )
+      })}
+    </ul>
+  )
+
+  const stageControls = (
+    <>
+      <DeviceControl
+        label={muted ? 'Unmute microphone' : 'Mute microphone'}
+        menuLabel="Choose microphone"
+        active={muted}
+        onClick={toggleVoiceMute}
+        devices={mics}
+        selectedDeviceId={audioDeviceId}
+        onSelectDevice={(deviceId) => void setVoiceAudioDevice(deviceId)}
+        menuPlacement="up"
+      >
+        <MicIcon off={muted} />
+      </DeviceControl>
+      <DeviceControl
+        label={cameraStatus === 'on' ? 'Turn camera off' : 'Turn camera on'}
+        menuLabel="Choose camera"
+        active={cameraStatus !== 'off'}
+        disabled={cameraStatus === 'starting'}
+        onClick={toggleVoiceCamera}
+        devices={cameras}
+        selectedDeviceId={videoDeviceId}
+        onSelectDevice={(deviceId) => void setVoiceVideoDevice(deviceId)}
+        menuPlacement="up"
+      >
+        <CameraIcon off={cameraStatus === 'off'} />
+      </DeviceControl>
+      <CallControl
+        label={
+          someoneElseSharing
+            ? `${otherSharerName} is sharing`
+            : screenStatus === 'on'
+              ? 'Stop sharing screen'
+              : 'Share screen'
+        }
+        active={screenStatus !== 'off'}
+        disabled={screenStatus === 'starting' || someoneElseSharing}
+        onClick={() => void toggleVoiceScreen()}
+      >
+        <ScreenShareIcon />
+      </CallControl>
+      <CallControl label="Leave call" danger onClick={leaveVoice}>
+        <LeaveIcon />
+      </CallControl>
+    </>
+  )
+
+  if (stageMode === 'full') {
+    return (
+      <section
+        aria-label={`${roomName} huddle`}
+        className="fixed inset-0 z-[60] flex bg-black text-[var(--color-text)]"
+      >
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          <header className="flex h-14 shrink-0 items-center gap-3 px-5">
+            <div className="min-w-0">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--color-text-faint)]">
+                Huddle
+              </div>
+              <div className="truncate text-sm font-semibold">{roomName}</div>
+            </div>
+            <div className="ml-auto flex items-center gap-1">
+              {pip.supported && (
+                <button
+                  type="button"
+                  aria-label="Open picture-in-picture"
+                  title="Picture-in-picture"
+                  onClick={() => void pip.open()}
+                  className={headerBtnClass}
+                >
+                  <PipIcon />
+                </button>
+              )}
+              <button
+                type="button"
+                aria-label={chatOpen ? 'Hide chat' : 'Show chat'}
+                title={chatOpen ? 'Hide chat' : 'Show chat'}
+                aria-pressed={chatOpen}
+                onClick={() => setChatOpen((value) => !value)}
+                className={headerBtnClass}
+              >
+                <ChatIcon />
+              </button>
+              <button
+                type="button"
+                aria-label="Minimize call"
+                title="Minimize"
+                onClick={() => setVoiceStageMode('mini')}
+                className={headerBtnClass}
+              >
+                <MinimizeIcon />
+              </button>
+              <button
+                type="button"
+                aria-label="Exit full screen"
+                title="Exit full screen (Esc)"
+                onClick={() => setVoiceStageMode('expanded')}
+                className={headerBtnClass}
+              >
+                <ReduceIcon />
+              </button>
+            </div>
+          </header>
+
+          <div className="min-h-0 flex-1 overflow-hidden px-8 pb-24 pt-2">{stageBody}</div>
+
+          <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center">
+            <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-ink)]/90 px-3 py-2 shadow-2xl backdrop-blur">
+              {stageControls}
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="shrink-0 overflow-hidden border-l border-[var(--color-border)] bg-[var(--color-ink)] transition-[width] duration-200 ease-out motion-reduce:transition-none"
+          style={{ width: chatOpen ? 380 : 0 }}
+        >
+          <div className="h-full w-[380px]">
+            <CallChatRail channelId={channelId} />
+          </div>
+        </div>
+      </section>
+    )
+  }
+
   const size = STAGE_SIZE[stageMode]
-  const avatarSize = stageMode === 'expanded' ? 88 : 56
 
   const onHeaderPointerDown = (event: React.PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return
@@ -318,174 +587,28 @@ export function VideoStage() {
         </button>
         <button
           type="button"
+          aria-label="Full screen"
+          title="Full screen"
+          onClick={() => setVoiceStageMode('full')}
+          className={headerBtnClass}
+        >
+          <FullscreenIcon />
+        </button>
+        <button
+          type="button"
           aria-label="Minimize call"
           title="Minimize"
           onClick={() => setVoiceStageMode('mini')}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-dim)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+          className={headerBtnClass}
         >
           <MinimizeIcon />
         </button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {activeScreen ? (
-          <div className="flex h-full min-h-0 flex-col gap-2">
-            <div className="min-h-0 flex-1">
-              <ScreenTile
-                name={
-                  activeScreen.local
-                    ? me?.display_name ?? 'You'
-                    : users[activeScreen.userId]?.display_name ?? 'Participant'
-                }
-                stream={activeScreen.stream}
-                local={activeScreen.local}
-              />
-            </div>
-            {participants.length > 0 && (
-              <ul
-                aria-label="Call participants"
-                className="flex shrink-0 items-center gap-2 overflow-x-auto pt-0.5"
-              >
-                {participants.map((participant) => {
-                  const name =
-                    users[participant.userId]?.display_name ??
-                    (me?.id === participant.userId ? me.display_name : 'Participant')
-                  if (stageMode === 'compact') {
-                    return (
-                      <AudioTile
-                        key={participant.userId}
-                        userId={participant.userId}
-                        name={name}
-                        local={me?.id === participant.userId}
-                        muted={participant.muted}
-                        speaking={participant.speaking}
-                        size={40}
-                      />
-                    )
-                  }
-                  const local = participant.cameraConnId === myConnId
-                  const stream = local
-                    ? localStream
-                    : participant.cameraConnId
-                      ? remoteStreams[participant.cameraConnId]
-                      : null
-                  return (
-                    <li key={participant.userId} className="w-40 shrink-0">
-                      <VideoTile
-                        userId={participant.userId}
-                        name={name}
-                        stream={stream}
-                        local={local}
-                        muted={participant.muted}
-                        speaking={participant.speaking}
-                        compact
-                      />
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-          </div>
-        ) : anyCamera ? (
-          <div
-            className={`mx-auto grid h-full auto-rows-fr gap-2 ${
-              stageMode === 'expanded'
-                ? 'max-w-6xl grid-cols-1 sm:grid-cols-2 xl:grid-cols-3'
-                : 'grid-cols-1 sm:grid-cols-2'
-            }`}
-          >
-            {participants.map((participant) => {
-              const local = participant.cameraConnId === myConnId
-              const stream = local
-                ? localStream
-                : participant.cameraConnId
-                  ? remoteStreams[participant.cameraConnId]
-                  : null
-              const name =
-                users[participant.userId]?.display_name ??
-                (me?.id === participant.userId ? me.display_name : 'Participant')
-              return (
-                <VideoTile
-                  key={participant.userId}
-                  userId={participant.userId}
-                  name={name}
-                  stream={stream}
-                  local={local}
-                  muted={participant.muted}
-                  speaking={participant.speaking}
-                  compact={stageMode === 'compact'}
-                />
-              )
-            })}
-          </div>
-        ) : (
-          <ul
-            aria-label={`${participants.length} participants`}
-            className="flex h-full flex-wrap items-center justify-center gap-5 py-4"
-          >
-            {participants.map((participant) => {
-              const name =
-                users[participant.userId]?.display_name ??
-                (me?.id === participant.userId ? me.display_name : 'Participant')
-              return (
-                <AudioTile
-                  key={participant.userId}
-                  userId={participant.userId}
-                  name={name}
-                  local={me?.id === participant.userId}
-                  muted={participant.muted}
-                  speaking={participant.speaking}
-                  size={avatarSize}
-                />
-              )
-            })}
-          </ul>
-        )}
-      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">{stageBody}</div>
 
       <footer className="flex shrink-0 items-center justify-center gap-2 border-t border-[var(--color-border)] px-3 py-2.5">
-        <DeviceControl
-          label={muted ? 'Unmute microphone' : 'Mute microphone'}
-          menuLabel="Choose microphone"
-          active={muted}
-          onClick={toggleVoiceMute}
-          devices={mics}
-          selectedDeviceId={audioDeviceId}
-          onSelectDevice={(deviceId) => void setVoiceAudioDevice(deviceId)}
-          menuPlacement="up"
-        >
-          <MicIcon off={muted} />
-        </DeviceControl>
-        <DeviceControl
-          label={cameraStatus === 'on' ? 'Turn camera off' : 'Turn camera on'}
-          menuLabel="Choose camera"
-          active={cameraStatus !== 'off'}
-          disabled={cameraStatus === 'starting'}
-          onClick={toggleVoiceCamera}
-          devices={cameras}
-          selectedDeviceId={videoDeviceId}
-          onSelectDevice={(deviceId) => void setVoiceVideoDevice(deviceId)}
-          menuPlacement="up"
-        >
-          <CameraIcon off={cameraStatus === 'off'} />
-        </DeviceControl>
-        <CallControl
-          label={
-            someoneElseSharing
-              ? `${otherSharerName} is sharing`
-              : screenStatus === 'on'
-                ? 'Stop sharing screen'
-                : 'Share screen'
-          }
-          active={screenStatus !== 'off'}
-          disabled={screenStatus === 'starting' || someoneElseSharing}
-          onClick={() => void toggleVoiceScreen()}
-        >
-          <ScreenShareIcon />
-        </CallControl>
-        <CallControl label="Leave call" danger onClick={leaveVoice}>
-          <LeaveIcon />
-        </CallControl>
+        {stageControls}
       </footer>
     </section>
   )
@@ -550,7 +673,6 @@ function VideoTile({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const hasVideo = Boolean(stream?.getVideoTracks().length)
-  const minH = compact ? 'min-h-28' : 'min-h-40'
 
   useEffect(() => {
     const video = videoRef.current
@@ -561,7 +683,7 @@ function VideoTile({
 
   return (
     <article
-      className={`relative flex overflow-hidden rounded-2xl border bg-[var(--color-panel)] ${minH} ${
+      className={`relative flex aspect-video w-full overflow-hidden rounded-2xl border bg-[var(--color-panel)] ${
         speaking ? 'border-[#4fbf9f] ring-2 ring-[#4fbf9f]/30' : 'border-[var(--color-border)]'
       }`}
     >
@@ -573,12 +695,10 @@ function VideoTile({
           autoPlay
           playsInline
           muted
-          className={`h-full w-full object-cover ${minH} ${local ? '-scale-x-100' : ''}`}
+          className={`h-full w-full object-cover ${local ? '-scale-x-100' : ''}`}
         />
       ) : (
-        <div
-          className={`flex w-full items-center justify-center bg-[radial-gradient(circle_at_top,var(--color-panel-2),var(--color-panel))] ${minH}`}
-        >
+        <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,var(--color-panel-2),var(--color-panel))]">
           <Avatar id={userId} name={name} size={compact ? 48 : 64} />
         </div>
       )}
@@ -842,6 +962,45 @@ function ExpandIcon() {
       <path d="m21 3-7 7" />
       <path d="M9 21H3v-6" />
       <path d="m3 21 7-7" />
+    </svg>
+  )
+}
+
+function FullscreenIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+      <path d="M21 8V5a2 2 0 0 0-2-2h-3" />
+      <path d="M3 16v3a2 2 0 0 0 2 2h3" />
+      <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+    </svg>
+  )
+}
+
+function ChatIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </svg>
   )
 }
