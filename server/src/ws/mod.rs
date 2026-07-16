@@ -1,7 +1,7 @@
 pub mod session;
 pub mod voice;
 
-use crate::auth::verify_token;
+use crate::auth::verify_claims;
 use crate::error::AppResult;
 use crate::state::SharedState;
 use axum::extract::ws::{Message, WebSocketUpgrade};
@@ -179,14 +179,37 @@ pub struct WsQuery {
     pub token: String,
 }
 
+/// Session context for a public voice-link guest. A guest is scoped to exactly
+/// one channel's voice room and carries its display name in the token.
+pub struct GuestInfo {
+    pub name: String,
+    pub channel_id: Uuid,
+    pub link: String,
+}
+
 pub async fn ws_handler(
     State(state): State<SharedState>,
     Query(params): Query<WsQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    let user_id = match verify_token(&params.token, &state.config.jwt_secret) {
-        Some(id) => id,
+    let (claims, user_id) = match verify_claims(&params.token, &state.config.jwt_secret) {
+        Some(parsed) => parsed,
         None => return (StatusCode::UNAUTHORIZED, "invalid token").into_response(),
     };
-    ws.on_upgrade(move |socket| session::handle_socket(socket, state, user_id))
+
+    let guest = if claims.guest {
+        match (claims.channel_id, claims.link) {
+            (Some(channel_id), Some(link)) => Some(GuestInfo {
+                name: claims.name.unwrap_or_default(),
+                channel_id,
+                link,
+            }),
+            // A guest token missing its binding is malformed — reject it.
+            _ => return (StatusCode::UNAUTHORIZED, "invalid token").into_response(),
+        }
+    } else {
+        None
+    };
+
+    ws.on_upgrade(move |socket| session::handle_socket(socket, state, user_id, guest))
 }

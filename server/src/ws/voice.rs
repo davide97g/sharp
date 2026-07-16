@@ -1,10 +1,11 @@
 use crate::routes::is_member;
 use crate::state::SharedState;
-use crate::ws::{channel_member_ids, envelope, WsSender};
+use crate::ws::{channel_member_ids, envelope, GuestInfo, WsSender};
 use axum::extract::ws::Message;
 use serde::Serialize;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use sqlx::Row;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use uuid::Uuid;
 
@@ -16,10 +17,53 @@ const MAX_SCREENS: usize = 1;
 pub struct VoiceParticipant {
     pub conn_id: Uuid,
     pub user_id: Uuid,
+    pub display_name: String,
+    pub guest: bool,
     pub muted: bool,
     pub camera_on: bool,
     pub screen_on: bool,
     pub screen_stream_id: Option<String>,
+}
+
+/// Resolve the audience for a voice broadcast: the union of the channel's
+/// members and the user-ids currently in the room (so guests, who are not
+/// channel members, still receive participant events), plus any extra ids the
+/// caller supplies (e.g. a just-removed participant for `participant_left`).
+async fn voice_targets(state: &SharedState, channel_id: Uuid, extra: &[Uuid]) -> Vec<Uuid> {
+    let mut ids: HashSet<Uuid> = HashSet::new();
+    match channel_member_ids(&state.pool, channel_id).await {
+        Ok(members) => ids.extend(members),
+        Err(error) => {
+            // Still deliver to in-room users (incl. guests) even if the member
+            // lookup fails, so live events aren't silently dropped.
+            tracing::warn!("voice room {} member lookup failed: {}", channel_id, error);
+        }
+    }
+    {
+        let guard = state.voice_rooms.lock().unwrap();
+        if let Some(room) = guard.get(&channel_id) {
+            for participant in room.participants.values() {
+                ids.insert(participant.user_id);
+            }
+        }
+    }
+    ids.extend(extra.iter().copied());
+    ids.into_iter().collect()
+}
+
+/// Fetch a channel's current voice-link token (used to validate guest joins).
+async fn current_voice_link_token(
+    pool: &sqlx::PgPool,
+    channel_id: Uuid,
+) -> Result<Option<String>, sqlx::Error> {
+    let row = sqlx::query("SELECT voice_link_token FROM channels WHERE id = $1")
+        .bind(channel_id)
+        .fetch_optional(pool)
+        .await?;
+    match row {
+        Some(row) => row.try_get::<Option<String>, _>("voice_link_token"),
+        None => Ok(None),
+    }
 }
 
 #[derive(Default)]
@@ -51,16 +95,19 @@ pub fn snapshot_all(state: &SharedState) -> Value {
         .collect::<Vec<_>>())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_voice_event(
     state: &SharedState,
     user_id: Uuid,
     conn_id: Uuid,
+    display_name: &str,
+    guest: Option<&GuestInfo>,
     event_type: &str,
     payload: Value,
     tx: &WsSender,
 ) {
     match event_type {
-        "voice.join" => handle_join(state, user_id, conn_id, &payload, tx).await,
+        "voice.join" => handle_join(state, user_id, conn_id, display_name, guest, &payload, tx).await,
         "voice.leave" => handle_leave(state, user_id, conn_id, &payload, tx).await,
         "voice.mute" => handle_mute(state, conn_id, &payload, tx).await,
         "voice.camera" => handle_camera(state, conn_id, &payload, tx).await,
@@ -112,13 +159,9 @@ pub async fn remove_member_from_room(state: &SharedState, channel_id: Uuid, user
     };
     removed.sort_by_key(|participant| participant.conn_id);
 
-    let targets = match channel_member_ids(&state.pool, channel_id).await {
-        Ok(targets) => targets,
-        Err(error) => {
-            tracing::warn!("voice room {} member lookup failed: {}", channel_id, error);
-            return;
-        }
-    };
+    // Include removed (possibly-guest) user-ids so they receive their leave event.
+    let extra: Vec<Uuid> = removed.iter().map(|p| p.user_id).collect();
+    let targets = voice_targets(state, channel_id, &extra).await;
     for participant in removed {
         let event = participant_left_event(channel_id, participant.conn_id, participant.user_id);
         state.hub.broadcast(event, targets.clone()).await;
@@ -135,43 +178,64 @@ pub async fn close_room(state: &SharedState, channel_id: Uuid) {
     };
     removed.sort_by_key(|participant| participant.conn_id);
 
-    let targets = match channel_member_ids(&state.pool, channel_id).await {
-        Ok(targets) => targets,
-        Err(error) => {
-            tracing::warn!("voice room {} member lookup failed: {}", channel_id, error);
-            return;
-        }
-    };
+    // Room is gone from the map, so seed targets with all removed user-ids
+    // (members + guests) to guarantee delivery of the leave events.
+    let extra: Vec<Uuid> = removed.iter().map(|p| p.user_id).collect();
+    let targets = voice_targets(state, channel_id, &extra).await;
     for participant in removed {
         let event = participant_left_event(channel_id, participant.conn_id, participant.user_id);
         state.hub.broadcast(event, targets.clone()).await;
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_join(
     state: &SharedState,
     user_id: Uuid,
     conn_id: Uuid,
+    display_name: &str,
+    guest: Option<&GuestInfo>,
     payload: &Value,
     tx: &WsSender,
 ) {
     let Some(channel_id) = channel_id(payload) else {
         return;
     };
-    match is_member(&state.pool, channel_id, user_id).await {
-        Ok(true) => {}
-        Ok(false) => {
-            send_error(tx, channel_id, "not_member");
-            return;
-        }
-        Err(error) => {
-            tracing::warn!(
-                "voice room {} membership check failed: {}",
-                channel_id,
-                error
-            );
-            return;
-        }
+
+    // Access control: guests must present a link matching the channel's CURRENT
+    // voice link (regenerating the link revokes them); registered users must be
+    // channel members.
+    match guest {
+        Some(g) => match current_voice_link_token(&state.pool, channel_id).await {
+            Ok(Some(current)) if current == g.link => {}
+            Ok(_) => {
+                send_error(tx, channel_id, "link_revoked");
+                return;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    "voice room {} link lookup failed: {}",
+                    channel_id,
+                    error
+                );
+                return;
+            }
+        },
+        None => match is_member(&state.pool, channel_id, user_id).await {
+            Ok(true) => {}
+            Ok(false) => {
+                send_error(tx, channel_id, "not_member");
+                return;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    "voice room {} membership check failed: {}",
+                    channel_id,
+                    error
+                );
+                return;
+            }
+        },
     }
 
     let result = {
@@ -185,6 +249,8 @@ async fn handle_join(
             let participant = VoiceParticipant {
                 conn_id,
                 user_id,
+                display_name: display_name.to_string(),
+                guest: guest.is_some(),
                 muted: false,
                 camera_on: false,
                 screen_on: false,
@@ -208,13 +274,7 @@ async fn handle_join(
     };
 
     send_state(tx, channel_id, participants);
-    let targets = match channel_member_ids(&state.pool, channel_id).await {
-        Ok(targets) => targets,
-        Err(error) => {
-            tracing::warn!("voice room {} member lookup failed: {}", channel_id, error);
-            return;
-        }
-    };
+    let targets = voice_targets(state, channel_id, &[]).await;
     let event = envelope(
         "voice.participant_joined",
         json!({
@@ -417,13 +477,7 @@ async fn broadcast_participant_updated(
     channel_id: Uuid,
     participant: VoiceParticipant,
 ) {
-    let targets = match channel_member_ids(&state.pool, channel_id).await {
-        Ok(targets) => targets,
-        Err(error) => {
-            tracing::warn!("voice room {} member lookup failed: {}", channel_id, error);
-            return;
-        }
-    };
+    let targets = voice_targets(state, channel_id, &[]).await;
     let event = envelope(
         "voice.participant_updated",
         json!({
@@ -545,13 +599,9 @@ async fn broadcast_participant_left(
     conn_id: Uuid,
     user_id: Uuid,
 ) {
-    let targets = match channel_member_ids(&state.pool, channel_id).await {
-        Ok(targets) => targets,
-        Err(error) => {
-            tracing::warn!("voice room {} member lookup failed: {}", channel_id, error);
-            return;
-        }
-    };
+    // The participant is already removed from the room map, so include their id
+    // explicitly to guarantee they receive their own leave event.
+    let targets = voice_targets(state, channel_id, &[user_id]).await;
     let event = participant_left_event(channel_id, conn_id, user_id);
     state.hub.broadcast(event, targets).await;
 }
@@ -564,6 +614,8 @@ mod tests {
         VoiceParticipant {
             conn_id: Uuid::new_v4(),
             user_id: Uuid::new_v4(),
+            display_name: "Tester".to_string(),
+            guest: false,
             muted: false,
             camera_on,
             screen_on: false,
@@ -584,6 +636,8 @@ mod tests {
         VoiceParticipant {
             conn_id: Uuid::new_v4(),
             user_id: Uuid::new_v4(),
+            display_name: "Tester".to_string(),
+            guest: false,
             muted: false,
             camera_on: false,
             screen_on,

@@ -114,6 +114,17 @@ export type NotificationsResponse = {
 export type VapidResponse = { public_key: string | null }
 export type IceConfigResponse = { ice_servers: RTCIceServer[] }
 
+// --- Public guest call links ---
+export type VoiceLinkResponse = { token: string | null }
+export type VoiceLinkCreateResponse = { token: string }
+export type CallLinkInfoResponse = { channel_name: string }
+export type CallLinkJoinResponse = {
+  token: string // guest JWT (12h)
+  channel_id: string
+  user_id: string
+  name: string
+}
+
 export type ApiError = { error: { code: string; message: string } }
 
 // --- WebSocket envelope ---
@@ -123,6 +134,10 @@ export type WsEnvelope<P = unknown> = { type: string; payload: P }
 export type VoiceParticipant = {
   conn_id: string
   user_id: string
+  // Server-filled for every participant (members + guests).
+  display_name: string
+  // True for unregistered visitors who joined via a public call link.
+  guest: boolean
   muted: boolean
   camera_on: boolean
   screen_on: boolean

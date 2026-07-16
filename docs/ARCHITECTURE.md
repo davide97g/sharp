@@ -519,7 +519,7 @@ media passes through it and there is no SFU.
 All ids are strings in JSON (UUIDs). A WebSocket connection id is the peer identity.
 
 ```ts
-VoiceParticipant = { conn_id: string, user_id: string, muted: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null }
+VoiceParticipant = { conn_id: string, user_id: string, display_name: string, guest: boolean, muted: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null }
 VoiceRoomSnapshot = { channel_id: string, participants: VoiceParticipant[] }
 VoiceSignalKind = 'offer'|'answer'|'candidate'
 ```
@@ -544,30 +544,42 @@ Server → client:
 - `hello` payload is extended with `conn_id: string` and
   `voice_rooms: VoiceRoomSnapshot[]`, where each snapshot is
   `{channel_id, participants: VoiceParticipant[]}` and each participant is
-  `{conn_id, user_id, muted: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null}`.
+  `{conn_id, user_id, display_name: string, guest: boolean, muted: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null}`.
+  `display_name` is filled server-side for everyone (users from the `users` table,
+  guests from their token) so clients can render names without `/users` access; `guest`
+  marks public voice-link joiners.
 - `voice.state` `{channel_id, participants: VoiceParticipant[]}` — sent only to the joining
   connection immediately after a successful join.
 - `voice.participant_joined` `{channel_id, participant: VoiceParticipant}` — broadcast to
-  all channel members.
-- `voice.participant_left` `{channel_id, conn_id, user_id}` — broadcast to all channel
-  members.
+  the room audience (see broadcast targeting below).
+- `voice.participant_left` `{channel_id, conn_id, user_id}` — broadcast to the room
+  audience.
 - `voice.participant_updated` `{channel_id, participant: VoiceParticipant}` — broadcast to
-  all channel members after mute, camera, or screen-share state changes.
+  the room audience after mute, camera, or screen-share state changes.
 - `voice.signal` `{channel_id, from_user, from_conn, to_user, to_conn, kind, data}` —
   delivered to `to_user`'s connections; receivers filter on
   `to_conn === my conn_id`.
 - `voice.error`
-  `{channel_id, code: "room_full"|"camera_full"|"screen_taken"|"not_member"|"not_in_room"}`
+  `{channel_id, code: "room_full"|"camera_full"|"screen_taken"|"not_member"|"not_in_room"|"link_revoked"}`
   — sent only to the offending connection. `camera_full` and `screen_taken` do not end the
-  audio call.
+  audio call. `link_revoked` is sent to a guest whose voice link no longer matches the
+  channel's current token (the link was regenerated or removed).
 
 ## Server behavior
 
-- `voice.join`: verify membership with `routes::is_member`; check the 8-participant cap and
-  send `voice.error` with `code: "room_full"` to the sender only when full. Insert the
-  participant with `muted=false, camera_on=false`, reply with `voice.state` on the sender's tx only, then
-  call `hub.broadcast(voice.participant_joined, channel_member_ids)`. Joining twice from
-  the same conn is idempotent and re-sends `voice.state`.
+- `voice.join`: for registered users, verify membership with `routes::is_member`; for
+  guests, skip membership and instead verify the token's `link` equals the channel's
+  **current** `voice_link_token` (send `voice.error` `code: "link_revoked"` and bail if it
+  does not). Then check the 8-participant cap and send `voice.error` with `code: "room_full"`
+  to the sender only when full. Insert the participant with `muted=false, camera_on=false`
+  and its resolved `display_name`/`guest`, reply with `voice.state` on the sender's tx only,
+  then broadcast `voice.participant_joined` to the room audience. Joining twice from the same
+  conn is idempotent and re-sends `voice.state`.
+- **Broadcast targeting**: every voice broadcast (`participant_joined`/`left`/`updated`)
+  targets the **union** of the channel's member ids and the user-ids currently in the room's
+  participant map (computed at broadcast time; `participant_left` additionally includes the
+  just-removed user's id). This is required so guests — who are not channel members — receive
+  participant events. `voice.signal` targets an explicit `to_user` and is unchanged.
 - `voice.leave`: remove the sender's conn from the room, drop the room when empty, and
   broadcast `voice.participant_left`.
 - `voice.mute`: update the participant's flag and broadcast `voice.participant_updated`.
@@ -627,7 +639,36 @@ Server → client:
 
 | Method | Path | Body → Response |
 |---|---|---|
-| GET | `/voice/config` | (Bearer auth) → `{"ice_servers": [{"urls": ["stun:..."]}, {"urls": ["turn:..."], "username": "...", "credential": "..."}]}`; the TURN entry is present only when configured. |
+| GET | `/voice/config` | (any valid token — **user OR guest**) → `{"ice_servers": [{"urls": ["stun:..."]}, {"urls": ["turn:..."], "username": "...", "credential": "..."}]}`; the TURN entry is present only when configured. This is the **only** endpoint guests may call; all other REST endpoints reject guest tokens with 401. |
+| GET | `/channels/{id}/voice-link` | (Bearer auth, channel member) → `{"token": string \| null}` — the channel's current public voice-link token, or `null` if none exists. |
+| POST | `/channels/{id}/voice-link` | (Bearer auth, channel member) → `{"token": string}` — generate a fresh 32-byte URL-safe token, **replacing** (revoking) any previous value. |
+| GET | `/call-links/{token}` | (public, no auth) → `{"channel_name": string}`; `404` if no channel has this token. For DM channels the literal `"Call"` is returned instead of the hidden DM name. |
+| POST | `/call-links/{token}/join` | (public, no auth) body `{"name": string}` (trimmed, 1..=80 chars, else `422`) → `{"token": <guest JWT>, "channel_id": string, "user_id": string, "name": string}`; `404` for an unknown token. `user_id` is the minted guest subject UUID. |
+
+## Public guest voice links
+
+Any channel member can create a stable, revocable public link to a channel's voice room. An
+unregistered guest opens the link, enters a display name, and receives a limited guest JWT
+that lets them join **only that channel's** voice room over the main WS — no chat, no other
+REST.
+
+- **Link token**: stored on `channels.voice_link_token` (nullable `text`, unique when set —
+  migration `0010_voice_link.sql`). `POST /channels/{id}/voice-link` overwrites it, so a
+  previous link is instantly revoked. `GET` returns the current value.
+- **Guest JWT**: minted by `POST /call-links/{token}/join`. Stateless, **12-hour** expiry,
+  HS256 (same secret as user tokens). Claims: `sub` = a fresh random UUID (the guest's
+  session identity / `user_id`), `guest: true`, `name`, `channel_id` (bound room), and
+  `link` (the token used to join). User tokens omit `guest` (defaults to `false` on decode),
+  so existing tokens keep working.
+- **Guest restrictions**: the `AuthUser` extractor rejects any token with `guest: true`
+  (401), so guests cannot reach REST endpoints; `/voice/config` uses a separate
+  `VoiceConfigAuth` extractor that accepts both. On the main WS, a guest may only send `ping`
+  and the `voice.*` events, and only when the event's `channel_id` matches its bound channel
+  (other events are silently dropped). Guest connect/disconnect does **not** emit presence.
+- **Revocation at join**: `voice.join` re-checks the guest token's `link` against the
+  channel's current `voice_link_token`. If a member has regenerated (or the link was removed),
+  the guest gets `voice.error` `code: "link_revoked"` and cannot join, even with an
+  unexpired token. Guests count toward the normal `MAX_PARTICIPANTS` cap.
 
 ## Server configuration
 

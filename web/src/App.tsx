@@ -7,7 +7,9 @@ import { isTauri, registerDeepLinkHandler } from './lib/desktopAuth'
 import { toastError } from './lib/toast'
 import { useStore } from './store'
 import { Login } from './components/Login'
+import { GuestCall } from './components/GuestCall'
 import { AppShell } from './components/AppShell'
+import { Splash } from './components/Splash'
 import { MessagePane } from './components/MessagePane'
 import { SearchResults } from './components/SearchResults'
 import { Home } from './components/Home'
@@ -27,6 +29,9 @@ type Boot = 'loading' | 'authed' | 'anon'
 
 export function App() {
   const [boot, setBoot] = useState<Boot>('loading')
+  // brand splash: plays once per page load, over the top of everything, then
+  // eases out to reveal whatever the auth gate resolved to.
+  const [showSplash, setShowSplash] = useState(true)
   const init = useStore((s) => s.init)
   const logout = useStore((s) => s.logout)
   const token = useStore((s) => s.token)
@@ -96,29 +101,22 @@ export function App() {
     if (!token && boot === 'authed') setBoot('anon')
   }, [token, boot])
 
-  if (boot === 'loading') {
-    return (
-      <div className="flex h-full items-center justify-center bg-[var(--color-ink)]">
-        <div className="flex flex-col items-center gap-3">
-          <div className="flex h-12 w-12 animate-pulse items-center justify-center rounded-xl bg-[var(--color-panel)] text-2xl font-extrabold text-[var(--color-accent)]">
-            #
-          </div>
-          <span className="text-sm text-[var(--color-text-faint)]">Loading…</span>
-        </div>
-        <Toasts />
-      </div>
-    )
-  }
-
   const authed = boot === 'authed'
 
   return (
     <>
+      {/* Routes stay unmounted until the auth gate resolves so a deep link
+          (e.g. /c/:id) isn't prematurely redirected to /login while we're
+          still deciding. The splash covers this whole window. */}
+      {boot !== 'loading' && (
       <Routes>
         <Route
           path="/login"
           element={authed ? <Navigate to="/" replace /> : <Login />}
         />
+        {/* Public guest call link: works for anonymous visitors and logged-in
+            members alike — always render the voice-only guest flow. */}
+        <Route path="/call/:token" element={<GuestCall />} />
         <Route
           path="/"
           element={authed ? <AppShell /> : <Navigate to="/login" replace />}
@@ -152,6 +150,10 @@ export function App() {
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      )}
+      {showSplash && (
+        <Splash ready={boot !== 'loading'} onDone={() => setShowSplash(false)} />
+      )}
       <Toasts />
     </>
   )

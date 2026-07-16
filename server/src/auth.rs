@@ -24,12 +24,36 @@ const DESKTOP_CODE_TTL: StdDuration = StdDuration::from_secs(60);
 pub struct Claims {
     pub sub: String,
     pub exp: usize,
+    /// True for limited guest tokens (public voice-link joiners). Defaults to
+    /// false so existing user tokens (which omit the field) keep decoding.
+    #[serde(default)]
+    pub guest: bool,
+    /// Guest display name, carried in the token so guests never need /users.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The single channel a guest token is bound to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<Uuid>,
+    /// The voice-link token the guest joined with; checked against the channel's
+    /// current link at join time so revocation (regenerate) invalidates guests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
 }
 
 /// Authenticated user identity, extracted from the Bearer JWT.
 #[derive(Debug, Clone, Copy)]
 pub struct AuthUser {
     pub id: Uuid,
+}
+
+/// Auth that accepts either a full user token or a limited guest token. Used
+/// ONLY by `GET /voice/config` so guests can fetch ICE servers; every other
+/// endpoint keeps `AuthUser`, which rejects guests.
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // Fields are part of the extractor's contract; not all callers read them.
+pub struct VoiceConfigAuth {
+    pub id: Uuid,
+    pub guest: bool,
 }
 
 pub fn hash_password(password: &str) -> AppResult<String> {
@@ -55,6 +79,10 @@ pub fn create_token(user_id: Uuid, secret: &str) -> AppResult<String> {
     let claims = Claims {
         sub: user_id.to_string(),
         exp,
+        guest: false,
+        name: None,
+        channel_id: None,
+        link: None,
     };
     encode(
         &Header::default(),
@@ -64,14 +92,51 @@ pub fn create_token(user_id: Uuid, secret: &str) -> AppResult<String> {
     .map_err(|e| AppError::Internal(format!("token error: {}", e)))
 }
 
-pub fn verify_token(token: &str, secret: &str) -> Option<Uuid> {
+/// Mint a limited guest token bound to a single channel's voice room. The
+/// subject is a fresh random UUID (the guest's identity for the session);
+/// tokens are stateless and expire after 12 hours. Revocation is achieved by
+/// regenerating the channel's voice link (checked at `voice.join`).
+pub fn create_guest_token(
+    name: &str,
+    channel_id: Uuid,
+    link_token: &str,
+    secret: &str,
+) -> AppResult<String> {
+    let exp = (Utc::now() + Duration::hours(12)).timestamp() as usize;
+    let claims = Claims {
+        sub: Uuid::new_v4().to_string(),
+        exp,
+        guest: true,
+        name: Some(name.to_string()),
+        channel_id: Some(channel_id),
+        link: Some(link_token.to_string()),
+    };
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )
+    .map_err(|e| AppError::Internal(format!("token error: {}", e)))
+}
+
+/// Verify a JWT and return the full parsed claims alongside the parsed subject
+/// UUID. Works for both user and guest tokens.
+pub fn verify_claims(token: &str, secret: &str) -> Option<(Claims, Uuid)> {
     let data = decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret.as_bytes()),
         &Validation::new(Algorithm::HS256),
     )
     .ok()?;
-    Uuid::parse_str(&data.claims.sub).ok()
+    let id = Uuid::parse_str(&data.claims.sub).ok()?;
+    Some((data.claims, id))
+}
+
+/// Thin helper for call sites that only need the subject UUID. Accepts any valid
+/// token (user or guest) — callers that must exclude guests should inspect the
+/// full claims via `verify_claims`.
+pub fn verify_token(token: &str, secret: &str) -> Option<Uuid> {
+    verify_claims(token, secret).map(|(_, id)| id)
 }
 
 fn bearer_from_parts(parts: &Parts) -> Option<String> {
@@ -91,9 +156,32 @@ impl FromRequestParts<SharedState> for AuthUser {
     ) -> Result<Self, Self::Rejection> {
         let token = bearer_from_parts(parts)
             .ok_or_else(|| AppError::Unauthorized("missing bearer token".to_string()))?;
-        let id = verify_token(&token, &state.config.jwt_secret)
+        let (claims, id) = verify_claims(&token, &state.config.jwt_secret)
             .ok_or_else(|| AppError::Unauthorized("invalid token".to_string()))?;
+        // Guest tokens are voice-only and must never reach a REST endpoint.
+        if claims.guest {
+            return Err(AppError::Unauthorized("invalid token".to_string()));
+        }
         Ok(AuthUser { id })
+    }
+}
+
+#[async_trait]
+impl FromRequestParts<SharedState> for VoiceConfigAuth {
+    type Rejection = AppError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &SharedState,
+    ) -> Result<Self, Self::Rejection> {
+        let token = bearer_from_parts(parts)
+            .ok_or_else(|| AppError::Unauthorized("missing bearer token".to_string()))?;
+        let (claims, id) = verify_claims(&token, &state.config.jwt_secret)
+            .ok_or_else(|| AppError::Unauthorized("invalid token".to_string()))?;
+        Ok(VoiceConfigAuth {
+            id,
+            guest: claims.guest,
+        })
     }
 }
 
@@ -211,6 +299,51 @@ pub async fn login(
     let token = create_token(user.id, &state.config.jwt_secret)?;
 
     Ok(Json(AuthResponse { token, user }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SECRET: &str = "test-secret";
+
+    #[test]
+    fn guest_token_round_trips_with_bound_channel_and_link() {
+        let channel_id = Uuid::new_v4();
+        let token = create_guest_token("Ada Lovelace", channel_id, "link-abc", SECRET).unwrap();
+
+        let (claims, sub) = verify_claims(&token, SECRET).expect("guest token should verify");
+        assert!(claims.guest);
+        assert_eq!(claims.name.as_deref(), Some("Ada Lovelace"));
+        assert_eq!(claims.channel_id, Some(channel_id));
+        assert_eq!(claims.link.as_deref(), Some("link-abc"));
+        // Subject is a fresh random UUID and matches the parsed uuid.
+        assert_eq!(claims.sub, sub.to_string());
+    }
+
+    #[test]
+    fn user_token_is_not_a_guest() {
+        let user_id = Uuid::new_v4();
+        let token = create_token(user_id, SECRET).unwrap();
+
+        let (claims, id) = verify_claims(&token, SECRET).expect("user token should verify");
+        assert!(!claims.guest);
+        assert_eq!(id, user_id);
+        assert!(claims.channel_id.is_none());
+        assert!(claims.link.is_none());
+    }
+
+    #[test]
+    fn guest_flag_gates_rest_access() {
+        // AuthUser rejects guests; this is the claims-level invariant it relies on.
+        let token = create_guest_token("Guest", Uuid::new_v4(), "link", SECRET).unwrap();
+        let (claims, _) = verify_claims(&token, SECRET).unwrap();
+        assert!(claims.guest, "AuthUser must reject tokens where guest == true");
+
+        let user = create_token(Uuid::new_v4(), SECRET).unwrap();
+        let (user_claims, _) = verify_claims(&user, SECRET).unwrap();
+        assert!(!user_claims.guest, "AuthUser must accept non-guest tokens");
+    }
 }
 
 #[derive(Serialize)]

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { api, clearToken, setToken } from './lib/api'
+import { api, clearToken, setSessionToken, setToken } from './lib/api'
 import { VoiceClient } from './lib/voice'
 import { WsClient } from './lib/ws'
 import { cmpId } from './lib/util'
@@ -67,6 +67,8 @@ export type VoiceRoom = Record<
   string,
   {
     user_id: string
+    display_name: string
+    guest: boolean
     muted: boolean
     camera_on: boolean
     screen_on: boolean
@@ -105,6 +107,14 @@ type State = {
   token: string | null
   me: User | null
   ready: boolean
+
+  // guest call sessions (public /call/:token page). isGuest gates the voice-only
+  // UI; guestChannelId is the bound channel; guestRevoked flips when the link is
+  // regenerated mid-call; guestPendingJoin one-shots the auto-join on first hello.
+  isGuest: boolean
+  guestChannelId: string | null
+  guestRevoked: boolean
+  guestPendingJoin: boolean
 
   // directory
   users: Record<string, User>
@@ -177,6 +187,13 @@ type State = {
 
   // --- actions ---
   init: (token: string, me: User) => Promise<void>
+  initGuestCall: (
+    guestToken: string,
+    user: { id: string; name: string },
+    channelId: string,
+  ) => void
+  leaveGuestCall: () => void
+  rejoinGuestCall: () => void
   logout: () => void
   refetchDirectory: () => Promise<void>
 
@@ -312,6 +329,10 @@ export const useStore = create<State>((set, get) => ({
   token: null,
   me: null,
   ready: false,
+  isGuest: false,
+  guestChannelId: null,
+  guestRevoked: false,
+  guestPendingJoin: false,
   users: {},
   online: new Set(),
   myConnId: null,
@@ -374,15 +395,65 @@ export const useStore = create<State>((set, get) => ({
     if (isWebNotifyGranted()) void initPush()
   },
 
+  initGuestCall(guestToken, user, channelId) {
+    // Guests authenticate through the in-memory session override so this never
+    // touches a real login's `sharp.token`.
+    setSessionToken(guestToken)
+    const me: User = {
+      id: user.id,
+      // The User type marks email optional; guests simply have none.
+      email: undefined,
+      display_name: user.name,
+      avatar_url: null,
+      created_at: new Date().toISOString(),
+    }
+    const existing = get().ws
+    if (existing) existing.close()
+    // Voice-only bootstrap: no directory/mentions/inbox/prefs/push. joinVoice
+    // fires from the `hello` handler once myConnId is set (see applyWsEvent).
+    const ws = new WsClient({
+      handler: (env) => get().applyWsEvent(env),
+    })
+    set({
+      token: guestToken,
+      me,
+      ready: true,
+      isGuest: true,
+      guestChannelId: channelId,
+      guestRevoked: false,
+      guestPendingJoin: true,
+      ws,
+      myConnId: null,
+      voice: emptyVoiceState(),
+    })
+    ws.connect()
+  },
+
+  leaveGuestCall() {
+    get().leaveVoice()
+  },
+
+  rejoinGuestCall() {
+    const channelId = get().guestChannelId
+    if (!channelId) return
+    set({ guestRevoked: false })
+    void get().joinVoice(channelId)
+  },
+
   logout() {
     get().leaveVoice()
     const ws = get().ws
     if (ws) ws.close()
     clearToken()
+    setSessionToken(null)
     set({
       token: null,
       me: null,
       ready: false,
+      isGuest: false,
+      guestChannelId: null,
+      guestRevoked: false,
+      guestPendingJoin: false,
       users: {},
       online: new Set(),
       myConnId: null,
@@ -1271,6 +1342,14 @@ export const useStore = create<State>((set, get) => ({
           voiceRooms: voiceRoomsFromSnapshots(p.voice_rooms),
           ...(voiceReconnected ? { voice: emptyVoiceState() } : {}),
         })
+        // Guest bootstrap: once we have a conn id, auto-join the bound channel's
+        // voice room exactly once (joinVoice fetches /voice/config with the guest
+        // token). Reconnects don't re-fire this; the guest page offers Rejoin.
+        const st = get()
+        if (st.isGuest && st.guestPendingJoin && st.guestChannelId) {
+          set({ guestPendingJoin: false })
+          void get().joinVoice(st.guestChannelId)
+        }
         break
       }
       case 'presence': {
@@ -1341,6 +1420,8 @@ export const useStore = create<State>((set, get) => ({
               ...(s.voiceRooms[p.channel_id] ?? {}),
               [p.participant.conn_id]: {
                 user_id: p.participant.user_id,
+                display_name: p.participant.display_name,
+                guest: p.participant.guest,
                 muted: p.participant.muted,
                 camera_on: p.participant.camera_on,
                 screen_on: p.participant.screen_on,
@@ -1420,6 +1501,8 @@ export const useStore = create<State>((set, get) => ({
                 ...room,
                 [p.participant.conn_id]: {
                   user_id: p.participant.user_id,
+                  display_name: p.participant.display_name,
+                  guest: p.participant.guest,
                   muted: p.participant.muted,
                   camera_on: p.participant.camera_on,
                   screen_on: p.participant.screen_on,
@@ -1494,6 +1577,15 @@ export const useStore = create<State>((set, get) => ({
           // Non-fatal: discard the acquired-but-unpublished share and stay in the call.
           get().voice.client?.stopScreenShare()
           set((s) => ({ voice: { ...s.voice, screenStatus: 'off', localScreenStream: null } }))
+          toastError(voiceErrorMessage(p.code))
+          break
+        }
+        if (p.code === 'link_revoked') {
+          // The guest's call link was regenerated — non-recoverable for this
+          // token. Tear the call down and mark the guest session revoked so the
+          // guest page shows the invalid-link state instead of Rejoin.
+          get().voice.client?.stop()
+          set({ voice: emptyVoiceState(), guestRevoked: true, guestPendingJoin: false })
           toastError(voiceErrorMessage(p.code))
           break
         }
@@ -1719,6 +1811,8 @@ function voiceRoomFromParticipants(
   for (const participant of participants) {
     room[participant.conn_id] = {
       user_id: participant.user_id,
+      display_name: participant.display_name,
+      guest: participant.guest,
       muted: participant.muted,
       camera_on: participant.camera_on,
       screen_on: participant.screen_on,
@@ -1748,6 +1842,8 @@ function voiceErrorMessage(code: string): string {
       return 'Four cameras are already active. You are still connected by audio.'
     case 'screen_taken':
       return 'Someone else is already sharing their screen.'
+    case 'link_revoked':
+      return 'This call link is no longer valid.'
     default:
       return `Voice error: ${code}`
   }

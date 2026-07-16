@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { api } from '../../lib/api'
 import { useStore, type VoiceStageMode } from '../../store'
 import { channelLabel } from '../../lib/util'
+import { toastError, toastSuccess } from '../../lib/toast'
 import { Avatar } from '../Avatar'
 import { VoiceMiniWidget } from './VoiceMiniWidget'
 import { CallChatRail } from './CallChatRail'
@@ -9,6 +11,8 @@ import { useVoicePip } from './VoicePip'
 type StageParticipant = {
   userId: string
   connIds: string[]
+  displayName: string
+  guest: boolean
   muted: boolean
   speaking: boolean
   cameraConnId: string | null
@@ -64,6 +68,7 @@ export function VideoStage() {
   const myConnId = useStore((s) => s.myConnId)
   const me = useStore((s) => s.me)
   const users = useStore((s) => s.users)
+  const isGuest = useStore((s) => s.isGuest)
   const channel = useStore((s) => s.channels.find((candidate) => candidate.id === channelId))
   const toggleVoiceMute = useStore((s) => s.toggleVoiceMute)
   const toggleVoiceCamera = useStore((s) => s.toggleVoiceCamera)
@@ -183,6 +188,8 @@ export function VideoStage() {
         byUser.set(entry.user_id, {
           userId: entry.user_id,
           connIds: [connId],
+          displayName: entry.display_name,
+          guest: entry.guest,
           muted: entry.muted,
           speaking: Boolean(speaking[connId]),
           cameraConnId: entry.camera_on ? connId : null,
@@ -193,14 +200,20 @@ export function VideoStage() {
   }, [myConnId, room, speaking])
 
   const screenShares = useMemo(() => {
-    const shares: { connId: string; userId: string; local: boolean; stream: MediaStream | null }[] =
-      []
+    const shares: {
+      connId: string
+      userId: string
+      displayName: string
+      local: boolean
+      stream: MediaStream | null
+    }[] = []
     for (const [connId, entry] of Object.entries(room ?? {})) {
       if (!entry.screen_on) continue
       const local = connId === myConnId
       shares.push({
         connId,
         userId: entry.user_id,
+        displayName: entry.display_name,
         local,
         stream: local ? localScreenStream : remoteScreenStreams[connId] ?? null,
       })
@@ -208,11 +221,20 @@ export function VideoStage() {
     return shares
   }, [room, myConnId, localScreenStream, remoteScreenStreams])
 
+  // Name resolution: prefer the directory entry (members), then our own name,
+  // then the server-filled display_name carried on the voice room (covers guests
+  // who aren't in the directory), finally a generic fallback.
+  const resolveName = (userId: string, roomName?: string): string =>
+    users[userId]?.display_name ??
+    (me?.id === userId ? me.display_name : undefined) ??
+    roomName ??
+    'Participant'
+
   const activeScreen = screenShares[0] ?? null
   const otherSharer = screenShares.find((share) => !share.local)
   const someoneElseSharing = Boolean(otherSharer)
   const otherSharerName = otherSharer
-    ? users[otherSharer.userId]?.display_name ?? 'Someone'
+    ? resolveName(otherSharer.userId, otherSharer.displayName)
     : ''
 
   if (!channelId) return null
@@ -247,11 +269,7 @@ export function VideoStage() {
     <div className="flex h-full min-h-0 flex-col gap-2">
       <div className="min-h-0 flex-1">
         <ScreenTile
-          name={
-            activeScreen.local
-              ? me?.display_name ?? 'You'
-              : users[activeScreen.userId]?.display_name ?? 'Participant'
-          }
+          name={resolveName(activeScreen.userId, activeScreen.displayName)}
           stream={activeScreen.stream}
           local={activeScreen.local}
         />
@@ -262,15 +280,14 @@ export function VideoStage() {
           className="flex shrink-0 items-center gap-2 overflow-x-auto pt-0.5"
         >
           {participants.map((participant) => {
-            const name =
-              users[participant.userId]?.display_name ??
-              (me?.id === participant.userId ? me.display_name : 'Participant')
+            const name = resolveName(participant.userId, participant.displayName)
             if (stageMode === 'compact') {
               return (
                 <AudioTile
                   key={participant.userId}
                   userId={participant.userId}
                   name={name}
+                  guest={participant.guest}
                   local={me?.id === participant.userId}
                   muted={participant.muted}
                   speaking={participant.speaking}
@@ -289,6 +306,7 @@ export function VideoStage() {
                 <VideoTile
                   userId={participant.userId}
                   name={name}
+                  guest={participant.guest}
                   stream={stream}
                   local={local}
                   muted={participant.muted}
@@ -312,9 +330,7 @@ export function VideoStage() {
           : participant.cameraConnId
             ? remoteStreams[participant.cameraConnId]
             : null
-        const name =
-          users[participant.userId]?.display_name ??
-          (me?.id === participant.userId ? me.display_name : 'Participant')
+        const name = resolveName(participant.userId, participant.displayName)
         return (
           <div
             key={participant.userId}
@@ -324,6 +340,7 @@ export function VideoStage() {
             <VideoTile
               userId={participant.userId}
               name={name}
+              guest={participant.guest}
               stream={stream}
               local={local}
               muted={participant.muted}
@@ -340,14 +357,13 @@ export function VideoStage() {
       className="flex h-full flex-wrap content-center items-center justify-center gap-5 py-4"
     >
       {participants.map((participant) => {
-        const name =
-          users[participant.userId]?.display_name ??
-          (me?.id === participant.userId ? me.display_name : 'Participant')
+        const name = resolveName(participant.userId, participant.displayName)
         return (
           <AudioTile
             key={participant.userId}
             userId={participant.userId}
             name={name}
+            guest={participant.guest}
             local={me?.id === participant.userId}
             muted={participant.muted}
             speaking={participant.speaking}
@@ -420,6 +436,9 @@ export function VideoStage() {
               <div className="truncate text-sm font-semibold">{roomName}</div>
             </div>
             <div className="ml-auto flex items-center gap-1">
+              {!isGuest && (
+                <CopyLinkControl channelId={channelId} buttonClass={headerBtnClass} />
+              )}
               {pip.supported && (
                 <button
                   type="button"
@@ -431,16 +450,18 @@ export function VideoStage() {
                   <PipIcon />
                 </button>
               )}
-              <button
-                type="button"
-                aria-label={chatOpen ? 'Hide chat' : 'Show chat'}
-                title={chatOpen ? 'Hide chat' : 'Show chat'}
-                aria-pressed={chatOpen}
-                onClick={() => setChatOpen((value) => !value)}
-                className={headerBtnClass}
-              >
-                <ChatIcon />
-              </button>
+              {!isGuest && (
+                <button
+                  type="button"
+                  aria-label={chatOpen ? 'Hide chat' : 'Show chat'}
+                  title={chatOpen ? 'Hide chat' : 'Show chat'}
+                  aria-pressed={chatOpen}
+                  onClick={() => setChatOpen((value) => !value)}
+                  className={headerBtnClass}
+                >
+                  <ChatIcon />
+                </button>
+              )}
               <button
                 type="button"
                 aria-label="Minimize call"
@@ -471,14 +492,16 @@ export function VideoStage() {
           </div>
         </div>
 
-        <div
-          className="shrink-0 overflow-hidden border-l border-[var(--color-border)] bg-[var(--color-ink)] transition-[width] duration-200 ease-out motion-reduce:transition-none"
-          style={{ width: chatOpen ? 380 : 0 }}
-        >
-          <div className="h-full w-[380px]">
-            <CallChatRail channelId={channelId} />
+        {!isGuest && (
+          <div
+            className="shrink-0 overflow-hidden border-l border-[var(--color-border)] bg-[var(--color-ink)] transition-[width] duration-200 ease-out motion-reduce:transition-none"
+            style={{ width: chatOpen ? 380 : 0 }}
+          >
+            <div className="h-full w-[380px]">
+              <CallChatRail channelId={channelId} />
+            </div>
           </div>
-        </div>
+        )}
       </section>
     )
   }
@@ -565,6 +588,9 @@ export function VideoStage() {
             {participants.length} {participants.length === 1 ? 'participant' : 'participants'}
           </div>
         </div>
+        {!isGuest && (
+          <CopyLinkControl channelId={channelId} buttonClass={headerBtnClass} />
+        )}
         {pip.supported && (
           <button
             type="button"
@@ -617,6 +643,7 @@ export function VideoStage() {
 function AudioTile({
   userId,
   name,
+  guest = false,
   local,
   muted,
   speaking,
@@ -624,6 +651,7 @@ function AudioTile({
 }: {
   userId: string
   name: string
+  guest?: boolean
   local: boolean
   muted: boolean
   speaking: boolean
@@ -646,9 +674,12 @@ function AudioTile({
           </span>
         )}
       </div>
-      <span className="w-full truncate text-xs font-medium text-[var(--color-text)]">
-        {name}
-        {local ? ' (you)' : ''}
+      <span className="flex w-full items-center justify-center gap-1 truncate text-xs font-medium text-[var(--color-text)]">
+        <span className="truncate">
+          {name}
+          {local ? ' (you)' : ''}
+        </span>
+        {guest && <GuestBadge />}
       </span>
     </li>
   )
@@ -657,6 +688,7 @@ function AudioTile({
 function VideoTile({
   userId,
   name,
+  guest = false,
   stream,
   local,
   muted,
@@ -665,6 +697,7 @@ function VideoTile({
 }: {
   userId: string
   name: string
+  guest?: boolean
   stream: MediaStream | null
   local: boolean
   muted: boolean
@@ -707,6 +740,7 @@ function VideoTile({
           {name}
           {local ? ' (you)' : ''}
         </span>
+        {guest && <GuestBadge onDark />}
         {muted && (
           <span className="ml-auto rounded-full bg-black/45 p-1" title="Muted">
             <MicIcon off />
@@ -714,6 +748,129 @@ function VideoTile({
         )}
       </div>
     </article>
+  )
+}
+
+// Members-only header control: copy or regenerate the channel's public call
+// link. Lazily resolves/creates the token only when an action is taken.
+function CopyLinkControl({
+  channelId,
+  buttonClass,
+}: {
+  channelId: string
+  buttonClass: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function onPointerDown(event: MouseEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', onPointerDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  async function writeLink(token: string) {
+    await navigator.clipboard.writeText(`${window.location.origin}/call/${token}`)
+  }
+
+  async function copyExisting() {
+    if (busy) return
+    setBusy(true)
+    try {
+      const { token } = await api.voiceLink.get(channelId)
+      const active = token ?? (await api.voiceLink.create(channelId)).token
+      await writeLink(active)
+      toastSuccess('Call link copied')
+      setOpen(false)
+    } catch (e) {
+      toastError(e instanceof Error ? e.message : 'Could not copy the call link.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function newLink() {
+    if (busy) return
+    setBusy(true)
+    try {
+      const { token } = await api.voiceLink.create(channelId)
+      await writeLink(token)
+      toastSuccess('New call link copied — old link revoked')
+      setOpen(false)
+    } catch (e) {
+      toastError(e instanceof Error ? e.message : 'Could not create a call link.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div ref={rootRef} className="relative flex">
+      <button
+        type="button"
+        aria-label="Call link"
+        title="Call link"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className={buttonClass}
+      >
+        <LinkIcon />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          aria-label="Call link"
+          className="absolute right-0 top-full z-40 mt-1 min-w-56 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1 shadow-2xl"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            disabled={busy}
+            onClick={() => void copyExisting()}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm text-[var(--color-text)] outline-none hover:bg-[var(--color-panel-2)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:opacity-60"
+          >
+            Copy call link
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={busy}
+            onClick={() => void newLink()}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm text-[var(--color-text)] outline-none hover:bg-[var(--color-panel-2)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:opacity-60"
+          >
+            New link (revokes old)
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Small quiet "Guest" chip shown next to a participant's name when they joined
+// via a public call link. `onDark` variant sits over the video tile gradient.
+function GuestBadge({ onDark = false }: { onDark?: boolean }) {
+  return (
+    <span
+      className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none tracking-wide ${
+        onDark
+          ? 'bg-white/20 text-white'
+          : 'bg-[var(--color-panel-2)] text-[var(--color-text-dim)]'
+      }`}
+    >
+      Guest
+    </span>
   )
 }
 
@@ -1001,6 +1158,25 @@ function ChatIcon() {
       aria-hidden
     >
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  )
+}
+
+function LinkIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
     </svg>
   )
 }

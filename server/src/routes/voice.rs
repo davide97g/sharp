@@ -1,4 +1,4 @@
-use crate::auth::AuthUser;
+use crate::auth::VoiceConfigAuth;
 use crate::error::AppResult;
 use crate::state::SharedState;
 use axum::extract::State;
@@ -7,7 +7,7 @@ use serde_json::json;
 
 pub async fn voice_config(
     State(state): State<SharedState>,
-    _auth: AuthUser,
+    _auth: VoiceConfigAuth,
 ) -> AppResult<Json<serde_json::Value>> {
     let mut ice_servers = vec![json!({ "urls": state.config.ice.stun_urls })];
     if let Some(turn) = &state.config.ice.turn {

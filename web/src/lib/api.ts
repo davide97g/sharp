@@ -20,13 +20,29 @@ import type {
   User,
   UsersResponse,
   VapidResponse,
+  VoiceLinkResponse,
+  VoiceLinkCreateResponse,
+  CallLinkInfoResponse,
+  CallLinkJoinResponse,
 } from './types'
 
 const TOKEN_KEY = 'sharp.token'
 const SERVER_URL_KEY = 'sharp.serverUrl'
 
+// In-memory auth override for guest call sessions. When set, it wins over the
+// persisted login token so a guest can authenticate the WS + voice/config
+// without touching `sharp.token` (no collision with a real login in the same
+// browser). Null = fall back to the stored token.
+let sessionToken: string | null = null
+export function setSessionToken(token: string | null) {
+  sessionToken = token
+}
+export function hasSessionToken(): boolean {
+  return sessionToken !== null
+}
+
 export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
+  return sessionToken ?? localStorage.getItem(TOKEN_KEY)
 }
 export function setToken(token: string) {
   localStorage.setItem(TOKEN_KEY, token)
@@ -94,8 +110,13 @@ async function request<T>(path: string, opts: ReqOpts = {}): Promise<T> {
   })
 
   if (res.status === 401 && auth) {
-    clearToken()
-    onUnauthorized?.()
+    // Guest sessions authenticate via the in-memory override, not `sharp.token`.
+    // A guest-page 401 must NOT wipe a real login or run the app's
+    // logout/navigate flow — just surface the error to the guest page.
+    if (!hasSessionToken()) {
+      clearToken()
+      onUnauthorized?.()
+    }
     throw new ApiRequestError('Unauthorized', 'unauthorized', 401)
   }
 
@@ -118,6 +139,30 @@ async function request<T>(path: string, opts: ReqOpts = {}): Promise<T> {
 export const api = {
   voice: {
     config: () => request<IceConfigResponse>('/voice/config'),
+  },
+
+  // --- public guest call links ---
+  voiceLink: {
+    // Fetch the channel's current public call link (member only).
+    get: (channelId: string) =>
+      request<VoiceLinkResponse>(`/channels/${channelId}/voice-link`),
+    // Mint a fresh link, revoking any previous one (member only).
+    create: (channelId: string) =>
+      request<VoiceLinkCreateResponse>(`/channels/${channelId}/voice-link`, {
+        method: 'POST',
+      }),
+  },
+  callLink: {
+    // Public: resolve a call link token to its channel name (404 if invalid).
+    info: (token: string) =>
+      request<CallLinkInfoResponse>(`/call-links/${token}`, { auth: false }),
+    // Public: join the call as a guest, receiving a short-lived guest JWT.
+    join: (token: string, name: string) =>
+      request<CallLinkJoinResponse>(`/call-links/${token}/join`, {
+        method: 'POST',
+        body: { name },
+        auth: false,
+      }),
   },
 
   // --- auth ---

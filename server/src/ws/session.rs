@@ -1,21 +1,30 @@
 use crate::state::SharedState;
 use crate::ws::voice;
-use crate::ws::{channel_member_ids, envelope};
+use crate::ws::{channel_member_ids, envelope, GuestInfo};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use sqlx::Row;
 use uuid::Uuid;
 
-pub async fn handle_socket(socket: WebSocket, state: SharedState, user_id: Uuid) {
-    // Load the display name once for typing events.
-    let display_name = match sqlx::query("SELECT display_name FROM users WHERE id = $1")
-        .bind(user_id)
-        .fetch_optional(&state.pool)
-        .await
-    {
-        Ok(Some(row)) => row.try_get::<String, _>("display_name").unwrap_or_default(),
-        _ => String::new(),
+pub async fn handle_socket(
+    socket: WebSocket,
+    state: SharedState,
+    user_id: Uuid,
+    guest: Option<GuestInfo>,
+) {
+    // Display name: guests carry it in the token (no users row); registered
+    // users are looked up once for typing/voice events.
+    let display_name = match &guest {
+        Some(g) => g.name.clone(),
+        None => match sqlx::query("SELECT display_name FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(&state.pool)
+            .await
+        {
+            Ok(Some(row)) => row.try_get::<String, _>("display_name").unwrap_or_default(),
+            _ => String::new(),
+        },
     };
 
     let conn_id = Uuid::new_v4();
@@ -51,8 +60,9 @@ pub async fn handle_socket(socket: WebSocket, state: SharedState, user_id: Uuid)
     );
     let _ = tx.send(Message::Text(hello.to_string()));
 
-    // Announce presence if this is the user's first connection.
-    if first {
+    // Announce presence if this is the user's first connection. Guests are
+    // voice-only and invisible to the presence system.
+    if first && guest.is_none() {
         let targets = state.hub.online_user_ids();
         let ev = envelope(
             "presence",
@@ -66,7 +76,16 @@ pub async fn handle_socket(socket: WebSocket, state: SharedState, user_id: Uuid)
         match msg {
             Message::Text(text) => {
                 if let Ok(value) = serde_json::from_str::<Value>(&text) {
-                    handle_client_event(&state, user_id, conn_id, &display_name, &tx, &value).await;
+                    handle_client_event(
+                        &state,
+                        user_id,
+                        conn_id,
+                        &display_name,
+                        guest.as_ref(),
+                        &tx,
+                        &value,
+                    )
+                    .await;
                 }
             }
             Message::Ping(data) => {
@@ -80,7 +99,7 @@ pub async fn handle_socket(socket: WebSocket, state: SharedState, user_id: Uuid)
     // Cleanup.
     voice::cleanup_conn(&state, user_id, conn_id).await;
     let last = state.hub.remove(user_id, conn_id);
-    if last {
+    if last && guest.is_none() {
         let targets = state.hub.online_user_ids();
         let ev = envelope(
             "presence",
@@ -96,11 +115,35 @@ async fn handle_client_event(
     user_id: Uuid,
     conn_id: Uuid,
     display_name: &str,
+    guest: Option<&GuestInfo>,
     tx: &tokio::sync::mpsc::UnboundedSender<Message>,
     value: &Value,
 ) {
     let event_type = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
     let payload = value.get("payload").cloned().unwrap_or_else(|| json!({}));
+
+    // Guests are voice-only: they may ping and send voice events, and only for
+    // the single channel their token is bound to. Anything else is dropped.
+    if let Some(g) = guest {
+        let voice_event = matches!(
+            event_type,
+            "voice.join" | "voice.leave" | "voice.mute" | "voice.camera" | "voice.screen"
+                | "voice.signal"
+        );
+        if event_type != "ping" && !voice_event {
+            return;
+        }
+        if voice_event {
+            let bound = payload
+                .get("channel_id")
+                .and_then(|c| c.as_str())
+                .and_then(|s| Uuid::parse_str(s).ok())
+                == Some(g.channel_id);
+            if !bound {
+                return;
+            }
+        }
+    }
 
     match event_type {
         "ping" => {
@@ -127,7 +170,17 @@ async fn handle_client_event(
         }
         "voice.join" | "voice.leave" | "voice.mute" | "voice.camera" | "voice.screen"
         | "voice.signal" => {
-            voice::handle_voice_event(state, user_id, conn_id, event_type, payload, tx).await;
+            voice::handle_voice_event(
+                state,
+                user_id,
+                conn_id,
+                display_name,
+                guest,
+                event_type,
+                payload,
+                tx,
+            )
+            .await;
         }
         _ => {}
     }
