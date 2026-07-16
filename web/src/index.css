@@ -303,13 +303,13 @@ body {
   );
 }
 
-/* Hide the login lockup until the splash hands off (or finishes without a
-   target). Prevents a ghost logo under the splash during the FLIP. */
-.login-brand-lockup {
-  opacity: 0;
+/* Hide the whole brand copy (logo + tagline) until splash is gone.
+   visibility — not opacity — so nothing ghosts through mid-handoff. */
+.login-brand-copy {
+  visibility: hidden;
 }
-html[data-splash-done] .login-brand-lockup {
-  opacity: 1;
+html[data-splash-done] .login-brand-copy {
+  visibility: visible;
 }
 
 /* ── Brand splash (app load) ─────────────────────────────────────────────
@@ -633,7 +633,7 @@ html[data-splash-done] .login-brand-lockup {
   .splash-duck-wrap {
     display: none;
   }
-  .login-brand-lockup {
-    opacity: 1;
+  .login-brand-copy {
+    visibility: visible;
   }
 }

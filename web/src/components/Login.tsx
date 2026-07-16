@@ -82,12 +82,11 @@ export function Login() {
           className="absolute inset-0 h-full w-full object-cover"
         />
         <div className="login-brand-veil pointer-events-none absolute inset-0" />
-        <div className="absolute inset-x-0 bottom-0 flex flex-col gap-2 p-5 md:gap-3 md:p-10 md:pb-12">
+        {/* Whole copy stack stays invisible until splash unmounts — prevents
+            tagline ghosting under the flying lockup mid-handoff. */}
+        <div className="login-brand-copy absolute inset-x-0 bottom-0 flex flex-col gap-2 p-5 md:gap-3 md:p-10 md:pb-12">
           <BrandLockup
             id={LOGIN_BRAND_ID}
-            // Invisible until splash hands off — avoids a double-logo flash
-            // under the splash layer. Splash sets data-splash-done when done.
-            className="login-brand-lockup"
             wordClassName="text-white drop-shadow-[0_1px_12px_rgba(0,0,0,0.45)]"
           />
           <p className="hidden max-w-xs text-sm leading-relaxed text-white/70 md:block">
