@@ -2,6 +2,7 @@ pub mod call_links;
 pub mod channels;
 pub mod docs;
 pub mod files;
+pub mod gifs;
 pub mod messages;
 pub mod notifications;
 pub mod search;

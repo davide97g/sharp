@@ -5,6 +5,7 @@ import { Avatar } from './Avatar'
 import { Markdown } from './Markdown'
 import { AttachmentList } from './Attachments'
 import { fmtTime } from '../lib/util'
+import { gifPreviewText } from '../lib/gif'
 
 export const REACTION_PALETTE = ['👍', '✅', '👀', '❤️', '😂', '🎉']
 
@@ -85,7 +86,7 @@ function QuotedReply({ reply }: { reply: ReplyPreview }) {
           {reply.user.display_name}
         </div>
         <div className="truncate text-xs text-[var(--color-text-dim)]">
-          {reply.deleted ? 'Deleted message' : reply.content || 'Attachment'}
+          {reply.deleted ? 'Deleted message' : gifPreviewText(reply.content) || 'Attachment'}
         </div>
       </div>
     </button>
@@ -135,7 +136,11 @@ export function MessageItem({
   const [editing, setEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [draft, setDraft] = useState(message.content)
+  const [freshOnMount] = useState(() => Date.now() - Date.parse(message.created_at) < 8000)
+  const [reactionBurst, setReactionBurst] = useState<{ emoji: string; id: number } | null>(null)
   const editRef = useRef<HTMLTextAreaElement>(null)
+  const reactionBurstTimer = useRef<number | null>(null)
+  const reactionBurstId = useRef(0)
 
   const isMine = me?.id === message.user.id
   const isDeleted = !!message.deleted_at
@@ -155,6 +160,48 @@ export function MessageItem({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing])
+
+  useEffect(
+    () => () => {
+      if (reactionBurstTimer.current !== null) window.clearTimeout(reactionBurstTimer.current)
+    },
+    [],
+  )
+
+  function react(emoji: string, target?: HTMLElement) {
+    if (target && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      target.getAnimations().forEach((animation) => animation.cancel())
+      target.animate(
+        [
+          { transform: 'scale(1) rotate(0deg)' },
+          { transform: 'scale(1.3) rotate(-5deg)', offset: 0.38 },
+          { transform: 'scale(0.94) rotate(2deg)', offset: 0.72 },
+          { transform: 'scale(1) rotate(0deg)' },
+        ],
+        { duration: 460, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+      )
+    }
+    const id = ++reactionBurstId.current
+    setReactionBurst({ emoji, id })
+    if (reactionBurstTimer.current !== null) window.clearTimeout(reactionBurstTimer.current)
+    reactionBurstTimer.current = window.setTimeout(() => setReactionBurst(null), 720)
+    void toggleReaction(message, emoji)
+  }
+
+  const burst = reactionBurst && (
+    <span
+      key={reactionBurst.id}
+      className="reaction-burst pointer-events-none absolute z-30"
+      data-side={isMine ? 'mine' : 'other'}
+      aria-hidden
+    >
+      <i />
+      <i />
+      <i />
+      <i />
+      <b>{reactionBurst.emoji}</b>
+    </span>
+  )
 
   async function saveEdit() {
     const content = draft.trim()
@@ -226,15 +273,17 @@ export function MessageItem({
     return (
       <div
         id={`msg-${message.id}`}
-        className={`group relative flex px-4 ${grouped ? 'py-0.5' : 'pt-2 mt-1'} ${
+        className={`group relative flex px-4 ${freshOnMount ? 'message-arrival' : ''} ${grouped ? 'py-0.5' : 'pt-2 mt-1'} ${
           isMine ? 'justify-end' : 'justify-start'
         }`}
+        data-message-mine={isMine || undefined}
         onMouseEnter={() => setActiveMessage(message.id)}
         onMouseLeave={() => {
           setActiveMessage(null)
           if (showPalette) closePalette()
         }}
       >
+        {burst}
         <div className={`relative flex max-w-[75%] flex-col ${isMine ? 'items-end' : 'items-start'}`}>
           {isDeleted ? (
             <div className="rounded-2xl bg-[var(--color-panel-2)] px-3 py-2 text-sm italic text-[var(--color-text-faint)]">
@@ -274,15 +323,15 @@ export function MessageItem({
               {message.reactions.map((r) => (
                 <button
                   key={r.emoji}
-                  onClick={() => toggleReaction(message, r.emoji)}
-                  className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition ${
+                  onClick={(event) => react(r.emoji, event.currentTarget)}
+                  className={`reaction-chip flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition ${
                     r.me
                       ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]'
                       : 'border-[var(--color-border)] bg-[var(--color-panel)] text-[var(--color-text-dim)] hover:border-[var(--color-text-faint)]'
                   }`}
                 >
-                  <span>{r.emoji}</span>
-                  <span className="tabular-nums">{r.count}</span>
+                  <span className="reaction-emoji">{r.emoji}</span>
+                  <span className="reaction-count tabular-nums">{r.count}</span>
                 </button>
               ))}
             </div>
@@ -311,10 +360,10 @@ export function MessageItem({
                       <button
                         key={e}
                         onClick={() => {
-                          toggleReaction(message, e)
+                          react(e)
                           closePalette()
                         }}
-                        className="rounded-md px-1.5 py-1 text-base transition-transform hover:scale-125 hover:bg-[var(--color-accent-soft)]"
+                        className="reaction-palette-item rounded-md px-1.5 py-1 text-base hover:bg-[var(--color-accent-soft)]"
                       >
                         {e}
                       </button>
@@ -358,19 +407,21 @@ export function MessageItem({
   return (
     <div
       id={`msg-${message.id}`}
-      className={`group relative flex gap-3 px-4 transition-colors duration-200 ease-in-out ${
+      className={`group relative flex gap-3 px-4 transition-colors duration-200 ease-in-out ${freshOnMount ? 'message-arrival' : ''} ${
         isFocused
           ? 'bg-[var(--color-accent-soft)]/40 ring-2 ring-inset ring-[var(--color-accent)]'
           : actioned
             ? 'bg-[var(--color-accent-soft)]/25 ring-1 ring-inset ring-[var(--color-accent)]'
             : 'hover:bg-[var(--color-panel)]/50'
       } ${grouped ? 'py-0.5' : 'pt-2 pb-0.5 mt-1'}`}
+      data-message-mine={isMine || undefined}
       onMouseEnter={() => setActiveMessage(message.id)}
       onMouseLeave={() => {
         setActiveMessage(null)
         if (showPalette) closePalette()
       }}
     >
+      {burst}
       {/* gutter: avatar or hover timestamp */}
       <div className="relative w-9 shrink-0">
         {grouped ? (
@@ -466,15 +517,15 @@ export function MessageItem({
             {message.reactions.map((r) => (
               <button
                 key={r.emoji}
-                onClick={() => toggleReaction(message, r.emoji)}
-                className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition ${
+                onClick={(event) => react(r.emoji, event.currentTarget)}
+                className={`reaction-chip flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition ${
                   r.me
                     ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]'
                     : 'border-[var(--color-border)] bg-[var(--color-panel)] text-[var(--color-text-dim)] hover:border-[var(--color-text-faint)]'
                 }`}
               >
-                <span>{r.emoji}</span>
-                <span className="tabular-nums">{r.count}</span>
+                <span className="reaction-emoji">{r.emoji}</span>
+                <span className="reaction-count tabular-nums">{r.count}</span>
               </button>
             ))}
           </div>
@@ -517,10 +568,10 @@ export function MessageItem({
                   <button
                     key={e}
                     onClick={() => {
-                      toggleReaction(message, e)
+                      react(e)
                       closePalette()
                     }}
-                    className="rounded-md px-1.5 py-1 text-base transition-transform hover:scale-125 hover:bg-[var(--color-accent-soft)]"
+                    className="reaction-palette-item rounded-md px-1.5 py-1 text-base hover:bg-[var(--color-accent-soft)]"
                   >
                     {e}
                   </button>
@@ -580,7 +631,7 @@ function ToolbarBtn({
     <button
       title={title}
       onClick={onClick}
-      className={`flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-text-faint)] transition-colors hover:bg-[var(--color-panel)] ${
+      className={`message-toolbar-button flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-text-faint)] transition-colors hover:bg-[var(--color-panel)] ${
         danger ? 'hover:text-red-400' : 'hover:text-[var(--color-text)]'
       }`}
     >

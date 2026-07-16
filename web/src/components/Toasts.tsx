@@ -11,11 +11,12 @@ export function Toasts() {
           return (
             <div
               key={t.id}
+              data-huddle={t.message === 'started a huddle' || undefined}
               onClick={() => {
                 t.onClick?.()
                 dismiss(t.id)
               }}
-              className="group pointer-events-auto flex w-80 max-w-[calc(100vw-2rem)] cursor-pointer items-start gap-3 overflow-hidden rounded-xl border border-[var(--color-accent)]/50 bg-gradient-to-br from-[var(--color-panel-2)] to-[var(--color-accent-soft)] px-3.5 py-3 shadow-[0_8px_30px_-6px_rgba(124,108,255,0.55)] ring-1 ring-inset ring-white/5 animate-notify"
+              className="notify-toast group pointer-events-auto flex w-80 max-w-[calc(100vw-2rem)] cursor-pointer items-start gap-3 overflow-hidden rounded-xl border border-[var(--color-accent)]/50 bg-gradient-to-br from-[var(--color-panel-2)] to-[var(--color-accent-soft)] px-3.5 py-3 shadow-[0_8px_30px_-6px_rgba(124,108,255,0.55)] ring-1 ring-inset ring-white/5 animate-notify"
             >
               {/* pulsing accent avatar bubble */}
               <div className="relative mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[var(--color-accent-hover)] to-[var(--color-accent)] text-sm font-bold text-white shadow-lg">

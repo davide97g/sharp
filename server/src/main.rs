@@ -1,8 +1,10 @@
 mod auth;
 mod config;
 mod docs_sync;
+mod deepseek;
 mod error;
 mod expo_push;
+mod gif;
 mod models;
 mod notify;
 mod routes;
@@ -113,6 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         storage,
         vapid,
         desktop_codes: Default::default(),
+        gif_suggest_cooldowns: Default::default(),
     });
 
     let api = Router::new()
@@ -129,6 +132,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/users", get(routes::users::list_users))
         .route("/users/:id/avatar", get(routes::users::get_avatar))
+        .route("/gifs/config", get(routes::gifs::get_config))
+        .route("/gifs/search", get(routes::gifs::search))
+        .route(
+            "/gifs/settings",
+            get(routes::gifs::get_settings).put(routes::gifs::put_settings),
+        )
         .route("/voice/config", get(routes::voice::voice_config))
         .route(
             "/channels",
@@ -150,6 +159,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             delete(routes::channels::remove_member),
         )
         .route("/channels/:id/read", post(routes::channels::mark_read))
+        .route("/channels/:id/gif-suggest", post(routes::gifs::suggest))
         .route(
             "/channels/:id/voice-link",
             get(routes::call_links::get_voice_link).post(routes::call_links::create_voice_link),

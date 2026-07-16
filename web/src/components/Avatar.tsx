@@ -52,18 +52,21 @@ export function Avatar({
   const radius = Math.max(6, Math.round(size * 0.28))
 
   return (
-    <div className="relative shrink-0" style={{ width: size, height: size }}>
+    <div
+      className="user-avatar relative shrink-0"
+      style={{ width: size, height: size, borderRadius: radius }}
+    >
       {src ? (
         <img
           src={src}
           alt={displayName}
-          className="h-full w-full object-cover select-none"
+          className="user-avatar-surface h-full w-full object-cover select-none"
           style={{ borderRadius: radius }}
           draggable={false}
         />
       ) : (
         <div
-          className="flex h-full w-full items-center justify-center font-semibold text-white select-none"
+          className="user-avatar-surface flex h-full w-full items-center justify-center font-semibold text-white select-none"
           style={{
             backgroundColor: avatarColor(id),
             fontSize: size * 0.4,

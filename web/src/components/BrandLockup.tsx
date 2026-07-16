@@ -17,16 +17,16 @@ export function BrandLockup({
   wordClassName?: string
 }) {
   return (
-    <div id={id} className={`flex items-center gap-3 ${className}`}>
+    <div id={id} className={`brand-lockup flex items-center gap-3 ${className}`}>
       <div
-        className={`relative flex h-16 w-16 shrink-0 items-center justify-center rounded-[30%] bg-[var(--color-accent)] shadow-[0_0_44px_-4px_var(--color-accent)] ${markClassName}`}
+        className={`brand-mark relative flex h-16 w-16 shrink-0 items-center justify-center rounded-[30%] bg-[var(--color-accent)] shadow-[0_0_44px_-4px_var(--color-accent)] ${markClassName}`}
       >
-        <span className="text-4xl font-extrabold leading-none text-white" aria-hidden>
+        <span className="brand-glyph text-4xl font-extrabold leading-none text-white" aria-hidden>
           #
         </span>
       </div>
       <span
-        className={`block pr-[0.12em] text-5xl font-extrabold leading-none tracking-tight text-[var(--color-text)] ${wordClassName}`}
+        className={`brand-word block pr-[0.12em] text-5xl font-extrabold leading-none tracking-tight text-[var(--color-text)] ${wordClassName}`}
       >
         sharp
       </span>

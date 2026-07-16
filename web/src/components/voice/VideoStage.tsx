@@ -425,7 +425,7 @@ export function VideoStage() {
     return (
       <section
         aria-label={`${roomName} huddle`}
-        className="fixed inset-0 z-[60] flex bg-black text-[var(--color-text)]"
+        className="voice-stage fixed inset-0 z-[60] flex bg-black text-[var(--color-text)]"
       >
         <div className="relative flex min-w-0 flex-1 flex-col">
           <header className="flex h-14 shrink-0 items-center gap-3 px-5">
@@ -559,7 +559,7 @@ export function VideoStage() {
     <section
       ref={panelRef}
       aria-label={`${roomName} huddle`}
-      className={`fixed z-50 flex flex-col overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-ink)] shadow-2xl ${
+      className={`voice-stage fixed z-50 flex flex-col overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-ink)] shadow-2xl ${
         dragging ? '' : 'transition-[width,height] duration-200 ease-out motion-reduce:transition-none'
       }`}
       style={{

@@ -1,6 +1,7 @@
 import { Fragment, useMemo, type ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { GIF_TOKEN } from '../lib/gif'
 import { navigateTo } from '../lib/nav'
 import { useStore } from '../store'
 
@@ -223,6 +224,19 @@ function makeComponents(names: string[], re: RegExp | null): Components {
   }
 }
 
+function GifImage({ url, alt }: { url: string; alt: string }) {
+  return (
+    <a href={url} target="_blank" rel="noreferrer noopener">
+      <img
+        src={url}
+        alt={alt}
+        loading="lazy"
+        className="my-1 block max-h-64 max-w-full rounded-lg border border-[var(--color-border)]"
+      />
+    </a>
+  )
+}
+
 export function Markdown({
   content,
   highlight,
@@ -242,11 +256,47 @@ export function Markdown({
   )
   const re = useMemo(() => buildHighlightRe(highlight), [highlight])
   const components = useMemo(() => makeComponents(names, re), [names, re])
+  const parts: Array<
+    | { kind: 'text'; content: string }
+    | { kind: 'gif'; url: string; alt: string }
+  > = []
+  let last = 0
+  let match: RegExpExecArray | null
+  GIF_TOKEN.lastIndex = 0
+  while ((match = GIF_TOKEN.exec(content)) !== null) {
+    if (match.index > last) {
+      parts.push({ kind: 'text', content: content.slice(last, match.index) })
+    }
+    parts.push({ kind: 'gif', url: match[1], alt: match[2] })
+    last = match.index + match[0].length
+  }
+  if (parts.length === 0) {
+    return (
+      <div className="md text-[0.94rem] text-[var(--color-text)]">
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} skipHtml>
+          {content}
+        </ReactMarkdown>
+      </div>
+    )
+  }
+  if (last < content.length) parts.push({ kind: 'text', content: content.slice(last) })
+
   return (
     <div className="md text-[0.94rem] text-[var(--color-text)]">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} skipHtml>
-        {content}
-      </ReactMarkdown>
+      {parts.map((part, index) =>
+        part.kind === 'gif' ? (
+          <GifImage key={index} url={part.url} alt={part.alt} />
+        ) : (
+          <ReactMarkdown
+            key={index}
+            remarkPlugins={[remarkGfm]}
+            components={components}
+            skipHtml
+          >
+            {part.content}
+          </ReactMarkdown>
+        ),
+      )}
     </div>
   )
 }

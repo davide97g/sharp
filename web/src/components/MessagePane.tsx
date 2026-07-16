@@ -10,10 +10,12 @@ import { ChatLayoutChooser } from './ChatLayoutChooser'
 import { InboxTrigger } from './NotificationCenter'
 import { ChannelTabs } from './ChannelTabs'
 import { Avatar } from './Avatar'
+import { DuckSuggest } from './DuckSuggest'
 import { channelLabel, sameDay, withinMinutes } from '../lib/util'
 
 export function MessagePane() {
   const { channelId } = useParams<{ channelId: string }>()
+  const me = useStore((s) => s.me)
   const channels = useStore((s) => s.channels)
   const channel = channels.find((c) => c.id === channelId)
   const cm = useStore((s) => (channelId ? s.byChannel[channelId] : undefined))
@@ -41,6 +43,26 @@ export function MessagePane() {
   const prevLenRef = useRef(0)
   const prevChannelRef = useRef<string | undefined>(undefined)
   const readTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const initialUnreadRef = useRef(0)
+  const unreadGateRef = useRef(false)
+  const leftBottomSinceUnreadRef = useRef(false)
+  const programmaticBottomRef = useRef(false)
+  const trackedTailRef = useRef<string | null>(null)
+  const trackedChannelRef = useRef<string | null>(null)
+  const [atBottom, setAtBottom] = useState(true)
+  const [pendingJump, setPendingJump] = useState<{ targetId: string; count: number } | null>(null)
+
+  // Ref initialization happens during render so no scroll event can race the
+  // unread gate between commit and the first layout effect.
+  if (channel && trackedChannelRef.current !== channel.id) {
+    const unread = Math.max(0, channel.unread_count)
+    initialUnreadRef.current = unread
+    unreadGateRef.current = unread > 0
+    leftBottomSinceUnreadRef.current = false
+    trackedTailRef.current = null
+    trackedChannelRef.current = channel.id
+    atBottomRef.current = true
+  }
 
   // set current channel + load
   useEffect(() => {
@@ -103,6 +125,45 @@ export function MessagePane() {
   const messages = cm?.list ?? []
   const lastId = messages.length ? messages[messages.length - 1].id : null
 
+  // Reset visual state for the route. Unread refs were captured synchronously
+  // above; append-only tracking catches messages received in older history.
+  useLayoutEffect(() => {
+    setAtBottom(true)
+    setPendingJump(null)
+  }, [channelId])
+
+  useEffect(() => {
+    if (!channelId || !cm?.loaded || trackedChannelRef.current !== channelId) return
+
+    const previousTail = trackedTailRef.current
+    const currentTail = messages.length ? messages[messages.length - 1].id : null
+
+    if (previousTail === null) {
+      const unread = initialUnreadRef.current
+      if (unread > 0 && messages.length > 0) {
+        const loadedUnread = Math.min(unread, messages.length)
+        setPendingJump({
+          targetId: messages[messages.length - loadedUnread].id,
+          count: unread,
+        })
+      }
+      trackedTailRef.current = currentTail
+      return
+    }
+
+    const previousTailIndex = messages.findIndex((message) => message.id === previousTail)
+    const appended = previousTailIndex >= 0 ? messages.slice(previousTailIndex + 1) : []
+    const newFromOthers = appended.filter((message) => message.user.id !== me?.id)
+    trackedTailRef.current = currentTail
+
+    if (!atBottomRef.current && newFromOthers.length > 0) {
+      setPendingJump((current) => ({
+        targetId: current?.targetId ?? newFromOthers[0].id,
+        count: (current?.count ?? 0) + newFromOthers.length,
+      }))
+    }
+  }, [channelId, cm?.loaded, me?.id, messages])
+
   // scroll management
   useLayoutEffect(() => {
     const el = scrollRef.current
@@ -115,6 +176,7 @@ export function MessagePane() {
       el.scrollTop = el.scrollHeight - pendingRestoreRef.current
       pendingRestoreRef.current = null
     } else if (channelChanged || atBottomRef.current) {
+      programmaticBottomRef.current = true
       el.scrollTop = el.scrollHeight
       atBottomRef.current = true
     }
@@ -125,6 +187,7 @@ export function MessagePane() {
   useEffect(() => {
     if (!channelId || !lastId) return
     if (!atBottomRef.current) return
+    if (unreadGateRef.current) return
     if (readTimerRef.current) clearTimeout(readTimerRef.current)
     readTimerRef.current = setTimeout(() => {
       markRead(channelId, lastId)
@@ -190,16 +253,58 @@ export function MessagePane() {
     const el = scrollRef.current
     if (!el) return
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    atBottomRef.current = distanceFromBottom < 80
+    const nextAtBottom = distanceFromBottom < 80
+    atBottomRef.current = nextAtBottom
+    setAtBottom((current) => (current === nextAtBottom ? current : nextAtBottom))
+    if (programmaticBottomRef.current) {
+      programmaticBottomRef.current = false
+      if (nextAtBottom) return
+    }
+    if (!nextAtBottom) leftBottomSinceUnreadRef.current = true
 
     if (el.scrollTop < 140 && cm?.hasMore && !cm.loading && channelId) {
       pendingRestoreRef.current = el.scrollHeight - el.scrollTop
       loadOlder(channelId)
     }
     // mark read once user reaches bottom
-    if (atBottomRef.current && channelId && lastId) {
+    if (
+      nextAtBottom &&
+      (!unreadGateRef.current || leftBottomSinceUnreadRef.current) &&
+      channelId &&
+      lastId
+    ) {
+      unreadGateRef.current = false
+      setPendingJump(null)
       markRead(channelId, lastId)
     }
+  }
+
+  function jumpToMessages() {
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const behavior: ScrollBehavior = reducedMotion ? 'auto' : 'smooth'
+
+    if (pendingJump) {
+      const target = document.getElementById(`msg-${pendingJump.targetId}`)
+      unreadGateRef.current = false
+      setPendingJump(null)
+      target?.scrollIntoView({ behavior, block: 'center' })
+
+      if (target && !reducedMotion) {
+        window.setTimeout(() => {
+          target.animate(
+            [
+              { backgroundColor: 'color-mix(in srgb, var(--color-accent) 18%, transparent)' },
+              { backgroundColor: 'transparent' },
+            ],
+            { duration: 900, easing: 'ease-out' },
+          )
+        }, 180)
+      }
+      return
+    }
+
+    const el = scrollRef.current
+    el?.scrollTo({ top: el.scrollHeight, behavior })
   }
 
   if (!channelId) return null
@@ -229,7 +334,7 @@ export function MessagePane() {
       : 'Join voice'
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
+    <div className="relative flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
       {/* header */}
       <header className="flex h-14 items-center gap-2 border-b border-[var(--color-border)] px-4">
         <div className="flex min-w-0 items-center gap-2">
@@ -279,11 +384,12 @@ export function MessagePane() {
             aria-label={voiceAction}
             aria-pressed={inThisVoiceRoom}
             title={voiceAction}
-            className={`flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+            className={`voice-channel-button flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
               inThisVoiceRoom
                 ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)] ring-1 ring-inset ring-[var(--color-accent)]'
                 : 'text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]'
             }`}
+            data-live={voiceOccupancy > 0 || undefined}
           >
             <VoiceIcon connecting={inThisVoiceRoom && voiceStatus === 'connecting'} />
             {voiceOccupancy > 0 && (
@@ -311,45 +417,57 @@ export function MessagePane() {
       )}
 
       {/* messages */}
-      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto overflow-x-hidden">
-        {cm?.loading && messages.length === 0 ? (
-          <LoadingSkeleton />
-        ) : messages.length === 0 && cm?.loaded ? (
-          <EmptyChannel name={channelLabel(channel)} isDm={isDm} />
-        ) : (
-          <div className="pb-2 pt-3">
-            {cm?.hasMore && (
-              <div className="py-2 text-center text-xs text-[var(--color-text-faint)]">
-                {cm.loading ? 'Loading earlier messages…' : 'Scroll up for more'}
-              </div>
-            )}
-            {messages.map((m, i) => {
-              const prev = messages[i - 1]
-              const newDay = !prev || !sameDay(prev.created_at, m.created_at)
-              const grouped =
-                !newDay &&
-                !!prev &&
-                prev.user.id === m.user.id &&
-                withinMinutes(prev.created_at, m.created_at, 5) &&
-                !prev.deleted_at
-              return (
-                <div key={m.id}>
-                  {newDay && <DayDivider iso={m.created_at} />}
-                  <MessageItem
-                    message={m}
-                    grouped={grouped}
-                    dm={bubbles}
-                    showThread={!bubbles}
-                    online={isDm ? undefined : online.has(m.user.id) || undefined}
-                  />
+      <div className="relative min-h-0 flex-1">
+        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto overflow-x-hidden">
+          {cm?.loading && messages.length === 0 ? (
+            <LoadingSkeleton />
+          ) : messages.length === 0 && cm?.loaded ? (
+            <EmptyChannel name={channelLabel(channel)} isDm={isDm} />
+          ) : (
+            <div className="pb-2 pt-3">
+              {cm?.hasMore && (
+                <div className="py-2 text-center text-xs text-[var(--color-text-faint)]">
+                  {cm.loading ? 'Loading earlier messages…' : 'Scroll up for more'}
                 </div>
-              )
-            })}
-          </div>
-        )}
+              )}
+              {messages.map((m, i) => {
+                const prev = messages[i - 1]
+                const newDay = !prev || !sameDay(prev.created_at, m.created_at)
+                const grouped =
+                  !newDay &&
+                  !!prev &&
+                  prev.user.id === m.user.id &&
+                  withinMinutes(prev.created_at, m.created_at, 5) &&
+                  !prev.deleted_at
+                return (
+                  <div key={m.id}>
+                    {newDay && <DayDivider iso={m.created_at} />}
+                    <MessageItem
+                      message={m}
+                      grouped={grouped}
+                      dm={bubbles}
+                      showThread={!bubbles}
+                      online={isDm ? undefined : online.has(m.user.id) || undefined}
+                    />
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        <JumpToMessages
+          count={pendingJump?.count ?? 0}
+          atBottom={atBottom}
+          disabled={messages.length === 0}
+          onClick={jumpToMessages}
+        />
       </div>
 
       <TypingRow channelId={channelId} />
+      <div className="pointer-events-none relative z-30 h-0">
+        <DuckSuggest channelId={channelId} />
+      </div>
       <Composer
         key={channel.id}
         channel={channel}
@@ -361,18 +479,72 @@ export function MessagePane() {
   )
 }
 
+function JumpToMessages({
+  count,
+  atBottom,
+  disabled,
+  onClick,
+}: {
+  count: number
+  atBottom: boolean
+  disabled: boolean
+  onClick: () => void
+}) {
+  const hasUnread = count > 0
+  const hiddenAtBottom = atBottom && !hasUnread
+  const label = hasUnread
+    ? `Jump to ${count} new ${count === 1 ? 'message' : 'messages'}`
+    : disabled
+      ? 'No messages yet'
+      : 'Jump to latest message'
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled || hiddenAtBottom}
+      aria-hidden={hiddenAtBottom || undefined}
+      tabIndex={hiddenAtBottom ? -1 : 0}
+      aria-label={label}
+      title={label}
+      className={`jump-messages-cta ${hasUnread ? 'jump-messages-cta--unread' : 'jump-messages-cta--latest'}`}
+      data-at-bottom={hiddenAtBottom ? 'true' : undefined}
+    >
+      <svg
+        className="jump-messages-cta__icon"
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="m6 9 6 6 6-6" />
+      </svg>
+      {hasUnread && (
+        <span>
+          {count} new {count === 1 ? 'message' : 'messages'}
+        </span>
+      )}
+    </button>
+  )
+}
+
 function VoiceIcon({ connecting }: { connecting: boolean }) {
   return (
     <span className="relative flex">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <path d="M3 10v4" />
-        <path d="M7 7v10" />
-        <path d="M11 4v16" />
-        <path d="M15 8v8" />
-        <path d="M19 10v4" />
+      <svg className="voice-waveform" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path className="voice-wave-bar" d="M3 10v4" />
+        <path className="voice-wave-bar" d="M7 7v10" />
+        <path className="voice-wave-bar" d="M11 4v16" />
+        <path className="voice-wave-bar" d="M15 8v8" />
+        <path className="voice-wave-bar" d="M19 10v4" />
       </svg>
       {connecting && (
-        <span className="absolute -right-1 -top-1 h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--color-accent-hover)]" />
+        <span className="voice-connecting-dot absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-[var(--color-accent-hover)]" />
       )}
     </span>
   )

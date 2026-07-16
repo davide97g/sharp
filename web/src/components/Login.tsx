@@ -79,7 +79,7 @@ export function Login() {
           src="/login-art.png"
           alt=""
           draggable={false}
-          className="absolute inset-0 h-full w-full object-cover"
+          className="login-brand-art absolute inset-0 h-full w-full object-cover"
         />
         <div className="login-brand-veil pointer-events-none absolute inset-0" />
         {/* Whole copy stack stays invisible until splash unmounts — prevents
@@ -98,8 +98,8 @@ export function Login() {
       {/* Form panel */}
       <main className="relative flex flex-1 flex-col justify-center bg-[var(--color-ink)] px-6 py-8 sm:px-10 md:py-10 lg:px-16">
         <div className="mx-auto w-full max-w-sm animate-in">
-          <header className="mb-8">
-            <h1 className="text-2xl font-bold tracking-tight text-[var(--color-text)]">
+          <header className="login-intro mb-8">
+            <h1 className="login-heading text-2xl font-bold tracking-tight text-[var(--color-text)]">
               {mode === 'login' ? 'Welcome back' : 'Create your account'}
             </h1>
             <p className="mt-1.5 text-sm text-[var(--color-text-dim)]">
@@ -151,7 +151,7 @@ export function Login() {
             <button
               type="submit"
               disabled={busy}
-              className="mt-2 rounded-lg bg-[var(--color-accent)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 focus:ring-offset-[var(--color-ink)] disabled:opacity-60"
+              className="login-primary-action mt-2 rounded-lg bg-[var(--color-accent)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 focus:ring-offset-[var(--color-ink)] disabled:opacity-60"
             >
               {busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
             </button>
@@ -208,8 +208,10 @@ function Field({
   required?: boolean
 }) {
   return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-xs font-medium text-[var(--color-text-dim)]">{label}</span>
+    <label className="login-field flex flex-col gap-1.5">
+      <span className="login-field-label text-xs font-medium text-[var(--color-text-dim)]">
+        {label}
+      </span>
       <input
         type={type}
         value={value}
@@ -217,7 +219,7 @@ function Field({
         placeholder={placeholder}
         autoComplete={autoComplete}
         required={required}
-        className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2.5 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
+        className="login-field-input rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2.5 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
       />
     </label>
   )

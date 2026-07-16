@@ -842,3 +842,64 @@ in sync.
 (optional; base64url — auto-generated if unset) · `VAPID_SUBJECT` (default
 `mailto:admin@sharp.app`) · `EXPO_ACCESS_TOKEN` (optional). Dev/local/prod compose add a
 `minio` service + bucket-init job.
+
+---
+
+# GIFs & duck suggestions
+
+GIF search proxied through the server (provider API keys never reach the client), a GIF
+picker in chat + docs, and an optional "duck": an LLM-powered (DeepSeek) suggester that
+watches the recent conversation and proposes a snarky/dark-humor GIF.
+
+## Providers & settings
+
+- Provider abstraction in `server/src/gif.rs` (`GifProvider` trait). Implemented: **GIPHY**
+  (default) and **Tenor v2** (legacy — Tenor accepts no new API clients since Jan 2026).
+  Adding a provider = new impl + `resolve_provider` match arm.
+- Settings persist in `app_meta` (no migration): `gif.provider` (default `giphy`),
+  `gif.api_key`, `gif.duck_enabled` (default `true`). API key resolution: `app_meta` →
+  provider-matching env fallback (`GIPHY_API_KEY` / `TENOR_API_KEY`).
+- **Any authenticated member may read/update settings** (v1 has no admin role — deliberate
+  simplification). The key is write-only: never echoed back by the API.
+- Web UI: Settings → Workspace tab (provider select, API key, duck toggle, DeepSeek status).
+
+## REST API additions — base `/api/v1`
+
+| Method | Path | Body → Response |
+|---|---|---|
+| GET | `/gifs/config` | → `{enabled, duck, provider}` — `enabled` = provider+key resolvable; `duck` = enabled ∧ DeepSeek configured ∧ `gif.duck_enabled` |
+| GET | `/gifs/search?q=&limit=` | → `{results: [GifResult]}`; `q` required (400), `limit` 1..=30 default 24; 503 `unavailable` when unconfigured or upstream fails |
+| GET | `/gifs/settings` | → `{provider, has_api_key, duck_enabled, deepseek_configured}` |
+| PUT | `/gifs/settings` | `{provider?, api_key?, duck_enabled?}` → same as GET; provider ∈ `giphy\|tenor`; `api_key: ""` clears, absent keeps |
+| POST | `/channels/{id}/gif-suggest` | (member-only) → `{query, results}`; on cooldown returns 200 `{query: null, results: []}`; 503 when duck disabled |
+
+`GifResult = {id, url, preview_url, width, height, title}` — `url` is the provider-CDN GIF
+(hotlinked, nothing stored server-side).
+
+## Message content token
+
+A sent GIF is plain message content: `[[gif:<url>|<alt>]]` (alt = provider title, `|`/`]`
+stripped). The web client pre-splits content on this token **before** react-markdown
+(remark-gfm would autolink the embedded URL) and renders an `<img>` linked to the source;
+same family as the `[[doc:…]]`/`[[canvas:…]]` chips. Chat-only (channels/DMs/threads);
+docs and canvas are not integrated.
+
+## Duck flow
+
+1. Client counts incoming top-level messages from others in the open channel
+   (`store.duckActivity`); own message resets the counter.
+2. ≥3 messages + 5s quiet + >2 min since last suggestion → `POST /channels/{id}/gif-suggest`.
+3. Server (member-guarded): per-channel in-memory cooldown 120s, **per replica**
+   (`AppState.gif_suggest_cooldowns`, stamped before the LLM call); loads last 15 non-deleted
+   top-level messages; DeepSeek chat completion returns ONE short GIF search query
+   (snarky/dark-humor roast tone, no slurs/NSFW; `max_tokens` 20, temp 1.1, 10s timeout);
+   runs provider search (limit 12).
+4. Client: duck (`/duck.png`) pops above the composer with a "gif is ready" bubble; click
+   opens the GIF picker prefilled; picking sends the token message. Duck hidden entirely
+   when `/gifs/config.duck` is false.
+
+## Env additions
+
+`GIPHY_API_KEY` / `TENOR_API_KEY` (optional fallback when no key saved in settings) ·
+`DEEPSEEK_API_KEY` (optional; duck disabled without it) · `DEEPSEEK_MODEL` (default
+`deepseek-chat`) · `DEEPSEEK_BASE_URL` (default `https://api.deepseek.com`).

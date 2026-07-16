@@ -8,6 +8,8 @@ name = "sharp-server"
 path = "src/main.rs"
 
 [dependencies]
+anyhow = "1"
+async-trait = "0.1"
 axum = { version = "0.7", features = ["ws", "multipart"] }
 tokio = { version = "1", features = ["full"] }
 tower-http = { version = "0.5", features = ["cors", "fs", "trace"] }

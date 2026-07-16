@@ -9,6 +9,10 @@ import type {
   DocRolesResponse,
   DocSearchResponse,
   DocsResponse,
+  GifConfig,
+  GifResult,
+  GifSettings,
+  GifSuggestResponse,
   IceConfigResponse,
   Message,
   MembersResponse,
@@ -431,6 +435,26 @@ export const api = {
     const params = new URLSearchParams({ q, limit: String(limit) })
     if (channelId) params.set('channel_id', channelId)
     return request<SearchResponse>(`/search?${params.toString()}`)
+  },
+
+  // --- GIFs ---
+  gifConfig() {
+    return request<GifConfig>('/gifs/config')
+  },
+  searchGifs(q: string, limit = 24) {
+    const params = new URLSearchParams({ q, limit: String(limit) })
+    return request<{ results: GifResult[] }>(`/gifs/search?${params.toString()}`)
+  },
+  getGifSettings() {
+    return request<GifSettings>('/gifs/settings')
+  },
+  putGifSettings(body: { provider?: string; api_key?: string; duck_enabled?: boolean }) {
+    return request<GifSettings>('/gifs/settings', { method: 'PUT', body })
+  },
+  gifSuggest(channelId: string) {
+    return request<GifSuggestResponse>(`/channels/${channelId}/gif-suggest`, {
+      method: 'POST',
+    })
   },
 
   // --- docs ---

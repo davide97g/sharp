@@ -12,26 +12,21 @@ export function TypingRow({ channelId }: { channelId: string }) {
   })()
 
   return (
-    <div className="h-5 px-5 text-xs text-[var(--color-text-faint)]">
+    <div className="typing-row h-5 px-5 text-xs text-[var(--color-text-faint)]" aria-live="polite">
       {text && (
-        <span className="flex items-center gap-1.5">
-          <span className="flex gap-0.5">
-            <Dot delay={0} />
-            <Dot delay={150} />
-            <Dot delay={300} />
+        <span className="typing-signal flex items-center gap-1.5">
+          <span className="typing-dots flex gap-0.5" aria-hidden>
+            <Dot />
+            <Dot />
+            <Dot />
           </span>
-          {text}
+          <span className="typing-copy">{text}</span>
         </span>
       )}
     </div>
   )
 }
 
-function Dot({ delay }: { delay: number }) {
-  return (
-    <span
-      className="inline-block h-1 w-1 animate-bounce rounded-full bg-[var(--color-text-faint)]"
-      style={{ animationDelay: `${delay}ms`, animationDuration: '1s' }}
-    />
-  )
+function Dot() {
+  return <span className="typing-dot inline-block h-1 w-1 rounded-full" />
 }

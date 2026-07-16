@@ -18,6 +18,12 @@ pub struct Config {
     pub vapid_env: Option<VapidEnv>,
     /// `sub` claim for VAPID JWTs (a mailto: or https: URL).
     pub vapid_subject: String,
+    /// GIPHY API key supplied via env. Persisted workspace settings take precedence.
+    pub giphy_api_key: Option<String>,
+    /// Tenor API key supplied via env. Persisted workspace settings take precedence.
+    pub tenor_api_key: Option<String>,
+    /// DeepSeek configuration. `None` when `DEEPSEEK_API_KEY` is unset.
+    pub deepseek: Option<DeepSeekConfig>,
 }
 
 #[derive(Clone)]
@@ -49,6 +55,13 @@ pub struct VapidEnv {
     /// URL-safe base64 of the raw 32-byte P-256 private scalar (the standard
     /// `web-push generate-vapid-keys` "Private Key" format).
     pub private_b64: String,
+}
+
+#[derive(Clone)]
+pub struct DeepSeekConfig {
+    pub api_key: String,
+    pub model: String,
+    pub base_url: String,
 }
 
 fn env_opt(key: &str) -> Option<String> {
@@ -143,6 +156,14 @@ impl Config {
         };
         let vapid_subject =
             env_opt("VAPID_SUBJECT").unwrap_or_else(|| "mailto:admin@sharp.app".to_string());
+        let giphy_api_key = env_opt("GIPHY_API_KEY");
+        let tenor_api_key = env_opt("TENOR_API_KEY");
+        let deepseek = env_opt("DEEPSEEK_API_KEY").map(|api_key| DeepSeekConfig {
+            api_key,
+            model: env_opt("DEEPSEEK_MODEL").unwrap_or_else(|| "deepseek-chat".to_string()),
+            base_url: env_opt("DEEPSEEK_BASE_URL")
+                .unwrap_or_else(|| "https://api.deepseek.com".to_string()),
+        });
 
         Ok(Config {
             database_url,
@@ -156,6 +177,9 @@ impl Config {
             max_upload_bytes,
             vapid_env,
             vapid_subject,
+            giphy_api_key,
+            tenor_api_key,
+            deepseek,
         })
     }
 }

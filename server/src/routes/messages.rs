@@ -32,7 +32,8 @@ const MESSAGE_SELECT: &str = "
 
 /// A short single-line preview of quoted content (newlines collapsed, truncated).
 fn preview_text(s: &str) -> String {
-    let flat: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let humanized = notify::preview_text(s);
+    let flat: String = humanized.split_whitespace().collect::<Vec<_>>().join(" ");
     if flat.chars().count() > 140 {
         flat.chars().take(140).collect::<String>() + "…"
     } else {

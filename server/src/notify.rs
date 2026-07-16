@@ -135,9 +135,40 @@ fn strip_resource_tokens(text: &str) -> String {
     out
 }
 
+/// Replace GIF message tokens with readable text for non-chat preview surfaces.
+/// A message containing one GIF token and only whitespace reads naturally after
+/// the actor name; GIFs embedded in other text become compact inline markers.
+pub(crate) fn preview_text(content: &str) -> String {
+    let trimmed = content.trim();
+    let mut out = String::with_capacity(trimmed.len());
+    let mut rest = trimmed;
+    let mut replacements = 0;
+
+    while let Some(start) = rest.find("[[gif:") {
+        out.push_str(&rest[..start]);
+        let token_body = &rest[start + "[[gif:".len()..];
+        let Some(end) = token_body.find("]]") else {
+            out.push_str(&rest[start..]);
+            rest = "";
+            break;
+        };
+        out.push_str("[GIF]");
+        replacements += 1;
+        rest = &token_body[end + 2..];
+    }
+    out.push_str(rest);
+
+    if replacements == 1 && out == "[GIF]" {
+        "sent a GIF".to_string()
+    } else {
+        out
+    }
+}
+
 /// Build a one-line inbox preview from a message (falls back to its attachment).
 fn build_preview(content: &str, first_attachment: Option<&str>) -> String {
-    let text = strip_resource_tokens(content.trim());
+    let gif_preview = preview_text(content);
+    let text = strip_resource_tokens(&gif_preview);
     let text = text.trim();
     if !text.is_empty() {
         truncate_chars(&text.replace('\n', " "), 140)
@@ -145,6 +176,37 @@ fn build_preview(content: &str, first_attachment: Option<&str>) -> String {
         format!("📎 {name}")
     } else {
         String::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::preview_text;
+
+    #[test]
+    fn humanizes_standalone_gif_token() {
+        assert_eq!(
+            preview_text(" \n[[gif:https://media.example/cat.gif|Cat wave]]\t"),
+            "sent a GIF"
+        );
+    }
+
+    #[test]
+    fn humanizes_gif_tokens_inside_text() {
+        assert_eq!(
+            preview_text(
+                "Look [[gif:https://media.example/one.gif|One]] and [[gif:https://media.example/two.gif|Two]]"
+            ),
+            "Look [GIF] and [GIF]"
+        );
+    }
+
+    #[test]
+    fn leaves_incomplete_gif_token_unchanged() {
+        assert_eq!(
+            preview_text("[[gif:https://media.example/cat.gif|Cat"),
+            "[[gif:https://media.example/cat.gif|Cat"
+        );
     }
 }
 

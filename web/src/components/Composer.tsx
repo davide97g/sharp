@@ -2,10 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import { resolveEmojiShortcode, searchEmojis } from '../lib/emoji'
+import { buildGifToken, gifPreviewText } from '../lib/gif'
 import { toastError } from '../lib/toast'
 import { fmtBytes } from '../lib/util'
 import { Avatar } from './Avatar'
-import type { Attachment, Channel } from '../lib/types'
+import { GifPicker, type GifPickerHandle } from './GifPicker'
+import type { Attachment, Channel, GifResult } from '../lib/types'
 
 type Pending = {
   id: string
@@ -83,6 +85,7 @@ export function Composer({
   const [dragOver, setDragOver] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const gifPickerRef = useRef<GifPickerHandle>(null)
   const counterRef = useRef(0)
   const pendingRef = useRef<Pending[]>([])
   const lastTypingRef = useRef(0)
@@ -92,6 +95,7 @@ export function Composer({
   const loadMembers = useStore((s) => s.loadMembers)
   const setReplyTarget = useStore((s) => s.setReplyTarget)
   const focusRequest = useStore((s) => s.focusRequest)
+  const gifEnabled = useStore((s) => s.gifConfig)?.enabled ?? false
   // Quote-reply applies to the main channel composer only (not the thread composer).
   const activeReply = useStore((s) => (parentId ? null : s.replyTargets[channel.id] ?? null))
 
@@ -100,6 +104,13 @@ export function Composer({
   const [results, setResults] = useState<PickItem[]>([])
   const [sel, setSel] = useState(0)
   const caretRef = useRef(0)
+  const [manualGifOpen, setManualGifOpen] = useState(false)
+  const [dismissedGifCommand, setDismissedGifCommand] = useState<string | null>(null)
+
+  const gifCommand = /^\/gif(?:\s+(.*))?$/.exec(value)
+  const slashGifOpen = gifEnabled && gifCommand !== null && dismissedGifCommand !== value
+  const gifOpen = gifEnabled && (manualGifOpen || slashGifOpen)
+  const gifInitialQuery = slashGifOpen ? (gifCommand?.[1] ?? '') : ''
 
   const canPost = channel.kind === 'dm' || channel.is_member
 
@@ -229,6 +240,10 @@ export function Composer({
     if (!el) return
     const caret = el.selectionStart ?? el.value.length
     caretRef.current = caret
+    if (/^\/gif(?:\s+(.*))?$/.test(el.value)) {
+      setTrigger(null)
+      return
+    }
     const next = detectTrigger(el.value, caret)
     // Only replace the trigger when it actually changed — arrow-key navigation
     // fires keyup with the same trigger, and a fresh object would re-run the
@@ -368,7 +383,52 @@ export function Composer({
     }
   }
 
+  async function sendGif(g: GifResult) {
+    if (sending) return
+    const wasCommand = gifCommand !== null
+    const previousValue = value
+    setSending(true)
+    setManualGifOpen(false)
+    if (wasCommand) setValue('')
+    setDismissedGifCommand(wasCommand ? previousValue : null)
+    setTrigger(null)
+    try {
+      await sendMessage(channel.id, buildGifToken(g), parentId, undefined, activeReply?.id)
+      if (activeReply) setReplyTarget(channel.id, null)
+    } catch {
+      if (wasCommand) setValue(previousValue)
+    } finally {
+      setSending(false)
+      requestAnimationFrame(() => ref.current?.focus())
+    }
+  }
+
+  function closeGifPicker() {
+    setManualGifOpen(false)
+    if (gifCommand) setDismissedGifCommand(value)
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (gifOpen && e.key === 'Tab') {
+      e.preventDefault()
+      gifPickerRef.current?.move(e.shiftKey ? -1 : 1)
+      return
+    }
+    if (gifOpen && e.key === 'Enter' && !e.shiftKey) {
+      if (gifPickerRef.current?.pickSelected()) {
+        e.preventDefault()
+        return
+      }
+      if (slashGifOpen) {
+        e.preventDefault()
+        return
+      }
+    }
+    if (gifOpen && e.key === 'Escape') {
+      e.preventDefault()
+      closeGifPicker()
+      return
+    }
     if (pickerOpen) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -420,8 +480,9 @@ export function Composer({
     } else {
       setValue(next)
       caretRef.current = caret
-      setTrigger(detectTrigger(next, caret))
+      setTrigger(/^\/gif(?:\s+(.*))?$/.test(next) ? null : detectTrigger(next, caret))
     }
+    setDismissedGifCommand(null)
     // throttle typing to 1 per 3s
     const now = Date.now()
     if (now - lastTypingRef.current > 3000) {
@@ -458,9 +519,21 @@ export function Composer({
   const canSend = !sending && !uploading && (!!value.trim() || readyIds.length > 0)
 
   return (
-    <div className="relative px-4 pb-4 pt-1">
-      {pickerOpen && (
-        <div className="absolute bottom-full left-4 right-4 z-20 mb-1 max-h-64 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1.5 shadow-2xl">
+    <div className="composer-wrap relative px-4 pb-4 pt-1" data-has-draft={!!value || undefined}>
+      {gifOpen && (
+        <div className="composer-picker absolute bottom-full left-4 z-30 mb-2">
+          <GifPicker
+            ref={gifPickerRef}
+            key={slashGifOpen ? `slash:${gifInitialQuery}` : 'manual'}
+            initialQuery={gifInitialQuery}
+            onPick={(g) => void sendGif(g)}
+            onClose={closeGifPicker}
+            autoFocus={!slashGifOpen}
+          />
+        </div>
+      )}
+      {pickerOpen && !gifOpen && (
+        <div className="composer-picker absolute bottom-full left-4 right-4 z-20 mb-1 max-h-64 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1.5 shadow-2xl">
           <div className="flex items-center justify-between px-2 py-1">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
               {trigger?.type === '@'
@@ -526,7 +599,7 @@ export function Composer({
           setDragOver(false)
           if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files)
         }}
-        className={`rounded-xl border bg-[var(--color-panel)] px-3 py-2 transition ${
+        className={`composer-shell rounded-xl border bg-[var(--color-panel)] px-3 py-2 transition ${
           dragOver
             ? 'border-[var(--color-accent)] ring-2 ring-[var(--color-accent-soft)]'
             : 'border-[var(--color-border)] focus-within:border-[var(--color-accent)] focus-within:ring-2 focus-within:ring-[var(--color-accent-soft)]'
@@ -539,7 +612,9 @@ export function Composer({
                 Replying to {activeReply.user.display_name}
               </div>
               <div className="truncate text-xs text-[var(--color-text-dim)]">
-                {activeReply.deleted_at ? 'Deleted message' : activeReply.content || 'Attachment'}
+                {activeReply.deleted_at
+                  ? 'Deleted message'
+                  : gifPreviewText(activeReply.content) || 'Attachment'}
               </div>
             </div>
             <button
@@ -557,7 +632,7 @@ export function Composer({
             {pending.map((p) => (
               <div
                 key={p.id}
-                className="relative flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] p-1.5 pr-2"
+                className="composer-attachment relative flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] p-1.5 pr-2"
               >
                 {p.isImage && p.previewUrl ? (
                   <img
@@ -618,6 +693,20 @@ export function Composer({
               e.target.value = ''
             }}
           />
+          {gifEnabled && (
+            <button
+              type="button"
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={() => {
+                setTrigger(null)
+                setManualGifOpen((open) => !open)
+              }}
+              title="Send a GIF"
+              className="mb-0.5 rounded-md px-2 py-1.5 text-xs font-bold leading-none text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
+            >
+              GIF
+            </button>
+          )}
           <textarea
             ref={ref}
             rows={1}
@@ -628,13 +717,13 @@ export function Composer({
             onClick={syncTrigger}
             onPaste={onPaste}
             placeholder={placeholder ?? 'Message'}
-            className="max-h-[260px] flex-1 resize-none bg-transparent py-1.5 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:outline-none"
+            className="composer-textarea max-h-[260px] flex-1 resize-none bg-transparent py-1.5 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:outline-none"
           />
           <button
             onClick={doSend}
             disabled={!canSend}
             title={uploading ? 'Waiting for uploads…' : 'Send (Enter)'}
-            className="mb-0.5 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-[var(--color-accent-hover)] disabled:opacity-40"
+            className="composer-send mb-0.5 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-[var(--color-accent-hover)] disabled:opacity-40"
           >
             Send
           </button>

@@ -1,12 +1,14 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
+import { api } from '../lib/api'
+import type { GifSettings } from '../lib/types'
 import { toastError } from '../lib/toast'
 import { Modal } from './Modal'
 import { Avatar } from './Avatar'
 import { AvatarCropper } from './AvatarCropper'
 import { ChatLayoutPicker } from './ChatLayoutChooser'
 
-type Tab = 'profile' | 'chat'
+type Tab = 'profile' | 'chat' | 'workspace'
 
 export function UserSettingsModal({ onClose }: { onClose: () => void }) {
   const me = useStore((s) => s.me)
@@ -21,7 +23,43 @@ export function UserSettingsModal({ onClose }: { onClose: () => void }) {
   const [savingName, setSavingName] = useState(false)
   const [cropFile, setCropFile] = useState<File | null>(null)
   const [savingAvatar, setSavingAvatar] = useState(false)
+  const [gifSettings, setGifSettings] = useState<GifSettings | null>(null)
+  const [savedGifSettings, setSavedGifSettings] = useState<GifSettings | null>(null)
+  const [gifLoadAttempted, setGifLoadAttempted] = useState(false)
+  const [gifLoading, setGifLoading] = useState(false)
+  const [gifSaving, setGifSaving] = useState(false)
+  const [gifApiKey, setGifApiKey] = useState('')
+  const [gifSaved, setGifSaved] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const gifSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    if (tab !== 'workspace' || gifLoadAttempted) return
+    setGifLoadAttempted(true)
+    setGifLoading(true)
+    api
+      .getGifSettings()
+      .then((settings) => {
+        if (!mountedRef.current) return
+        setGifSettings(settings)
+        setSavedGifSettings(settings)
+      })
+      .catch((error: unknown) => {
+        if (mountedRef.current && error instanceof Error) toastError(error.message)
+      })
+      .finally(() => {
+        if (mountedRef.current) setGifLoading(false)
+      })
+  }, [gifLoadAttempted, tab])
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      if (gifSavedTimerRef.current) clearTimeout(gifSavedTimerRef.current)
+    }
+  }, [])
 
   if (!me) return null
   const nameDirty = name.trim() !== me.display_name && name.trim().length > 0
@@ -72,6 +110,43 @@ export function UserSettingsModal({ onClose }: { onClose: () => void }) {
     }
   }
 
+  function showGifSaved() {
+    setGifSaved(true)
+    if (gifSavedTimerRef.current) clearTimeout(gifSavedTimerRef.current)
+    gifSavedTimerRef.current = setTimeout(() => setGifSaved(false), 1600)
+  }
+
+  async function updateGifSettings(body: {
+    provider?: string
+    api_key?: string
+    duck_enabled?: boolean
+  }) {
+    setGifSaving(true)
+    try {
+      const settings = await api.putGifSettings(body)
+      setGifSettings(settings)
+      setSavedGifSettings(settings)
+      setGifApiKey('')
+      await useStore.getState().refreshGifConfig()
+      showGifSaved()
+    } catch (error) {
+      if (error instanceof Error) toastError(error.message)
+    } finally {
+      setGifSaving(false)
+    }
+  }
+
+  async function saveGifSettings() {
+    if (!gifSettings || !savedGifSettings) return
+    const body: { provider?: string; api_key?: string; duck_enabled?: boolean } = {}
+    if (gifSettings.provider !== savedGifSettings.provider) body.provider = gifSettings.provider
+    if (gifSettings.duck_enabled !== savedGifSettings.duck_enabled) {
+      body.duck_enabled = gifSettings.duck_enabled
+    }
+    if (gifApiKey) body.api_key = gifApiKey
+    await updateGifSettings(body)
+  }
+
   return (
     <Modal title="Settings" onClose={onClose} wide>
       <div className="mb-4 flex gap-1 border-b border-[var(--color-border)]">
@@ -80,6 +155,9 @@ export function UserSettingsModal({ onClose }: { onClose: () => void }) {
         </TabBtn>
         <TabBtn active={tab === 'chat'} onClick={() => setTab('chat')}>
           Chat
+        </TabBtn>
+        <TabBtn active={tab === 'workspace'} onClick={() => setTab('workspace')}>
+          Workspace
         </TabBtn>
       </div>
 
@@ -156,7 +234,7 @@ export function UserSettingsModal({ onClose }: { onClose: () => void }) {
             Signed in as {me.email}
           </div>
         </div>
-      ) : (
+      ) : tab === 'chat' ? (
         <div className="flex flex-col gap-3">
           <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
             Direct message layout
@@ -164,6 +242,123 @@ export function UserSettingsModal({ onClose }: { onClose: () => void }) {
           <ChatLayoutPicker value={chatLayout} onChange={(l) => void setChatLayout(l)} />
           <p className="text-[11px] text-[var(--color-text-faint)]">
             Applies to 1:1 conversations. Channels always use the classic layout.
+          </p>
+        </div>
+      ) : !gifLoadAttempted || gifLoading ? (
+        <div
+          className="flex min-h-48 items-center justify-center text-[var(--color-text-faint)]"
+          aria-label="Loading GIF settings"
+        >
+          <span className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--color-border)] border-t-[var(--color-accent)]" />
+        </div>
+      ) : !gifSettings ? (
+        <div className="flex min-h-48 flex-col items-center justify-center gap-3 text-sm text-[var(--color-text-dim)]">
+          <span>Could not load GIF settings.</span>
+          <button
+            type="button"
+            onClick={() => setGifLoadAttempted(false)}
+            className="rounded-md border border-[var(--color-border)] px-3 py-1.5 hover:bg-[var(--color-panel-2)]"
+          >
+            Retry
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-5">
+          <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+            GIFs
+          </div>
+
+          <div>
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+              Provider
+            </label>
+            <select
+              value={gifSettings.provider}
+              onChange={(event) =>
+                setGifSettings((settings) =>
+                  settings ? { ...settings, provider: event.target.value } : settings,
+                )
+              }
+              className="w-full cursor-default rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm text-[var(--color-text-dim)] opacity-80 focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
+            >
+              <option value="giphy">GIPHY</option>
+              <option value="tenor">Tenor (legacy — no new API clients)</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+              API key
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="password"
+                value={gifApiKey}
+                onChange={(event) => setGifApiKey(event.target.value)}
+                placeholder={
+                  gifSettings.has_api_key
+                    ? '•••••••• (saved)'
+                    : gifSettings.provider === 'tenor'
+                      ? 'Tenor API key'
+                      : 'GIPHY API key'
+                }
+                className="min-w-0 flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
+              />
+              {gifSettings.has_api_key ? (
+                <button
+                  type="button"
+                  disabled={gifSaving}
+                  onClick={() => void updateGifSettings({ api_key: '' })}
+                  className="shrink-0 text-xs text-[var(--color-text-faint)] underline decoration-dotted underline-offset-2 hover:text-[var(--color-text-dim)] disabled:opacity-50"
+                >
+                  Clear key
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] p-3">
+            <input
+              type="checkbox"
+              checked={gifSettings.duck_enabled}
+              onChange={(event) =>
+                setGifSettings((settings) =>
+                  settings ? { ...settings, duck_enabled: event.target.checked } : settings,
+                )
+              }
+              className="mt-0.5 h-4 w-4 accent-[var(--color-accent)]"
+            />
+            <span>
+              <span className="block text-sm font-medium text-[var(--color-text)]">
+                Duck GIF suggestions
+              </span>
+              <span className="mt-1 block text-xs text-[var(--color-text-faint)]">
+                An AI duck watches the conversation and suggests a fitting GIF.
+              </span>
+            </span>
+          </label>
+
+          <div className="rounded-lg border border-[var(--color-border)] px-3 py-2.5 text-sm text-[var(--color-text-dim)]">
+            DeepSeek (duck AI):{' '}
+            {gifSettings.deepseek_configured
+              ? 'configured'
+              : 'not configured — set DEEPSEEK_API_KEY on the server'}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void saveGifSettings()}
+              disabled={gifSaving}
+              className="rounded-md bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
+            >
+              {gifSaving ? 'Saving…' : 'Save'}
+            </button>
+            {gifSaved ? <span className="text-xs text-[var(--color-text-dim)]">Saved</span> : null}
+          </div>
+
+          <p className="text-[11px] text-[var(--color-text-faint)]">
+            Workspace-wide settings — every member can edit them.
           </p>
         </div>
       )}

@@ -191,17 +191,17 @@ export function VoiceMiniWidget() {
       onClick={(event) => {
         if (event.detail === 0) expandCall()
       }}
-      className={`fixed z-50 flex w-[88px] touch-none select-none flex-col items-center gap-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-panel)] p-2.5 shadow-2xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+      className={`voice-mini-widget fixed z-50 flex w-[88px] touch-none select-none flex-col items-center gap-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-panel)] p-2.5 shadow-2xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
         dragging
           ? 'cursor-grabbing'
           : 'cursor-grab transition-[left,top] duration-200 ease-out motion-reduce:transition-none'
       }`}
       style={position ?? { right: EDGE_MARGIN, bottom: EDGE_MARGIN }}
     >
-      <div className="relative flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]">
+      <div className="voice-live-tile relative flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]">
         <WaveformIcon />
         <span
-          className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-[var(--color-panel)] bg-[#4fbf9f]"
+          className="voice-connected-dot absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-[var(--color-panel)] bg-[#4fbf9f]"
           aria-label="Connected"
         />
         {anyScreen && (
@@ -223,8 +223,8 @@ export function VoiceMiniWidget() {
           return (
             <div
               key={participant.userId}
-              className={`rounded-[11px] border-2 border-[var(--color-panel)] ${
-                participant.speaking ? 'ring-2 ring-[#4fbf9f]' : ''
+              className={`voice-speaker-avatar rounded-[11px] border-2 border-[var(--color-panel)] ${
+                participant.speaking ? 'is-speaking ring-2 ring-[#4fbf9f]' : ''
               }`}
               title={name}
             >
@@ -279,6 +279,7 @@ export function VoiceMiniWidget() {
 function WaveformIcon() {
   return (
     <svg
+      className="voice-waveform"
       width="23"
       height="23"
       viewBox="0 0 24 24"
@@ -288,11 +289,11 @@ function WaveformIcon() {
       strokeLinecap="round"
       aria-hidden
     >
-      <path d="M5 10v4" />
-      <path d="M9 7v10" />
-      <path d="M13 4v16" />
-      <path d="M17 8v8" />
-      <path d="M21 10v4" />
+      <path className="voice-wave-bar" d="M5 10v4" />
+      <path className="voice-wave-bar" d="M9 7v10" />
+      <path className="voice-wave-bar" d="M13 4v16" />
+      <path className="voice-wave-bar" d="M17 8v8" />
+      <path className="voice-wave-bar" d="M21 10v4" />
     </svg>
   )
 }

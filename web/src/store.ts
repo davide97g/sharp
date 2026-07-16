@@ -3,6 +3,7 @@ import { api, clearToken, setSessionToken, setToken } from './lib/api'
 import { VoiceClient } from './lib/voice'
 import { WsClient } from './lib/ws'
 import { cmpId } from './lib/util'
+import { gifPreviewText } from './lib/gif'
 import { toastError, toastNotify } from './lib/toast'
 import { navigateTo } from './lib/nav'
 import {
@@ -29,6 +30,7 @@ import type {
   DocMention,
   DocMentionPayload,
   DocUpdatedPayload,
+  GifConfig,
   HelloPayload,
   Message,
   MessageCreatedPayload,
@@ -128,6 +130,10 @@ type State = {
   // messages keyed by channel id
   byChannel: Record<string, ChannelMessages>
 
+  // GIF feature flags + per-channel activity used by duck suggestions
+  gifConfig: GifConfig | null
+  duckActivity: Record<string, { count: number; lastAt: number }>
+
   // members cache keyed by channel id
   members: Record<string, User[]>
 
@@ -196,6 +202,8 @@ type State = {
   rejoinGuestCall: () => void
   logout: () => void
   refetchDirectory: () => Promise<void>
+  refreshGifConfig: () => Promise<void>
+  resetDuckActivity: (channelId: string) => void
 
   setCurrentChannel: (id: string | null) => void
   loadMessages: (channelId: string) => Promise<void>
@@ -339,6 +347,8 @@ export const useStore = create<State>((set, get) => ({
   channels: [],
   currentChannelId: null,
   byChannel: {},
+  gifConfig: null,
+  duckActivity: {},
   members: {},
   thread: { open: false, parentId: null, parent: null, replies: [], loading: false },
   typing: {},
@@ -385,6 +395,11 @@ export const useStore = create<State>((set, get) => ({
     })
     set({ ws })
     ws.connect()
+
+    void api
+      .gifConfig()
+      .then((gifConfig) => set({ gifConfig }))
+      .catch(() => {})
 
     await get().refetchDirectory()
     get().loadMentions()
@@ -460,6 +475,8 @@ export const useStore = create<State>((set, get) => ({
       channels: [],
       currentChannelId: null,
       byChannel: {},
+      gifConfig: null,
+      duckActivity: {},
       members: {},
       thread: { open: false, parentId: null, parent: null, replies: [], loading: false },
       typing: {},
@@ -503,6 +520,27 @@ export const useStore = create<State>((set, get) => ({
     } catch (e) {
       if (e instanceof Error) toastError(e.message)
     }
+  },
+
+  async refreshGifConfig() {
+    try {
+      const gifConfig = await api.gifConfig()
+      set({ gifConfig })
+    } catch {
+      // Keep last known config when refresh fails.
+    }
+  },
+
+  resetDuckActivity(channelId) {
+    set((s) => ({
+      duckActivity: {
+        ...s.duckActivity,
+        [channelId]: {
+          count: 0,
+          lastAt: s.duckActivity[channelId]?.lastAt ?? 0,
+        },
+      },
+    }))
   },
 
   setCurrentChannel(id) {
@@ -1783,13 +1821,14 @@ export const useStore = create<State>((set, get) => ({
               ? notification.actor.display_name
               : `${notification.actor.display_name} in #${notification.channel_name}`
           const cid = notification.channel_id
-          toastNotify(notification.preview || 'sent you a message', {
+          const preview = gifPreviewText(notification.preview)
+          toastNotify(preview || 'sent you a message', {
             title,
             initial: notification.actor.display_name.trim().charAt(0).toUpperCase() || '?',
             onClick: cid ? () => navigateToChannel(cid) : undefined,
           })
           playNotifySound()
-          void showOsNotification(title, notification.preview, {
+          void showOsNotification(title, preview, {
             deepLink: `/c/${cid}`,
             tag: `sharp-${cid}`,
           })
@@ -2038,7 +2077,26 @@ function applyMessageCreated(set: Setter, message: Message, myId: string | null)
         unread_count: bumpUnread ? c.unread_count + 1 : c.unread_count,
       }
     })
-    return { byChannel, channels }
+    let duckActivity = s.duckActivity
+    if (!fromMe && isCurrent) {
+      const previous = s.duckActivity[message.channel_id]
+      duckActivity = {
+        ...s.duckActivity,
+        [message.channel_id]: {
+          count: (previous?.count ?? 0) + 1,
+          lastAt: Date.now(),
+        },
+      }
+    } else if (fromMe) {
+      duckActivity = {
+        ...s.duckActivity,
+        [message.channel_id]: {
+          count: 0,
+          lastAt: s.duckActivity[message.channel_id]?.lastAt ?? 0,
+        },
+      }
+    }
+    return { byChannel, channels, duckActivity }
   })
 }
 

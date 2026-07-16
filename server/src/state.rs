@@ -35,6 +35,8 @@ pub struct AppState {
     pub vapid: Option<Vapid>,
     /// One-time codes for the desktop browser-login exchange. Per-replica.
     pub desktop_codes: DesktopCodes,
+    /// Last automatic GIF suggestion attempt per channel. Per-replica.
+    pub gif_suggest_cooldowns: Mutex<HashMap<Uuid, Instant>>,
 }
 
 pub type SharedState = Arc<AppState>;

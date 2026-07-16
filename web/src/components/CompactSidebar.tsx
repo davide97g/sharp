@@ -63,9 +63,9 @@ export function CompactSidebar({ mode }: { mode: Mode }) {
           onClick={() => setQuickSwitcher(true)}
           aria-label="Quick switcher"
           title="Quick switcher (⌘K)"
-          className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-faint)] outline-none hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+          className="micro-icon-button flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-faint)] outline-none hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
         >
-          <SearchIcon />
+          <span className="micro-icon-glyph"><SearchIcon /></span>
         </button>
 
         {mode !== 'chat' && (
@@ -172,7 +172,7 @@ function CompactDmLink({
       to={`/c/${channel.id}`}
       aria-label={label}
       title={label}
-      className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+      className={`micro-icon-button relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
         active
           ? 'bg-[var(--color-accent-soft)] ring-1 ring-[var(--color-accent)]'
           : 'hover:bg-[var(--color-panel-2)]'
@@ -202,13 +202,13 @@ function CompactLink({
       to={to}
       aria-label={label}
       title={label}
-      className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+      className={`micro-icon-button relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
         active
           ? 'bg-[var(--color-accent-soft)] text-white ring-1 ring-[var(--color-accent)]'
           : 'text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]'
       }`}
     >
-      {children}
+      <span className="micro-icon-glyph flex items-center justify-center">{children}</span>
       {badge !== undefined && badge > 0 && <UnreadBadge count={badge} />}
     </NavLink>
   )

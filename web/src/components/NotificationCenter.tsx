@@ -5,6 +5,7 @@ import { useStore } from '../store'
 import { Avatar } from './Avatar'
 import { fmtDayDivider, fmtRelative, sameDay } from '../lib/util'
 import { isTauri } from '../lib/notify'
+import { gifPreviewText } from '../lib/gif'
 import type { Notification, NotificationKind } from '../lib/types'
 
 type Filter = 'all' | NotificationKind
@@ -295,6 +296,7 @@ export function InboxPanel() {
 function InboxRow({ n, onOpen }: { n: Notification; onOpen: () => void }) {
   const unread = !n.read_at
   const meta = KIND_META[n.kind]
+  const preview = gifPreviewText(n.preview)
   const where =
     n.channel_kind === 'dm' ? 'Direct message' : `#${n.channel_name}`
 
@@ -327,9 +329,9 @@ function InboxRow({ n, onOpen }: { n: Notification; onOpen: () => void }) {
             {fmtRelative(n.created_at)}
           </time>
         </div>
-        {n.preview && (
+        {preview && (
           <p className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-[var(--color-text-dim)]">
-            {n.preview}
+            {preview}
           </p>
         )}
         <div className="mt-1.5 flex items-center gap-1.5">

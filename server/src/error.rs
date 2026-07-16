@@ -11,6 +11,7 @@ pub enum AppError {
     NotFound(String),
     Conflict(String),
     Validation(String),
+    ServiceUnavailable(String),
     Internal(String),
 }
 
@@ -23,6 +24,7 @@ impl AppError {
             AppError::NotFound(m) => (StatusCode::NOT_FOUND, "not_found", m),
             AppError::Conflict(m) => (StatusCode::CONFLICT, "conflict", m),
             AppError::Validation(m) => (StatusCode::UNPROCESSABLE_ENTITY, "validation", m),
+            AppError::ServiceUnavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, "unavailable", m),
             AppError::Internal(m) => (StatusCode::INTERNAL_SERVER_ERROR, "internal", m),
         }
     }

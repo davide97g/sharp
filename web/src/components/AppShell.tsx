@@ -207,9 +207,9 @@ function ModeRail({
         aria-keyshortcuts="\\"
         aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
         title={`${sidebarOpen ? 'Collapse' : 'Expand'} sidebar (\\)`}
-        className="mt-auto flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-faint)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-ink)]"
+        className="micro-icon-button mt-auto flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-faint)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-ink)]"
       >
-        <SidebarToggleIcon open={sidebarOpen} />
+        <span className="micro-icon-glyph"><SidebarToggleIcon open={sidebarOpen} /></span>
       </button>
     </nav>
   )
@@ -252,13 +252,13 @@ function RailButton({
     <button
       onClick={onClick}
       title={title}
-      className={`relative flex h-10 w-10 items-center justify-center rounded-xl text-lg font-extrabold transition ${
+      className={`micro-icon-button relative flex h-10 w-10 items-center justify-center rounded-xl text-lg font-extrabold transition ${
         active
           ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)] ring-1 ring-[var(--color-accent)]'
           : 'text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]'
       }`}
     >
-      {label}
+      <span className="micro-icon-glyph flex items-center justify-center">{label}</span>
       {badge !== undefined && badge > 0 && (
         <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--color-accent)] px-1 text-[10px] font-bold text-white">
           {badge > 99 ? '99+' : badge}

@@ -107,6 +107,22 @@ export type MessagesResponse = { messages: Message[] }
 export type ThreadResponse = { parent: Message; replies: Message[] }
 export type SearchResult = Message & { channel_name: string; snippet: string }
 export type SearchResponse = { results: SearchResult[] }
+export type GifResult = {
+  id: string
+  url: string
+  preview_url: string
+  width: number
+  height: number
+  title: string
+}
+export type GifConfig = { enabled: boolean; duck: boolean; provider?: string }
+export type GifSettings = {
+  provider: string
+  has_api_key: boolean
+  duck_enabled: boolean
+  deepseek_configured: boolean
+}
+export type GifSuggestResponse = { query: string | null; results: GifResult[] }
 export type NotificationsResponse = {
   notifications: Notification[]
   unread_count: number

@@ -4,6 +4,7 @@ import { useStore } from '../store'
 import { api } from '../lib/api'
 import { channelLabel, fmtTime, fmtDayDivider } from '../lib/util'
 import { toastError } from '../lib/toast'
+import { gifPreviewText } from '../lib/gif'
 import { Avatar } from './Avatar'
 import type { DocSearchResult, SearchResult } from '../lib/types'
 
@@ -51,6 +52,13 @@ function clientSnippet(text: string, query: string): string {
   const pre = start > 0 ? '…' : ''
   const post = end < text.length ? '…' : ''
   return `${pre}${text.slice(start, idx)}<<${text.slice(idx, idx + term.length)}>>${text.slice(idx + term.length, end)}${post}`
+}
+
+function messageSnippet(result: SearchResult, query: string): string {
+  const content = gifPreviewText(result.content)
+  return content !== result.content
+    ? clientSnippet(content, query)
+    : gifPreviewText(result.snippet || clientSnippet(result.content, query))
 }
 
 export function SearchPalette() {
@@ -347,7 +355,7 @@ export function SearchPalette() {
                       <Highlight
                         text={
                           row.kind === 'message'
-                            ? row.data.snippet || clientSnippet(row.data.content, q)
+                            ? messageSnippet(row.data, q)
                             : row.data.snippet || row.data.preview || ''
                         }
                       />
