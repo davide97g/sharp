@@ -58,6 +58,7 @@ pub async fn search(
     let settings = gif::load_settings(&state.pool, &state.config).await;
     let provider = gif::resolve_provider(&settings)
         .ok_or_else(|| AppError::ServiceUnavailable("gif provider not configured".to_string()))?;
+    maybe_acquire_giphy(&state, &settings.provider)?;
     let results = provider.search(query, limit).await.map_err(|error| {
         tracing::warn!("GIF search failed: {}", error);
         AppError::ServiceUnavailable("gif search failed".to_string())
@@ -73,6 +74,8 @@ pub struct GifSettingsResponse {
     duck_cooldown_secs: u64,
     duck_context: String,
     deepseek_configured: bool,
+    /// Sliding-hour self-enforced GIPHY search usage (100/h).
+    giphy_usage: gif::GiphyUsageSnapshot,
 }
 
 fn settings_response(state: &SharedState, settings: GifSettings) -> GifSettingsResponse {
@@ -83,7 +86,40 @@ fn settings_response(state: &SharedState, settings: GifSettings) -> GifSettingsR
         duck_cooldown_secs: settings.duck_cooldown_secs,
         duck_context: settings.duck_context,
         deepseek_configured: state.config.deepseek.is_some(),
+        giphy_usage: giphy_usage_snapshot(state),
     }
+}
+
+fn giphy_usage_snapshot(state: &SharedState) -> gif::GiphyUsageSnapshot {
+    match state.giphy_usage.lock() {
+        Ok(mut usage) => usage.snapshot(),
+        Err(_) => gif::GiphyUsageSnapshot {
+            used: 0,
+            limit: gif::GIPHY_HOURLY_LIMIT,
+            resets_at: None,
+        },
+    }
+}
+
+fn acquire_giphy_slot(state: &SharedState) -> AppResult<()> {
+    let mut usage = state
+        .giphy_usage
+        .lock()
+        .map_err(|_| AppError::Internal("giphy_usage lock poisoned".to_string()))?;
+    usage.try_acquire().map(|_| ()).map_err(|snapshot| {
+        AppError::RateLimited(format!(
+            "GIPHY hourly limit reached ({}/{}). Try again after the window resets.",
+            snapshot.used, snapshot.limit
+        ))
+    })
+}
+
+/// Reserve a GIPHY quota slot when the active provider is GIPHY.
+fn maybe_acquire_giphy(state: &SharedState, provider: &str) -> AppResult<()> {
+    if provider == "giphy" {
+        acquire_giphy_slot(state)?;
+    }
+    Ok(())
 }
 
 pub async fn get_settings(
@@ -187,7 +223,8 @@ pub async fn suggest(
     }
 
     let (query, results) =
-        suggest_best_gif(deepseek_config, provider.as_ref(), &transcript).await?;
+        suggest_best_gif(&state, &settings.provider, deepseek_config, provider.as_ref(), &transcript)
+            .await?;
 
     // Someone pulled the trigger — clear the shared streak for every member.
     gif::reset_streak(&state.duck_streaks, channel_id);
@@ -206,6 +243,8 @@ pub async fn suggest(
 
 /// Query → multi-search → soft-rank → LLM pick (with one retry on junk-heavy results).
 async fn suggest_best_gif(
+    state: &SharedState,
+    provider_name: &str,
     deepseek_config: &crate::config::DeepSeekConfig,
     provider: &dyn gif::GifProvider,
     transcript: &[(String, String)],
@@ -217,12 +256,13 @@ async fn suggest_best_gif(
             AppError::ServiceUnavailable("suggestion failed".to_string())
         })?;
 
-    let mut ranked = search_and_rank(provider, &query, transcript).await?;
+    let mut ranked = search_and_rank(state, provider_name, provider, &query, transcript).await?;
     if gif::needs_query_retry(&ranked) {
         // One retry when the top hit looks like watermark/spam junk.
         if let Ok(retry_query) = deepseek::suggest_query(deepseek_config, transcript).await {
             if retry_query != query {
-                if let Ok(retry_ranked) = search_and_rank(provider, &retry_query, transcript).await
+                if let Ok(retry_ranked) =
+                    search_and_rank(state, provider_name, provider, &retry_query, transcript).await
                 {
                     if !retry_ranked.is_empty() {
                         query = retry_query;
@@ -259,10 +299,13 @@ async fn suggest_best_gif(
 }
 
 async fn search_and_rank(
+    state: &SharedState,
+    provider_name: &str,
     provider: &dyn gif::GifProvider,
     query: &str,
     transcript: &[(String, String)],
 ) -> AppResult<Vec<GifResult>> {
+    maybe_acquire_giphy(state, provider_name)?;
     let results = provider
         .search(query, gif::SUGGEST_SEARCH_LIMIT)
         .await

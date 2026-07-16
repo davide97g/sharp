@@ -117,6 +117,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         desktop_codes: Default::default(),
         gif_suggest_cooldowns: Default::default(),
         duck_streaks: Default::default(),
+        giphy_usage: Default::default(),
     });
 
     let api = Router::new()

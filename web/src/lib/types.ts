@@ -124,6 +124,12 @@ export type GifConfig = {
 }
 export type DuckContext = '1m' | '2m' | '3m'
 export type DuckCooldownSecs = 30 | 60 | 120 | 300
+export type GiphyUsage = {
+  used: number
+  limit: number
+  /** ISO timestamp when the oldest call ages out; null when unused. */
+  resets_at: string | null
+}
 export type GifSettings = {
   provider: string
   has_api_key: boolean
@@ -131,6 +137,7 @@ export type GifSettings = {
   duck_cooldown_secs: DuckCooldownSecs
   duck_context: DuckContext
   deepseek_configured: boolean
+  giphy_usage: GiphyUsage
 }
 export type GifSuggestResponse = { query: string | null; results: GifResult[] }
 export type NotificationsResponse = {

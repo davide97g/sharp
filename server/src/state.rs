@@ -39,6 +39,8 @@ pub struct AppState {
     pub gif_suggest_cooldowns: Mutex<HashMap<Uuid, Instant>>,
     /// Shared per-channel duck streak (all members boost it). Per-replica.
     pub duck_streaks: crate::gif::DuckStreaks,
+    /// Sliding-hour GIPHY search usage (self-enforced 100/h). Per-replica.
+    pub giphy_usage: crate::gif::GiphyUsageTracker,
 }
 
 pub type SharedState = Arc<AppState>;

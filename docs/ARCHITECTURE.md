@@ -868,17 +868,26 @@ watches fast chat streaks and auto-picks a mean roast GIF to send.
 - **Any authenticated member may read/update settings** (v1 has no admin role — deliberate
   simplification). The key is write-only: never echoed back by the API.
 - Web UI: Settings → Workspace tab (provider select, API key, duck toggle, slow mode,
-  context window, DeepSeek status).
+  context window, DeepSeek status, GIPHY hourly usage bar).
+- **GIPHY rate limit**: server self-enforces a sliding **100 searches / hour** window
+  (free-tier style). Each `/gifs/search` and duck-suggest provider search acquires one
+  slot; at cap the API returns `429 rate_limited`. Usage is per-replica in-memory
+  (`giphy_usage` on `AppState`) and exposed on settings as
+  `giphy_usage: {used, limit, resets_at}` (`resets_at` = when the oldest call ages out,
+  or `null` when unused).
 
 ## REST API additions — base `/api/v1`
 
 | Method | Path | Body → Response |
 |---|---|---|
 | GET | `/gifs/config` | → `{enabled, duck, provider, duck_cooldown_secs, duck_context}` — `enabled` = provider+key resolvable; `duck` = enabled ∧ DeepSeek configured ∧ `gif.duck_enabled` |
-| GET | `/gifs/search?q=&limit=` | → `{results: [GifResult]}`; `q` required (400), `limit` 1..=30 default 24; 503 `unavailable` when unconfigured or upstream fails |
-| GET | `/gifs/settings` | → `{provider, has_api_key, duck_enabled, duck_cooldown_secs, duck_context, deepseek_configured}` |
+| GET | `/gifs/search?q=&limit=` | → `{results: [GifResult]}`; `q` required (400), `limit` 1..=30 default 24; 503 `unavailable` when unconfigured or upstream fails; 429 `rate_limited` when GIPHY hourly cap is hit |
+| GET | `/gifs/settings` | → `{provider, has_api_key, duck_enabled, duck_cooldown_secs, duck_context, deepseek_configured, giphy_usage}` |
 | PUT | `/gifs/settings` | `{provider?, api_key?, duck_enabled?, duck_cooldown_secs?, duck_context?}` → same as GET; provider ∈ `giphy\|tenor`; cooldown ∈ `30\|60\|120\|300`; context ∈ `1m\|2m\|3m`; `api_key: ""` clears, absent keeps |
-| POST | `/channels/{id}/gif-suggest` | (member-only) → `{query, results}`; on cooldown returns 200 `{query: null, results: []}`; 503 when duck disabled |
+| POST | `/channels/{id}/gif-suggest` | (member-only) → `{query, results}`; on cooldown returns 200 `{query: null, results: []}`; 503 when duck disabled; 429 when GIPHY cap is hit |
+
+`giphy_usage = {used: u32, limit: u32, resets_at: string|null}` — `limit` is always `100`;
+`resets_at` is an ISO-8601 timestamp for the first recovery moment in the sliding window.
 
 `GifResult = {id, url, preview_url, width, height, title}` — `url` is the provider-CDN GIF
 (hotlinked, nothing stored server-side).

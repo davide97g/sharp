@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -22,6 +22,64 @@ pub const DEFAULT_DUCK_COOLDOWN_SECS: u64 = 120;
 pub const DEFAULT_DUCK_CONTEXT: &str = "1m";
 /// Max gap between consecutive messages that still counts as one fast streak.
 pub const STREAK_GAP_SECS: i64 = 20;
+
+/// GIPHY free-tier style cap we self-enforce (sliding 1-hour window).
+pub const GIPHY_HOURLY_LIMIT: u32 = 100;
+const GIPHY_WINDOW: Duration = Duration::from_secs(3600);
+
+/// Sliding-window counter of outbound GIPHY search calls. Per-replica in-memory.
+#[derive(Default)]
+pub struct GiphyUsage {
+    calls: VecDeque<Instant>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct GiphyUsageSnapshot {
+    pub used: u32,
+    pub limit: u32,
+    /// When the oldest call in the window ages out (first recovery). `None` if unused.
+    pub resets_at: Option<DateTime<Utc>>,
+}
+
+impl GiphyUsage {
+    fn prune(&mut self, now: Instant) {
+        while self
+            .calls
+            .front()
+            .is_some_and(|at| now.duration_since(*at) >= GIPHY_WINDOW)
+        {
+            self.calls.pop_front();
+        }
+    }
+
+    pub fn snapshot(&mut self) -> GiphyUsageSnapshot {
+        let now = Instant::now();
+        self.prune(now);
+        let used = self.calls.len() as u32;
+        let resets_at = self.calls.front().map(|oldest| {
+            let remaining = GIPHY_WINDOW.saturating_sub(now.duration_since(*oldest));
+            Utc::now() + chrono::Duration::from_std(remaining).unwrap_or_default()
+        });
+        GiphyUsageSnapshot {
+            used,
+            limit: GIPHY_HOURLY_LIMIT,
+            resets_at,
+        }
+    }
+
+    /// Reserve one GIPHY call slot. Err when the hourly cap is already hit.
+    pub fn try_acquire(&mut self) -> Result<GiphyUsageSnapshot, GiphyUsageSnapshot> {
+        let now = Instant::now();
+        self.prune(now);
+        if self.calls.len() as u32 >= GIPHY_HOURLY_LIMIT {
+            return Err(self.snapshot());
+        }
+        self.calls.push_back(now);
+        Ok(self.snapshot())
+    }
+}
+
+pub type GiphyUsageTracker = Mutex<GiphyUsage>;
 
 #[derive(Clone, Copy)]
 pub struct DuckStreakEntry {
@@ -67,7 +125,8 @@ pub fn is_duck_roast_gif(content: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_duck_roast_gif, is_standalone_gif, needs_query_retry, rank_suggest_candidates, GifResult,
+        is_duck_roast_gif, is_standalone_gif, needs_query_retry, rank_suggest_candidates,
+        GiphyUsage, GifResult, GIPHY_HOURLY_LIMIT,
     };
 
     fn gif(id: &str, title: &str) -> GifResult {
@@ -79,6 +138,18 @@ mod tests {
             height: 100,
             title: title.into(),
         }
+    }
+
+    #[test]
+    fn giphy_usage_caps_at_hourly_limit() {
+        let mut usage = GiphyUsage::default();
+        for _ in 0..GIPHY_HOURLY_LIMIT {
+            assert!(usage.try_acquire().is_ok());
+        }
+        let err = usage.try_acquire().unwrap_err();
+        assert_eq!(err.used, GIPHY_HOURLY_LIMIT);
+        assert_eq!(err.limit, GIPHY_HOURLY_LIMIT);
+        assert!(err.resets_at.is_some());
     }
 
     #[test]
