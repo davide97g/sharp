@@ -3,6 +3,7 @@ import { useStore, type VoiceStageMode } from '../../store'
 import { channelLabel } from '../../lib/util'
 import { Avatar } from '../Avatar'
 import { VoiceMiniWidget } from './VoiceMiniWidget'
+import { useVoicePip } from './VoicePip'
 
 type StageParticipant = {
   userId: string
@@ -68,6 +69,11 @@ export function VideoStage() {
   } | null>(null)
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
   const [dragging, setDragging] = useState(false)
+  const hasFallbackVideo = Boolean(
+    localStream?.getVideoTracks().length ||
+      Object.values(remoteStreams).some((stream) => stream.getVideoTracks().length > 0),
+  )
+  const pip = useVoicePip(hasFallbackVideo)
 
   useEffect(() => {
     let cancelled = false
@@ -158,6 +164,20 @@ export function VideoStage() {
   }, [myConnId, room, speaking])
 
   if (!channelId) return null
+  if (pip.pipWindow) {
+    return (
+      <>
+        {pip.portal}
+        <button
+          type="button"
+          onClick={pip.closeAndFocus}
+          className="fixed bottom-4 right-4 z-50 rounded-full border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 text-xs font-medium text-[var(--color-text)] shadow-2xl outline-none hover:bg-[var(--color-panel-2)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+        >
+          Call is in picture-in-picture
+        </button>
+      </>
+    )
+  }
   if (stageMode === 'mini') return <VoiceMiniWidget />
 
   const roomName = channel
@@ -249,6 +269,17 @@ export function VideoStage() {
             {participants.length} {participants.length === 1 ? 'participant' : 'participants'}
           </div>
         </div>
+        {pip.supported && (
+          <button
+            type="button"
+            aria-label="Open picture-in-picture"
+            title="Picture-in-picture"
+            onClick={() => void pip.open()}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-dim)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+          >
+            <PipIcon />
+          </button>
+        )}
         <button
           type="button"
           aria-label={stageMode === 'expanded' ? 'Reduce call window' : 'Expand call window'}
@@ -438,6 +469,8 @@ function VideoTile({
       {hasVideo ? (
         <video
           ref={videoRef}
+          data-voice-video
+          data-voice-video-local={local ? 'true' : undefined}
           autoPlay
           playsInline
           muted
@@ -665,6 +698,25 @@ function ExpandIcon() {
       <path d="m21 3-7 7" />
       <path d="M9 21H3v-6" />
       <path d="m3 21 7-7" />
+    </svg>
+  )
+}
+
+function PipIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <rect x="12" y="11" width="7" height="6" rx="1" fill="currentColor" stroke="none" />
     </svg>
   )
 }
