@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { sound } from './sound'
 
 export type Toast = {
   id: number
@@ -26,6 +27,10 @@ export const useToasts = create<ToastState>((set) => ({
   toasts: [],
   push: (kind, message, extra) => {
     const id = seq++
+    // One sound per toast (fires here, not on each render). Info/notify stay
+    // silent — the notification chime already covers notify toasts.
+    if (kind === 'success') sound.toastSuccess()
+    else if (kind === 'error') sound.toastError()
     set((s) => ({ toasts: [...s.toasts, { id, kind, message, ...extra }] }))
     // Notification toasts linger a touch longer so they're readable.
     const ttl = kind === 'notify' ? 6000 : 4500

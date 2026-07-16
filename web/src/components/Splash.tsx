@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { LOGIN_BRAND_ID } from './BrandLockup'
+import { sound } from '../lib/sound'
 
 // Brand splash shown once per page load. Logo births center-screen while a
 // duck pops from a corner. When auth resolves to login, the lockup is pinned
@@ -67,7 +68,16 @@ export function Splash({ ready, onDone }: { ready: boolean; onDone: () => void }
     })(),
   ).current
 
-  const onDuckLanded = () => setLanded(true)
+  // The duck's squack should fire exactly once (onAnimationEnd + the fallback
+  // timer both call this).
+  const squackedRef = useRef(false)
+  const onDuckLanded = () => {
+    if (!squackedRef.current) {
+      squackedRef.current = true
+      sound.squack()
+    }
+    setLanded(true)
+  }
 
   useEffect(() => {
     if (!landed || !ready || revealedRef.current) return
@@ -115,6 +125,9 @@ export function Splash({ ready, onDone }: { ready: boolean; onDone: () => void }
         if (cancelled) return
         const ease = `left ${HANDOFF_MS}ms cubic-bezier(0.22, 1, 0.36, 1), top ${HANDOFF_MS}ms cubic-bezier(0.22, 1, 0.36, 1), color ${HANDOFF_MS}ms ease`
         lockup.style.transition = ease
+        // Airy whoosh synced to the flight (only reached when we actually hand
+        // off — reduced motion takes the simple-exit path and stays silent).
+        sound.whoosh()
         lockup.style.left = `${to.left}px`
         lockup.style.top = `${to.top}px`
         // wordmark is light-gray on ink; ease it to white over the art
@@ -141,6 +154,20 @@ export function Splash({ ready, onDone }: { ready: boolean; onDone: () => void }
   useEffect(() => {
     const t = setTimeout(onDuckLanded, FALL_FALLBACK_MS)
     return () => clearTimeout(t)
+  }, [])
+
+  // Sound bed for the splash, timed to the CSS animation beats: a deep bass
+  // swell on mount, a bell ping as the ring pulses (360ms), a shimmer as the
+  // wordmark slides out (900ms). The whoosh is played later, only if we do the
+  // flight handoff (see below) so it's skipped under reduced motion.
+  useEffect(() => {
+    sound.bassSwell()
+    const ping = setTimeout(() => sound.ringPing(), 360)
+    const spark = setTimeout(() => sound.shimmer(), 900)
+    return () => {
+      clearTimeout(ping)
+      clearTimeout(spark)
+    }
   }, [])
 
   return (

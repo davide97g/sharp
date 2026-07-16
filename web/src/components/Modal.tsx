@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react'
+import { sound } from '../lib/sound'
 
 export function Modal({
   title,
@@ -18,6 +19,12 @@ export function Modal({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  // Soft thup on open, slightly lower on close — every modal shares this.
+  useEffect(() => {
+    sound.modalOpen()
+    return () => sound.modalClose()
+  }, [])
 
   return (
     <div

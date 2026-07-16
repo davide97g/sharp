@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { DocsSidebar } from './docs/DocsSidebar'
@@ -11,6 +11,7 @@ import { InboxPanel } from './NotificationCenter'
 import { VideoStage } from './voice/VideoStage'
 import { Onboarding } from './Onboarding'
 import { isOnboardingDone } from '../lib/onboarding'
+import { sound } from '../lib/sound'
 import { useStore } from '../store'
 
 const SIDEBAR_OPEN_KEY = 'sharp.sidebarOpen'
@@ -45,6 +46,18 @@ export function AppShell() {
       : 'chat'
 
   const setInboxOpen = useStore((s) => s.setInboxOpen)
+
+  // Navigation cues: a mid tick when the mode rail switches (chat/docs/canvas),
+  // a near-subliminal tick when moving between channels/docs within a mode. The
+  // initial mount is skipped so landing in the app is silent.
+  const navRef = useRef<{ mode: string; path: string } | null>(null)
+  useEffect(() => {
+    const prev = navRef.current
+    navRef.current = { mode, path: location.pathname }
+    if (!prev) return
+    if (prev.mode !== mode) sound.modeSwitch()
+    else if (prev.path !== location.pathname) sound.tabSwitch()
+  }, [mode, location.pathname])
 
   // Close the chat inbox when leaving chat mode so it doesn't snap back open.
   useEffect(() => {

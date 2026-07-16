@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store'
 import { channelLabel, fuzzyScore } from '../lib/util'
 import { toastError } from '../lib/toast'
+import { sound } from '../lib/sound'
 import type { DocKind } from '../lib/types'
 
 type Item =
@@ -30,6 +31,7 @@ export function QuickSwitcher() {
     if (open) {
       setQ('')
       setSel(0)
+      sound.switcherOpen()
       requestAnimationFrame(() => inputRef.current?.focus())
     }
   }, [open])

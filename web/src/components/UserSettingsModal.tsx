@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import type { DuckContext, DuckCooldownSecs, GifSettings, GiphyUsage } from '../lib/types'
 import { toastError } from '../lib/toast'
+import { getSoundSettings, setSoundSettings, sound, subscribeSoundSettings } from '../lib/sound'
 import { Modal } from './Modal'
 import { Avatar } from './Avatar'
 import { AvatarCropper } from './AvatarCropper'
@@ -281,6 +282,8 @@ export function UserSettingsModal({ onClose }: { onClose: () => void }) {
             </div>
           </div>
 
+          <SoundSettingsSection />
+
           <div className="text-[11px] text-[var(--color-text-faint)]">
             Signed in as {me.email}
           </div>
@@ -552,6 +555,64 @@ function GiphyUsageBar({ usage }: { usage: GiphyUsage }) {
               ? `Resets in ${resetLabel}`
               : `Next free slot in ${resetLabel}`}
         </span>
+      </div>
+    </div>
+  )
+}
+
+function SoundSettingsSection() {
+  const settings = useSyncExternalStore(
+    subscribeSoundSettings,
+    getSoundSettings,
+    getSoundSettings,
+  )
+  const pct = Math.round(settings.volume * 100)
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+        Sounds
+      </div>
+      <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] p-3">
+        <input
+          type="checkbox"
+          checked={settings.enabled}
+          onChange={(e) => {
+            setSoundSettings({ enabled: e.target.checked })
+            if (e.target.checked) sound.previewTick()
+          }}
+          className="mt-0.5 h-4 w-4 accent-[var(--color-accent)]"
+        />
+        <span>
+          <span className="block text-sm font-medium text-[var(--color-text)]">
+            Interface sounds
+          </span>
+          <span className="mt-1 block text-xs text-[var(--color-text-faint)]">
+            Crisp synthesized cues for messages, calls, and navigation.
+          </span>
+        </span>
+      </label>
+      <div>
+        <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+          Volume
+        </label>
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={pct}
+            disabled={!settings.enabled}
+            onChange={(e) => {
+              setSoundSettings({ volume: Number(e.target.value) / 100 })
+              // Preview at the new level so dragging is audible feedback.
+              sound.previewTick()
+            }}
+            className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-[var(--color-panel)] accent-[var(--color-accent)] disabled:cursor-default disabled:opacity-50"
+          />
+          <span className="w-10 text-right text-xs tabular-nums text-[var(--color-text-dim)]">
+            {pct}%
+          </span>
+        </div>
       </div>
     </div>
   )

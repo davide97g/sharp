@@ -11,13 +11,16 @@ import {
   initPush,
   isWebNotifyGranted,
   navigateToChannel,
+  requestNotifyPermission,
+  showOsNotification,
+} from './lib/notify'
+import {
   playHuddleRingSound,
   playNotifySound,
   playVoiceJoinSound,
   playVoiceLeaveSound,
-  requestNotifyPermission,
-  showOsNotification,
-} from './lib/notify'
+  sound,
+} from './lib/sound'
 import type {
   Channel,
   ChannelCreatedPayload,
@@ -648,6 +651,7 @@ export const useStore = create<State>((set, get) => ({
   async sendMessage(channelId, content, parentId, attachmentIds, replyToId) {
     try {
       const msg = await api.sendMessage(channelId, content, parentId, attachmentIds, replyToId)
+      sound.messageSend()
       // Merge immediately; the WS echo will dedupe by id.
       get().applyWsEvent({ type: 'message.created', payload: { message: msg } })
     } catch (e) {
@@ -743,6 +747,7 @@ export const useStore = create<State>((set, get) => ({
     const mine = existing?.me ?? false
     const myId = get().me?.id ?? ''
     get().applyReaction(msg.id, msg.channel_id, emoji, myId, !mine)
+    if (!mine) sound.reactionAdd()
     try {
       if (mine) await api.removeReaction(msg.id, emoji)
       else await api.addReaction(msg.id, emoji)
@@ -1051,6 +1056,8 @@ export const useStore = create<State>((set, get) => ({
     if (!channelId || !client) return
     const nextMuted = !muted
     client.setMuted(nextMuted)
+    if (nextMuted) sound.micMute()
+    else sound.micUnmute()
     set((s) => ({ voice: { ...s.voice, muted: nextMuted } }))
     if (get().voice.transcribing) {
       if (nextMuted) voiceRecognizer?.pause()
@@ -1102,9 +1109,11 @@ export const useStore = create<State>((set, get) => ({
     if (!channelId || !client || status !== 'connected' || cameraStatus === 'starting') return
     if (cameraStatus === 'on') {
       client.stopCamera()
+      sound.cameraOff()
       get().ws?.send('voice.camera', { channel_id: channelId, enabled: false })
       return
     }
+    sound.cameraOn()
     set((s) => ({ voice: { ...s.voice, cameraStatus: 'starting' } }))
     get().ws?.send('voice.camera', { channel_id: channelId, enabled: true })
   },
@@ -1114,6 +1123,7 @@ export const useStore = create<State>((set, get) => ({
     if (!channelId || !client || status !== 'connected' || screenStatus === 'starting') return
     if (screenStatus === 'on') {
       client.stopScreenShare()
+      sound.screenShareStop()
       get().ws?.send('voice.screen', { channel_id: channelId, enabled: false })
       return
     }
@@ -1123,6 +1133,7 @@ export const useStore = create<State>((set, get) => ({
       // Acquire in the click gesture (getDisplayMedia needs transient user
       // activation); publish only once the server echoes participant_updated.
       streamId = await client.acquireScreen()
+      sound.screenShareStart()
     } catch {
       // Picker cancelled / permission denied — reset silently.
       if (get().voice.client === client) {
@@ -1719,6 +1730,16 @@ export const useStore = create<State>((set, get) => ({
       case 'message.created': {
         const { message, duck_streak } = env.payload as MessageCreatedPayload
         applyMessageCreated(set, message, me?.id ?? null, duck_streak)
+        // Ultra-soft cue when a top-level message lands in the channel you're
+        // looking at (others' messages only — DM/mention/reply get the fuller
+        // notification chime via notification.created instead).
+        const focusedHere =
+          typeof document !== 'undefined' &&
+          document.hasFocus() &&
+          get().currentChannelId === message.channel_id
+        if (focusedHere && !message.parent_id && message.user.id !== me?.id) {
+          sound.messageReceived()
+        }
         break
       }
       case 'duck.streak': {

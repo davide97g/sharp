@@ -5,6 +5,7 @@ import { ApiRequestError } from '../lib/api'
 import { startBrowserLogin } from '../lib/desktopAuth'
 import { useStore } from '../store'
 import { toastError } from '../lib/toast'
+import { sound } from '../lib/sound'
 import { BrandLockup, LOGIN_BRAND_ID } from './BrandLockup'
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
@@ -55,6 +56,7 @@ export function Login() {
           ? await api.login(email.trim().toLowerCase(), password)
           : await api.register(email.trim().toLowerCase(), password, displayName.trim())
       await init(res.token, res.user)
+      sound.loginSuccess()
       // First sign-in: ask for notification permission once, while we still have
       // the click gesture. Skip if the user already granted or denied it before.
       if (typeof Notification === 'undefined' || Notification.permission === 'default') {
