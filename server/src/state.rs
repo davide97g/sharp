@@ -37,6 +37,8 @@ pub struct AppState {
     pub desktop_codes: DesktopCodes,
     /// Last automatic GIF suggestion attempt per channel. Per-replica.
     pub gif_suggest_cooldowns: Mutex<HashMap<Uuid, Instant>>,
+    /// Shared per-channel duck streak (all members boost it). Per-replica.
+    pub duck_streaks: crate::gif::DuckStreaks,
 }
 
 pub type SharedState = Arc<AppState>;

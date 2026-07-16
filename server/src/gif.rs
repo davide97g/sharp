@@ -1,11 +1,13 @@
 use crate::config::Config;
 use anyhow::anyhow;
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
-use std::sync::OnceLock;
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
+use uuid::Uuid;
 
 const TENOR_SEARCH_URL: &str = "https://tenor.googleapis.com/v2/search";
 const GIPHY_SEARCH_URL: &str = "https://api.giphy.com/v1/gifs/search";
@@ -20,6 +22,68 @@ pub const DEFAULT_DUCK_COOLDOWN_SECS: u64 = 120;
 pub const DEFAULT_DUCK_CONTEXT: &str = "streak";
 /// Max gap between consecutive messages that still counts as one fast streak.
 pub const STREAK_GAP_SECS: i64 = 20;
+
+#[derive(Clone, Copy)]
+pub struct DuckStreakEntry {
+    pub count: u32,
+    pub last_at: Instant,
+}
+
+/// Per-channel shared duck streak. Per-replica in-memory (same as voice rooms).
+pub type DuckStreaks = Mutex<HashMap<Uuid, DuckStreakEntry>>;
+
+#[derive(Serialize, Clone)]
+pub struct DuckStreakSnapshot {
+    pub count: u32,
+    pub last_at: DateTime<Utc>,
+}
+
+/// True when the message is only a GIF token (don't let roast GIFs re-boost the streak).
+pub fn is_standalone_gif(content: &str) -> bool {
+    let trimmed = content.trim();
+    if !trimmed.starts_with("[[gif:") || !trimmed.ends_with("]]") {
+        return false;
+    }
+    trimmed.matches("[[gif:").count() == 1
+}
+
+/// Bump the shared channel streak for a top-level chat message from any member.
+pub fn bump_streak(streaks: &DuckStreaks, channel_id: Uuid) -> DuckStreakSnapshot {
+    let now = Instant::now();
+    let gap = Duration::from_secs(STREAK_GAP_SECS as u64);
+    let mut map = streaks
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let count = match map.get(&channel_id) {
+        Some(entry) if now.duration_since(entry.last_at) <= gap => entry.count.saturating_add(1),
+        _ => 1,
+    };
+    map.insert(
+        channel_id,
+        DuckStreakEntry {
+            count,
+            last_at: now,
+        },
+    );
+    DuckStreakSnapshot {
+        count,
+        last_at: Utc::now(),
+    }
+}
+
+pub fn reset_streak(streaks: &DuckStreaks, channel_id: Uuid) {
+    let mut map = streaks
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    map.remove(&channel_id);
+}
+
+pub fn empty_streak_snapshot() -> DuckStreakSnapshot {
+    DuckStreakSnapshot {
+        count: 0,
+        last_at: Utc::now(),
+    }
+}
 
 fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();

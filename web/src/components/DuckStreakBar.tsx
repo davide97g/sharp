@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  duckStreakArmed,
   duckStreakProgress,
   STREAK_GAP_MS,
-  STREAK_TARGET,
 } from '../lib/duckStreak'
 import { useStore } from '../store'
 
@@ -14,12 +14,14 @@ export function DuckStreakBar({ channelId }: { channelId: string }) {
   const resetDuckActivity = useStore((state) => state.resetDuckActivity)
   const [progress, setProgress] = useState(0)
   const [visible, setVisible] = useState(false)
+  const [armed, setArmed] = useState(false)
   const hideTimer = useRef<number | null>(null)
 
   useEffect(() => {
     if (!duck) {
       setProgress(0)
       setVisible(false)
+      setArmed(false)
       return
     }
 
@@ -34,6 +36,7 @@ export function DuckStreakBar({ channelId }: { channelId: string }) {
       }
 
       setProgress(next)
+      setArmed(duckStreakArmed(count, lastAt))
       if (next > VISIBLE_FLOOR) {
         setVisible(true)
         if (hideTimer.current != null) {
@@ -41,7 +44,6 @@ export function DuckStreakBar({ channelId }: { channelId: string }) {
           hideTimer.current = null
         }
       } else if (hideTimer.current == null) {
-        // Linger briefly so the drain-to-zero reads as a finish, not a pop-out.
         hideTimer.current = window.setTimeout(() => {
           setVisible(false)
           hideTimer.current = null
@@ -61,7 +63,6 @@ export function DuckStreakBar({ channelId }: { channelId: string }) {
   if (!duck) return null
 
   const pct = Math.round(Math.min(1, Math.max(0, progress)) * 1000) / 10
-  const armed = (activity?.count ?? 0) >= STREAK_TARGET && progress > 0.7
 
   return (
     <div

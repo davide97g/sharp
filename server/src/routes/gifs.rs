@@ -4,6 +4,7 @@ use crate::error::{AppError, AppResult};
 use crate::gif::{self, GifResult, GifSettings, DEFAULT_DUCK_CONTEXT, STREAK_GAP_SECS};
 use crate::routes::{channel_kind, is_member};
 use crate::state::SharedState;
+use crate::ws::{channel_member_ids, envelope};
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
@@ -197,6 +198,19 @@ pub async fn suggest(
         tracing::warn!("GIF suggestion search failed: {}", error);
         AppError::ServiceUnavailable("gif search failed".to_string())
     })?;
+
+    // Someone pulled the trigger — clear the shared streak for every member.
+    gif::reset_streak(&state.duck_streaks, channel_id);
+    let targets = channel_member_ids(&state.pool, channel_id).await?;
+    let reset = envelope(
+        "duck.streak",
+        json!({
+            "channel_id": channel_id,
+            "duck_streak": gif::empty_streak_snapshot(),
+        }),
+    );
+    state.hub.broadcast(reset, targets).await;
+
     Ok(Json(json!({ "query": query, "results": results })))
 }
 

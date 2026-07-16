@@ -181,7 +181,15 @@ export type HelloPayload = {
   conn_id: string
   voice_rooms: VoiceRoomSnapshot[]
 }
-export type MessageCreatedPayload = { message: Message }
+export type DuckStreakSnapshot = { count: number; last_at: string }
+export type MessageCreatedPayload = {
+  message: Message
+  duck_streak?: DuckStreakSnapshot
+}
+export type DuckStreakPayload = {
+  channel_id: string
+  duck_streak: DuckStreakSnapshot
+}
 export type MessageUpdatedPayload = { message: Message }
 export type MessageDeletedPayload = {
   message_id: string

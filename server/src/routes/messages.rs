@@ -1,5 +1,6 @@
 use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
+use crate::gif;
 use crate::models::{Attachment, Message, MessageUser, Reaction, ReplyPreview};
 use crate::notify;
 use crate::routes::{channel_kind, is_member};
@@ -396,7 +397,18 @@ pub async fn create_message(
     let message = load_message(&state.pool, new_id, auth.id).await?;
 
     let targets = channel_member_ids(&state.pool, channel_id).await?;
-    let ev = envelope("message.created", json!({ "message": &message }));
+    let duck_streak = if parent_id.is_none() && !gif::is_standalone_gif(&message.content) {
+        Some(gif::bump_streak(&state.duck_streaks, channel_id))
+    } else {
+        None
+    };
+    let ev = match &duck_streak {
+        Some(streak) => envelope(
+            "message.created",
+            json!({ "message": &message, "duck_streak": streak }),
+        ),
+        None => envelope("message.created", json!({ "message": &message })),
+    };
     state.hub.broadcast(ev, targets).await;
 
     // Fan out notifications (mentions / dm / reply) — best-effort, OFF the request

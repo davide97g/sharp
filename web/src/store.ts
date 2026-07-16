@@ -4,7 +4,6 @@ import { VoiceClient } from './lib/voice'
 import { WsClient } from './lib/ws'
 import { cmpId } from './lib/util'
 import { gifPreviewText } from './lib/gif'
-import { STREAK_GAP_MS } from './lib/duckStreak'
 import { toastError, toastNotify } from './lib/toast'
 import { navigateTo } from './lib/nav'
 import {
@@ -37,6 +36,7 @@ import type {
   MessageCreatedPayload,
   MessageDeletedPayload,
   MessageUpdatedPayload,
+  DuckStreakPayload,
   Notification,
   NotificationCreatedPayload,
   PresencePayload,
@@ -1634,8 +1634,13 @@ export const useStore = create<State>((set, get) => ({
         break
       }
       case 'message.created': {
-        const { message } = env.payload as MessageCreatedPayload
-        applyMessageCreated(set, message, me?.id ?? null)
+        const { message, duck_streak } = env.payload as MessageCreatedPayload
+        applyMessageCreated(set, message, me?.id ?? null, duck_streak)
+        break
+      }
+      case 'duck.streak': {
+        const { channel_id, duck_streak } = env.payload as DuckStreakPayload
+        applyDuckStreak(set, channel_id, duck_streak)
         break
       }
       case 'message.updated': {
@@ -2027,7 +2032,38 @@ function upsertAscending(list: Message[], msg: Message): Message[] {
   return next
 }
 
-function applyMessageCreated(set: Setter, message: Message, myId: string | null) {
+function applyDuckStreak(
+  set: Setter,
+  channelId: string,
+  streak: { count: number; last_at: string } | undefined,
+) {
+  if (!streak) {
+    set((s) => ({
+      duckActivity: {
+        ...s.duckActivity,
+        [channelId]: { count: 0, lastAt: s.duckActivity[channelId]?.lastAt ?? 0 },
+      },
+    }))
+    return
+  }
+  const lastAt = Date.parse(streak.last_at)
+  set((s) => ({
+    duckActivity: {
+      ...s.duckActivity,
+      [channelId]: {
+        count: streak.count,
+        lastAt: Number.isFinite(lastAt) ? lastAt : Date.now(),
+      },
+    },
+  }))
+}
+
+function applyMessageCreated(
+  set: Setter,
+  message: Message,
+  myId: string | null,
+  duckStreak?: { count: number; last_at: string },
+) {
   if (message.parent_id) {
     set((s) => {
       const cm = s.byChannel[message.channel_id]
@@ -2079,25 +2115,15 @@ function applyMessageCreated(set: Setter, message: Message, myId: string | null)
       }
     })
     let duckActivity = s.duckActivity
-    if (!fromMe && isCurrent) {
-      const previous = s.duckActivity[message.channel_id]
-      const now = Date.now()
-      // Fast streak: messages more than STREAK_GAP_MS apart start a new burst.
-      const continuesStreak =
-        previous != null && previous.count > 0 && now - previous.lastAt <= STREAK_GAP_MS
+    // Shared channel streak comes from the server (`duck_streak` on message.created /
+    // duck.streak). Every member's top-level messages boost it; GIF-only posts skip.
+    if (!message.parent_id && duckStreak) {
+      const lastAt = Date.parse(duckStreak.last_at)
       duckActivity = {
         ...s.duckActivity,
         [message.channel_id]: {
-          count: continuesStreak ? previous.count + 1 : 1,
-          lastAt: now,
-        },
-      }
-    } else if (fromMe) {
-      duckActivity = {
-        ...s.duckActivity,
-        [message.channel_id]: {
-          count: 0,
-          lastAt: s.duckActivity[message.channel_id]?.lastAt ?? 0,
+          count: duckStreak.count,
+          lastAt: Number.isFinite(lastAt) ? lastAt : Date.now(),
         },
       }
     }

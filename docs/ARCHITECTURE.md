@@ -173,8 +173,10 @@ Server → client:
 - `user.updated` `{user: User}` — broadcast to all online users on a profile change (display name
   or avatar). Clients patch their `users` directory (and `me` if it's their own id); avatars are
   resolved from that directory so message/sidebar/header avatars update live.
-- `message.created` `{message: Message}` — to all members of its channel (also to the
-  author's other devices). Thread replies carry non-null `parent_id`.
+- `message.created` `{message: Message, duck_streak?: {count, last_at}}` — to all members of
+  its channel (also to the author's other devices). `duck_streak` is set for top-level
+  non-GIF posts (shared channel burst for the duck bar). Thread replies carry non-null
+  `parent_id`.
 - `message.updated` `{message: Message}`
 - `message.deleted` `{message_id, channel_id, parent_id}`
 - `reaction.added` / `reaction.removed` `{message_id, channel_id, emoji, user_id}`
@@ -190,6 +192,8 @@ Server → client:
   channel also sends that user a member-view `channel.created` so private channels appear.
 - `typing` `{channel_id, user_id, display_name}` — client shows ~3s
 - `presence` `{user_id, status: 'online'|'offline'}`
+- `duck.streak` `{channel_id, duck_streak: {count, last_at}}` — shared duck bar reset
+  after someone triggers a GIF suggestion (count `0`)
 
 Client → server:
 
@@ -889,19 +893,18 @@ docs and canvas are not integrated.
 
 ## Duck flow
 
-1. Client tracks **fast streaks** of incoming top-level messages from others in the open
-   channel (`store.duckActivity`): gaps >20s reset the burst; own message resets the
-   counter.
-2. ≥3 messages in a fast streak + 5s quiet + cooldown elapsed (from
-   `gifConfig.duck_cooldown_secs`, default 2 min) → `POST /channels/{id}/gif-suggest`.
-3. Server (member-guarded): per-channel in-memory cooldown from settings, **per replica**
-   (`AppState.gif_suggest_cooldowns`, stamped before the LLM call); loads context messages
-   by `duck_context` — `streak` = newest burst with ≤20s gaps, or `1m`/`2m`/`3m` = messages
-   in that wall-clock window (up to 40); DeepSeek chat completion returns ONE short GIF
-   search query (vicious/disrespectful roast tone, no slurs/NSFW; `max_tokens` 20, temp 1.1,
-   10s timeout); runs provider search (limit 1 — top hit is the pick).
-4. Client: duck (`/duck.png`) pops above the composer with a "gif is ready" bubble; click
-   immediately sends that GIF as a message (no picker). Duck hidden entirely when
+1. **Shared channel streak** (server, per-replica `AppState.duck_streaks`): every
+   top-level non-GIF message from any member bumps the burst; gaps >20s reset.
+   The new count rides `message.created` as `duck_streak: {count, last_at}` so
+   every member's progress bar stays in sync.
+2. Client progress bar fills with the shared count (more messages = more boost,
+   saturates at 3+). Drains as the streak cools. At ≥3 messages with enough
+   freshness the duck CTA appears (`drop a roast`).
+3. Clicking the duck CTA → `POST /channels/{id}/gif-suggest` (cooldown from
+   `gifConfig.duck_cooldown_secs`) → auto-sends the top GIF; server resets the
+   shared streak and broadcasts `duck.streak` `{channel_id, duck_streak:{count:0,…}}`.
+4. Server suggest: loads context by `duck_context` (`streak` / `1m` / `2m` / `3m`);
+   DeepSeek returns one roast query; provider search limit 1. Duck hidden when
    `/gifs/config.duck` is false.
 
 ## Env additions

@@ -406,8 +406,8 @@ export function UserSettingsModal({ onClose }: { onClose: () => void }) {
                   <option value="3m">Last 3 minutes</option>
                 </select>
                 <p className="mt-1.5 text-xs text-[var(--color-text-faint)]">
-                  Which messages the duck reads when picking a GIF. Triggers still require a fast
-                  streak (≥3 messages within 20s).
+                  Which messages the duck reads when picking a GIF. The composer streak fills from
+                  every member&apos;s messages; at 3+ the duck CTA unlocks.
                 </p>
               </div>
             </>

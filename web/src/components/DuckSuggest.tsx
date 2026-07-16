@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
-import { STREAK_QUIET_MS, STREAK_TARGET } from '../lib/duckStreak'
+import { duckStreakArmed, STREAK_GAP_MS } from '../lib/duckStreak'
 import { buildGifToken } from '../lib/gif'
 import type { GifResult } from '../lib/types'
 import { useStore } from '../store'
@@ -12,73 +12,80 @@ export function DuckSuggest({ channelId }: { channelId: string }) {
   const cooldownMs = (useStore((state) => state.gifConfig?.duck_cooldown_secs) ?? 120) * 1000
   const activity = useStore((state) => state.duckActivity[channelId])
   const resetDuckActivity = useStore((state) => state.resetDuckActivity)
-  const [gif, setGif] = useState<GifResult | null>(null)
-  const [sending, setSending] = useState(false)
+  const [armed, setArmed] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [tick, setTick] = useState(0)
 
   useEffect(() => {
-    setGif(null)
-    setSending(false)
+    setBusy(false)
   }, [channelId])
 
+  // Re-evaluate arming as the shared streak decays over time.
   useEffect(() => {
-    // Fast streak: ≥target rapid messages from others, then a short quiet window.
-    if (!duck || (activity?.count ?? 0) < STREAK_TARGET) return
-
-    let cancelled = false
-    const timer = window.setTimeout(() => {
-      const previous = lastSuggestAt.get(channelId) ?? 0
-      if (Date.now() - previous <= cooldownMs) return
-
-      void api
-        .gifSuggest(channelId)
-        .then(({ query, results }) => {
-          if (cancelled) return
-          if (query === null) {
-            resetDuckActivity(channelId)
-            return
-          }
-          const best = results[0]
-          if (!best) return
-
-          lastSuggestAt.set(channelId, Date.now())
-          setGif(best)
-          setSending(false)
-          resetDuckActivity(channelId)
-        })
-        .catch(() => {
-          // Suggestions are an optional easter egg; network failures stay silent.
-        })
-    }, STREAK_QUIET_MS)
-
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
+    if (!duck) {
+      setArmed(false)
+      return
     }
-  }, [activity?.count, activity?.lastAt, channelId, cooldownMs, duck, resetDuckActivity])
+    const id = window.setInterval(() => setTick((n) => n + 1), 250)
+    return () => window.clearInterval(id)
+  }, [duck])
 
-  if (!duck || !gif) return null
+  useEffect(() => {
+    if (!duck) {
+      setArmed(false)
+      return
+    }
+    const count = activity?.count ?? 0
+    const lastAt = activity?.lastAt ?? 0
+    if (count > 0 && lastAt > 0 && Date.now() - lastAt >= STREAK_GAP_MS) {
+      resetDuckActivity(channelId)
+      setArmed(false)
+      return
+    }
+    setArmed(duckStreakArmed(count, lastAt))
+  }, [activity?.count, activity?.lastAt, channelId, duck, resetDuckActivity, tick])
 
-  async function sendSuggestedGif() {
-    if (sending || !gif) return
-    setSending(true)
+  if (!duck || !armed) return null
+
+  async function triggerSuggestion() {
+    if (busy) return
+    const previous = lastSuggestAt.get(channelId) ?? 0
+    if (Date.now() - previous <= cooldownMs) return
+
+    setBusy(true)
     try {
-      await useStore.getState().sendMessage(channelId, buildGifToken(gif))
-      setGif(null)
+      const { query, results } = await api.gifSuggest(channelId)
+      if (query === null || results.length === 0) {
+        resetDuckActivity(channelId)
+        setArmed(false)
+        return
+      }
+      const best: GifResult = results[0]
+      lastSuggestAt.set(channelId, Date.now())
+      await useStore.getState().sendMessage(channelId, buildGifToken(best))
+      setArmed(false)
     } catch {
-      setSending(false)
+      // Optional easter egg — keep the CTA so they can retry.
+    } finally {
+      setBusy(false)
     }
   }
+
+  const onCooldown =
+    Date.now() - (lastSuggestAt.get(channelId) ?? 0) <= cooldownMs && !busy
 
   return (
     <div className="duck-suggest-pop pointer-events-auto absolute bottom-2 right-6 z-30">
       <button
         type="button"
-        onClick={() => void sendSuggestedGif()}
-        disabled={sending}
-        aria-label="Send suggested GIF"
+        onClick={() => void triggerSuggestion()}
+        disabled={busy || onCooldown}
+        aria-label="Trigger GIF suggestion"
         className="duck-suggest-bob relative block h-14 w-[60px] cursor-pointer overflow-visible outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:cursor-wait"
       >
-        <span className="duck-suggest-bubble">gif is ready</span>
+        <span className="duck-suggest-bubble">
+          {busy ? 'cooking…' : onCooldown ? 'cooling off' : 'drop a roast'}
+        </span>
         <span className="absolute inset-0 overflow-hidden rounded-xl">
           <img
             src="/duck.png"
