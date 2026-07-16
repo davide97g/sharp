@@ -4,5 +4,9 @@
 <dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>Sharp uses the microphone for voice rooms and huddles.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>Sharp uses the camera for video in voice rooms and huddles.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>Sharp uses speech recognition to transcribe voice calls.</string>
 </dict>
 </plist>
