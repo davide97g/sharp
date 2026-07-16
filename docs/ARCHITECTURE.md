@@ -886,9 +886,12 @@ watches fast chat streaks and auto-picks a mean roast GIF to send.
 ## Message content token
 
 A sent GIF is plain message content: `[[gif:<url>|<alt>]]` (alt = provider title, `|`/`]`
-stripped). Duck-automation roast GIFs append `|duck`: `[[gif:<url>|<alt>|duck]]` so
-suggestion context can skip prior roasts while still rendering them like normal GIFs.
-Manual GIF sends stay unmarked. The web client pre-splits content on this token **before**
+stripped). Duck-automation roast GIFs append `|duck`: `[[gif:<url>|<alt>|duck]]`, and
+optionally embed the search query as a fourth field:
+`[[gif:<url>|<alt>|duck|<query>]]` (`|`/`]` stripped from the query). Suggestion context
+skips prior roasts (any `|duck` token) while the web client still renders them like
+normal GIFs and shows `<query>` under the image on hover. Manual GIF sends stay unmarked.
+The web client pre-splits content on this token **before**
 react-markdown (remark-gfm would autolink the embedded URL) and renders an `<img>` linked
 to the source; same family as the `[[doc:…]]`/`[[canvas:…]]` chips. Chat-only
 (channels/DMs/threads); docs and canvas are not integrated.

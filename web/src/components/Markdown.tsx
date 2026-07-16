@@ -1,9 +1,10 @@
-import { Fragment, useMemo, type ReactNode } from 'react'
+import { Fragment, useMemo, useState, type ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { GIF_TOKEN } from '../lib/gif'
 import { navigateTo } from '../lib/nav'
 import { useStore } from '../store'
+import { ImageLightbox } from './ImageLightbox'
 
 // Resource-chip matcher: [[doc:<uuid>|<title>]] or [[canvas:<uuid>|<title>]].
 const RESOURCE_TOKEN = /\[\[(doc|canvas):([0-9a-f-]{36})\|([^\]]*)\]\]/g
@@ -221,19 +222,67 @@ function makeComponents(names: string[], re: RegExp | null): Components {
         {children}
       </a>
     ),
+    img: ({ src, alt }) => (src ? <MdImage src={src} alt={alt || ''} /> : null),
   }
 }
 
-function GifImage({ url, alt }: { url: string; alt: string }) {
+function MdImage({ src, alt }: { src: string; alt: string }) {
+  const [open, setOpen] = useState(false)
   return (
-    <a href={url} target="_blank" rel="noreferrer noopener">
-      <img
-        src={url}
-        alt={alt}
-        loading="lazy"
-        className="my-1 block max-h-64 max-w-full rounded-lg border border-[var(--color-border)]"
-      />
-    </a>
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="my-1 inline-block max-w-full cursor-zoom-in border-0 bg-transparent p-0 text-left"
+        title={alt || undefined}
+      >
+        <img
+          src={src}
+          alt={alt}
+          loading="lazy"
+          className="block max-h-80 max-w-full rounded-lg border border-[var(--color-border)]"
+        />
+      </button>
+      {open ? <ImageLightbox src={src} alt={alt} onClose={() => setOpen(false)} /> : null}
+    </>
+  )
+}
+
+function GifImage({
+  url,
+  alt,
+  query,
+}: {
+  url: string
+  alt: string
+  query?: string
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={`msg-gif group relative my-1 inline-block max-w-full cursor-zoom-in border-0 bg-transparent p-0 text-left ${query ? 'pb-5' : ''}`}
+        title={query || alt}
+      >
+        <img
+          src={url}
+          alt={alt}
+          loading="lazy"
+          className="block max-h-64 max-w-full rounded-lg border border-[var(--color-border)]"
+        />
+        {query ? (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 bottom-0 text-center text-[0.72rem] leading-snug text-[var(--color-muted)] opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
+          >
+            {query}
+          </span>
+        ) : null}
+      </button>
+      {open ? <ImageLightbox src={url} alt={alt} onClose={() => setOpen(false)} /> : null}
+    </>
   )
 }
 
@@ -258,7 +307,7 @@ export function Markdown({
   const components = useMemo(() => makeComponents(names, re), [names, re])
   const parts: Array<
     | { kind: 'text'; content: string }
-    | { kind: 'gif'; url: string; alt: string }
+    | { kind: 'gif'; url: string; alt: string; query?: string }
   > = []
   let last = 0
   let match: RegExpExecArray | null
@@ -267,7 +316,13 @@ export function Markdown({
     if (match.index > last) {
       parts.push({ kind: 'text', content: content.slice(last, match.index) })
     }
-    parts.push({ kind: 'gif', url: match[1], alt: match[2] })
+    const query = match[3]?.trim()
+    parts.push({
+      kind: 'gif',
+      url: match[1],
+      alt: match[2],
+      ...(query ? { query } : {}),
+    })
     last = match.index + match[0].length
   }
   if (parts.length === 0) {
@@ -285,7 +340,7 @@ export function Markdown({
     <div className="md text-[0.94rem] text-[var(--color-text)]">
       {parts.map((part, index) =>
         part.kind === 'gif' ? (
-          <GifImage key={index} url={part.url} alt={part.alt} />
+          <GifImage key={index} url={part.url} alt={part.alt} query={part.query} />
         ) : (
           <ReactMarkdown
             key={index}

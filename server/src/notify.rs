@@ -207,6 +207,10 @@ mod tests {
             preview_text("[[gif:https://media.example/roast.gif|Gotcha|duck]]"),
             "sent a GIF"
         );
+        assert_eq!(
+            preview_text("[[gif:https://media.example/roast.gif|Gotcha|duck|gemini ai sucks]]"),
+            "sent a GIF"
+        );
     }
 }
 

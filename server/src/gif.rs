@@ -47,10 +47,21 @@ pub fn is_standalone_gif(content: &str) -> bool {
     trimmed.matches("[[gif:").count() == 1
 }
 
-/// Duck-automation roast GIF (`[[gif:url|alt|duck]]`) — excluded from suggest context.
+/// Duck-automation roast GIF (`[[gif:url|alt|duck]]` or `[[gif:url|alt|duck|query]]`) —
+/// excluded from suggest context.
 pub fn is_duck_roast_gif(content: &str) -> bool {
     let trimmed = content.trim();
-    is_standalone_gif(trimmed) && trimmed.ends_with("|duck]]")
+    if !is_standalone_gif(trimmed) {
+        return false;
+    }
+    let Some(inner) = trimmed
+        .strip_prefix("[[gif:")
+        .and_then(|value| value.strip_suffix("]]"))
+    else {
+        return false;
+    };
+    // url|alt|duck  or  url|alt|duck|search query
+    inner.split('|').nth(2) == Some("duck")
 }
 
 #[cfg(test)]
@@ -74,8 +85,10 @@ mod tests {
     fn detects_manual_vs_duck_gifs() {
         assert!(is_standalone_gif("[[gif:https://x/a.gif|hi]]"));
         assert!(is_standalone_gif("[[gif:https://x/a.gif|hi|duck]]"));
+        assert!(is_standalone_gif("[[gif:https://x/a.gif|hi|duck|gemini ai sucks]]"));
         assert!(!is_duck_roast_gif("[[gif:https://x/a.gif|hi]]"));
         assert!(is_duck_roast_gif("[[gif:https://x/a.gif|hi|duck]]"));
+        assert!(is_duck_roast_gif("[[gif:https://x/a.gif|hi|duck|gemini ai sucks]]"));
         assert!(!is_duck_roast_gif("lol [[gif:https://x/a.gif|hi|duck]]"));
     }
 

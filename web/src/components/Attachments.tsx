@@ -3,6 +3,7 @@ import { fetchAttachmentBlob } from '../lib/api'
 import { toastError } from '../lib/toast'
 import { fmtBytes } from '../lib/util'
 import type { Attachment } from '../lib/types'
+import { ImageLightbox } from './ImageLightbox'
 
 // SVG is excluded from inline rendering — it can carry script; treat it as a
 // download instead (matches the server, which serves non-safe types as downloads).
@@ -28,6 +29,7 @@ export function AttachmentList({ attachments }: { attachments: Attachment[] }) {
 function AuthedImage({ att }: { att: Attachment }) {
   const [src, setSrc] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
+  const [open, setOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -48,23 +50,28 @@ function AuthedImage({ att }: { att: Attachment }) {
   if (failed) return <FileChip att={att} />
 
   return (
-    <a
-      href={src ?? undefined}
-      target="_blank"
-      rel="noreferrer noopener"
-      title={att.filename}
-      className="block overflow-hidden rounded-lg border border-[var(--color-border)]"
-    >
-      {src ? (
-        <img
-          src={src}
-          alt={att.filename}
-          className="max-h-80 max-w-xs object-cover"
-        />
-      ) : (
-        <div className="skeleton h-40 w-56" />
-      )}
-    </a>
+    <>
+      <button
+        type="button"
+        onClick={() => src && setOpen(true)}
+        disabled={!src}
+        title={att.filename}
+        className="block cursor-zoom-in overflow-hidden rounded-lg border border-[var(--color-border)] bg-transparent p-0 text-left disabled:cursor-default"
+      >
+        {src ? (
+          <img
+            src={src}
+            alt={att.filename}
+            className="max-h-80 max-w-xs object-cover"
+          />
+        ) : (
+          <div className="skeleton h-40 w-56" />
+        )}
+      </button>
+      {open && src ? (
+        <ImageLightbox src={src} alt={att.filename} onClose={() => setOpen(false)} />
+      ) : null}
+    </>
   )
 }
 
