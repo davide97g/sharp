@@ -293,22 +293,64 @@ body {
   animation: sharp-pulse 1.4s ease-in-out infinite;
 }
 
+/* ── Login split screen ────────────────────────────────────────────────── */
+.login-brand-veil {
+  background: linear-gradient(
+    to top,
+    rgba(8, 8, 12, 0.88) 0%,
+    rgba(8, 8, 12, 0.35) 42%,
+    rgba(8, 8, 12, 0.1) 100%
+  );
+}
+
+/* Hide the login lockup until the splash hands off (or finishes without a
+   target). Prevents a ghost logo under the splash during the FLIP. */
+.login-brand-lockup {
+  opacity: 0;
+}
+html[data-splash-done] .login-brand-lockup {
+  opacity: 1;
+}
+
 /* ── Brand splash (app load) ─────────────────────────────────────────────
    `#` mark pops in, "sharp" wordmark reveals out of it, a glowing rubber
-   duck drifts through, then the whole layer eases out to reveal the app. */
+   duck drifts through. If login is underneath, the lockup FLIPs into the
+   brand panel; otherwise the whole layer eases out. */
 .splash {
   animation: splash-bg-in 320ms ease both;
+}
+.splash[data-exiting] {
+  pointer-events: none;
+}
+.splash[data-exiting]:not([data-handoff]) .splash-veil,
+.splash[data-exiting]:not([data-handoff]) .splash-aura,
+.splash[data-exiting]:not([data-handoff]) .splash-duck-wrap,
+.splash[data-exiting]:not([data-handoff]) .splash-lockup {
+  opacity: 0;
   transition:
     opacity 300ms cubic-bezier(0.4, 0, 0.2, 1),
     transform 300ms cubic-bezier(0.4, 0, 0.2, 1),
     filter 300ms cubic-bezier(0.4, 0, 0.2, 1);
 }
-.splash[data-exiting] {
-  opacity: 0;
+.splash[data-exiting]:not([data-handoff]) .splash-lockup {
   transform: scale(1.04);
   filter: blur(4px);
-  pointer-events: none;
 }
+
+/* handoff: veil/aura/duck fade; lockup stays sharp and flies via inline transform */
+.splash[data-handoff] .splash-veil,
+.splash[data-handoff] .splash-aura,
+.splash[data-handoff] .splash-duck-wrap {
+  opacity: 0;
+  transition: opacity 480ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.splash[data-handoff] .splash-duck-wrap {
+  transition:
+    opacity 360ms ease,
+    filter 360ms ease;
+  filter: blur(6px);
+}
+
 @keyframes splash-bg-in {
   from {
     opacity: 0;
@@ -420,13 +462,9 @@ body {
   }
 }
 
-/* the wordmark: reveal its width open (types out from behind the tile). The
-   trailing padding keeps the final glyph from being clipped by overflow. */
+/* the wordmark: reveal its width open (types out from behind the tile). */
 .splash-word {
   animation: splash-word-in 720ms cubic-bezier(0.22, 1, 0.36, 1) 900ms both;
-}
-.splash-word > span {
-  padding-right: 0.12em;
 }
 @keyframes splash-word-in {
   0% {
@@ -441,29 +479,131 @@ body {
   }
 }
 
-/* the glowing rubber duck: tumbles top→bottom, fast, spinning, from a random
-   spot (positioned inline via left + CSS vars). Screen-blended so its dark
-   backdrop melts into the splash and only the glow shows; a radial mask fades
-   the square edges out. Its `left` and the --duck-* vars are set inline. */
-.splash-duck {
-  width: min(38vw, 300px);
+/* the rubber duck: pops out of a random corner with a little bounce, holds
+   while a "squack" bubble appears, then bounces back out. The wrapper is
+   anchored at the corner (inline top/left/right/bottom); the duck's
+   transform-origin (inline) is the screen corner so it grows out of it.
+   Screen-blended + radial-masked so only the glow shows. */
+.splash-duck-wrap {
+  width: min(30vw, 210px);
   aspect-ratio: 3 / 2;
-  top: 0;
+}
+.splash-duck {
+  width: 100%;
+  height: 100%;
   opacity: 0.95;
   mix-blend-mode: screen;
-  will-change: transform;
+  will-change: transform, opacity;
   -webkit-mask-image: radial-gradient(closest-side at 50% 46%, #000 34%, transparent 70%);
   mask-image: radial-gradient(closest-side at 50% 46%, #000 34%, transparent 70%);
-  transform: translate(-50%, -55vh);
-  animation: splash-duck-fall var(--duck-dur, 2.9s) linear both;
+  animation: splash-duck-pop 2600ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
-@keyframes splash-duck-fall {
-  from {
-    transform: translate(-50%, -55vh) rotate(0deg) scale(0.9);
+@keyframes splash-duck-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0) rotate(-6deg);
   }
-  to {
-    transform: translate(calc(-50% + var(--duck-drift, 0px)), 120vh)
-      rotate(var(--duck-rot, 540deg)) scale(1.06);
+  6% {
+    opacity: 0.95;
+  }
+  11% {
+    transform: scale(1.16) rotate(4deg);
+  }
+  16% {
+    transform: scale(0.95) rotate(-2deg);
+  }
+  21% {
+    transform: scale(1.03) rotate(1deg);
+  }
+  25% {
+    transform: scale(1) rotate(0deg);
+  }
+  76% {
+    opacity: 0.95;
+    transform: scale(1) rotate(0deg);
+  }
+  82% {
+    transform: scale(1.14) rotate(-3deg);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0) rotate(6deg);
+  }
+}
+
+/* "squack" speech bubble: pops in smoothly once the duck has settled, holds,
+   then pops out before the duck leaves. Sits on the screen-inward side of the
+   duck with a little tail pointing back at it. */
+.splash-bubble-pos {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+}
+.splash-bubble-pos[data-side='below'] {
+  top: 82%;
+}
+.splash-bubble-pos[data-side='above'] {
+  bottom: 82%;
+}
+.splash-bubble {
+  position: relative;
+  display: inline-block;
+  white-space: nowrap;
+  padding: 0.28rem 0.62rem;
+  border-radius: 0.7rem;
+  background: #ffffff;
+  color: var(--color-ink);
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  box-shadow:
+    0 8px 22px -8px rgba(0, 0, 0, 0.7),
+    0 0 0 1px rgba(0, 0, 0, 0.05);
+  animation: splash-bubble-pop 2600ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.splash-bubble-pos[data-side='below'] .splash-bubble {
+  transform-origin: top center;
+}
+.splash-bubble-pos[data-side='above'] .splash-bubble {
+  transform-origin: bottom center;
+}
+.splash-bubble::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  background: #ffffff;
+  transform: translateX(-50%) rotate(45deg);
+}
+.splash-bubble-pos[data-side='below'] .splash-bubble::after {
+  top: -3px;
+}
+.splash-bubble-pos[data-side='above'] .splash-bubble::after {
+  bottom: -3px;
+}
+@keyframes splash-bubble-pop {
+  0%,
+  24% {
+    opacity: 0;
+    transform: scale(0.2);
+  }
+  32% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+  38% {
+    transform: scale(1);
+  }
+  66% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  74%,
+  100% {
+    opacity: 0;
+    transform: scale(0.4);
   }
 }
 
@@ -490,7 +630,10 @@ body {
   .splash-word {
     max-width: 16rem;
   }
-  .splash-duck {
+  .splash-duck-wrap {
     display: none;
+  }
+  .login-brand-lockup {
+    opacity: 1;
   }
 }

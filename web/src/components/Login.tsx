@@ -5,6 +5,7 @@ import { ApiRequestError } from '../lib/api'
 import { startBrowserLogin } from '../lib/desktopAuth'
 import { useStore } from '../store'
 import { toastError } from '../lib/toast'
+import { BrandLockup, LOGIN_BRAND_ID } from './BrandLockup'
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
@@ -70,96 +71,122 @@ export function Login() {
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center bg-[var(--color-ink)] p-6">
-      <div className="w-full max-w-sm animate-in">
-        <div className="mb-8 flex flex-col items-center gap-3">
-          <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-[var(--color-panel)] text-3xl font-extrabold text-[var(--color-accent)] ring-1 ring-[var(--color-border)]">
-            #
-          </div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            sharp
-          </h1>
-          <p className="text-sm text-[var(--color-text-dim)]">
-            {mode === 'login' ? 'Sign in to your workspace' : 'Create your account'}
+    <div className="login-screen flex min-h-full w-full flex-col md:flex-row">
+      {/* Branding panel — art + official lockup (splash FLIP target).
+          Stacks as a top strip on small screens; half-width on md+. */}
+      <aside className="login-brand relative h-44 w-full shrink-0 overflow-hidden md:h-auto md:min-h-full md:w-[48%]">
+        <img
+          src="/login-art.png"
+          alt=""
+          draggable={false}
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+        <div className="login-brand-veil pointer-events-none absolute inset-0" />
+        <div className="absolute inset-x-0 bottom-0 flex flex-col gap-2 p-5 md:gap-3 md:p-10 md:pb-12">
+          <BrandLockup
+            id={LOGIN_BRAND_ID}
+            // Invisible until splash hands off — avoids a double-logo flash
+            // under the splash layer. Splash sets data-splash-done when done.
+            className="login-brand-lockup"
+            wordClassName="text-white drop-shadow-[0_1px_12px_rgba(0,0,0,0.45)]"
+          />
+          <p className="hidden max-w-xs text-sm leading-relaxed text-white/70 md:block">
+            Your work, your team, your flow — all in one place.
           </p>
         </div>
+      </aside>
 
-        <form onSubmit={submit} className="flex flex-col gap-3">
-          {isTauri && (
+      {/* Form panel */}
+      <main className="relative flex flex-1 flex-col justify-center bg-[var(--color-ink)] px-6 py-8 sm:px-10 md:py-10 lg:px-16">
+        <div className="mx-auto w-full max-w-sm animate-in">
+          <header className="mb-8">
+            <h1 className="text-2xl font-bold tracking-tight text-[var(--color-text)]">
+              {mode === 'login' ? 'Welcome back' : 'Create your account'}
+            </h1>
+            <p className="mt-1.5 text-sm text-[var(--color-text-dim)]">
+              {mode === 'login'
+                ? 'Sign in to your workspace'
+                : 'Get started with sharp'}
+            </p>
+          </header>
+
+          <form onSubmit={submit} className="flex flex-col gap-3">
+            {isTauri && (
+              <Field
+                label="Server URL"
+                type="url"
+                placeholder="https://chat.example.com"
+                value={server}
+                onChange={setServer}
+                autoComplete="url"
+              />
+            )}
+            {mode === 'register' && (
+              <Field
+                label="Display name"
+                value={displayName}
+                onChange={setDisplayName}
+                placeholder="Ada Lovelace"
+                required
+              />
+            )}
             <Field
-              label="Server URL"
-              type="url"
-              placeholder="https://chat.example.com"
-              value={server}
-              onChange={setServer}
-              autoComplete="url"
-            />
-          )}
-          {mode === 'register' && (
-            <Field
-              label="Display name"
-              value={displayName}
-              onChange={setDisplayName}
-              placeholder="Ada Lovelace"
+              label="Email"
+              type="email"
+              value={email}
+              onChange={setEmail}
+              placeholder="you@example.com"
+              autoComplete="email"
               required
             />
-          )}
-          <Field
-            label="Email"
-            type="email"
-            value={email}
-            onChange={setEmail}
-            placeholder="you@example.com"
-            autoComplete="email"
-            required
-          />
-          <Field
-            label="Password"
-            type="password"
-            value={password}
-            onChange={setPassword}
-            placeholder="••••••••"
-            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-            required
-          />
+            <Field
+              label="Password"
+              type="password"
+              value={password}
+              onChange={setPassword}
+              placeholder="••••••••"
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              required
+            />
 
-          <button
-            type="submit"
-            disabled={busy}
-            className="mt-2 rounded-lg bg-[var(--color-accent)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 focus:ring-offset-[var(--color-ink)] disabled:opacity-60"
-          >
-            {busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
-          </button>
-        </form>
-
-        {isTauri && (
-          <>
-            <div className="my-4 flex items-center gap-3 text-xs text-[var(--color-text-faint)]">
-              <span className="h-px flex-1 bg-[var(--color-border)]" />
-              or
-              <span className="h-px flex-1 bg-[var(--color-border)]" />
-            </div>
             <button
-              type="button"
-              onClick={browserLogin}
+              type="submit"
               disabled={busy}
-              className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-4 py-2.5 text-sm font-semibold text-[var(--color-text)] transition hover:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)] disabled:opacity-60"
+              className="mt-2 rounded-lg bg-[var(--color-accent)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 focus:ring-offset-[var(--color-ink)] disabled:opacity-60"
             >
-              Log in with browser
+              {busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
             </button>
-          </>
-        )}
+          </form>
 
-        <div className="mt-6 text-center text-sm text-[var(--color-text-dim)]">
-          {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
-          <button
-            className="font-medium text-[var(--color-accent-hover)] hover:underline"
-            onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
-          >
-            {mode === 'login' ? 'Register' : 'Sign in'}
-          </button>
+          {isTauri && (
+            <>
+              <div className="my-4 flex items-center gap-3 text-xs text-[var(--color-text-faint)]">
+                <span className="h-px flex-1 bg-[var(--color-border)]" />
+                or
+                <span className="h-px flex-1 bg-[var(--color-border)]" />
+              </div>
+              <button
+                type="button"
+                onClick={browserLogin}
+                disabled={busy}
+                className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-4 py-2.5 text-sm font-semibold text-[var(--color-text)] transition hover:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)] disabled:opacity-60"
+              >
+                Log in with browser
+              </button>
+            </>
+          )}
+
+          <div className="mt-6 text-center text-sm text-[var(--color-text-dim)]">
+            {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
+            <button
+              className="font-medium text-[var(--color-accent-hover)] hover:underline"
+              onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
+            >
+              {mode === 'login' ? 'Register' : 'Sign in'}
+            </button>
+          </div>
         </div>
-      </div>
+      </main>
     </div>
   )
 }
