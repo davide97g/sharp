@@ -36,31 +36,6 @@ services:
     volumes:
       - redis_data:/data
 
-  # Object storage for file uploads. Internal only — sharp streams files through
-  # its own API, so MinIO needs no Domain/public port. To use an external
-  # S3/R2/B2 instead, delete this service + createbuckets and point the S3_*
-  # vars on `sharp` at your provider.
-  minio:
-    image: minio/minio:latest
-    restart: unless-stopped
-    command: server /data
-    environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-sharp}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?set S3_SECRET_KEY in the Environment tab}
-    volumes:
-      - minio_data:/data
-
-  createbuckets:
-    image: minio/mc:latest
-    depends_on:
-      - minio
-    entrypoint: >
-      /bin/sh -c "
-      until mc alias set local http://minio:9000 ${S3_ACCESS_KEY:-sharp} ${S3_SECRET_KEY}; do echo 'waiting for minio'; sleep 1; done;
-      mc mb -p local/${S3_BUCKET:-sharp} || true;
-      exit 0;
-      "
-
   # API server (API-only image; the web SPA is the separate `web` service below).
   # Domain: server.sharp.davideghiotto.it -> port 3000.
   sharp:
@@ -74,13 +49,17 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       SHARP_DISABLE_SIGNUP: ${SHARP_DISABLE_SIGNUP:-false}
       RUST_LOG: ${RUST_LOG:-info}
-      # File uploads (S3-compatible object storage — MinIO above).
-      S3_ENDPOINT: http://minio:9000
+      # File uploads — Cloudflare R2 (S3-compatible). The bucket stays private:
+      # sharp proxies every upload/download through its own API with channel
+      # auth, so R2 needs no public access or custom domain. Set S3_ENDPOINT,
+      # S3_ACCESS_KEY and S3_SECRET_KEY in the Environment tab (R2 API token
+      # credentials — endpoint is https://<account_id>.r2.cloudflarestorage.com,
+      # WITHOUT the bucket suffix).
+      S3_ENDPOINT: ${S3_ENDPOINT:?set S3_ENDPOINT in the Environment tab}
       S3_BUCKET: ${S3_BUCKET:-sharp}
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-sharp}
-      S3_SECRET_KEY: ${S3_SECRET_KEY}
-      S3_REGION: ${S3_REGION:-us-east-1}
-      S3_ALLOW_HTTP: "true"
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?set S3_ACCESS_KEY in the Environment tab}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?set S3_SECRET_KEY in the Environment tab}
+      S3_REGION: ${S3_REGION:-auto}
       # Web push: VAPID keys auto-generate + persist on first startup. Only the
       # subject (contact URL) is configurable here.
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@sharp.davideghiotto.it}
@@ -98,8 +77,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      minio:
-        condition: service_started
     networks:
       - dokploy-network
       - default
@@ -170,4 +147,3 @@ networks:
 volumes:
   postgres_data:
   redis_data:
-  minio_data:
