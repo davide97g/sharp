@@ -68,7 +68,6 @@ function Tab({
 
 function AboutTab({ channelId, onClose }: { channelId: string; onClose: () => void }) {
   const channel = useStore((s) => s.channels.find((c) => c.id === channelId))
-  const me = useStore((s) => s.me)
   const updateChannel = useStore((s) => s.updateChannel)
   const deleteChannel = useStore((s) => s.deleteChannel)
   const muted = useStore((s) => s.mutedChannels.has(channelId))
@@ -84,13 +83,13 @@ function AboutTab({ channelId, onClose }: { channelId: string; onClose: () => vo
   const [deleting, setDeleting] = useState(false)
 
   if (!channel) return null
-  const isOwner = !!channel.created_by && !!me && channel.created_by === me.id
+  const isOwner = channel.my_role === 'owner'
 
   const normalized = name.trim().toLowerCase()
   const nameValid = NAME_RE.test(normalized)
   const dirty =
     normalized !== channel.name || topic.trim() !== channel.topic || kind !== channel.kind
-  const canSave = nameValid && dirty && !busy
+  const canSave = isOwner && nameValid && dirty && !busy
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
@@ -130,7 +129,8 @@ function AboutTab({ channelId, onClose }: { channelId: string; onClose: () => vo
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="flex-1 bg-transparent px-2 py-2.5 text-sm focus:outline-none"
+            disabled={!isOwner}
+            className="flex-1 bg-transparent px-2 py-2.5 text-sm focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
           />
         </div>
         <span className="text-[11px] text-[var(--color-text-faint)]">
@@ -143,8 +143,9 @@ function AboutTab({ channelId, onClose }: { channelId: string; onClose: () => vo
         <input
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
+          disabled={!isOwner}
           placeholder="What's this channel about?"
-          className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
+          className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)] disabled:cursor-not-allowed disabled:opacity-60"
         />
       </label>
 
@@ -156,12 +157,14 @@ function AboutTab({ channelId, onClose }: { channelId: string; onClose: () => vo
             onClick={() => setKind('public')}
             label="Public"
             desc="Anyone can join"
+            disabled={!isOwner}
           />
           <VisibilityOption
             active={kind === 'private'}
             onClick={() => setKind('private')}
             label="Private"
             desc="Invite only"
+            disabled={!isOwner}
           />
         </div>
       </div>
@@ -199,15 +202,17 @@ function AboutTab({ channelId, onClose }: { channelId: string; onClose: () => vo
         </button>
       </div>
 
-      <div className="flex justify-end pt-1">
-        <button
-          type="submit"
-          disabled={!canSave}
-          className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
-        >
-          {busy ? 'Saving…' : 'Save changes'}
-        </button>
-      </div>
+      {isOwner && (
+        <div className="flex justify-end pt-1">
+          <button
+            type="submit"
+            disabled={!canSave}
+            className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
+          >
+            {busy ? 'Saving…' : 'Save changes'}
+          </button>
+        </div>
+      )}
 
       {isOwner && (
         <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/5 p-3">
@@ -261,6 +266,7 @@ function MembersTab({ channelId }: { channelId: string }) {
   const loadMembers = useStore((s) => s.loadMembers)
   const addChannelMembers = useStore((s) => s.addChannelMembers)
   const removeChannelMember = useStore((s) => s.removeChannelMember)
+  const setMemberRole = useStore((s) => s.setMemberRole)
 
   const [query, setQuery] = useState('')
   const [pending, setPending] = useState<string | null>(null)
@@ -273,6 +279,8 @@ function MembersTab({ channelId }: { channelId: string }) {
     () => [...(members ?? [])].sort((a, b) => a.display_name.localeCompare(b.display_name)),
     [members],
   )
+  const iAmOwner = channel?.my_role === 'owner'
+  const ownersCount = (members ?? []).filter((member) => member.role === 'owner').length
 
   const candidates = useMemo(() => {
     const memberIds = new Set((members ?? []).map((m) => m.id))
@@ -307,49 +315,62 @@ function MembersTab({ channelId }: { channelId: string }) {
     }
   }
 
+  async function changeRole(userId: string, role: 'owner' | 'editor' | 'viewer') {
+    setPending(userId)
+    try {
+      await setMemberRole(channelId, userId, role)
+    } catch {
+      // Store rolls back optimistic state and surfaces the error.
+    } finally {
+      setPending(null)
+    }
+  }
+
   const loading = members === undefined
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-1.5">
-        <span className="text-xs font-medium text-[var(--color-text-dim)]">Add people</span>
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search people to add…"
-          className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
-        />
-        {query.trim() && (
-          <div className="max-h-40 overflow-y-auto rounded-lg border border-[var(--color-border)]">
-            {candidates.length === 0 ? (
-              <div className="px-3 py-3 text-sm text-[var(--color-text-faint)]">
-                No one to add.
-              </div>
-            ) : (
-              candidates.map((u) => (
-                <button
-                  key={u.id}
-                  type="button"
-                  disabled={pending === u.id}
-                  onClick={() => add(u.id)}
-                  className="flex w-full items-center gap-2.5 px-2.5 py-1.5 text-left hover:bg-[var(--color-panel-2)] disabled:opacity-50"
-                >
-                  <Avatar id={u.id} name={u.display_name} size={28} />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{u.display_name}</div>
-                    {visibleEmail(u, me?.id) && (
-                      <div className="truncate text-[11px] text-[var(--color-text-faint)]">
-                        {visibleEmail(u, me?.id)}
-                      </div>
-                    )}
-                  </div>
-                  <span className="text-xs text-[var(--color-accent)]">Add</span>
-                </button>
-              ))
-            )}
-          </div>
-        )}
-      </div>
+      {iAmOwner && (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-[var(--color-text-dim)]">Add people</span>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search people to add…"
+            className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
+          />
+          {query.trim() && (
+            <div className="max-h-40 overflow-y-auto rounded-lg border border-[var(--color-border)]">
+              {candidates.length === 0 ? (
+                <div className="px-3 py-3 text-sm text-[var(--color-text-faint)]">
+                  No one to add.
+                </div>
+              ) : (
+                candidates.map((u) => (
+                  <button
+                    key={u.id}
+                    type="button"
+                    disabled={pending === u.id}
+                    onClick={() => add(u.id)}
+                    className="flex w-full items-center gap-2.5 px-2.5 py-1.5 text-left hover:bg-[var(--color-panel-2)] disabled:opacity-50"
+                  >
+                    <Avatar id={u.id} name={u.display_name} size={28} />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">{u.display_name}</div>
+                      {visibleEmail(u, me?.id) && (
+                        <div className="truncate text-[11px] text-[var(--color-text-faint)]">
+                          {visibleEmail(u, me?.id)}
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-xs text-[var(--color-accent)]">Add</span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="text-xs font-medium text-[var(--color-text-dim)]">
         Members{members ? ` · ${members.length}` : ''}
@@ -363,7 +384,7 @@ function MembersTab({ channelId }: { channelId: string }) {
       ) : (
         <div className="max-h-[45vh] space-y-1 overflow-y-auto">
           {memberRows.map((u) => {
-            const isCreator = u.id === channel?.created_by
+            const isLastOwner = u.role === 'owner' && ownersCount === 1
             return (
               <div key={u.id} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5">
                 <Avatar id={u.id} name={u.display_name} size={30} />
@@ -375,19 +396,38 @@ function MembersTab({ channelId }: { channelId: string }) {
                     </div>
                   )}
                 </div>
-                {isCreator ? (
-                  <span className="rounded-md border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-faint)]">
-                    Owner
-                  </span>
+                {iAmOwner ? (
+                  <div className="flex items-center gap-1">
+                    <select
+                      value={u.role}
+                      disabled={pending === u.id || isLastOwner}
+                      onChange={(e) =>
+                        void changeRole(
+                          u.id,
+                          e.target.value as 'owner' | 'editor' | 'viewer',
+                        )
+                      }
+                      className="rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1 text-sm focus:border-[var(--color-accent)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <option value="owner">Owner</option>
+                      <option value="editor">Editor</option>
+                      <option value="viewer">Viewer</option>
+                    </select>
+                    {!isLastOwner && (
+                      <button
+                        type="button"
+                        disabled={pending === u.id}
+                        onClick={() => remove(u.id)}
+                        className="rounded-md px-2.5 py-1 text-xs text-[var(--color-text-dim)] hover:bg-red-500/10 hover:text-red-400 disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
                 ) : (
-                  <button
-                    type="button"
-                    disabled={pending === u.id}
-                    onClick={() => remove(u.id)}
-                    className="rounded-md px-2.5 py-1 text-xs text-[var(--color-text-dim)] hover:bg-red-500/10 hover:text-red-400 disabled:opacity-50"
-                  >
-                    Remove
-                  </button>
+                  <span className="rounded-md border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-faint)]">
+                    {u.role.charAt(0).toUpperCase() + u.role.slice(1)}
+                  </span>
                 )}
               </div>
             )
@@ -403,21 +443,24 @@ function VisibilityOption({
   onClick,
   label,
   desc,
+  disabled = false,
 }: {
   active: boolean
   onClick: () => void
   label: string
   desc: string
+  disabled?: boolean
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       className={`flex-1 rounded-lg border px-3 py-2 text-left transition ${
         active
           ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
           : 'border-[var(--color-border)] hover:bg-[var(--color-panel-2)]'
-      }`}
+      } disabled:cursor-not-allowed disabled:opacity-60`}
     >
       <div className="text-sm font-medium">{label}</div>
       <div className="text-[11px] text-[var(--color-text-faint)]">{desc}</div>

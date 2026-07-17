@@ -1,6 +1,6 @@
 use crate::auth::{create_guest_token, verify_claims, AuthUser};
 use crate::error::{AppError, AppResult};
-use crate::routes::is_member;
+use crate::routes::{is_member, member_role};
 use crate::state::SharedState;
 use axum::extract::{Path, State};
 use axum::Json;
@@ -41,15 +41,18 @@ pub async fn get_voice_link(
 }
 
 /// POST /channels/{id}/voice-link — generate a fresh link, replacing (revoking)
-/// any previous value (member only).
+/// any previous value (owner/editor only).
 pub async fn create_voice_link(
     State(state): State<SharedState>,
     auth: AuthUser,
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
-    if !is_member(&state.pool, channel_id, auth.id).await? {
+    if !member_role(&state.pool, channel_id, auth.id)
+        .await?
+        .is_some_and(|role| role.can_post())
+    {
         return Err(AppError::Forbidden(
-            "not a member of this channel".to_string(),
+            "creating call links requires owner or editor role".to_string(),
         ));
     }
 

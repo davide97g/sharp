@@ -50,7 +50,7 @@ channels(
   name text NOT NULL,                    -- for dm: generated, not shown
   kind text NOT NULL CHECK (kind IN ('public','private','dm')),
   topic text NOT NULL default '',
-  created_by uuid REFERENCES users(id),
+  created_by uuid REFERENCES users(id),    -- historical creator only; never used for channel authz
   created_at timestamptz NOT NULL default now()
 )
 -- partial unique index on lower(name) WHERE kind <> 'dm'
@@ -58,10 +58,12 @@ channels(
 channel_members(
   channel_id uuid REFERENCES channels(id) ON DELETE CASCADE,
   user_id uuid REFERENCES users(id) ON DELETE CASCADE,
+  role text NOT NULL default 'editor' CHECK (role IN ('owner','editor','viewer')),
   last_read_message_id bigint NOT NULL default 0,
   joined_at timestamptz NOT NULL default now(),
   PRIMARY KEY (channel_id, user_id)
 )
+-- every non-DM channel has at least one owner; both DM members are editors
 
 messages(
   id bigint PK GENERATED ALWAYS AS IDENTITY,
@@ -99,10 +101,12 @@ User    = { id: string, email?: string, display_name: string, avatar_url: string
           // email is private: sent only on the viewer's own record (/auth/me, login, register,
           // update-me). Omitted for every other user (lists, members, doc roles, dm_user,
           // user.updated broadcast). Never leaks another user's address to the client.
+ChannelRole = 'owner'|'editor'|'viewer'
 Channel = {
   id: string, name: string, kind: 'public'|'private'|'dm', topic: string,
   created_by: string|null, created_at: string,
-  is_member: boolean, unread_count: number,       // for the requesting user
+  is_member: boolean, my_role: ChannelRole|null,  // null for non-members
+  unread_count: number,                           // for the requesting user
   last_message_at: string|null,
   dm_user: User|null                              // the *other* user, when kind='dm'
 }
@@ -137,13 +141,14 @@ ReplyPreview = { id: string, user: { id, display_name, avatar_url }, content: st
 | GET | `/channels` | → `{channels: Channel[]}` (public ∪ my private/dm) |
 | POST | `/channels` | `{name, kind: 'public'\|'private', topic?, member_ids?}` → `201 Channel` |
 | POST | `/channels/dm` | `{user_id}` → `Channel` (get-or-create) |
-| PATCH | `/channels/{id}` | `{name?, topic?, kind?}` → `Channel` (any member; not DMs) |
-| DELETE | `/channels/{id}` | → `204` (creator/owner only; hard delete, cascades) |
+| PATCH | `/channels/{id}` | `{name?, topic?, kind?}` → `Channel` (channel owner; not DMs) |
+| DELETE | `/channels/{id}` | → `204` (channel owner; hard delete, cascades; not DMs) |
 | POST | `/channels/{id}/join` | → `204` (public only) |
-| POST | `/channels/{id}/leave` | → `204` |
-| GET | `/channels/{id}/members` | → `{members: User[]}` |
-| POST | `/channels/{id}/members` | `{user_ids: string[]}` → `204` (any member adds; not DMs) |
-| DELETE | `/channels/{id}/members/{user_id}` | → `204` (any member; cannot remove creator; not DMs) |
+| POST | `/channels/{id}/leave` | → `204` (last owner of a non-DM gets 403 until ownership is transferred) |
+| GET | `/channels/{id}/members` | → `{members: (User & {role: ChannelRole})[]}` (role flattened onto each user) |
+| POST | `/channels/{id}/members` | `{user_ids: string[]}` → `204` (channel owner; new members are editors; not DMs) |
+| DELETE | `/channels/{id}/members/{user_id}` | → `204` (channel owner; last owner cannot be removed; not DMs) |
+| PUT | `/channels/{id}/members/{user_id}/role` | `{role: ChannelRole}` → `204` (channel owner; 400 for DM/invalid role, 403 for non-owner/non-member target, 409 when demoting last owner; emits `channel.member_updated`) |
 | POST | `/channels/{id}/read` | `{message_id}` → `204` (sets last_read high-water mark) |
 | GET | `/channels/{id}/messages?before=<id>&limit=50` | → `{messages: Message[]}` top-level only, **ascending**, the `limit` newest with `id < before` (or newest overall) |
 | POST | `/channels/{id}/messages` | `{content, parent_id?, reply_to_id?, attachment_ids?}` → `201 Message` (`reply_to_id`: quote a non-deleted message in the same channel) |
@@ -155,9 +160,15 @@ ReplyPreview = { id: string, user: { id, display_name, avatar_url }, content: st
 | GET | `/search?q=&limit=20&channel_id=` | → `{results: (Message & {channel_name: string, snippet: string})[]}` (my channels only; optional `channel_id` scopes to one channel; `snippet` is a `ts_headline` with `<<`/`>>` markers around matches) |
 | GET | `/healthz` | → `200 {"status":"ok"}` (no auth) |
 
-Channel management: any member may rename, edit topic, change visibility, and add/remove other
-members (the creator/owner cannot be removed). Only the creator/owner may delete the channel.
-DMs cannot be edited, deleted, or have members changed.
+Channel management (rename/topic/visibility, membership, roles, deletion) is channel-owner only.
+`channel_members.role` is the sole channel authorization source; `channels.created_by` is historical.
+Every non-DM channel must retain at least one owner. DMs cannot be edited, deleted, or have members
+or roles changed; both DM members are editors.
+
+Owners and editors may post/edit their own messages, add reactions, upload files, create docs or
+canvases, create/regenerate call links, and join voice. Viewers have read-only chat: they may read,
+download, remove their own reactions, delete their own messages, mark read, and leave, but may not
+perform those posting actions. Viewer posting gates return 403.
 
 Validation: password ≥ 8 chars; channel name `[a-z0-9-]{1,50}`; message content 1–8000 chars.
 Registering the **first user** of an instance is always open; later registrations are open
@@ -182,14 +193,17 @@ Server → client:
 - `reaction.added` / `reaction.removed` `{message_id, channel_id, emoji, user_id}`
 - `channel.created` `{channel: Channel}` — to members (public: to everyone)
 - `channel.updated` `{channel: Channel}` — to members on rename/topic/visibility edit. Clients
-  merge only `name`/`topic`/`kind` (per-viewer `unread_count`/`is_member` are preserved). A
+  merge only `name`/`topic`/`kind` (per-viewer `unread_count`/`is_member`/`my_role` are preserved). A
   public→private flip also sends `channel.deleted` to online non-members; private→public sends
   them a non-member `channel.created`.
 - `channel.deleted` `{channel_id}` — channel removed, or the recipient can no longer see it
   (deleted; removed from a private channel). Client drops all cached state and, if it was open,
   navigates home.
-- `channel.member_joined` / `channel.member_left` `{channel_id, user: User}`. Adding a user to a
-  channel also sends that user a member-view `channel.created` so private channels appear.
+- `channel.member_joined` `{channel_id, user: User, role: ChannelRole}` and
+  `channel.member_left` `{channel_id, user: User}`. Adding a user also sends that user a member-view
+  `channel.created` so private channels appear.
+- `channel.member_updated` `{channel_id, user_id, role: ChannelRole}` — to all channel members after
+  a role change; open doc/canvas sync rooms for that channel are refreshed immediately.
 - `typing` `{channel_id, user_id, display_name}` — client shows ~3s
 - `presence` `{user_id, status: 'online'|'offline'}`
 - `duck.streak` `{channel_id, duck_streak: {count, last_at}}` — shared duck bar reset
@@ -272,15 +286,15 @@ docs are Yjs CRDTs. Both are served by the same single binary — no sidecar.
 - **Sync**: Yjs on the client; the Rust server persists and relays updates using `yrs`.
   The server does not interpret document semantics except for compaction, plain-text
   extraction (search) and doc-link extraction (backlinks).
-- **Authorization is per channel**: every doc belongs to a channel; channel membership
-  gates access. On top: per-doc `everyone_role` + per-user role overrides.
+- **Authorization is per channel**: every doc belongs to a channel; channel membership and role
+  gate access. On top: per-doc `everyone_role` + per-user role overrides.
 - **Bridging**: `@user` mentions inside docs notify people (inbox + WS); `[[doc]]` chips
   embed docs in chat messages and other docs; docs can be shared to a channel.
 - **Limitation (v2)**: live doc sync rooms are per-replica (no Redis fanout for binary
   updates). Updates always persist to Postgres, so replicas converge on reopen. Chat
   events about docs (`doc.*`) do go through Redis like all other events.
 
-## Database schema (migration `0002_docs.sql`)
+## Database schema (migrations `0002_docs.sql`, `0013_doc_inherit.sql`)
 
 ```sql
 docs(
@@ -294,8 +308,8 @@ docs(
   created_at timestamptz NOT NULL default now(),
   updated_at timestamptz NOT NULL default now(),
   deleted_at timestamptz,                     -- soft delete = trash (restorable)
-  everyone_role text NOT NULL default 'editor'
-    CHECK (everyone_role IN ('editor','viewer','none')),
+  everyone_role text NOT NULL default 'inherit'
+    CHECK (everyone_role IN ('editor','viewer','none','inherit')),
   content_text text NOT NULL default '',      -- extracted plain text (search/preview)
   search tsvector GENERATED ALWAYS AS
     (to_tsvector('simple', title || ' ' || content_text)) STORED
@@ -338,10 +352,13 @@ doc_mentions(                                 -- @user inside a doc = inbox noti
 
 1. Not a member of the doc's channel → **no access** (404, and doc never listed).
 2. Doc creator → `owner` (always full access; cannot be demoted; manages roles/trash).
-3. `doc_roles` row for the user → that role.
-4. Otherwise → `docs.everyone_role`.
+3. Channel owner → `owner` (including role management, `everyone_role`, permanent delete).
+4. `doc_roles` row for the user → that role.
+5. If `docs.everyone_role != 'inherit'` → that role.
+6. Otherwise channel editor → `editor`; channel viewer → `viewer`.
 
-`none` behaves like the doc doesn't exist for that user. `viewer` = read-only (server
+Per-doc `none` cannot hide a doc from its creator or a channel owner. For everyone else, `none`
+behaves like the doc doesn't exist. `viewer` = read-only (server
 drops their sync updates; UI renders read-only). `editor` = full content editing +
 rename + trash. Only `owner` edits roles, `everyone_role`, and permanently deletes.
 
@@ -355,7 +372,7 @@ Doc = {
   id: string, channel_id: string, kind: 'doc'|'canvas', title: string, icon: string,
   created_by: string|null, created_at: string, updated_at: string,
   deleted_at: string|null,
-  everyone_role: 'editor'|'viewer'|'none',
+  everyone_role: 'editor'|'viewer'|'none'|'inherit',
   my_role: DocRole,                    // resolved for the requesting/receiving user
   preview: string                      // first 160 chars of content_text
 }
@@ -373,7 +390,7 @@ DocMention = {
 |---|---|---|
 | GET | `/channels/{id}/docs` | → `{docs: Doc[]}` (not trashed, `my_role != none`, updated_at desc) |
 | GET | `/channels/{id}/docs/trash` | → `{docs: Doc[]}` (trashed, same visibility) |
-| POST | `/channels/{id}/docs` | `{title?, icon?, kind?}` → `201 Doc` (members only; `kind` defaults `'doc'`, or `'canvas'` for a whiteboard) |
+| POST | `/channels/{id}/docs` | `{title?, icon?, kind?}` → `201 Doc` (channel owner/editor; `kind` defaults `'doc'`, or `'canvas'` for a whiteboard) |
 | GET | `/docs/{id}` | → `Doc` |
 | PATCH | `/docs/{id}` | `{title?, icon?, everyone_role?}` → `Doc` (title/icon: editor+; everyone_role: owner; empty body → 422) |
 | DELETE | `/docs/{id}` | → `204` (editor+; soft — sets `deleted_at`) |
@@ -421,9 +438,10 @@ the blocking thread pool. Update frames are capped at 512 KB (oversized ⇒ sock
 awareness frames over 64 KB are dropped silently. If persisting an update fails, the frame
 is not relayed and the socket is closed so the client resyncs from DB state.
 
-**Access revocation is live**: role/`everyone_role` changes, trash and restore push a
+**Access revocation is live**: channel-member role changes, per-doc role/`everyone_role` changes,
+trash and restore push a
 fresh `0x04` to open sessions (and flip server-side update dropping instantly); loss of
-access (`none`) and permanent deletion close the socket server-side. A closed client's
+access (`none` or channel removal/leave) and permanent deletion close the socket server-side. A closed client's
 reconnect gets 403/404 on upgrade — after a few consecutive upgrade failures the client
 must stop retrying and treat the doc as unavailable. A slow consumer whose send queue
 fills (1024 frames) is evicted from the room.
@@ -583,7 +601,7 @@ Server → client:
 
 ## Server behavior
 
-- `voice.join`: for registered users, verify membership with `routes::is_member`; for
+- `voice.join`: for registered users, require channel role `owner` or `editor`; for
   guests, skip membership and instead verify the token's `link` equals the channel's
   **current** `voice_link_token` (send `voice.error` `code: "link_revoked"` and bail if it
   does not). Then check the 8-participant cap and send `voice.error` with `code: "room_full"`
@@ -591,7 +609,8 @@ Server → client:
   and its resolved `display_name`/`guest`, reply with `voice.state` on the sender's tx only,
   then broadcast `voice.participant_joined` to the room audience. Joining twice from the same
   conn is idempotent and re-sends `voice.state`. New participants start with
-  `transcribing=false`.
+  `transcribing=false`. Demoting a registered participant to channel viewer removes all of that
+  user's connections from the room immediately.
 - **Broadcast targeting**: every voice broadcast (`participant_joined`/`left`/`updated` and
   `voice.roast_armed`)
   targets the **union** of the channel's member ids and the user-ids currently in the room's
@@ -670,13 +689,13 @@ Server → client:
 | GET | `/voice/config` | (any valid token — **user OR guest**) → `{"ice_servers": [{"urls": ["stun:..."]}, {"urls": ["turn:..."], "username": "...", "credential": "..."}]}`; the TURN entry is present only when configured. This is the **only** endpoint guests may call; all other REST endpoints reject guest tokens with 401. |
 | GET | `/channels/{id}/gifs/suggest-voice` | (member-only) → `{query, results}` from recent buffered voice phrases; fewer than two phrases or shared channel cooldown returns 200 `{query: null, results: []}`; 503 when duck suggestions are disabled. Success resets only the voice phrase streak/armed state and broadcasts `voice.roast_armed {armed:false}`. |
 | GET | `/channels/{id}/voice-link` | (Bearer auth, channel member) → `{"token": string \| null}` — the channel's current public voice-link token, or `null` if none exists. |
-| POST | `/channels/{id}/voice-link` | (Bearer auth, channel member) → `{"token": string}` — generate a fresh 32-byte URL-safe token, **replacing** (revoking) any previous value. |
+| POST | `/channels/{id}/voice-link` | (Bearer auth, channel owner/editor) → `{"token": string}` — generate a fresh 32-byte URL-safe token, **replacing** (revoking) any previous value. |
 | GET | `/call-links/{token}` | (public, no auth) → `{"channel_name": string}`; `404` if no channel has this token. For DM channels the literal `"Call"` is returned instead of the hidden DM name. |
 | POST | `/call-links/{token}/join` | (public, no auth) body `{"name": string}` (trimmed, 1..=80 chars, else `422`) → `{"token": <guest JWT>, "channel_id": string, "user_id": string, "name": string}`; `404` for an unknown token. `user_id` is the minted guest subject UUID. |
 
 ## Public guest voice links
 
-Any channel member can create a stable, revocable public link to a channel's voice room. An
+Any channel owner/editor can create a stable, revocable public link to a channel's voice room. An
 unregistered guest opens the link, enters a display name, and receives a limited guest JWT
 that lets them join **only that channel's** voice room over the main WS — no chat, no other
 REST.
@@ -697,7 +716,7 @@ REST.
   `voice.transcribe` and `voice.phrase`, plus all other events, are silently dropped. Guest
   connect/disconnect does **not** emit presence.
 - **Revocation at join**: `voice.join` re-checks the guest token's `link` against the
-  channel's current `voice_link_token`. If a member has regenerated (or the link was removed),
+  channel's current `voice_link_token`. If an owner/editor has regenerated (or the link was removed),
   the guest gets `voice.error` `code: "link_revoked"` and cannot join, even with an
   unexpired token. Guests count toward the normal `MAX_PARTICIPANTS` cap.
 
@@ -803,7 +822,7 @@ Prefs = { dnd: boolean, muted_channel_ids: string[], chat_layout: ChatLayout | n
 | Method | Path | Body → Response |
 |---|---|---|
 | POST | `/channels/{id}/messages` | now also accepts `attachment_ids?: string[]`; content may be empty iff ≥1 attachment |
-| POST | `/channels/{id}/uploads` | multipart `file` → `201 Attachment` (member only; ≤ `MAX_UPLOAD_MB`) |
+| POST | `/channels/{id}/uploads` | multipart `file` → `201 Attachment` (channel owner/editor; ≤ `MAX_UPLOAD_MB`) |
 | GET | `/files/{id}?download=1` | streamed bytes (member only); `download=1` forces attachment disposition |
 | GET | `/notifications?before=<id>&limit=30` | → `{notifications: Notification[], unread_count}` (newest first) |
 | POST | `/notifications/read` | `{ids?: string[]}` or `{all: true}` → `204` |
@@ -893,8 +912,8 @@ watches fast chat streaks and auto-picks a mean roast GIF to send.
   (default `120`; allowed `30|60|120|300`), `gif.duck_context` (default `1m`;
   allowed `1m|2m|3m`). API key resolution: `app_meta` →
   provider-matching env fallback (`GIPHY_API_KEY` / `TENOR_API_KEY`).
-- **Any authenticated member may read/update settings** (v1 has no admin role — deliberate
-  simplification). The key is write-only: never echoed back by the API.
+- **Any authenticated user may read/update workspace settings** (channel roles do not apply;
+  v1 has no workspace-admin role). The key is write-only: never echoed back by the API.
 - Web UI: Settings → Workspace tab (provider select, API key, duck toggle, slow mode,
   context window, DeepSeek status, GIPHY hourly usage bar).
 - **GIPHY rate limit**: server self-enforces a sliding **100 searches / hour** window
@@ -957,7 +976,7 @@ to the source; same family as the `[[doc:…]]`/`[[canvas:…]]` chips. Chat-onl
 ## Duck flow
 
 1. **Shared channel streak** (server, per-replica `AppState.duck_streaks`): every
-   top-level non-GIF message from any member bumps the burst; gaps >20s reset.
+   top-level non-GIF message from any owner/editor bumps the burst; gaps >20s reset.
    The new count rides `message.created` as `duck_streak: {count, last_at}` so
    every member's progress bar stays in sync.
 2. Client progress bar fills with the shared count (more messages = more boost,

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { api, clearToken, setSessionToken, setToken } from './lib/api'
+import { api, ApiRequestError, clearToken, setSessionToken, setToken } from './lib/api'
 import { VoiceClient } from './lib/voice'
 import { isSpeechSupported, PhraseRecognizer } from './lib/speech'
 import { WsClient } from './lib/ws'
@@ -23,10 +23,13 @@ import {
 } from './lib/sound'
 import type {
   Channel,
+  ChannelMember,
   ChannelCreatedPayload,
   ChannelUpdatedPayload,
   ChannelDeletedPayload,
   ChannelMemberPayload,
+  ChannelMemberUpdatedPayload,
+  ChannelRole,
   ChatLayout,
   Doc,
   DocCreatedPayload,
@@ -153,7 +156,7 @@ type State = {
   duckActivity: Record<string, { count: number; lastAt: number }>
 
   // members cache keyed by channel id
-  members: Record<string, User[]>
+  members: Record<string, ChannelMember[]>
 
   // thread panel
   thread: ThreadState
@@ -251,6 +254,7 @@ type State = {
   deleteChannel: (id: string) => Promise<void>
   addChannelMembers: (id: string, userIds: string[]) => Promise<void>
   removeChannelMember: (id: string, userId: string) => Promise<void>
+  setMemberRole: (channelId: string, userId: string, role: ChannelRole) => Promise<void>
   openDm: (userId: string) => Promise<Channel>
   loadMembers: (id: string) => Promise<void>
 
@@ -305,7 +309,11 @@ type State = {
   fetchDoc: (id: string) => Promise<Doc>
   patchDoc: (
     id: string,
-    input: { title?: string; icon?: string; everyone_role?: 'editor' | 'viewer' | 'none' },
+    input: {
+      title?: string
+      icon?: string
+      everyone_role?: 'editor' | 'viewer' | 'none' | 'inherit'
+    },
   ) => Promise<Doc>
   trashDoc: (id: string) => Promise<void>
   restoreDoc: (id: string) => Promise<Doc>
@@ -727,6 +735,57 @@ export const useStore = create<State>((set, get) => ({
   async removeChannelMember(id, userId) {
     await api.removeMember(id, userId)
     // channel.member_left events refresh the members cache.
+  },
+
+  async setMemberRole(channelId, userId, role) {
+    const previousMember = get().members[channelId]?.find((member) => member.id === userId)
+    const previousChannelRole = get().channels.find((channel) => channel.id === channelId)?.my_role
+    const isMe = get().me?.id === userId
+
+    set((s) => ({
+      members: s.members[channelId]
+        ? {
+            ...s.members,
+            [channelId]: s.members[channelId].map((member) =>
+              member.id === userId ? { ...member, role } : member,
+            ),
+          }
+        : s.members,
+      channels: isMe
+        ? s.channels.map((channel) =>
+            channel.id === channelId ? { ...channel, my_role: role } : channel,
+          )
+        : s.channels,
+    }))
+
+    try {
+      await api.setChannelMemberRole(channelId, userId, role)
+    } catch (e) {
+      set((s) => ({
+        members:
+          previousMember && s.members[channelId]
+            ? {
+                ...s.members,
+                [channelId]: s.members[channelId].map((member) =>
+                  member.id === userId ? { ...member, role: previousMember.role } : member,
+                ),
+              }
+            : s.members,
+        channels: isMe
+          ? s.channels.map((channel) =>
+              channel.id === channelId
+                ? { ...channel, my_role: previousChannelRole ?? null }
+                : channel,
+            )
+          : s.channels,
+      }))
+      if (e instanceof ApiRequestError && e.status === 409) {
+        toastError('Cannot demote the last owner.')
+      } else if (e instanceof Error) {
+        toastError(e.message)
+      }
+      throw e
+    }
   },
 
   async openDm(userId) {
@@ -1846,7 +1905,7 @@ export const useStore = create<State>((set, get) => ({
           let channels = s.channels
           if (me && p.user.id === me.id) {
             channels = s.channels.map((c) =>
-              c.id === p.channel_id ? { ...c, is_member: true } : c,
+              c.id === p.channel_id ? { ...c, is_member: true, my_role: p.role } : c,
             )
           }
           return {
@@ -1856,8 +1915,10 @@ export const useStore = create<State>((set, get) => ({
               ? {
                   ...s.members,
                   [p.channel_id]: members.some((m) => m.id === p.user.id)
-                    ? members
-                    : [...members, p.user],
+                    ? members.map((member) =>
+                        member.id === p.user.id ? { ...p.user, role: p.role } : member,
+                      )
+                    : [...members, { ...p.user, role: p.role }],
                 }
               : s.members,
           }
@@ -1871,7 +1932,7 @@ export const useStore = create<State>((set, get) => ({
           let channels = s.channels
           if (me && p.user.id === me.id) {
             channels = s.channels.map((c) =>
-              c.id === p.channel_id ? { ...c, is_member: false } : c,
+              c.id === p.channel_id ? { ...c, is_member: false, my_role: null } : c,
             )
           }
           return {
@@ -1881,6 +1942,26 @@ export const useStore = create<State>((set, get) => ({
               : s.members,
           }
         })
+        break
+      }
+      case 'channel.member_updated': {
+        const p = env.payload as ChannelMemberUpdatedPayload
+        set((s) => ({
+          members: s.members[p.channel_id]
+            ? {
+                ...s.members,
+                [p.channel_id]: s.members[p.channel_id].map((member) =>
+                  member.id === p.user_id ? { ...member, role: p.role } : member,
+                ),
+              }
+            : s.members,
+          channels:
+            me?.id === p.user_id
+              ? s.channels.map((channel) =>
+                  channel.id === p.channel_id ? { ...channel, my_role: p.role } : channel,
+                )
+              : s.channels,
+        }))
         break
       }
       case 'doc.created': {

@@ -2,7 +2,9 @@ use crate::auth::{user_from_row, AuthUser};
 use crate::docs_sync::refresh_room_access;
 use crate::error::{AppError, AppResult};
 use crate::models::{Doc, DocMention, DocMentionDoc, DocSearchResult, MessageUser};
-use crate::routes::{channel_kind, is_member};
+use crate::routes::{
+    channel_kind, channel_member_roles, is_member, member_role, ChannelRole,
+};
 use crate::state::SharedState;
 use crate::ws::{channel_member_ids, envelope};
 use axum::extract::{Path, Query, State};
@@ -129,13 +131,28 @@ fn redacted_doc_view(raw: &RawDoc) -> Doc {
     }
 }
 
-fn compute_role(raw: &RawDoc, viewer: Uuid, override_role: Option<&str>) -> DocRole {
+fn compute_role(
+    raw: &RawDoc,
+    viewer: Uuid,
+    channel_role: ChannelRole,
+    override_role: Option<&str>,
+) -> DocRole {
     if raw.created_by == Some(viewer) {
         return DocRole::Owner;
     }
-    match override_role {
-        Some(r) => DocRole::from_role_str(r),
-        None => DocRole::from_role_str(&raw.everyone_role),
+    if channel_role.is_owner() {
+        return DocRole::Owner;
+    }
+    if let Some(role) = override_role {
+        return DocRole::from_role_str(role);
+    }
+    if raw.everyone_role != "inherit" {
+        return DocRole::from_role_str(&raw.everyone_role);
+    }
+    match channel_role {
+        ChannelRole::Owner => DocRole::Owner,
+        ChannelRole::Editor => DocRole::Editor,
+        ChannelRole::Viewer => DocRole::Viewer,
     }
 }
 
@@ -201,17 +218,11 @@ async fn access(pool: &PgPool, doc_id: Uuid, user_id: Uuid) -> AppResult<(RawDoc
     let raw = fetch_raw_doc(pool, doc_id)
         .await?
         .ok_or_else(|| AppError::NotFound("doc not found".to_string()))?;
-    if !is_member(pool, raw.channel_id, user_id).await? {
-        return Err(AppError::NotFound("doc not found".to_string()));
-    }
-    let role = if raw.created_by == Some(user_id) {
-        DocRole::Owner
-    } else {
-        match single_override(pool, doc_id, user_id).await? {
-            Some(r) => DocRole::from_role_str(&r),
-            None => DocRole::from_role_str(&raw.everyone_role),
-        }
-    };
+    let channel_role = member_role(pool, raw.channel_id, user_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("doc not found".to_string()))?;
+    let override_role = single_override(pool, doc_id, user_id).await?;
+    let role = compute_role(&raw, user_id, channel_role, override_role.as_deref());
     Ok((raw, role))
 }
 
@@ -250,7 +261,16 @@ fn validate_icon(icon: &str) -> AppResult<()> {
     Ok(())
 }
 
-fn validate_role_value(role: &str) -> AppResult<()> {
+fn validate_everyone_role(role: &str) -> AppResult<()> {
+    if !matches!(role, "editor" | "viewer" | "none" | "inherit") {
+        return Err(AppError::Validation(
+            "everyone_role must be 'editor', 'viewer', 'none' or 'inherit'".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_override_role(role: &str) -> AppResult<()> {
     if !matches!(role, "editor" | "viewer" | "none") {
         return Err(AppError::Validation(
             "role must be 'editor', 'viewer' or 'none'".to_string(),
@@ -276,9 +296,24 @@ async fn docs_for_viewer(pool: &PgPool, rows: Vec<PgRow>, viewer: Uuid) -> AppRe
     }
     let ids: Vec<Uuid> = raws.iter().map(|r| r.id).collect();
     let overrides = fetch_viewer_overrides(pool, &ids, viewer).await?;
+    let mut channel_roles = HashMap::new();
+    for raw in &raws {
+        if !channel_roles.contains_key(&raw.channel_id) {
+            let role = member_role(pool, raw.channel_id, viewer).await?;
+            channel_roles.insert(raw.channel_id, role);
+        }
+    }
     let mut out = Vec::new();
     for raw in raws {
-        let role = compute_role(&raw, viewer, overrides.get(&raw.id).map(|s| s.as_str()));
+        let Some(channel_role) = channel_roles.get(&raw.channel_id).copied().flatten() else {
+            continue;
+        };
+        let role = compute_role(
+            &raw,
+            viewer,
+            channel_role,
+            overrides.get(&raw.id).map(|s| s.as_str()),
+        );
         if role == DocRole::None {
             continue;
         }
@@ -300,15 +335,20 @@ pub(crate) async fn broadcast_doc_event(
         Some(r) => r,
         None => return Ok(()),
     };
-    let members = channel_member_ids(&state.pool, raw.channel_id).await?;
+    let members = channel_member_roles(&state.pool, raw.channel_id).await?;
     if members.is_empty() {
         return Ok(());
     }
     let overrides = fetch_all_overrides(&state.pool, doc_id).await?;
 
     let mut groups: HashMap<&'static str, Vec<Uuid>> = HashMap::new();
-    for uid in members {
-        let role = compute_role(&raw, uid, overrides.get(&uid).map(|s| s.as_str()));
+    for (uid, channel_role) in members {
+        let role = compute_role(
+            &raw,
+            uid,
+            channel_role,
+            overrides.get(&uid).map(|s| s.as_str()),
+        );
         groups.entry(role.as_str()).or_default().push(uid);
     }
     for (role_str, uids) in groups {
@@ -342,27 +382,32 @@ pub(crate) async fn sync_decision(
         Some(r) => r,
         None => return Ok(SyncDecision::NotFound),
     };
-    let member = is_member(pool, raw.channel_id, user_id).await?;
+    let channel_role = member_role(pool, raw.channel_id, user_id).await?;
     let ov = if raw.created_by == Some(user_id) {
         None
     } else {
         single_override(pool, doc_id, user_id).await?
     };
-    Ok(sync_decision_for(&raw, member, ov.as_deref(), user_id))
+    Ok(sync_decision_for(
+        &raw,
+        channel_role,
+        ov.as_deref(),
+        user_id,
+    ))
 }
 
 /// Pure form of [`sync_decision`] over already-fetched data. Used to re-evaluate every
 /// open connection after an access change without a query per connection.
 pub(crate) fn sync_decision_for(
     raw: &RawDoc,
-    is_member: bool,
+    channel_role: Option<ChannelRole>,
     override_role: Option<&str>,
     user_id: Uuid,
 ) -> SyncDecision {
-    if !is_member {
+    let Some(channel_role) = channel_role else {
         return SyncDecision::NotFound;
-    }
-    let role = compute_role(raw, user_id, override_role);
+    };
+    let role = compute_role(raw, user_id, channel_role, override_role);
     if role == DocRole::None {
         return SyncDecision::Forbidden;
     }
@@ -423,6 +468,14 @@ pub async fn create_doc(
     Json(body): Json<CreateDocRequest>,
 ) -> AppResult<(StatusCode, Json<Doc>)> {
     require_channel(&state.pool, channel_id, auth.id).await?;
+    if !member_role(&state.pool, channel_id, auth.id)
+        .await?
+        .is_some_and(ChannelRole::can_post)
+    {
+        return Err(AppError::Forbidden(
+            "creating docs requires owner or editor role".to_string(),
+        ));
+    }
     let title = body.title.unwrap_or_default();
     let icon = body.icon.unwrap_or_default();
     let kind = body.kind.unwrap_or_else(|| "doc".to_string());
@@ -473,7 +526,7 @@ pub async fn update_doc(
     auth: AuthUser,
     Json(body): Json<UpdateDocRequest>,
 ) -> AppResult<Json<Doc>> {
-    let (_raw, role) = access(&state.pool, doc_id, auth.id).await?;
+    let (raw, role) = access(&state.pool, doc_id, auth.id).await?;
     require_visible(role)?;
 
     if body.title.is_none() && body.icon.is_none() && body.everyone_role.is_none() {
@@ -495,7 +548,7 @@ pub async fn update_doc(
         validate_icon(i)?;
     }
     if let Some(er) = &body.everyone_role {
-        validate_role_value(er)?;
+        validate_everyone_role(er)?;
     }
 
     let sql = format!(
@@ -515,7 +568,10 @@ pub async fn update_doc(
 
     // Recompute the requester's role against the (possibly changed) everyone_role.
     let ov = single_override(&state.pool, doc_id, auth.id).await?;
-    let my_role = compute_role(&new_raw, auth.id, ov.as_deref());
+    let channel_role = member_role(&state.pool, raw.channel_id, auth.id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("doc not found".to_string()))?;
+    let my_role = compute_role(&new_raw, auth.id, channel_role, ov.as_deref());
     let doc = doc_view(&new_raw, my_role.as_str());
 
     broadcast_doc_event(&state, doc_id, "doc.updated").await?;
@@ -565,7 +621,7 @@ pub async fn restore_doc(
     Path(doc_id): Path<Uuid>,
     auth: AuthUser,
 ) -> AppResult<Json<Doc>> {
-    let (_raw, role) = access(&state.pool, doc_id, auth.id).await?;
+    let (raw, role) = access(&state.pool, doc_id, auth.id).await?;
     if !role.can_edit() {
         return Err(AppError::Forbidden("editor role required".to_string()));
     }
@@ -580,7 +636,10 @@ pub async fn restore_doc(
         .await?;
     let new_raw = parse_raw_doc(&row)?;
     let ov = single_override(&state.pool, doc_id, auth.id).await?;
-    let my_role = compute_role(&new_raw, auth.id, ov.as_deref());
+    let channel_role = member_role(&state.pool, raw.channel_id, auth.id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("doc not found".to_string()))?;
+    let my_role = compute_role(&new_raw, auth.id, channel_role, ov.as_deref());
     let doc = doc_view(&new_raw, my_role.as_str());
 
     broadcast_doc_event(&state, doc_id, "doc.updated").await?;
@@ -667,7 +726,7 @@ pub async fn set_role(
     if !role.is_owner() {
         return Err(AppError::Forbidden("owner role required".to_string()));
     }
-    validate_role_value(&body.role)?;
+    validate_override_role(&body.role)?;
     if raw.created_by == Some(target_user) {
         return Err(AppError::BadRequest(
             "cannot change the creator's role".to_string(),
@@ -769,19 +828,19 @@ pub async fn create_mention(
         ));
     }
     // The target must be able to see the doc: channel member + role != none.
-    if !is_member(&state.pool, raw.channel_id, target).await? {
+    let target_channel_role = member_role(&state.pool, raw.channel_id, target).await?;
+    if target_channel_role.is_none() {
         return Err(AppError::Validation(
             "target user cannot access this doc".to_string(),
         ));
     }
-    let target_role = if raw.created_by == Some(target) {
-        DocRole::Owner
-    } else {
-        match single_override(&state.pool, doc_id, target).await? {
-            Some(r) => DocRole::from_role_str(&r),
-            None => DocRole::from_role_str(&raw.everyone_role),
-        }
-    };
+    let target_override = single_override(&state.pool, doc_id, target).await?;
+    let target_role = compute_role(
+        &raw,
+        target,
+        target_channel_role.expect("checked above"),
+        target_override.as_deref(),
+    );
     if target_role == DocRole::None {
         return Err(AppError::Validation(
             "target user cannot access this doc".to_string(),
@@ -976,10 +1035,25 @@ pub async fn search_docs(
     }
     let ids: Vec<Uuid> = raws.iter().map(|(r, _, _)| r.id).collect();
     let overrides = fetch_viewer_overrides(&state.pool, &ids, auth.id).await?;
+    let mut channel_roles = HashMap::new();
+    for (raw, _, _) in &raws {
+        if !channel_roles.contains_key(&raw.channel_id) {
+            let role = member_role(&state.pool, raw.channel_id, auth.id).await?;
+            channel_roles.insert(raw.channel_id, role);
+        }
+    }
 
     let mut results = Vec::new();
     for (raw, channel_name, snippet) in raws {
-        let role = compute_role(&raw, auth.id, overrides.get(&raw.id).map(|s| s.as_str()));
+        let Some(channel_role) = channel_roles.get(&raw.channel_id).copied().flatten() else {
+            continue;
+        };
+        let role = compute_role(
+            &raw,
+            auth.id,
+            channel_role,
+            overrides.get(&raw.id).map(|s| s.as_str()),
+        );
         if role == DocRole::None {
             continue;
         }
