@@ -124,7 +124,9 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
   const [handledNotesMeetingId, setHandledNotesMeetingId] = useState<string | null>(null)
   const hasFallbackVideo = Boolean(
     localStream?.getVideoTracks().length ||
-      Object.values(remoteStreams).some((stream) => stream.getVideoTracks().length > 0),
+      localScreenStream?.getVideoTracks().length ||
+      Object.values(remoteStreams).some((stream) => stream.getVideoTracks().length > 0) ||
+      Object.values(remoteScreenStreams).some((stream) => stream.getVideoTracks().length > 0),
   )
   const pip = useVoicePip(hasFallbackVideo)
 
@@ -1125,6 +1127,7 @@ function ScreenTile({
         <video
           ref={videoRef}
           data-voice-video
+          data-voice-screen
           autoPlay
           playsInline
           muted

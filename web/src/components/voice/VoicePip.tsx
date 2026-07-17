@@ -21,6 +21,13 @@ type PipParticipant = {
   cameraConnId: string | null
 }
 
+type PipScreenShare = {
+  userId: string
+  displayName: string
+  local: boolean
+  stream: MediaStream | null
+}
+
 export type VoicePipController = {
   supported: boolean
   open: () => Promise<void>
@@ -174,6 +181,8 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
   const cameraStatus = useStore((s) => s.voice.cameraStatus)
   const localStream = useStore((s) => s.voice.localStream)
   const remoteStreams = useStore((s) => s.voice.remoteStreams)
+  const localScreenStream = useStore((s) => s.voice.localScreenStream)
+  const remoteScreenStreams = useStore((s) => s.voice.remoteScreenStreams)
   const myConnId = useStore((s) => s.myConnId)
   const me = useStore((s) => s.me)
   const users = useStore((s) => s.users)
@@ -223,6 +232,27 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
     })
   }, [myConnId, room, speaking])
 
+  // First active screen share wins (server caps shares at one per room anyway).
+  const screenShare = useMemo<PipScreenShare | null>(() => {
+    for (const [connId, entry] of Object.entries(room ?? {})) {
+      if (!entry.screen_on) continue
+      const local = connId === myConnId
+      return {
+        userId: entry.user_id,
+        displayName: entry.display_name,
+        local,
+        stream: local ? localScreenStream : remoteScreenStreams[connId] ?? null,
+      }
+    }
+    return null
+  }, [room, myConnId, localScreenStream, remoteScreenStreams])
+
+  const resolveName = (userId: string, fallback?: string) =>
+    users[userId]?.display_name ??
+    (me?.id === userId ? me.display_name : undefined) ??
+    fallback ??
+    'Participant'
+
   const roomName = channel
     ? channel.kind === 'dm'
       ? channel.dm_user?.display_name ?? channelLabel(channel)
@@ -244,33 +274,61 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
         </button>
       </header>
 
-      <div className={`grid min-h-0 flex-1 auto-rows-fr gap-1.5 p-1.5 ${
-        participants.length <= 1 ? 'grid-cols-1' : 'grid-cols-2'
-      }`}>
-        {participants.map((participant) => {
-          const local = participant.cameraConnId === myConnId
-          const stream = local
-            ? localStream
-            : participant.cameraConnId
-              ? remoteStreams[participant.cameraConnId]
-              : null
-          const name =
-            users[participant.userId]?.display_name ??
-            (me?.id === participant.userId ? me.display_name : 'Participant')
-          return (
-            <PipTile
-              key={participant.userId}
-              userId={participant.userId}
-              name={name}
-              stream={stream}
-              local={local}
-              muted={participant.muted}
-              speaking={participant.speaking}
-              handRaised={participant.handRaised}
-            />
-          )
-        })}
-      </div>
+      {screenShare ? (
+        <div className="flex min-h-0 flex-1 flex-col gap-1.5 p-1.5">
+          <PipScreenTile
+            name={resolveName(screenShare.userId, screenShare.displayName)}
+            stream={screenShare.stream}
+            local={screenShare.local}
+          />
+          {participants.length > 0 && (
+            <div
+              aria-label="Call participants"
+              className="flex shrink-0 items-center gap-1.5 overflow-x-auto"
+            >
+              {participants.map((participant) => {
+                const name = resolveName(participant.userId)
+                return (
+                  <div
+                    key={participant.userId}
+                    title={name}
+                    className={`shrink-0 rounded-full ${
+                      participant.speaking ? 'ring-2 ring-[#4fbf9f]' : ''
+                    }`}
+                  >
+                    <Avatar id={participant.userId} name={name} size={28} />
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className={`grid min-h-0 flex-1 auto-rows-fr gap-1.5 p-1.5 ${
+          participants.length <= 1 ? 'grid-cols-1' : 'grid-cols-2'
+        }`}>
+          {participants.map((participant) => {
+            const local = participant.cameraConnId === myConnId
+            const stream = local
+              ? localStream
+              : participant.cameraConnId
+                ? remoteStreams[participant.cameraConnId]
+                : null
+            return (
+              <PipTile
+                key={participant.userId}
+                userId={participant.userId}
+                name={resolveName(participant.userId)}
+                stream={stream}
+                local={local}
+                muted={participant.muted}
+                speaking={participant.speaking}
+                handRaised={participant.handRaised}
+              />
+            )
+          })}
+        </div>
+      )}
 
       <footer className="flex shrink-0 items-center justify-center gap-2 border-t border-[var(--color-border)] px-2 py-1.5">
         <PipControl
@@ -370,6 +428,49 @@ function PipTile({
             )}
           </span>
         )}
+      </div>
+    </article>
+  )
+}
+
+function PipScreenTile({
+  name,
+  stream,
+  local,
+}: {
+  name: string
+  stream: MediaStream | null
+  local: boolean
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const hasVideo = Boolean(stream?.getVideoTracks().length)
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    video.srcObject = hasVideo ? stream : null
+    if (hasVideo) void video.play().catch(() => {})
+  }, [hasVideo, stream])
+
+  return (
+    <article className="relative flex min-h-0 flex-1 overflow-hidden rounded-xl border border-[var(--color-border)] bg-black">
+      {hasVideo ? (
+        // Never mirrored; muted — remote system/tab audio plays via the engine's
+        // hidden screenAudio element.
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className="h-full w-full object-contain"
+        />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-[11px] text-[var(--color-text-dim)]">
+          Waiting for screen…
+        </div>
+      )}
+      <div className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-black/80 to-transparent px-2 pb-1.5 pt-5 text-[11px] font-medium text-white">
+        <span className="truncate">{local ? 'Your screen' : `${name}'s screen`}</span>
       </div>
     </article>
   )

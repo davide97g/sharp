@@ -23,6 +23,7 @@ export function CallChatRail({ channelId }: { channelId: string }) {
   const atBottomRef = useRef(true)
   const pendingRestoreRef = useRef<number | null>(null)
   const prevChannelRef = useRef<string | null>(null)
+  const prevTailRef = useRef<string | null>(null)
 
   // Load this channel's messages the same way the main view does (works even
   // when the call channel isn't the currently open channel).
@@ -38,15 +39,21 @@ export function CallChatRail({ channelId }: { channelId: string }) {
     const el = scrollRef.current
     if (!el) return
     const channelChanged = prevChannelRef.current !== channelId
+    const tailChanged = !channelChanged && prevTailRef.current !== lastId
     prevChannelRef.current = channelId
-    if (pendingRestoreRef.current !== null) {
+    prevTailRef.current = lastId
+    if (channelChanged || tailChanged) {
+      pendingRestoreRef.current = null
+      el.scrollTop = el.scrollHeight
+      atBottomRef.current = true
+    } else if (pendingRestoreRef.current !== null) {
       el.scrollTop = el.scrollHeight - pendingRestoreRef.current
       pendingRestoreRef.current = null
-    } else if (channelChanged || atBottomRef.current) {
+    } else if (atBottomRef.current) {
       el.scrollTop = el.scrollHeight
       atBottomRef.current = true
     }
-  }, [messages.length, channelId])
+  }, [messages.length, lastId, channelId])
 
   // Mark read once new content lands while we're at the bottom.
   useEffect(() => {

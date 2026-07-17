@@ -43,8 +43,11 @@ export function copyDocumentStyles(target: Window) {
   target.document.body.style.background = 'var(--color-ink)'
 }
 
+// Screen share first (that's what you want to keep watching), then local
+// camera, then any remote camera.
 export function bestVoiceVideo() {
   return (
+    document.querySelector<HTMLVideoElement>('video[data-voice-screen]') ??
     document.querySelector<HTMLVideoElement>('video[data-voice-video-local="true"]') ??
     document.querySelector<HTMLVideoElement>('video[data-voice-video]')
   )

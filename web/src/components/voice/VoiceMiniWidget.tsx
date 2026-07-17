@@ -54,6 +54,9 @@ export function VoiceMiniWidget() {
   const room = useStore((s) => (channelId ? s.voiceRooms[channelId] : undefined))
   const speaking = useStore((s) => s.voice.speaking)
   const muted = useStore((s) => s.voice.muted)
+  const localScreenStream = useStore((s) => s.voice.localScreenStream)
+  const remoteScreenStreams = useStore((s) => s.voice.remoteScreenStreams)
+  const myConnId = useStore((s) => s.myConnId)
   const users = useStore((s) => s.users)
   const me = useStore((s) => s.me)
   const channel = useStore((s) =>
@@ -89,6 +92,18 @@ export function VoiceMiniWidget() {
     [room],
   )
 
+  // Live thumbnail of the active screen share (yours or a peer's), when its
+  // stream has arrived; the monitor badge covers the not-yet-streaming case.
+  const share = useMemo(() => {
+    for (const [connId, entry] of Object.entries(room ?? {})) {
+      if (!entry.screen_on) continue
+      const local = connId === myConnId
+      const stream = local ? localScreenStream : remoteScreenStreams[connId] ?? null
+      return stream?.getVideoTracks().length ? { local, stream } : null
+    }
+    return null
+  }, [room, myConnId, localScreenStream, remoteScreenStreams])
+
   const roomName = channel
     ? channel.kind === 'dm'
       ? channel.dm_user?.display_name ?? channelLabel(channel)
@@ -102,9 +117,11 @@ export function VoiceMiniWidget() {
     setPosition(cornerPosition(nextCorner, rect.width, rect.height))
   }, [])
 
+  const hasPreview = Boolean(share)
+
   useLayoutEffect(() => {
     placeAtCorner(corner)
-  }, [corner, participants.length, placeAtCorner])
+  }, [corner, participants.length, hasPreview, placeAtCorner])
 
   useEffect(() => {
     const onResize = () => placeAtCorner(corner)
@@ -192,20 +209,23 @@ export function VoiceMiniWidget() {
       onClick={(event) => {
         if (event.detail === 0) expandCall()
       }}
-      className={`voice-mini-widget fixed z-50 flex w-[88px] touch-none select-none flex-col items-center gap-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-panel)] p-2.5 shadow-2xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+      className={`voice-mini-widget fixed z-50 flex touch-none select-none flex-col items-center gap-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-panel)] p-2.5 shadow-2xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+        hasPreview ? 'w-[176px]' : 'w-[88px]'
+      } ${
         dragging
           ? 'cursor-grabbing'
           : 'cursor-grab transition-[left,top] duration-200 ease-out motion-reduce:transition-none'
       }`}
       style={position ?? { right: EDGE_MARGIN, bottom: EDGE_MARGIN }}
     >
+      {share && <SharePreview stream={share.stream} local={share.local} />}
       <div className="voice-live-tile relative flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]">
         <WaveformIcon />
         <span
           className="voice-connected-dot absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-[var(--color-panel)] bg-[#4fbf9f]"
           aria-label="Connected"
         />
-        {anyScreen && (
+        {anyScreen && !share && (
           <span
             className="absolute -bottom-0.5 -left-0.5 flex h-4 w-4 items-center justify-center rounded-full border-2 border-[var(--color-panel)] bg-[var(--color-accent)] text-white"
             aria-label="Someone is sharing their screen"
@@ -273,6 +293,37 @@ export function VoiceMiniWidget() {
           <LeaveIcon />
         </button>
       </div>
+    </div>
+  )
+}
+
+// Tiny live view of the active screen share. Muted — remote share audio plays
+// via the voice engine's hidden screenAudio element.
+function SharePreview({ stream, local }: { stream: MediaStream; local: boolean }) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    video.srcObject = stream
+    void video.play().catch(() => {})
+  }, [stream])
+
+  return (
+    <div
+      className="relative w-full overflow-hidden rounded-xl border border-[var(--color-border)] bg-black"
+      title={local ? 'Your screen' : 'Shared screen'}
+    >
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        className="aspect-video w-full object-contain"
+      />
+      <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white">
+        {local ? 'Your screen' : 'Sharing'}
+      </span>
     </div>
   )
 }

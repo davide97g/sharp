@@ -40,7 +40,8 @@ export function MessagePane() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const atBottomRef = useRef(true)
   const pendingRestoreRef = useRef<number | null>(null)
-  const prevLenRef = useRef(0)
+  const prevTailRef = useRef<string | null>(null)
+  const prevLoadedRef = useRef(false)
   const prevChannelRef = useRef<string | undefined>(undefined)
   const readTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const initialUnreadRef = useRef(0)
@@ -169,9 +170,23 @@ export function MessagePane() {
     const el = scrollRef.current
     if (!el) return
     const channelChanged = prevChannelRef.current !== channelId
+    const tailChanged =
+      !channelChanged && prevLoadedRef.current && prevTailRef.current !== lastId
     prevChannelRef.current = channelId
+    prevTailRef.current = lastId
+    prevLoadedRef.current = Boolean(cm?.loaded)
 
-    if (pendingRestoreRef.current !== null) {
+    if (tailChanged) {
+      // New chat content should always remain visible, including GIFs sent by
+      // the duck while the user is reading older messages.
+      pendingRestoreRef.current = null
+      unreadGateRef.current = false
+      setPendingJump(null)
+      programmaticBottomRef.current = true
+      el.scrollTop = el.scrollHeight
+      atBottomRef.current = true
+      setAtBottom(true)
+    } else if (pendingRestoreRef.current !== null) {
       // restore after prepending older messages
       el.scrollTop = el.scrollHeight - pendingRestoreRef.current
       pendingRestoreRef.current = null
@@ -180,8 +195,7 @@ export function MessagePane() {
       el.scrollTop = el.scrollHeight
       atBottomRef.current = true
     }
-    prevLenRef.current = messages.length
-  }, [messages.length, channelId])
+  }, [messages.length, lastId, channelId, cm?.loaded])
 
   // mark read when at bottom & new content
   useEffect(() => {
