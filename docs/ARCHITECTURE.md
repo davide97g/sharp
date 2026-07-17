@@ -170,7 +170,7 @@ ReplyPreview = { id: string, user: { id, display_name, avatar_url }, content: st
 | PUT | `/messages/{id}/reactions/{emoji}` | → `204` |
 | DELETE | `/messages/{id}/reactions/{emoji}` | → `204` |
 | GET | `/search?q=&limit=20&channel_id=` | → `{results: (Message & {channel_name: string, snippet: string})[]}` (my channels only; optional `channel_id` scopes to one channel; `snippet` is a `ts_headline` with `<<`/`>>` markers around matches) |
-| GET | `/healthz` | → `200 {"status":"ok"}` (no auth) |
+| GET | `/healthz` | → `200 {"status":"ok","version":"<server package version>"}` (no auth) |
 
 Channel management (rename/topic/visibility, membership, roles, deletion) is channel-owner only.
 `channel_members.role` is the sole channel authorization source; `channels.created_by` is historical.

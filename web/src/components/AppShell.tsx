@@ -14,6 +14,7 @@ import { VideoStage } from './voice/VideoStage'
 import { Onboarding } from './Onboarding'
 import { isOnboardingDone } from '../lib/onboarding'
 import { sound } from '../lib/sound'
+import { hasUnseenRelease } from '../lib/whatsNew'
 import { useStore } from '../store'
 
 const SIDEBAR_OPEN_KEY = 'sharp.sidebarOpen'
@@ -43,7 +44,10 @@ export function AppShell() {
     location.pathname.startsWith('/canvas') || location.pathname.startsWith('/x/')
   const meetingsMode = location.pathname.startsWith('/meetings')
   const calendarMode = location.pathname.startsWith('/calendar')
-  const mode: 'chat' | 'docs' | 'canvas' | 'meetings' | 'calendar' = calendarMode
+  const helpMode = location.pathname.startsWith('/help')
+  const mode: 'chat' | 'docs' | 'canvas' | 'meetings' | 'calendar' | 'help' = helpMode
+    ? 'help'
+    : calendarMode
     ? 'calendar'
     : meetingsMode
     ? 'meetings'
@@ -118,17 +122,19 @@ export function AppShell() {
         sidebarOpen={sidebarOpen}
         onToggleSidebar={toggleSidebar}
       />
-      <div
-        id="app-sidebar"
-        className="sidebar-shell relative"
-        data-open={sidebarOpen}
-      >
-        {sidebarOpen ? (
-          calendarMode ? <CalendarSidebar /> : meetingsMode ? <MeetingsSidebar /> : canvasMode ? <CanvasSidebar /> : docsMode ? <DocsSidebar /> : <Sidebar />
-        ) : (
-          <CompactSidebar mode={mode} />
-        )}
-      </div>
+      {mode !== 'help' && (
+        <div
+          id="app-sidebar"
+          className="sidebar-shell relative"
+          data-open={sidebarOpen}
+        >
+          {sidebarOpen ? (
+            calendarMode ? <CalendarSidebar /> : meetingsMode ? <MeetingsSidebar /> : canvasMode ? <CanvasSidebar /> : docsMode ? <DocsSidebar /> : <Sidebar />
+          ) : (
+            <CompactSidebar mode={mode} />
+          )}
+        </div>
+      )}
       <Outlet />
       {mode === 'chat' && <ThreadPanel />}
       {inVoice && <VideoStage />}
@@ -145,11 +151,12 @@ function ModeRail({
   sidebarOpen,
   onToggleSidebar,
 }: {
-  mode: 'chat' | 'docs' | 'canvas' | 'meetings' | 'calendar'
+  mode: 'chat' | 'docs' | 'canvas' | 'meetings' | 'calendar' | 'help'
   sidebarOpen: boolean
   onToggleSidebar: () => void
 }) {
   const navigate = useNavigate()
+  const [unseenRelease, setUnseenRelease] = useState(hasUnseenRelease)
   const chatUnread = useStore((s) => s.notifUnread)
   const mentions = useStore((s) => s.mentions)
   const docMentions = mentions.reduce(
@@ -160,6 +167,16 @@ function ModeRail({
     (n, m) => n + (!m.read_at && m.doc.kind === 'canvas' ? 1 : 0),
     0,
   )
+
+  useEffect(() => {
+    const update = () => setUnseenRelease(hasUnseenRelease())
+    window.addEventListener('sharp:last-seen-version', update)
+    window.addEventListener('storage', update)
+    return () => {
+      window.removeEventListener('sharp:last-seen-version', update)
+      window.removeEventListener('storage', update)
+    }
+  }, [])
 
   return (
     <nav
@@ -252,6 +269,29 @@ function ModeRail({
           </svg>
         }
       />
+      <RailButton
+        active={mode === 'help'}
+        onClick={() => navigate('/help')}
+        title="Help"
+        dot={unseenRelease}
+        label={
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <circle cx="12" cy="12" r="9" />
+            <path d="M9.7 9a2.4 2.4 0 1 1 3.8 2c-1 .7-1.5 1.1-1.5 2.2" />
+            <path d="M12 17h.01" />
+          </svg>
+        }
+      />
       <button
         type="button"
         onClick={onToggleSidebar}
@@ -294,12 +334,14 @@ function RailButton({
   title,
   label,
   badge,
+  dot,
 }: {
   active: boolean
   onClick: () => void
   title: string
   label: React.ReactNode
   badge?: number
+  dot?: boolean
 }) {
   return (
     <button
@@ -316,6 +358,9 @@ function RailButton({
         <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--color-accent)] px-1 text-[10px] font-bold text-white">
           {badge > 99 ? '99+' : badge}
         </span>
+      )}
+      {dot && !(badge !== undefined && badge > 0) && (
+        <span className="absolute right-0.5 top-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--color-ink)] bg-[var(--color-accent)]" />
       )}
     </button>
   )

@@ -22,6 +22,7 @@ import { ChannelCanvases } from './components/canvas/ChannelCanvases'
 import { MeetingsHome } from './components/meetings/MeetingsHome'
 import { MeetingDetailView } from './components/meetings/MeetingDetailView'
 import { CalendarView } from './components/calendar/CalendarView'
+import { HelpArea } from './components/help/HelpArea'
 // tldraw is a large dependency; keep it out of the main bundle by loading the
 // canvas editor lazily (only fetched when a whiteboard is actually opened).
 const CanvasEditor = lazy(() =>
@@ -140,6 +141,8 @@ export function App() {
           <Route path="meetings/:meetingId" element={<MeetingDetailView />} />
           <Route path="calendar" element={<CalendarView />} />
           <Route path="calendar/:date" element={<CalendarView />} />
+          <Route path="help" element={<HelpArea />} />
+          <Route path="help/:tab" element={<HelpArea />} />
           <Route
             path="x/:docId"
             element={

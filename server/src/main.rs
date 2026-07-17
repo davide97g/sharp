@@ -32,7 +32,10 @@ use tracing_subscriber::EnvFilter;
 use ws::Hub;
 
 async fn healthz() -> Json<serde_json::Value> {
-    Json(json!({ "status": "ok" }))
+    Json(json!({
+        "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
+    }))
 }
 
 /// Self-contained desktop browser-login bridge page. Served by the API host
