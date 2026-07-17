@@ -15,6 +15,28 @@ use uuid::Uuid;
 
 const COOLDOWN_RETENTION: Duration = Duration::from_secs(900);
 
+pub(crate) fn try_acquire_suggestion_cooldown(
+    state: &SharedState,
+    channel_id: Uuid,
+    cooldown_secs: u64,
+) -> AppResult<bool> {
+    let cooldown = Duration::from_secs(cooldown_secs);
+    let now = Instant::now();
+    let mut cooldowns = state
+        .gif_suggest_cooldowns
+        .lock()
+        .map_err(|_| AppError::Internal("gif_suggest_cooldowns lock poisoned".to_string()))?;
+    cooldowns.retain(|_, last_attempt| now.duration_since(*last_attempt) < COOLDOWN_RETENTION);
+    if cooldowns
+        .get(&channel_id)
+        .is_some_and(|last_attempt| now.duration_since(*last_attempt) < cooldown)
+    {
+        return Ok(false);
+    }
+    cooldowns.insert(channel_id, now);
+    Ok(true)
+}
+
 #[derive(Serialize)]
 pub struct GifConfigResponse {
     enabled: bool,
@@ -200,21 +222,8 @@ pub async fn suggest(
             AppError::ServiceUnavailable("gif suggestion not configured".to_string())
         })?;
 
-    let cooldown = Duration::from_secs(settings.duck_cooldown_secs);
-    let now = Instant::now();
-    {
-        let mut cooldowns = state
-            .gif_suggest_cooldowns
-            .lock()
-            .map_err(|_| AppError::Internal("gif_suggest_cooldowns lock poisoned".to_string()))?;
-        cooldowns.retain(|_, last_attempt| now.duration_since(*last_attempt) < COOLDOWN_RETENTION);
-        if cooldowns
-            .get(&channel_id)
-            .is_some_and(|last_attempt| now.duration_since(*last_attempt) < cooldown)
-        {
-            return Ok(empty_suggestion());
-        }
-        cooldowns.insert(channel_id, now);
+    if !try_acquire_suggestion_cooldown(&state, channel_id, settings.duck_cooldown_secs)? {
+        return Ok(empty_suggestion());
     }
 
     let transcript = load_transcript(&state, channel_id, &settings.duck_context).await?;
@@ -263,21 +272,8 @@ pub async fn suggest_voice(
         .as_ref()
         .ok_or_else(|| AppError::ServiceUnavailable("gif suggestion not configured".to_string()))?;
 
-    let cooldown = Duration::from_secs(settings.duck_cooldown_secs);
-    let now = Instant::now();
-    {
-        let mut cooldowns = state
-            .gif_suggest_cooldowns
-            .lock()
-            .map_err(|_| AppError::Internal("gif_suggest_cooldowns lock poisoned".to_string()))?;
-        cooldowns.retain(|_, last_attempt| now.duration_since(*last_attempt) < COOLDOWN_RETENTION);
-        if cooldowns
-            .get(&channel_id)
-            .is_some_and(|last_attempt| now.duration_since(*last_attempt) < cooldown)
-        {
-            return Ok(empty_suggestion());
-        }
-        cooldowns.insert(channel_id, now);
+    if !try_acquire_suggestion_cooldown(&state, channel_id, settings.duck_cooldown_secs)? {
+        return Ok(empty_suggestion());
     }
 
     let minutes = gif::duck_context_minutes(&settings.duck_context);
@@ -297,7 +293,7 @@ pub async fn suggest_voice(
 }
 
 /// Query → multi-search → soft-rank → LLM pick (with one retry on junk-heavy results).
-async fn suggest_best_gif(
+pub(crate) async fn suggest_best_gif(
     state: &SharedState,
     provider_name: &str,
     deepseek_config: &crate::config::DeepSeekConfig,
@@ -408,6 +404,43 @@ async fn load_transcript(
         })
         .collect();
 
+    messages.reverse();
+    Ok(messages)
+}
+
+pub(crate) async fn load_recent_messages(
+    state: &SharedState,
+    channel_id: Uuid,
+    limit: i64,
+) -> AppResult<Vec<(String, String)>> {
+    let rows = sqlx::query(
+        "SELECT u.display_name, m.content
+         FROM messages m
+         JOIN users u ON u.id = m.user_id
+         WHERE m.channel_id = $1
+           AND m.parent_id IS NULL
+           AND m.deleted_at IS NULL
+           AND m.content <> ''
+         ORDER BY m.id DESC
+         LIMIT $2",
+    )
+    .bind(channel_id)
+    .bind(limit)
+    .fetch_all(&state.pool)
+    .await?;
+
+    let mut messages: Vec<(String, String)> = rows
+        .into_iter()
+        .filter_map(|row| {
+            let display_name: String = row.try_get("display_name").ok()?;
+            let content: String = row.try_get("content").ok()?;
+            if content.trim().is_empty() || gif::is_duck_roast_gif(&content) {
+                None
+            } else {
+                Some((display_name, content))
+            }
+        })
+        .collect();
     messages.reverse();
     Ok(messages)
 }

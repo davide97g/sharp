@@ -410,23 +410,21 @@ export function MessagePane() {
               <span className="text-[11px] font-semibold tabular-nums">{voiceOccupancy}</span>
             )}
           </button>
-          {!isDm && (
-            <button
-              onClick={() => setShowSettings(true)}
-              aria-label="Channel settings"
-              title="Channel settings"
-              className="rounded-md px-2 py-1 text-sm text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
-            >
-              ⚙
-            </button>
-          )}
+          <button
+            onClick={() => setShowSettings(true)}
+            aria-label={isDm ? 'Conversation settings' : 'Channel settings'}
+            title={isDm ? 'Conversation settings' : 'Channel settings'}
+            className="rounded-md px-2 py-1 text-sm text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
+          >
+            ⚙
+          </button>
           <InboxTrigger variant="header" />
         </div>
       </header>
 
       <ChannelTabs channelId={channel.id} active="chat" />
 
-      {showSettings && !isDm && (
+      {showSettings && (
         <ChannelSettingsModal channelId={channel.id} onClose={() => setShowSettings(false)} />
       )}
 

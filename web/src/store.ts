@@ -58,6 +58,10 @@ import type {
   VoiceRoomSnapshot,
   VoiceSignalPayload,
   VoiceStatePayload,
+  VoiceTrigger,
+  VoiceTriggerCreatedPayload,
+  VoiceTriggerDeletedPayload,
+  VoiceTriggerFiredPayload,
   MeetingStartedPayload,
   MeetingEndedPayload,
   WsEnvelope,
@@ -160,6 +164,8 @@ type State = {
 
   // members cache keyed by channel id
   members: Record<string, ChannelMember[]>
+  // shared voice triggers; missing key means not loaded yet
+  channelVoiceTriggers: Record<string, VoiceTrigger[]>
 
   // thread panel
   thread: ThreadState
@@ -260,6 +266,9 @@ type State = {
   setMemberRole: (channelId: string, userId: string, role: ChannelRole) => Promise<void>
   openDm: (userId: string) => Promise<Channel>
   loadMembers: (id: string) => Promise<void>
+  loadChannelVoiceTriggers: (channelId: string) => Promise<void>
+  createChannelVoiceTrigger: (channelId: string, phrase: string) => Promise<VoiceTrigger>
+  deleteChannelVoiceTrigger: (channelId: string, triggerId: string) => Promise<void>
 
   toggleReaction: (msg: Message, emoji: string) => Promise<void>
   applyReaction: (
@@ -388,6 +397,7 @@ export const useStore = create<State>((set, get) => ({
   gifConfig: null,
   duckActivity: {},
   members: {},
+  channelVoiceTriggers: {},
   thread: { open: false, parentId: null, parent: null, replies: [], loading: false },
   typing: {},
   quickSwitcherOpen: false,
@@ -430,6 +440,9 @@ export const useStore = create<State>((set, get) => ({
         get().loadInboxAndPrefs()
         const cur = get().currentChannelId
         if (cur) get().loadMessages(cur)
+        for (const channelId of Object.keys(get().channelVoiceTriggers)) {
+          void get().loadChannelVoiceTriggers(channelId).catch(() => {})
+        }
       },
     })
     set({ ws })
@@ -517,6 +530,7 @@ export const useStore = create<State>((set, get) => ({
       gifConfig: null,
       duckActivity: {},
       members: {},
+      channelVoiceTriggers: {},
       thread: { open: false, parentId: null, parent: null, replies: [], loading: false },
       typing: {},
       quickSwitcherOpen: false,
@@ -569,6 +583,42 @@ export const useStore = create<State>((set, get) => ({
     } catch {
       // Keep last known config when refresh fails.
     }
+  },
+
+  async loadChannelVoiceTriggers(channelId) {
+    const { triggers } = await api.voiceTriggers.listChannel(channelId)
+    set((s) => ({
+      channelVoiceTriggers: { ...s.channelVoiceTriggers, [channelId]: triggers },
+    }))
+  },
+
+  async createChannelVoiceTrigger(channelId, phrase) {
+    const trigger = await api.voiceTriggers.createChannel(channelId, phrase)
+    set((s) => {
+      const current = s.channelVoiceTriggers[channelId]
+      if (!current || current.some((item) => item.id === trigger.id)) return {}
+      return {
+        channelVoiceTriggers: {
+          ...s.channelVoiceTriggers,
+          [channelId]: [...current, trigger],
+        },
+      }
+    })
+    return trigger
+  },
+
+  async deleteChannelVoiceTrigger(channelId, triggerId) {
+    await api.voiceTriggers.deleteChannel(channelId, triggerId)
+    set((s) => {
+      const current = s.channelVoiceTriggers[channelId]
+      if (!current) return {}
+      return {
+        channelVoiceTriggers: {
+          ...s.channelVoiceTriggers,
+          [channelId]: current.filter((trigger) => trigger.id !== triggerId),
+        },
+      }
+    })
   },
 
   resetDuckActivity(channelId) {
@@ -1822,6 +1872,13 @@ export const useStore = create<State>((set, get) => ({
         )
         break
       }
+      case 'voice.trigger_fired': {
+        const p = env.payload as VoiceTriggerFiredPayload
+        if (get().voice.channelId === p.channel_id) {
+          toastInfo(`🎙️ ${p.display_name} triggered “${p.phrase}”`)
+        }
+        break
+      }
       case 'voice.signal': {
         const p = env.payload as VoiceSignalPayload
         const active = get().voice
@@ -1880,6 +1937,34 @@ export const useStore = create<State>((set, get) => ({
       case 'duck.streak': {
         const { channel_id, duck_streak } = env.payload as DuckStreakPayload
         applyDuckStreak(set, channel_id, duck_streak)
+        break
+      }
+      case 'voice_trigger.created': {
+        const p = env.payload as VoiceTriggerCreatedPayload
+        set((s) => {
+          const current = s.channelVoiceTriggers[p.channel_id]
+          if (!current || current.some((trigger) => trigger.id === p.trigger.id)) return {}
+          return {
+            channelVoiceTriggers: {
+              ...s.channelVoiceTriggers,
+              [p.channel_id]: [...current, p.trigger],
+            },
+          }
+        })
+        break
+      }
+      case 'voice_trigger.deleted': {
+        const p = env.payload as VoiceTriggerDeletedPayload
+        set((s) => {
+          const current = s.channelVoiceTriggers[p.channel_id]
+          if (!current) return {}
+          return {
+            channelVoiceTriggers: {
+              ...s.channelVoiceTriggers,
+              [p.channel_id]: current.filter((trigger) => trigger.id !== p.trigger_id),
+            },
+          }
+        })
         break
       }
       case 'message.updated': {
@@ -2181,12 +2266,15 @@ function dropChannel(set: Setter, get: () => State, id: string) {
     delete docsByChannel[id]
     const trashByChannel = { ...s.trashByChannel }
     delete trashByChannel[id]
+    const channelVoiceTriggers = { ...s.channelVoiceTriggers }
+    delete channelVoiceTriggers[id]
     return {
       channels: s.channels.filter((c) => c.id !== id),
       members,
       byChannel,
       docsByChannel,
       trashByChannel,
+      channelVoiceTriggers,
     }
   })
   if (wasCurrent) navigateTo('/')

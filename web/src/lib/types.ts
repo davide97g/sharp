@@ -143,6 +143,15 @@ export type GifSettings = {
   giphy_usage: GiphyUsage
 }
 export type GifSuggestResponse = { query: string | null; results: GifResult[] }
+export type VoiceTrigger = {
+  id: string
+  channel_id: string | null
+  user_id: string
+  phrase: string
+  action: string
+  created_at: string
+}
+export type VoiceTriggersResponse = { triggers: VoiceTrigger[] }
 export type NotificationsResponse = {
   notifications: Notification[]
   unread_count: number
@@ -318,6 +327,14 @@ export type VoiceSignalPayload = {
   data: unknown
 }
 export type VoiceErrorPayload = { channel_id: string; code: string }
+export type VoiceTriggerCreatedPayload = { channel_id: string; trigger: VoiceTrigger }
+export type VoiceTriggerDeletedPayload = { channel_id: string; trigger_id: string }
+export type VoiceTriggerFiredPayload = {
+  channel_id: string
+  user_id: string
+  display_name: string
+  phrase: string
+}
 export type MeetingStartedPayload = {
   meeting_id: string
   channel_id: string

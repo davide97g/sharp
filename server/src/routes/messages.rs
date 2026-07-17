@@ -253,6 +253,89 @@ fn validate_content(content: &str) -> AppResult<()> {
     Ok(())
 }
 
+async fn insert_message(
+    state: &SharedState,
+    channel_id: Uuid,
+    user_id: Uuid,
+    parent_id: Option<i64>,
+    content: &str,
+    reply_to_id: Option<i64>,
+) -> AppResult<i64> {
+    let row = sqlx::query(
+        "INSERT INTO messages (channel_id, user_id, parent_id, content, reply_to_id)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id",
+    )
+    .bind(channel_id)
+    .bind(user_id)
+    .bind(parent_id)
+    .bind(content)
+    .bind(reply_to_id)
+    .fetch_one(&state.pool)
+    .await?;
+    Ok(row.try_get("id")?)
+}
+
+async fn publish_message(
+    state: &SharedState,
+    channel_id: Uuid,
+    author: Uuid,
+    message: &Message,
+) -> AppResult<()> {
+    let targets = channel_member_ids(&state.pool, channel_id).await?;
+    let duck_streak = if message.parent_id.is_none() && !gif::is_standalone_gif(&message.content) {
+        Some(gif::bump_streak(&state.duck_streaks, channel_id))
+    } else {
+        None
+    };
+    let event = match &duck_streak {
+        Some(streak) => envelope(
+            "message.created",
+            json!({ "message": message, "duck_streak": streak }),
+        ),
+        None => envelope("message.created", json!({ "message": message })),
+    };
+    state.hub.broadcast(event, targets).await;
+
+    let kind = channel_kind(&state.pool, channel_id)
+        .await?
+        .unwrap_or_default();
+    let notify_state = state.clone();
+    let content = message.content.clone();
+    let first_attachment = message.attachments.first().map(|attachment| attachment.filename.clone());
+    let message_id = message.id;
+    let parent_id = message.parent_id;
+    tokio::spawn(async move {
+        notify::dispatch_message(
+            &notify_state,
+            message_id,
+            channel_id,
+            &kind,
+            parent_id,
+            author,
+            &content,
+            first_attachment.as_deref(),
+        )
+        .await;
+    });
+    Ok(())
+}
+
+/// Post a top-level message as an existing user, including normal realtime,
+/// unread, and notification behavior. Internal automations use this instead of
+/// bypassing the message pipeline.
+pub(crate) async fn post_message_as(
+    state: &SharedState,
+    channel_id: Uuid,
+    user_id: Uuid,
+    content: &str,
+) -> AppResult<Message> {
+    validate_content(content)?;
+    let id = insert_message(state, channel_id, user_id, None, content, None).await?;
+    let message = load_message(&state.pool, id, user_id).await?;
+    publish_message(state, channel_id, user_id, &message).await?;
+    Ok(message)
+}
+
 #[derive(Deserialize)]
 pub struct ListQuery {
     pub before: Option<String>,
@@ -382,18 +465,15 @@ pub async fn create_message(
         _ => None,
     };
 
-    let row = sqlx::query(
-        "INSERT INTO messages (channel_id, user_id, parent_id, content, reply_to_id)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id",
+    let new_id = insert_message(
+        &state,
+        channel_id,
+        auth.id,
+        parent_id,
+        &body.content,
+        reply_to_id,
     )
-    .bind(channel_id)
-    .bind(auth.id)
-    .bind(parent_id)
-    .bind(&body.content)
-    .bind(reply_to_id)
-    .fetch_one(&state.pool)
     .await?;
-    let new_id: i64 = row.try_get("id")?;
 
     // Attach the caller's pending uploads (their own, in this channel, unattached).
     if !attachment_ids.is_empty() {
@@ -410,46 +490,7 @@ pub async fn create_message(
     }
 
     let message = load_message(&state.pool, new_id, auth.id).await?;
-
-    let targets = channel_member_ids(&state.pool, channel_id).await?;
-    let duck_streak = if parent_id.is_none() && !gif::is_standalone_gif(&message.content) {
-        Some(gif::bump_streak(&state.duck_streaks, channel_id))
-    } else {
-        None
-    };
-    let ev = match &duck_streak {
-        Some(streak) => envelope(
-            "message.created",
-            json!({ "message": &message, "duck_streak": streak }),
-        ),
-        None => envelope("message.created", json!({ "message": &message })),
-    };
-    state.hub.broadcast(ev, targets).await;
-
-    // Fan out notifications (mentions / dm / reply) — best-effort, OFF the request
-    // path: web push does outbound HTTP, so never let it delay this response.
-    let kind = channel_kind(&state.pool, channel_id)
-        .await?
-        .unwrap_or_default();
-    let notify_state = state.clone();
-    let content = message.content.clone();
-    let first_attachment = message.attachments.first().map(|a| a.filename.clone());
-    let msg_id = message.id;
-    let parent = message.parent_id;
-    let author = auth.id;
-    tokio::spawn(async move {
-        notify::dispatch_message(
-            &notify_state,
-            msg_id,
-            channel_id,
-            &kind,
-            parent,
-            author,
-            &content,
-            first_attachment.as_deref(),
-        )
-        .await;
-    });
+    publish_message(&state, channel_id, auth.id, &message).await?;
 
     Ok((StatusCode::CREATED, Json(message)))
 }

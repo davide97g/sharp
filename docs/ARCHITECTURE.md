@@ -86,6 +86,17 @@ reactions(
   created_at timestamptz NOT NULL default now(),
   PRIMARY KEY (message_id, user_id, emoji)
 )
+
+voice_triggers(
+  id uuid PK default gen_random_uuid(),
+  channel_id uuid REFERENCES channels(id) ON DELETE CASCADE, -- NULL = private personal trigger
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE, -- personal owner / channel creator
+  phrase text NOT NULL,                    -- lowercase, trimmed, single-spaced
+  action text NOT NULL default 'gif',      -- forward-compatible; v1 supports gif only
+  created_at timestamptz NOT NULL default now()
+)
+-- unique (user_id, phrase) WHERE channel_id IS NULL
+-- unique (channel_id, phrase) WHERE channel_id IS NOT NULL
 ```
 
 Migrations: `server/migrations/` via `sqlx::migrate!()` (embedded, run on startup).
@@ -102,6 +113,7 @@ User    = { id: string, email?: string, display_name: string, avatar_url: string
           // update-me). Omitted for every other user (lists, members, doc roles, dm_user,
           // user.updated broadcast). Never leaks another user's address to the client.
 ChannelRole = 'owner'|'editor'|'viewer'
+VoiceTrigger = { id: string, channel_id: string|null, user_id: string, phrase: string, action: string, created_at: string }
 Channel = {
   id: string, name: string, kind: 'public'|'private'|'dm', topic: string,
   created_by: string|null, created_at: string,
@@ -208,6 +220,9 @@ Server → client:
 - `presence` `{user_id, status: 'online'|'offline'}`
 - `duck.streak` `{channel_id, duck_streak: {count, last_at}}` — shared duck bar reset
   after someone triggers a GIF suggestion (count `0`)
+- `voice_trigger.created` `{channel_id, trigger: VoiceTrigger}` and
+  `voice_trigger.deleted` `{channel_id, trigger_id}` — to all channel members after a shared
+  channel/DM voice trigger changes. Personal triggers are private and do not emit WS events.
 
 Client → server:
 
@@ -520,8 +535,9 @@ doc REST surface, the per-channel + per-doc role model, trash/restore, and the
 Ephemeral P2P-mesh WebRTC audio rooms with optional webcam video on channels, DMs, and
 standalone meets.
 Browsers connect directly; the server does signaling, media-state coordination, and buffering
-of member-submitted speech-recognition phrases for roast GIF suggestions. No media passes
-through it and there is no SFU.
+of member-submitted speech-recognition phrases for roast GIF suggestions and durable voice-trigger
+matching. Registered users may keep private trigger phrases, while channels/DMs share a trigger
+vocabulary. No media passes through the server and there is no SFU.
 
 ## Principles
 
@@ -599,6 +615,9 @@ Server → client:
 - `voice.roast_armed` `{channel_id, armed: boolean}` — broadcast to the room audience when
   three phrases with gaps of at most 20 seconds arm a voice roast, and with `armed=false`
   after a successful voice GIF suggestion consumes it.
+- `voice.trigger_fired` `{channel_id, user_id, display_name, phrase}` — broadcast to the room
+  audience after a registered speaker's matched trigger successfully auto-posts a GIF. `phrase`
+  is the stored trigger phrase, not the full transcription utterance.
 - `voice.signal` `{channel_id, from_user, from_conn, to_user, to_conn, kind, data}` —
   delivered to `to_user`'s connections; receivers filter on
   `to_conn === my conn_id`.
@@ -646,7 +665,21 @@ Server → client:
   display name and trimmed text to the room's oldest-first transcript buffer (maximum 50 phrases).
   A phrase within 20 seconds of the previous phrase increments the room streak; otherwise it
   starts a new streak at one. The first transition to three or more phrases broadcasts
-  `voice.roast_armed {armed:true}`.
+  `voice.roast_armed {armed:true}`. After that existing meeting/streak work, registered speakers'
+  phrases are checked asynchronously against channel triggers plus their private personal
+  triggers; guest phrases never fire triggers. Matching lowercases text, collapses whitespace,
+  strips punctuation into word boundaries, and requires the trigger words as a contiguous word
+  subsequence (`roast` does not match `roasted`). Earliest occurrence wins; a channel trigger
+  beats a personal trigger at the same word position, with creation order/id as the stable
+  fallback.
+- A matched trigger uses the shared per-channel `gif_suggest_cooldowns` entry and configured
+  `gif.duck_cooldown_secs`, so voice triggers, voice-roast suggestions, and chat duck suggestions
+  suppress one another during slow mode. Disabled duck settings, a missing GIF provider/API key,
+  or missing DeepSeek configuration skip matching entirely. The detached task reads the latest
+  five non-deleted top-level channel messages oldest-first (excluding prior duck GIFs), requires
+  at least two, runs the normal DeepSeek/provider best-GIF pipeline, and posts
+  `[[gif:<url>|<alt>|duck|<query>]]` as the speaker through the normal message/notification path.
+  Standalone rooms have no channel messages, so personal matches there abort silently.
 - `voice.camera`: require an active room participant; atomically reserve/release a camera
   slot and broadcast the complete participant state. Enabling is rejected with `camera_full`
   when four slots are already reserved. Repeated requests are idempotent.
@@ -704,7 +737,13 @@ Server → client:
 
 | Method | Path | Body → Response |
 |---|---|---|
-| GET | `/voice/config` | (any valid token — **user OR guest**) → `{"ice_servers": [{"urls": ["stun:..."]}, {"urls": ["turn:..."], "username": "...", "credential": "..."}]}`; the TURN entry is present only when configured. This is the **only** endpoint guests may call; all other REST endpoints reject guest tokens with 401. |
+| GET | `/voice/config` | (any valid token — **user OR guest**) → `{"ice_servers": [{"urls": ["stun:..."]}, {"urls": ["turn:..."], "username": "...", "credential": "..."}]}`; the TURN entry is present only when configured. This is the only endpoint guests may use successfully; trigger-management endpoints return 403 to guests and other REST endpoints reject guest tokens with 401. |
+| GET | `/voice/triggers` | (registered user only; guest → 403) → `{triggers: VoiceTrigger[]}` containing only the caller's private personal triggers. |
+| POST | `/voice/triggers` | (registered user only; guest → 403) `{phrase}` → `201 VoiceTrigger`; normalizes lowercase/trim/single spaces, requires 2..=80 normalized characters, duplicate → 409. |
+| DELETE | `/voice/triggers/{id}` | (registered user only; guest → 403) → `204` for the caller's personal trigger; 404 when absent or owned by someone else. |
+| GET | `/channels/{id}/voice-triggers` | (channel member; guest → 403) → `{triggers: VoiceTrigger[]}` shared by the channel/DM. |
+| POST | `/channels/{id}/voice-triggers` | (channel owner/editor; either DM member; guest → 403) `{phrase}` → `201 VoiceTrigger`; same normalization/validation, duplicate → 409; emits `voice_trigger.created`. |
+| DELETE | `/channels/{id}/voice-triggers/{trigger_id}` | (channel owner/editor; either DM member; guest → 403) → `204`, 404 when absent; emits `voice_trigger.deleted`. |
 | GET | `/channels/{id}/gifs/suggest-voice` | (member-only) → `{query, results}` from recent buffered voice phrases; fewer than two phrases or shared channel cooldown returns 200 `{query: null, results: []}`; 503 when duck suggestions are disabled. Success resets only the voice phrase streak/armed state and broadcasts `voice.roast_armed {armed:false}`. |
 | GET | `/channels/{id}/voice-link` | (Bearer auth, channel member) → `{"token": string \| null}` — the channel's current public voice-link token, or `null` if none exists. |
 | POST | `/channels/{id}/voice-link` | (Bearer auth, channel owner/editor) → `{"token": string}` — generate a fresh 32-byte URL-safe token, **replacing** (revoking) any previous value. |
@@ -727,9 +766,10 @@ receives a limited guest JWT bound to that room — no chat, no other REST.
   session identity / `user_id`), `guest: true`, `name`, `channel_id` (bound room), and
   `link` (the token used to join). User tokens omit `guest` (defaults to `false` on decode),
   so existing tokens keep working.
-- **Guest restrictions**: the `AuthUser` extractor rejects any token with `guest: true`
-  (401), so guests cannot reach REST endpoints; `/voice/config` uses a separate
-  `VoiceConfigAuth` extractor that accepts both. On the main WS, a guest may only send `ping`
+- **Guest restrictions**: most REST endpoints use `AuthUser`, which rejects tokens with
+  `guest: true` (401). `/voice/config` and voice-trigger management use `VoiceConfigAuth` to
+  distinguish both token kinds; config succeeds for guests while trigger management returns
+  403. On the main WS, a guest may only send `ping`
   plus `voice.join`, `voice.leave`, `voice.mute`, `voice.camera`, `voice.screen`,
   `voice.hand`, and `voice.signal`, and only when the event's `channel_id` matches its bound
   channel. Member-only
@@ -748,8 +788,9 @@ receives a limited guest JWT bound to that room — no chat, no other REST.
 
 ## Multi-replica behavior
 
-The room registry, buffered transcript, phrase streak, and armed state are per-replica and in
-memory. Live `voice.*` events converge across replicas through the existing Redis fanout in
+The room registry, buffered transcript, phrase streak, armed state, and GIF cooldown are
+per-replica and in memory; trigger vocabularies themselves are durable Postgres rows. Live
+`voice.*` events converge across replicas through the existing Redis fanout in
 `Hub::broadcast` (`sharp:events`). The cold `hello` snapshot and transcript used for a voice
 suggestion are local-replica-only, the same documented limitation as presence.
 

@@ -27,6 +27,8 @@ import type {
   VapidResponse,
   VoiceLinkResponse,
   VoiceLinkCreateResponse,
+  VoiceTrigger,
+  VoiceTriggersResponse,
   CallLinkInfoResponse,
   CallLinkJoinResponse,
   MeetingDetail,
@@ -176,6 +178,24 @@ export const api = {
   },
   voice: {
     config: () => request<IceConfigResponse>('/voice/config'),
+  },
+  voiceTriggers: {
+    listPersonal: () => request<VoiceTriggersResponse>('/voice/triggers'),
+    createPersonal: (phrase: string) =>
+      request<VoiceTrigger>('/voice/triggers', { method: 'POST', body: { phrase } }),
+    deletePersonal: (triggerId: string) =>
+      request<void>(`/voice/triggers/${triggerId}`, { method: 'DELETE' }),
+    listChannel: (channelId: string) =>
+      request<VoiceTriggersResponse>(`/channels/${channelId}/voice-triggers`),
+    createChannel: (channelId: string, phrase: string) =>
+      request<VoiceTrigger>(`/channels/${channelId}/voice-triggers`, {
+        method: 'POST',
+        body: { phrase },
+      }),
+    deleteChannel: (channelId: string, triggerId: string) =>
+      request<void>(`/channels/${channelId}/voice-triggers/${triggerId}`, {
+        method: 'DELETE',
+      }),
   },
 
   // --- public guest call links ---

@@ -1,4 +1,7 @@
+use crate::gif;
+use crate::routes::gifs;
 use crate::routes::meetings::{self, LiveAttendee};
+use crate::routes::messages;
 use crate::state::SharedState;
 use crate::ws::{envelope, GuestInfo, WsSender};
 use axum::extract::ws::Message;
@@ -734,6 +737,180 @@ async fn handle_phrase(state: &SharedState, conn_id: Uuid, payload: &Value, tx: 
     if armed {
         broadcast_roast_armed(state, channel_id, true).await;
     }
+    if !participant.guest {
+        let trigger_state = state.clone();
+        tokio::spawn(async move {
+            maybe_fire_voice_trigger(trigger_state, channel_id, participant, text).await;
+        });
+    }
+}
+
+fn phrase_words(value: &str) -> Vec<String> {
+    let normalized: String = value
+        .to_lowercase()
+        .chars()
+        .map(|character| {
+            if character.is_alphanumeric() {
+                character
+            } else {
+                ' '
+            }
+        })
+        .collect();
+    normalized
+        .split_whitespace()
+        .map(str::to_string)
+        .collect()
+}
+
+fn phrase_match_start(spoken: &str, trigger: &str) -> Option<usize> {
+    let spoken = phrase_words(spoken);
+    let trigger = phrase_words(trigger);
+    if trigger.is_empty() || trigger.len() > spoken.len() {
+        return None;
+    }
+    spoken
+        .windows(trigger.len())
+        .position(|window| window == trigger.as_slice())
+}
+
+fn sanitize_gif_token_field(value: &str) -> String {
+    value.replace(['|', ']'], "").trim().to_string()
+}
+
+async fn maybe_fire_voice_trigger(
+    state: SharedState,
+    channel_id: Uuid,
+    participant: VoiceParticipant,
+    spoken: String,
+) {
+    let settings = gif::load_settings(&state.pool, &state.config).await;
+    if !settings.duck_enabled || state.config.deepseek.is_none() {
+        return;
+    }
+    let Some(provider) = gif::resolve_provider(&settings) else {
+        return;
+    };
+    let Some(deepseek_config) = state.config.deepseek.as_ref() else {
+        return;
+    };
+
+    let rows = match sqlx::query(
+        "SELECT channel_id, phrase
+         FROM voice_triggers
+         WHERE action = 'gif'
+           AND (channel_id = $1 OR (user_id = $2 AND channel_id IS NULL))
+         ORDER BY created_at, id",
+    )
+    .bind(channel_id)
+    .bind(participant.user_id)
+    .fetch_all(&state.pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::warn!("voice trigger lookup failed: {}", error);
+            return;
+        }
+    };
+
+    let mut matched: Option<(usize, bool, String)> = None;
+    for row in rows {
+        let Ok(trigger_channel) = row.try_get::<Option<Uuid>, _>("channel_id") else {
+            continue;
+        };
+        let Ok(phrase) = row.try_get::<String, _>("phrase") else {
+            continue;
+        };
+        let Some(start) = phrase_match_start(&spoken, &phrase) else {
+            continue;
+        };
+        let personal = trigger_channel.is_none();
+        let replace = matched
+            .as_ref()
+            .is_none_or(|(best_start, best_personal, _)| {
+                start < *best_start || (start == *best_start && !personal && *best_personal)
+            });
+        if replace {
+            matched = Some((start, personal, phrase));
+        }
+    }
+    let Some((_, _, trigger_phrase)) = matched else {
+        return;
+    };
+
+    match gifs::try_acquire_suggestion_cooldown(
+        &state,
+        channel_id,
+        settings.duck_cooldown_secs,
+    ) {
+        Ok(true) => {}
+        Ok(false) => return,
+        Err(error) => {
+            tracing::warn!("voice trigger cooldown failed: {}", error);
+            return;
+        }
+    }
+
+    let transcript = match gifs::load_recent_messages(&state, channel_id, 5).await {
+        Ok(transcript) if transcript.len() >= 2 => transcript,
+        Ok(_) => return,
+        Err(error) => {
+            tracing::warn!("voice trigger context failed: {}", error);
+            return;
+        }
+    };
+    let (query, results) = match gifs::suggest_best_gif(
+        &state,
+        &settings.provider,
+        deepseek_config,
+        provider.as_ref(),
+        &transcript,
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(error) => {
+            tracing::warn!("voice trigger GIF suggestion failed: {}", error);
+            return;
+        }
+    };
+    let Some(result) = results.first() else {
+        tracing::warn!("voice trigger GIF suggestion returned no results");
+        return;
+    };
+    let alt = sanitize_gif_token_field(&result.title);
+    let alt = if alt.is_empty() { "gif" } else { &alt };
+    let query = sanitize_gif_token_field(&query);
+    let content = format!("[[gif:{}|{}|duck|{}]]", result.url, alt, query);
+    if let Err(error) = messages::post_message_as(
+        &state,
+        channel_id,
+        participant.user_id,
+        &content,
+    )
+    .await
+    {
+        tracing::warn!("voice trigger message post failed: {}", error);
+        return;
+    }
+
+    let targets = voice_targets(&state, channel_id, &[]).await;
+    state
+        .hub
+        .broadcast(
+            envelope(
+                "voice.trigger_fired",
+                json!({
+                    "channel_id": channel_id,
+                    "user_id": participant.user_id,
+                    "display_name": participant.display_name,
+                    "phrase": trigger_phrase,
+                }),
+            ),
+            targets,
+        )
+        .await;
 }
 
 fn record_phrase(
@@ -1281,6 +1458,22 @@ mod tests {
         );
         assert_eq!(expired.phrase_count, 1);
         assert!(!expired.roast_armed);
+    }
+
+    #[test]
+    fn voice_trigger_matching_uses_word_boundaries() {
+        assert_eq!(phrase_match_start("time to roast this", "roast"), Some(2));
+        assert_eq!(phrase_match_start("the roasted duck", "roast"), None);
+        assert_eq!(phrase_match_start("roast-beef now", "roast beef"), Some(0));
+    }
+
+    #[test]
+    fn voice_trigger_matching_normalizes_case_spacing_and_punctuation() {
+        assert_eq!(
+            phrase_match_start("  LET'S... drop   A roast! ", "let's drop a roast"),
+            Some(0)
+        );
+        assert_eq!(phrase_match_start("hello, sharp world", "sharp world"), Some(1));
     }
 
     #[test]

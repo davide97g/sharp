@@ -46,9 +46,8 @@ pub struct AuthUser {
     pub id: Uuid,
 }
 
-/// Auth that accepts either a full user token or a limited guest token. Used
-/// ONLY by `GET /voice/config` so guests can fetch ICE servers; every other
-/// endpoint keeps `AuthUser`, which rejects guests.
+/// Auth that accepts either a full user token or a limited guest token. Used by
+/// `GET /voice/config` and endpoints that must distinguish guests explicitly.
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)] // Fields are part of the extractor's contract; not all callers read them.
 pub struct VoiceConfigAuth {

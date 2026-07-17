@@ -3,7 +3,8 @@ import { Modal } from './Modal'
 import { Avatar } from './Avatar'
 import { useStore } from '../store'
 import { toastError } from '../lib/toast'
-import { visibleEmail } from '../lib/util'
+import { channelLabel, visibleEmail } from '../lib/util'
+import { VoiceTriggerEditor } from './VoiceTriggerEditor'
 
 const NAME_RE = /^[a-z0-9-]{1,50}$/
 
@@ -15,7 +16,7 @@ export function ChannelSettingsModal({
   onClose: () => void
 }) {
   const channel = useStore((s) => s.channels.find((c) => c.id === channelId))
-  const [tab, setTab] = useState<'about' | 'members'>('about')
+  const [tab, setTab] = useState<'about' | 'members' | 'triggers'>('about')
 
   // The channel can vanish under us (deleted, or we were removed from a
   // private one). Close rather than render a broken shell.
@@ -23,6 +24,14 @@ export function ChannelSettingsModal({
     if (!channel) onClose()
   }, [channel, onClose])
   if (!channel) return null
+
+  if (channel.kind === 'dm') {
+    return (
+      <Modal title={channelLabel(channel)} onClose={onClose} wide>
+        <VoiceTriggersTab channelId={channelId} />
+      </Modal>
+    )
+  }
 
   return (
     <Modal title={`#${channel.name}`} onClose={onClose} wide>
@@ -33,13 +42,62 @@ export function ChannelSettingsModal({
         <Tab active={tab === 'members'} onClick={() => setTab('members')}>
           Members
         </Tab>
+        <Tab active={tab === 'triggers'} onClick={() => setTab('triggers')}>
+          Voice triggers
+        </Tab>
       </div>
       {tab === 'about' ? (
         <AboutTab channelId={channelId} onClose={onClose} />
-      ) : (
+      ) : tab === 'members' ? (
         <MembersTab channelId={channelId} />
+      ) : (
+        <VoiceTriggersTab channelId={channelId} />
       )}
     </Modal>
+  )
+}
+
+function VoiceTriggersTab({ channelId }: { channelId: string }) {
+  const channel = useStore((state) => state.channels.find((item) => item.id === channelId))
+  const triggers = useStore((state) => state.channelVoiceTriggers[channelId])
+  const loadTriggers = useStore((state) => state.loadChannelVoiceTriggers)
+  const createTrigger = useStore((state) => state.createChannelVoiceTrigger)
+  const deleteTrigger = useStore((state) => state.deleteChannelVoiceTrigger)
+  const [loading, setLoading] = useState(triggers === undefined)
+
+  useEffect(() => {
+    if (triggers !== undefined) {
+      setLoading(false)
+      return
+    }
+    let active = true
+    setLoading(true)
+    loadTriggers(channelId)
+      .catch((error: unknown) => {
+        if (active && error instanceof Error) toastError(error.message)
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [channelId, loadTriggers, triggers])
+
+  const canEdit = channel?.my_role === 'owner' || channel?.my_role === 'editor'
+  return (
+    <VoiceTriggerEditor
+      triggers={triggers ?? []}
+      loading={loading}
+      canEdit={canEdit}
+      hint="When anyone’s live transcription in this call contains a phrase, sharp posts a GIF picked from the last messages. Active only while transcription is on."
+      onAdd={async (phrase) => {
+        await createTrigger(channelId, phrase)
+      }}
+      onDelete={async (triggerId) => {
+        await deleteTrigger(channelId, triggerId)
+      }}
+    />
   )
 }
 

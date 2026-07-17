@@ -9,6 +9,7 @@ pub mod notifications;
 pub mod search;
 pub mod users;
 pub mod voice;
+pub mod voice_triggers;
 
 use crate::error::AppResult;
 use sqlx::{PgPool, Row};

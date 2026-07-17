@@ -1,13 +1,20 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
-import type { DuckContext, DuckCooldownSecs, GifSettings, GiphyUsage } from '../lib/types'
+import type {
+  DuckContext,
+  DuckCooldownSecs,
+  GifSettings,
+  GiphyUsage,
+  VoiceTrigger,
+} from '../lib/types'
 import { toastError } from '../lib/toast'
 import { getSoundSettings, setSoundSettings, sound, subscribeSoundSettings } from '../lib/sound'
 import { Modal } from './Modal'
 import { Avatar } from './Avatar'
 import { AvatarCropper } from './AvatarCropper'
 import { ChatLayoutPicker } from './ChatLayoutChooser'
+import { VoiceTriggerEditor } from './VoiceTriggerEditor'
 
 type Tab = 'profile' | 'chat' | 'workspace'
 
@@ -284,6 +291,8 @@ export function UserSettingsModal({ onClose }: { onClose: () => void }) {
 
           <SoundSettingsSection />
 
+          <PersonalVoiceTriggers />
+
           <div className="text-[11px] text-[var(--color-text-faint)]">
             Signed in as {me.email}
           </div>
@@ -480,6 +489,46 @@ export function UserSettingsModal({ onClose }: { onClose: () => void }) {
         </div>
       )}
     </Modal>
+  )
+}
+
+function PersonalVoiceTriggers() {
+  const [triggers, setTriggers] = useState<VoiceTrigger[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    api.voiceTriggers
+      .listPersonal()
+      .then(({ triggers }) => {
+        if (active) setTriggers(triggers)
+      })
+      .catch((error: unknown) => {
+        if (active && error instanceof Error) toastError(error.message)
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  return (
+    <VoiceTriggerEditor
+      triggers={triggers}
+      loading={loading}
+      canEdit
+      hint="When your live transcription in a call contains a phrase, sharp posts a GIF picked from the last messages. Active only while transcription is on."
+      onAdd={async (phrase) => {
+        const trigger = await api.voiceTriggers.createPersonal(phrase)
+        setTriggers((current) => [...current, trigger])
+      }}
+      onDelete={async (triggerId) => {
+        await api.voiceTriggers.deletePersonal(triggerId)
+        setTriggers((current) => current.filter((trigger) => trigger.id !== triggerId))
+      }}
+    />
   )
 }
 

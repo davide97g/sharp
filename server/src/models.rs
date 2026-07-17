@@ -118,6 +118,16 @@ pub struct Message {
     pub reply_to: Option<ReplyPreview>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct VoiceTrigger {
+    pub id: Uuid,
+    pub channel_id: Option<Uuid>,
+    pub user_id: Uuid,
+    pub phrase: String,
+    pub action: String,
+    pub created_at: DateTime<Utc>,
+}
+
 /// An inbox notification (mention / dm / reply).
 #[derive(Debug, Clone, Serialize)]
 pub struct Notification {

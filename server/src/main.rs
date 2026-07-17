@@ -157,6 +157,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(routes::gifs::get_settings).put(routes::gifs::put_settings),
         )
         .route("/voice/config", get(routes::voice::voice_config))
+        .route(
+            "/voice/triggers",
+            get(routes::voice_triggers::list_personal)
+                .post(routes::voice_triggers::create_personal),
+        )
+        .route(
+            "/voice/triggers/:id",
+            delete(routes::voice_triggers::delete_personal),
+        )
         .route("/calls", post(routes::call_links::create_standalone_call))
         .route("/meetings", get(routes::meetings::list_meetings))
         .route(
@@ -197,6 +206,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             put(routes::channels::set_member_role),
         )
         .route("/channels/:id/read", post(routes::channels::mark_read))
+        .route(
+            "/channels/:id/voice-triggers",
+            get(routes::voice_triggers::list_channel)
+                .post(routes::voice_triggers::create_channel),
+        )
+        .route(
+            "/channels/:id/voice-triggers/:trigger_id",
+            delete(routes::voice_triggers::delete_channel),
+        )
         .route("/channels/:id/gif-suggest", post(routes::gifs::suggest))
         .route(
             "/channels/:id/gifs/suggest-voice",
