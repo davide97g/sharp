@@ -1,3 +1,4 @@
+pub mod calendar;
 pub mod call_links;
 pub mod channels;
 pub mod docs;

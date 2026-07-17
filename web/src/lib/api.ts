@@ -35,6 +35,10 @@ import type {
   MeetingsResponse,
   MeetingAction,
   StandaloneCallCreateResponse,
+  CalendarConnectionsResponse,
+  CalendarConnectUrlResponse,
+  CalendarEventsResponse,
+  ScheduledMeeting,
 } from './types'
 
 const TOKEN_KEY = 'sharp.token'
@@ -594,6 +598,65 @@ export const api = {
     const params = new URLSearchParams({ q, limit: String(limit) })
     if (docId) params.set('doc_id', docId)
     return request<DocSearchResponse>(`/docs/search?${params.toString()}`)
+  },
+
+  // --- calendar (Phase 5) ---
+  calendar: {
+    connections: () =>
+      request<CalendarConnectionsResponse>('/calendar/connections'),
+    googleConnectUrl: () =>
+      request<CalendarConnectUrlResponse>('/calendar/google/connect'),
+    disconnect: (id: string) =>
+      request<void>(`/calendar/connections/${id}`, { method: 'DELETE' }),
+    setCalendarSelected: (id: string, selected: boolean) =>
+      request<void>(`/calendar/calendars/${id}`, {
+        method: 'PATCH',
+        body: { selected },
+      }),
+    sync: () => request<void>('/calendar/sync', { method: 'POST' }),
+    events: (from: string, to: string) => {
+      const params = new URLSearchParams({ from, to })
+      return request<CalendarEventsResponse>(`/calendar/events?${params.toString()}`)
+    },
+    meetings: {
+      create: (input: {
+        title: string
+        description?: string
+        start_at: string
+        end_at: string
+        all_day?: boolean
+        channel_id?: string | null
+        standalone_call_id?: string | null
+        attendee_ids?: string[]
+        post_card?: boolean
+      }) =>
+        request<ScheduledMeeting>('/calendar/meetings', {
+          method: 'POST',
+          body: input,
+        }),
+      get: (id: string) => request<ScheduledMeeting>(`/calendar/meetings/${id}`),
+      update: (
+        id: string,
+        input: {
+          title?: string
+          description?: string
+          start_at?: string
+          end_at?: string
+          all_day?: boolean
+        },
+      ) =>
+        request<ScheduledMeeting>(`/calendar/meetings/${id}`, {
+          method: 'PATCH',
+          body: input,
+        }),
+      cancel: (id: string) =>
+        request<void>(`/calendar/meetings/${id}`, { method: 'DELETE' }),
+      rsvp: (id: string, response: string) =>
+        request<void>(`/calendar/meetings/${id}/rsvp`, {
+          method: 'POST',
+          body: { response },
+        }),
+    },
   },
 }
 

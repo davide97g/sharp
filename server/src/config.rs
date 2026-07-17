@@ -24,6 +24,8 @@ pub struct Config {
     pub tenor_api_key: Option<String>,
     /// DeepSeek configuration. `None` when `DEEPSEEK_API_KEY` is unset.
     pub deepseek: Option<DeepSeekConfig>,
+    /// Google Calendar OAuth. `None` unless client id + secret (+ redirect) are set.
+    pub google: Option<GoogleConfig>,
 }
 
 #[derive(Clone)]
@@ -62,6 +64,15 @@ pub struct DeepSeekConfig {
     pub api_key: String,
     pub model: String,
     pub base_url: String,
+}
+
+#[derive(Clone)]
+pub struct GoogleConfig {
+    pub client_id: String,
+    pub client_secret: String,
+    /// Must exactly match a redirect URI registered on the Google OAuth client,
+    /// e.g. `https://<app-domain>/api/v1/calendar/google/callback`.
+    pub redirect_uri: String,
 }
 
 fn env_opt(key: &str) -> Option<String> {
@@ -165,6 +176,28 @@ impl Config {
                 .unwrap_or_else(|| "https://api.deepseek.com".to_string()),
         });
 
+        // Google Calendar OAuth is enabled only when client id + secret are both
+        // present; the redirect URI is required alongside them (Google demands an
+        // exact match, so there is no safe default).
+        let google = match (
+            env_opt("GOOGLE_CLIENT_ID"),
+            env_opt("GOOGLE_CLIENT_SECRET"),
+            env_opt("GOOGLE_REDIRECT_URI"),
+        ) {
+            (Some(client_id), Some(client_secret), Some(redirect_uri)) => Some(GoogleConfig {
+                client_id,
+                client_secret,
+                redirect_uri,
+            }),
+            (Some(_), Some(_), None) => {
+                return Err(
+                    "GOOGLE_REDIRECT_URI is required when GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET are set"
+                        .to_string(),
+                );
+            }
+            _ => None,
+        };
+
         Ok(Config {
             database_url,
             jwt_secret,
@@ -180,6 +213,7 @@ impl Config {
             giphy_api_key,
             tenor_api_key,
             deepseek,
+            google,
         })
     }
 }

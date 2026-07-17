@@ -1,10 +1,13 @@
 mod auth;
+mod calendar_crypto;
+mod calendar_sync;
 mod config;
 mod docs_sync;
 mod deepseek;
 mod error;
 mod expo_push;
 mod gif;
+mod google_oauth;
 mod models;
 mod notify;
 mod routes;
@@ -136,6 +139,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // Calendar reminder scheduler: 30s tick fires lead/start reminders for both
+    // native scheduled meetings and Google events via atomic claim queries.
+    let reminder_state = app_state.clone();
+    tokio::spawn(async move {
+        loop {
+            if let Err(error) = calendar_sync::reminder_tick(&reminder_state).await {
+                tracing::warn!("calendar reminder tick failed: {}", error);
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        }
+    });
+
+    // Google Calendar sync poller: 5-minute rolling-window refresh of every active
+    // connection. Only runs when Google OAuth is configured.
+    if app_state.config.google.is_some() {
+        let poller_state = app_state.clone();
+        tokio::spawn(async move {
+            loop {
+                calendar_sync::poll_active_accounts(&poller_state).await;
+                tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+            }
+        });
+    }
+
     let api = Router::new()
         .route("/auth/register", post(auth::register))
         .route("/auth/login", post(auth::login))
@@ -181,6 +208,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/meetings/:id/regenerate",
             post(routes::meetings::regenerate_meeting),
+        )
+        // --- Phase 5: calendar ---
+        .route(
+            "/calendar/connections",
+            get(routes::calendar::list_connections),
+        )
+        .route(
+            "/calendar/connections/:id",
+            delete(routes::calendar::disconnect),
+        )
+        .route(
+            "/calendar/google/connect",
+            get(routes::calendar::google_connect),
+        )
+        .route(
+            "/calendar/google/callback",
+            get(routes::calendar::google_callback),
+        )
+        .route(
+            "/calendar/calendars/:id",
+            patch(routes::calendar::set_calendar_selected),
+        )
+        .route("/calendar/sync", post(routes::calendar::sync_now))
+        .route("/calendar/events", get(routes::calendar::list_events))
+        .route(
+            "/calendar/meetings",
+            post(routes::calendar::create_meeting),
+        )
+        .route(
+            "/calendar/meetings/:id",
+            get(routes::calendar::get_meeting)
+                .patch(routes::calendar::update_meeting)
+                .delete(routes::calendar::cancel_meeting),
+        )
+        .route(
+            "/calendar/meetings/:id/rsvp",
+            post(routes::calendar::rsvp),
         )
         .route(
             "/channels",

@@ -100,8 +100,10 @@ fn truncate_chars(s: &str, max: usize) -> String {
     out
 }
 
-/// Replace `[[doc:<uuid>|Title]]` / `[[canvas:<uuid>|Title]]` chips with a readable
-/// "📄 Title" / "🎨 Title" so notification previews don't leak raw tokens.
+/// Replace resource chips with a readable icon + title so notification previews
+/// don't leak raw tokens: `[[doc:<uuid>|Title]]` → "📄 Title",
+/// `[[canvas:<uuid>|Title]]` → "🎨 Title", and the scheduled-meeting card
+/// `[[meet:<uuid>|Title|<start_iso>]]` → "📅 Title".
 fn strip_resource_tokens(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
@@ -112,13 +114,18 @@ fn strip_resource_tokens(text: &str) -> String {
             Some("🎨")
         } else if after.starts_with("doc:") {
             Some("📄")
+        } else if after.starts_with("meet:") {
+            Some("📅")
         } else {
             None
         };
         match (icon, after.find("]]")) {
             (Some(icon), Some(end)) => {
                 let inner = &after[..end];
-                let title = inner.split_once('|').map(|(_, t)| t).unwrap_or(inner);
+                // Fields are `<id>|<title>[|…]`; the title is the second field.
+                let mut fields = inner.split('|');
+                let _id = fields.next();
+                let title = fields.next().unwrap_or(inner);
                 out.push_str(icon);
                 out.push(' ');
                 out.push_str(title);
@@ -335,7 +342,7 @@ pub async fn push_event(
     body: &str,
     tag: &str,
     path: &str,
-    channel_id: Uuid,
+    channel_id: Option<Uuid>,
     kind: &str,
 ) {
     if state.hub.is_online(user_id) || is_dnd(&state.pool, user_id).await {
@@ -348,9 +355,12 @@ pub async fn push_event(
         "path": path,
     })
     .to_string();
+    // Events without a channel context (Google reminders, standalone calls) carry
+    // a nil uuid to the native payload; the deep-link `path` is the real target.
+    let expo_channel = channel_id.unwrap_or_else(Uuid::nil);
     tokio::join!(
         push::send_payload(state, user_id, &payload),
-        expo_push::send_to_user(state, user_id, title, body, channel_id, kind),
+        expo_push::send_to_user(state, user_id, title, body, expo_channel, kind),
     );
 }
 

@@ -86,6 +86,12 @@ services:
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_ALLOW_HTTP: "true"
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@sharp.app}
+      # Google Calendar (Phase 5) — optional. Leave unset to disable calendar sync.
+      # GOOGLE_REDIRECT_URI must exactly match a redirect registered on the OAuth
+      # client, pointing at this API origin: https://<domain>/api/v1/calendar/google/callback
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
     # Expose sharp directly instead of going through Caddy by uncommenting:
     # ports:
     #   - "3000:3000"

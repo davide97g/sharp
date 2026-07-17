@@ -11,6 +11,7 @@ import { InboxTrigger } from './NotificationCenter'
 import { ChannelTabs } from './ChannelTabs'
 import { Avatar } from './Avatar'
 import { DuckSuggest } from './DuckSuggest'
+import { ScheduleMeetingModal } from './calendar/ScheduleMeetingModal'
 import { channelLabel, sameDay, withinMinutes } from '../lib/util'
 
 export function MessagePane() {
@@ -34,6 +35,7 @@ export function MessagePane() {
   const focus = useStore((s) => s.focus)
   const setFocus = useStore((s) => s.setFocus)
   const [showSettings, setShowSettings] = useState(false)
+  const [showSchedule, setShowSchedule] = useState(false)
   const focusTriesRef = useRef(0)
   const focusedOnceRef = useRef<string | null>(null)
 
@@ -411,6 +413,15 @@ export function MessagePane() {
             )}
           </button>
           <button
+            type="button"
+            onClick={() => setShowSchedule(true)}
+            aria-label="Schedule a meeting"
+            title="Schedule a meeting"
+            className="flex h-8 cursor-pointer items-center rounded-md px-2 text-sm text-[var(--color-text-faint)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+          >
+            <ScheduleIcon />
+          </button>
+          <button
             onClick={() => setShowSettings(true)}
             aria-label={isDm ? 'Conversation settings' : 'Channel settings'}
             title={isDm ? 'Conversation settings' : 'Channel settings'}
@@ -426,6 +437,10 @@ export function MessagePane() {
 
       {showSettings && (
         <ChannelSettingsModal channelId={channel.id} onClose={() => setShowSettings(false)} />
+      )}
+
+      {showSchedule && (
+        <ScheduleMeetingModal channelId={channel.id} onClose={() => setShowSchedule(false)} />
       )}
 
       {/* messages */}
@@ -559,6 +574,15 @@ function VoiceIcon({ connecting }: { connecting: boolean }) {
         <span className="voice-connecting-dot absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-[var(--color-accent-hover)]" />
       )}
     </span>
+  )
+}
+
+function ScheduleIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="3" y="4" width="18" height="17" rx="2" />
+      <path d="M3 9h18M8 2v4M16 2v4M12 13v4M10 15h4" />
+    </svg>
   )
 }
 

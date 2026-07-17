@@ -5,6 +5,10 @@ import { GIF_TOKEN } from '../lib/gif'
 import { navigateTo } from '../lib/nav'
 import { useStore } from '../store'
 import { ImageLightbox } from './ImageLightbox'
+import { MeetingCard } from './calendar/MeetingCard'
+
+// Chat card token for a scheduled meeting: [[meet:<uuid>|<title>|<start_iso>]].
+const MEET_TOKEN = /\[\[meet:([0-9a-f-]{36})\|([^|\]]*)\|([^\]]*)\]\]/g
 
 // Resource-chip matcher: [[doc:<uuid>|<title>]] or [[canvas:<uuid>|<title>]].
 const RESOURCE_TOKEN = /\[\[(doc|canvas):([0-9a-f-]{36})\|([^\]]*)\]\]/g
@@ -305,26 +309,57 @@ export function Markdown({
   )
   const re = useMemo(() => buildHighlightRe(highlight), [highlight])
   const components = useMemo(() => makeComponents(names, re), [names, re])
+  // Collect card tokens (GIF + meeting) in document order, then slice the text
+  // between them into markdown runs.
+  type Tok =
+    | { index: number; length: number; kind: 'gif'; url: string; alt: string; query?: string }
+    | { index: number; length: number; kind: 'meet'; id: string; title: string; iso: string }
+  const toks: Tok[] = []
+  let m: RegExpExecArray | null
+  GIF_TOKEN.lastIndex = 0
+  while ((m = GIF_TOKEN.exec(content)) !== null) {
+    const query = m[3]?.trim()
+    toks.push({
+      index: m.index,
+      length: m[0].length,
+      kind: 'gif',
+      url: m[1],
+      alt: m[2],
+      ...(query ? { query } : {}),
+    })
+  }
+  MEET_TOKEN.lastIndex = 0
+  while ((m = MEET_TOKEN.exec(content)) !== null) {
+    toks.push({
+      index: m.index,
+      length: m[0].length,
+      kind: 'meet',
+      id: m[1],
+      title: m[2],
+      iso: m[3],
+    })
+  }
+  toks.sort((a, b) => a.index - b.index)
+
   const parts: Array<
     | { kind: 'text'; content: string }
     | { kind: 'gif'; url: string; alt: string; query?: string }
+    | { kind: 'meet'; id: string; title: string; iso: string }
   > = []
   let last = 0
-  let match: RegExpExecArray | null
-  GIF_TOKEN.lastIndex = 0
-  while ((match = GIF_TOKEN.exec(content)) !== null) {
-    if (match.index > last) {
-      parts.push({ kind: 'text', content: content.slice(last, match.index) })
+  for (const tok of toks) {
+    if (tok.index < last) continue // skip overlapping (shouldn't happen)
+    if (tok.index > last) {
+      parts.push({ kind: 'text', content: content.slice(last, tok.index) })
     }
-    const query = match[3]?.trim()
-    parts.push({
-      kind: 'gif',
-      url: match[1],
-      alt: match[2],
-      ...(query ? { query } : {}),
-    })
-    last = match.index + match[0].length
+    if (tok.kind === 'gif') {
+      parts.push({ kind: 'gif', url: tok.url, alt: tok.alt, query: tok.query })
+    } else {
+      parts.push({ kind: 'meet', id: tok.id, title: tok.title, iso: tok.iso })
+    }
+    last = tok.index + tok.length
   }
+
   if (parts.length === 0) {
     return (
       <div className="md text-[0.94rem] text-[var(--color-text)]">
@@ -341,6 +376,8 @@ export function Markdown({
       {parts.map((part, index) =>
         part.kind === 'gif' ? (
           <GifImage key={index} url={part.url} alt={part.alt} query={part.query} />
+        ) : part.kind === 'meet' ? (
+          <MeetingCard key={index} id={part.id} title={part.title} iso={part.iso} />
         ) : (
           <ReactMarkdown
             key={index}

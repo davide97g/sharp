@@ -392,6 +392,93 @@ export type DocDeletedPayload = {
   permanent: boolean
 }
 export type DocMentionPayload = { mention: DocMention }
+
+// --- Phase 5: Calendar ---
+
+export type CalendarCalendar = {
+  id: string
+  external_id: string
+  summary: string
+  color: string | null
+  is_primary: boolean
+  selected: boolean
+}
+
+export type CalendarConnection = {
+  id: string
+  provider: 'google'
+  provider_email: string
+  status: 'active' | 'invalid'
+  last_synced_at: string | null
+  calendars: CalendarCalendar[]
+}
+
+export type MeetingAttendee = {
+  user_id: string
+  display_name: string
+  response: string
+}
+
+export type ScheduledMeeting = {
+  id: string
+  channel_id: string | null
+  standalone_call_id: string | null
+  creator: { id: string; display_name: string; avatar_url: string | null }
+  title: string
+  description: string
+  start_at: string
+  end_at: string
+  all_day: boolean
+  status: 'scheduled' | 'cancelled'
+  join_path: string | null
+  attendees: MeetingAttendee[]
+  my_response: string | null
+}
+
+export type CalendarItem =
+  | {
+      source: 'google'
+      id: string
+      calendar_id: string
+      title: string
+      description: string | null
+      location: string | null
+      start_at: string
+      end_at: string
+      all_day: boolean
+      html_link: string | null
+      color: string | null
+    }
+  | {
+      source: 'native'
+      id: string
+      title: string
+      start_at: string
+      end_at: string
+      all_day: boolean
+      join_path: string | null
+      meeting: ScheduledMeeting
+    }
+
+// Calendar REST response shapes
+export type CalendarConnectionsResponse = { connections: CalendarConnection[] }
+export type CalendarConnectUrlResponse = { url: string }
+export type CalendarEventsResponse = { events: CalendarItem[] }
+
+// Calendar WS payloads
+export type CalendarMeetingCreatedPayload = { meeting: ScheduledMeeting }
+export type CalendarMeetingUpdatedPayload = { meeting: ScheduledMeeting }
+export type CalendarMeetingCancelledPayload = { meeting_id: string }
+export type CalendarSyncedPayload = { account_id: string; last_synced_at: string }
+export type CalendarReminderPayload = {
+  kind: 'lead' | 'start'
+  title: string
+  start_at: string
+  join_path: string | null
+  source: 'google' | 'native'
+  ref_id: string
+}
+
 export type TypingPayload = {
   channel_id: string
   user_id: string

@@ -64,6 +64,14 @@ import type {
   VoiceTriggerFiredPayload,
   MeetingStartedPayload,
   MeetingEndedPayload,
+  CalendarConnection,
+  CalendarItem,
+  ScheduledMeeting,
+  CalendarMeetingCreatedPayload,
+  CalendarMeetingUpdatedPayload,
+  CalendarMeetingCancelledPayload,
+  CalendarSyncedPayload,
+  CalendarReminderPayload,
   WsEnvelope,
 } from './lib/types'
 
@@ -219,6 +227,14 @@ type State = {
   activeMeetings: Record<string, string>
   voice: VoiceState
 
+  // --- calendar (Phase 5) ---
+  calendarConnections: CalendarConnection[]
+  calendarItems: CalendarItem[]
+  // the [from, to) ISO window currently loaded into calendarItems, or null
+  calendarRange: { from: string; to: string } | null
+  // local-day key (YYYY-MM-DD) the agenda is focused on
+  calendarSelectedDate: string | null
+
   // ws
   ws: WsClient | null
 
@@ -334,6 +350,25 @@ type State = {
   loadMentions: () => Promise<void>
   markMentionsRead: (ids: string[]) => Promise<void>
 
+  // calendar actions
+  loadCalendar: (from: string, to: string) => Promise<void>
+  loadCalendarConnections: () => Promise<void>
+  createScheduledMeeting: (input: {
+    title: string
+    description?: string
+    start_at: string
+    end_at: string
+    all_day?: boolean
+    channel_id?: string | null
+    standalone_call_id?: string | null
+    attendee_ids?: string[]
+    post_card?: boolean
+  }) => Promise<ScheduledMeeting>
+  cancelScheduledMeeting: (id: string) => Promise<void>
+  rsvpMeeting: (id: string, response: string) => Promise<void>
+  setCalendarSelectedDate: (dayKey: string | null) => void
+  joinScheduledMeeting: (joinPath: string | null) => void
+
   // notifications + preferences
   loadInboxAndPrefs: () => Promise<void>
   loadMoreNotifications: () => Promise<void>
@@ -425,6 +460,10 @@ export const useStore = create<State>((set, get) => ({
   voiceRooms: {},
   activeMeetings: {},
   voice: emptyVoiceState(),
+  calendarConnections: [],
+  calendarItems: [],
+  calendarRange: null,
+  calendarSelectedDate: null,
   ws: null,
 
   async init(token, me) {
@@ -1421,6 +1460,64 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
+  async loadCalendar(from, to) {
+    try {
+      const res = await api.calendar.events(from, to)
+      set({ calendarItems: res.events, calendarRange: { from, to } })
+    } catch (e) {
+      if (e instanceof Error) toastError(e.message)
+    }
+  },
+
+  async loadCalendarConnections() {
+    try {
+      const res = await api.calendar.connections()
+      set({ calendarConnections: res.connections })
+    } catch (e) {
+      if (e instanceof Error) toastError(e.message)
+    }
+  },
+
+  async createScheduledMeeting(input) {
+    const meeting = await api.calendar.meetings.create(input)
+    set((s) => ({
+      calendarItems: upsertMeetingItem(s.calendarItems, s.calendarRange, meeting),
+    }))
+    return meeting
+  },
+
+  async cancelScheduledMeeting(id) {
+    await api.calendar.meetings.cancel(id)
+    set((s) => ({
+      calendarItems: s.calendarItems.filter(
+        (i) => !(i.source === 'native' && i.meeting.id === id),
+      ),
+    }))
+  },
+
+  async rsvpMeeting(id, response) {
+    await api.calendar.meetings.rsvp(id, response)
+    const myId = get().me?.id ?? null
+    set((s) => ({
+      calendarItems: s.calendarItems.map((i) =>
+        i.source === 'native' && i.meeting.id === id
+          ? { ...i, meeting: applyMyRsvp(i.meeting, myId, response) }
+          : i,
+      ),
+    }))
+  },
+
+  setCalendarSelectedDate(dayKey) {
+    set({ calendarSelectedDate: dayKey })
+  },
+
+  joinScheduledMeeting(joinPath) {
+    if (!joinPath) return
+    const channelMatch = joinPath.match(/^\/c\/([^/]+)/)
+    navigateTo(joinPath)
+    if (channelMatch) void get().joinVoice(channelMatch[1])
+  },
+
   async loadInboxAndPrefs() {
     try {
       const [inbox, prefs] = await Promise.all([api.notifications(), api.prefs()])
@@ -2187,11 +2284,113 @@ export const useStore = create<State>((set, get) => ({
         }
         break
       }
+      case 'calendar.meeting_created':
+      case 'calendar.meeting_updated': {
+        const { meeting } = env.payload as
+          | CalendarMeetingCreatedPayload
+          | CalendarMeetingUpdatedPayload
+        set((s) => ({
+          calendarItems: upsertMeetingItem(s.calendarItems, s.calendarRange, meeting),
+        }))
+        break
+      }
+      case 'calendar.meeting_cancelled': {
+        const { meeting_id } = env.payload as CalendarMeetingCancelledPayload
+        set((s) => ({
+          calendarItems: s.calendarItems.filter(
+            (i) => !(i.source === 'native' && i.meeting.id === meeting_id),
+          ),
+        }))
+        break
+      }
+      case 'calendar.synced': {
+        const p = env.payload as CalendarSyncedPayload
+        set((s) => ({
+          calendarConnections: s.calendarConnections.map((c) =>
+            c.id === p.account_id
+              ? { ...c, last_synced_at: p.last_synced_at }
+              : c,
+          ),
+        }))
+        // Refetch the visible window so newly-synced Google events appear.
+        const range = get().calendarRange
+        if (range) void get().loadCalendar(range.from, range.to)
+        break
+      }
+      case 'calendar.reminder': {
+        const p = env.payload as CalendarReminderPayload
+        if (get().dnd) break
+        const when = p.kind === 'lead' ? 'starts soon' : 'starting now'
+        const title = p.title || 'Meeting'
+        const deepLink = p.join_path ?? '/calendar'
+        toastNotify(when, {
+          title,
+          initial: '📅',
+          onClick: () => navigateTo(deepLink),
+        })
+        playNotifySound()
+        void showOsNotification(title, when, {
+          deepLink,
+          tag: `sharp-cal-${p.ref_id}`,
+        })
+        break
+      }
       default:
         break
     }
   },
 }))
+
+// --- calendar helpers ---
+
+function nativeItemFromMeeting(meeting: ScheduledMeeting): CalendarItem {
+  return {
+    source: 'native',
+    id: meeting.id,
+    title: meeting.title,
+    start_at: meeting.start_at,
+    end_at: meeting.end_at,
+    all_day: meeting.all_day,
+    join_path: meeting.join_path,
+    meeting,
+  }
+}
+
+function inCalendarRange(
+  range: { from: string; to: string } | null,
+  iso: string,
+): boolean {
+  if (!range) return false
+  return iso >= range.from && iso < range.to
+}
+
+/** Insert/replace a native meeting in the item list, honoring the loaded range. */
+function upsertMeetingItem(
+  items: CalendarItem[],
+  range: { from: string; to: string } | null,
+  meeting: ScheduledMeeting,
+): CalendarItem[] {
+  const filtered = items.filter(
+    (i) => !(i.source === 'native' && i.meeting.id === meeting.id),
+  )
+  if (meeting.status === 'cancelled') return filtered
+  if (!inCalendarRange(range, meeting.start_at)) return filtered
+  return [...filtered, nativeItemFromMeeting(meeting)]
+}
+
+function applyMyRsvp(
+  meeting: ScheduledMeeting,
+  myUserId: string | null,
+  response: string,
+): ScheduledMeeting {
+  return {
+    ...meeting,
+    my_response: response,
+    attendees: meeting.attendees.map((a) =>
+      a.user_id === myUserId ? { ...a, response } : a,
+    ),
+  }
+}
 
 // --- voice helpers ---
 
