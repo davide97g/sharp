@@ -3,8 +3,9 @@ import { useParams } from 'react-router-dom'
 import { useStore } from '../../store'
 import { api } from '../../lib/api'
 import { toastError, toastInfo } from '../../lib/toast'
-import { dayjs, dayKey, dayHeading } from '../../lib/calendar'
+import { dayjs, dayKey, dayHeading, startOfWeek, weekHeading } from '../../lib/calendar'
 import { AgendaList } from './AgendaList'
+import { WeekGrid } from './WeekGrid'
 import { ScheduleMeetingModal } from './ScheduleMeetingModal'
 
 // Rolling window that mirrors the server's sync range (-30d / +90d).
@@ -13,6 +14,13 @@ function windowRange() {
     from: dayjs().subtract(30, 'day').startOf('day').toISOString(),
     to: dayjs().add(90, 'day').endOf('day').toISOString(),
   }
+}
+
+type ViewMode = 'day' | 'week'
+const VIEW_KEY = 'sharp.calendarView'
+
+function initialView(): ViewMode {
+  return localStorage.getItem(VIEW_KEY) === 'week' ? 'week' : 'day'
 }
 
 export function CalendarView() {
@@ -26,6 +34,18 @@ export function CalendarView() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [scheduling, setScheduling] = useState(false)
+  const [view, setView] = useState<ViewMode>(initialView)
+
+  function changeView(next: ViewMode) {
+    setView(next)
+    localStorage.setItem(VIEW_KEY, next)
+  }
+
+  function step(direction: 1 | -1) {
+    const base = selectedDate ? dayjs(selectedDate) : dayjs()
+    const amount = view === 'week' ? 7 : 1
+    setSelectedDate(dayKey(base.add(direction * amount, 'day')))
+  }
 
   // Sync the URL :date into the selected day (defaults to today).
   useEffect(() => {
@@ -54,8 +74,19 @@ export function CalendarView() {
     }
   }
 
-  const title = selectedDate ? dayHeading(selectedDate) : 'Calendar'
-  const subtitle = selectedDate ? dayjs(selectedDate).format('dddd, MMMM D, YYYY') : ''
+  const weekStart = startOfWeek(selectedDate ?? dayjs())
+  const title =
+    view === 'week'
+      ? weekHeading(weekStart)
+      : selectedDate
+        ? dayHeading(selectedDate)
+        : 'Calendar'
+  const subtitle =
+    view === 'week'
+      ? ''
+      : selectedDate
+        ? dayjs(selectedDate).format('dddd, MMMM D, YYYY')
+        : ''
 
   return (
     <main className="flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
@@ -67,6 +98,40 @@ export function CalendarView() {
               {subtitle}
             </span>
           )}
+        </div>
+        <div className="flex items-center rounded-md border border-[var(--color-border)] p-0.5">
+          {(['day', 'week'] as ViewMode[]).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => changeView(mode)}
+              className={`rounded px-3 py-1 text-sm capitalize transition ${
+                view === mode
+                  ? 'bg-[var(--color-panel)] font-medium text-[var(--color-text)]'
+                  : 'text-[var(--color-text-dim)] hover:text-[var(--color-text)]'
+              }`}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => step(-1)}
+            aria-label={view === 'week' ? 'Previous week' : 'Previous day'}
+            className="flex h-9 w-9 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-text-dim)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
+          >
+            <ChevronIcon direction="left" />
+          </button>
+          <button
+            type="button"
+            onClick={() => step(1)}
+            aria-label={view === 'week' ? 'Next week' : 'Next day'}
+            className="flex h-9 w-9 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-text-dim)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
+          >
+            <ChevronIcon direction="right" />
+          </button>
         </div>
         <button
           type="button"
@@ -94,10 +159,22 @@ export function CalendarView() {
         </button>
       </header>
 
-      <AgendaList items={items} selectedDate={selectedDate} loading={loading} />
+      {view === 'week' ? (
+        <WeekGrid items={items} selectedDate={selectedDate} loading={loading} />
+      ) : (
+        <AgendaList items={items} selectedDate={selectedDate} loading={loading} />
+      )}
 
       {scheduling && <ScheduleMeetingModal onClose={() => setScheduling(false)} />}
     </main>
+  )
+}
+
+function ChevronIcon({ direction }: { direction: 'left' | 'right' }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      {direction === 'left' ? <path d="m15 18-6-6 6-6" /> : <path d="m9 18 6-6-6-6" />}
+    </svg>
   )
 }
 

@@ -1148,7 +1148,7 @@ CalendarItem =
 | GET | `/calendar/events?from=&to=` | → `{ events: CalendarItem[] }` — merged Google (selected calendars) ∪ native meetings the caller attends, ascending; window defaults now−30d … now+90d |
 | POST | `/calendar/meetings` | `{title, description?, start_at, end_at, all_day?, channel_id?, standalone_call_id?, attendee_ids?, post_card?}` → 201 `ScheduledMeeting`. Default attendees = channel members; creator always attends (auto-accepts). `post_card` + channel → posts a `[[meet:…]]` chat card |
 | GET | `/calendar/meetings/{id}` | creator/attendee only |
-| PATCH | `/calendar/meetings/{id}` | creator only; a start/end change resets `reminded_*` to NULL |
+| PATCH | `/calendar/meetings/{id}` | creator only; body `{title?, description?, start_at?, end_at?, all_day?, attendee_ids?}` → `ScheduledMeeting`. A start/end change resets `reminded_*` to NULL. `attendee_ids`, when present, is the FULL replacement attendee set (creator always kept, deduped): kept attendees preserve their RSVP, new ones start at the default response, removed ones' rows are deleted. Broadcasts `calendar.meeting_updated` to the current attendees; removed attendees additionally get a `calendar.meeting_cancelled` (same `{meeting_id}` payload as DELETE) so their stale calendar item drops |
 | DELETE | `/calendar/meetings/{id}` | creator only; soft `status='cancelled'` |
 | POST | `/calendar/meetings/{id}/rsvp` | attendee only; `{response}` → 204 |
 
@@ -1162,7 +1162,7 @@ stores its id in `card_message_id`. `notify::strip_resource_tokens` humanizes th
 
 - `calendar.meeting_created` / `calendar.meeting_updated` — `{meeting}` (fanned out
   per-attendee so each recipient's `my_response` is correct).
-- `calendar.meeting_cancelled` — `{meeting_id}` to attendees.
+- `calendar.meeting_cancelled` — `{meeting_id}` to attendees (also sent to attendees removed via a PATCH `attendee_ids` replacement).
 - `calendar.synced` — `{account_id, last_synced_at}` to the account owner.
 - `calendar.reminder` — `{kind:'lead'|'start', title, start_at, join_path, source:'google'|'native', ref_id}`
   to the recipient (online toast + OS notification client-side).

@@ -364,6 +364,17 @@ type State = {
     attendee_ids?: string[]
     post_card?: boolean
   }) => Promise<ScheduledMeeting>
+  updateScheduledMeeting: (
+    id: string,
+    input: {
+      title?: string
+      description?: string
+      start_at?: string
+      end_at?: string
+      all_day?: boolean
+      attendee_ids?: string[]
+    },
+  ) => Promise<ScheduledMeeting>
   cancelScheduledMeeting: (id: string) => Promise<void>
   rsvpMeeting: (id: string, response: string) => Promise<void>
   setCalendarSelectedDate: (dayKey: string | null) => void
@@ -1480,6 +1491,14 @@ export const useStore = create<State>((set, get) => ({
 
   async createScheduledMeeting(input) {
     const meeting = await api.calendar.meetings.create(input)
+    set((s) => ({
+      calendarItems: upsertMeetingItem(s.calendarItems, s.calendarRange, meeting),
+    }))
+    return meeting
+  },
+
+  async updateScheduledMeeting(id, input) {
+    const meeting = await api.calendar.meetings.update(id, input)
     set((s) => ({
       calendarItems: upsertMeetingItem(s.calendarItems, s.calendarRange, meeting),
     }))

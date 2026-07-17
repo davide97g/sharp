@@ -803,6 +803,12 @@ pub struct UpdateMeetingRequest {
     pub end_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub all_day: Option<bool>,
+    /// When present, the FULL replacement attendee set. The creator is always
+    /// kept in the set (mirroring `create_meeting`). Kept attendees preserve their
+    /// existing RSVP; new attendees start at the default response; removed
+    /// attendees have their rows deleted and receive a `calendar.meeting_cancelled`.
+    #[serde(default)]
+    pub attendee_ids: Option<Vec<Uuid>>,
 }
 
 pub async fn update_meeting(
@@ -825,6 +831,20 @@ pub async fn update_meeting(
     // A time change re-arms reminders (reset the claim flags to NULL).
     let reschedules = body.start_at.is_some() || body.end_at.is_some();
 
+    // Compute the replacement attendee set (if requested). The creator always
+    // attends (mirror create_meeting), and we dedup.
+    let desired: Option<Vec<Uuid>> = body.attendee_ids.as_ref().map(|ids| {
+        let mut set: Vec<Uuid> = ids.clone();
+        if !set.contains(&auth.id) {
+            set.push(auth.id);
+        }
+        set.sort();
+        set.dedup();
+        set
+    });
+
+    let mut tx = state.pool.begin().await?;
+
     sqlx::query(
         "UPDATE scheduled_meetings SET
            title = COALESCE($2, title),
@@ -844,11 +864,74 @@ pub async fn update_meeting(
     .bind(body.end_at)
     .bind(body.all_day)
     .bind(reschedules)
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
+
+    // Attendee replacement: diff the desired set against the existing rows so
+    // that kept attendees preserve their RSVP, new ones are inserted at the
+    // default response, and removed ones are deleted (and later notified).
+    let mut removed: Vec<Uuid> = Vec::new();
+    if let Some(desired) = &desired {
+        let existing_rows =
+            sqlx::query("SELECT user_id FROM scheduled_meeting_attendees WHERE meeting_id = $1")
+                .bind(id)
+                .fetch_all(&mut *tx)
+                .await?;
+        let mut existing: Vec<Uuid> = Vec::with_capacity(existing_rows.len());
+        for r in &existing_rows {
+            existing.push(r.try_get("user_id")?);
+        }
+
+        // Insert new attendees; creator auto-accepts, everyone else needs_action
+        // (same defaults as create_meeting).
+        for uid in desired {
+            if !existing.contains(uid) {
+                let response = if *uid == auth.id { "accepted" } else { "needs_action" };
+                sqlx::query(
+                    "INSERT INTO scheduled_meeting_attendees (meeting_id, user_id, response)
+                     VALUES ($1, $2, $3) ON CONFLICT (meeting_id, user_id) DO NOTHING",
+                )
+                .bind(id)
+                .bind(uid)
+                .bind(response)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+
+        // Remove attendees no longer in the set (kept ones are left untouched).
+        for uid in &existing {
+            if !desired.contains(uid) {
+                removed.push(*uid);
+            }
+        }
+        if !removed.is_empty() {
+            sqlx::query(
+                "DELETE FROM scheduled_meeting_attendees
+                 WHERE meeting_id = $1 AND user_id = ANY($2)",
+            )
+            .bind(id)
+            .bind(&removed)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+
+    tx.commit().await?;
 
     let meeting = load_meeting(&state.pool, id, auth.id).await?;
     broadcast_meeting(&state, &meeting, "calendar.meeting_updated").await;
+
+    // Removed attendees would otherwise keep a stale calendar item; tell them the
+    // meeting is gone with the same payload shape as cancel_meeting.
+    if !removed.is_empty() {
+        let ev = envelope(
+            "calendar.meeting_cancelled",
+            json!({ "meeting_id": id.to_string() }),
+        );
+        state.hub.broadcast(ev, removed).await;
+    }
+
     Ok(Json(meeting))
 }
 

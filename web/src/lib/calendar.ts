@@ -105,6 +105,25 @@ export function monthGrid(anchor: dayjs.Dayjs): MonthCell[] {
 /** Monday-first weekday initials for the mini-month header. */
 export const WEEKDAY_INITIALS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 
+/** Monday-first start-of-day for the week containing `date`. */
+export function startOfWeek(date: string | Date | dayjs.Dayjs): dayjs.Dayjs {
+  const d = dayjs(date)
+  const offset = (d.day() + 6) % 7 // dayjs day(): 0=Sun..6=Sat → Monday=0
+  return d.subtract(offset, 'day').startOf('day')
+}
+
+/** Header label for a week, e.g. "Jul 13 – 19, 2026" or "Jun 29 – Jul 5, 2026". */
+export function weekHeading(start: dayjs.Dayjs): string {
+  const end = start.add(6, 'day')
+  if (start.isSame(end, 'year')) {
+    if (start.isSame(end, 'month')) {
+      return `${start.format('MMM D')} – ${end.format('D, YYYY')}`
+    }
+    return `${start.format('MMM D')} – ${end.format('MMM D, YYYY')}`
+  }
+  return `${start.format('MMM D, YYYY')} – ${end.format('MMM D, YYYY')}`
+}
+
 /**
  * Fractional offset (0..1) of "now" within the given local day, or null when the
  * day is not today — used to place the agenda "now" line.

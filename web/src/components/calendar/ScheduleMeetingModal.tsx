@@ -3,6 +3,7 @@ import { api } from '../../lib/api'
 import { toastError, toastSuccess } from '../../lib/toast'
 import { useStore } from '../../store'
 import { channelLabel } from '../../lib/util'
+import type { ScheduledMeeting } from '../../lib/types'
 import {
   dayjs,
   nextHalfHourIso,
@@ -19,39 +20,66 @@ type Context = string // 'channel:<id>' | 'standalone' | 'none'
 /**
  * Hand-rolled modal (cloned from NewMeetDialog) for scheduling a native meeting.
  * `channelId` prefills the channel context and defaults attendees to its members.
+ * When `meeting` is passed the modal switches to EDIT mode: context is immutable
+ * (hidden), the attendee picker is always shown, and submit PATCHes the meeting.
  */
 export function ScheduleMeetingModal({
   onClose,
   channelId,
+  meeting,
 }: {
   onClose: () => void
   channelId?: string | null
+  meeting?: ScheduledMeeting
 }) {
   const channels = useStore((s) => s.channels)
   const users = useStore((s) => s.users)
   const membersByChannel = useStore((s) => s.members)
   const loadMembers = useStore((s) => s.loadMembers)
   const createScheduledMeeting = useStore((s) => s.createScheduledMeeting)
+  const updateScheduledMeeting = useStore((s) => s.updateScheduledMeeting)
+
+  const isEdit = !!meeting
 
   const prefillChannel = channelId
     ? channels.find((c) => c.id === channelId)
     : undefined
 
+  const initialDuration = meeting
+    ? Math.max(1, dayjs(meeting.end_at).diff(dayjs(meeting.start_at), 'minute'))
+    : 30
+
   const [title, setTitle] = useState(
-    prefillChannel ? `Meeting in ${channelLabel(prefillChannel)}` : 'Meeting',
+    meeting
+      ? meeting.title
+      : prefillChannel
+        ? `Meeting in ${channelLabel(prefillChannel)}`
+        : 'Meeting',
   )
   const [startLocal, setStartLocal] = useState(() =>
-    isoToDatetimeLocal(nextHalfHourIso()),
+    isoToDatetimeLocal(meeting ? meeting.start_at : nextHalfHourIso()),
   )
-  const [durationMin, setDurationMin] = useState(30)
-  const [allDay, setAllDay] = useState(false)
+  const [durationMin, setDurationMin] = useState(initialDuration)
+  const [allDay, setAllDay] = useState(meeting ? meeting.all_day : false)
   const [context, setContext] = useState<Context>(
     channelId ? `channel:${channelId}` : 'none',
   )
-  const [description, setDescription] = useState('')
+  const [description, setDescription] = useState(meeting?.description ?? '')
   const [postCard, setPostCard] = useState(!!channelId)
-  const [attendees, setAttendees] = useState<Set<string>>(() => new Set())
+  const [attendees, setAttendees] = useState<Set<string>>(
+    () => new Set(meeting ? meeting.attendees.map((a) => a.user_id) : []),
+  )
   const [busy, setBusy] = useState(false)
+
+  // In edit mode the Duration select includes the meeting's actual length even
+  // when it doesn't match a preset.
+  const durationOptions = useMemo(
+    () =>
+      DURATIONS.includes(initialDuration)
+        ? DURATIONS
+        : [...DURATIONS, initialDuration].sort((a, b) => a - b),
+    [initialDuration],
+  )
 
   const inputRef = useRef<HTMLInputElement>(null)
   const dialogRef = useRef<HTMLElement>(null)
@@ -67,10 +95,11 @@ export function ScheduleMeetingModal({
   }, [contextChannelId, loadMembers])
 
   useEffect(() => {
+    if (isEdit) return // edit mode keeps the meeting's own attendee set
     if (!contextChannelId) return
     const members = membersByChannel[contextChannelId]
     if (members) setAttendees(new Set(members.map((m) => m.id)))
-  }, [contextChannelId, membersByChannel])
+  }, [isEdit, contextChannelId, membersByChannel])
 
   useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null
@@ -135,6 +164,20 @@ export function ScheduleMeetingModal({
         endIso = dayjs(startIso).add(durationMin, 'minute').toISOString()
       }
 
+      if (meeting) {
+        await updateScheduledMeeting(meeting.id, {
+          title: value,
+          description: description.trim(),
+          start_at: startIso,
+          end_at: endIso,
+          all_day: allDay,
+          attendee_ids: [...attendees],
+        })
+        toastSuccess('Meeting updated.')
+        onClose()
+        return
+      }
+
       let payloadChannelId: string | null = null
       let standaloneCallId: string | null = null
       if (contextChannelId) {
@@ -187,10 +230,12 @@ export function ScheduleMeetingModal({
           </span>
           <div className="min-w-0 flex-1">
             <h2 id="schedule-meeting-title" className="text-lg font-semibold">
-              Schedule meeting
+              {isEdit ? 'Edit meeting' : 'Schedule meeting'}
             </h2>
             <p className="mt-1 text-sm leading-5 text-[var(--color-text-dim)]">
-              Put it on the shared agenda and, optionally, drop a card in a channel.
+              {isEdit
+                ? 'Update the details and attendees for this meeting.'
+                : 'Put it on the shared agenda and, optionally, drop a card in a channel.'}
             </p>
           </div>
           <button
@@ -237,7 +282,7 @@ export function ScheduleMeetingModal({
                   onChange={(e) => setDurationMin(Number(e.target.value))}
                   className="mt-2 h-11 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 text-sm outline-none focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent-soft)]"
                 >
-                  {DURATIONS.map((d) => (
+                  {durationOptions.map((d) => (
                     <option key={d} value={d}>
                       {d < 60 ? `${d} min` : `${d / 60} hr${d >= 120 ? 's' : ''}`}
                     </option>
@@ -257,6 +302,7 @@ export function ScheduleMeetingModal({
             All day
           </label>
 
+          {!isEdit && (
           <label className="block">
             <span className="meeting-label">Context</span>
             <select
@@ -286,8 +332,9 @@ export function ScheduleMeetingModal({
               )}
             </select>
           </label>
+          )}
 
-          {contextChannelId && (
+          {(isEdit || contextChannelId) && (
             <div>
               <span className="meeting-label">Attendees</span>
               <div className="mt-2 max-h-40 overflow-y-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] p-2">
@@ -329,7 +376,7 @@ export function ScheduleMeetingModal({
             />
           </label>
 
-          {contextChannelId && (
+          {!isEdit && contextChannelId && (
             <label className="flex cursor-pointer items-center gap-2 text-sm text-[var(--color-text-dim)]">
               <input
                 type="checkbox"
@@ -355,7 +402,7 @@ export function ScheduleMeetingModal({
               disabled={!title.trim() || busy}
               className="meeting-button-primary h-11 min-w-28 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {busy ? 'Scheduling…' : 'Schedule'}
+              {busy ? (isEdit ? 'Saving…' : 'Scheduling…') : isEdit ? 'Save' : 'Schedule'}
             </button>
           </div>
         </form>

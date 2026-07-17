@@ -643,6 +643,7 @@ export const api = {
           start_at?: string
           end_at?: string
           all_day?: boolean
+          attendee_ids?: string[]
         },
       ) =>
         request<ScheduledMeeting>(`/calendar/meetings/${id}`, {
