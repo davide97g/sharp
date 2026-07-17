@@ -160,7 +160,7 @@ function ChannelCanvasGroup({
           onClick={newCanvas}
           disabled={creating}
           title="New canvas"
-          className="flex h-5 w-5 items-center justify-center rounded text-[var(--color-text-faint)] opacity-0 hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] group-hover:opacity-100"
+          className="flex h-8 w-8 items-center justify-center rounded text-[var(--color-text-faint)] opacity-100 hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] md:h-5 md:w-5 md:opacity-0 md:group-hover:opacity-100"
         >
           +
         </button>

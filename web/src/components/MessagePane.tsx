@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useStore } from '../store'
 import { MessageItem } from './MessageItem'
 import { DayDivider } from './DayDivider'
@@ -12,10 +12,13 @@ import { ChannelTabs } from './ChannelTabs'
 import { Avatar } from './Avatar'
 import { DuckSuggest } from './DuckSuggest'
 import { ScheduleMeetingModal } from './calendar/ScheduleMeetingModal'
+import { useIsMobile } from '../lib/useMediaQuery'
 import { channelLabel, sameDay, withinMinutes } from '../lib/util'
 
 export function MessagePane() {
   const { channelId } = useParams<{ channelId: string }>()
+  const navigate = useNavigate()
+  const isMobile = useIsMobile()
   const me = useStore((s) => s.me)
   const channels = useStore((s) => s.channels)
   const channel = channels.find((c) => c.id === channelId)
@@ -352,10 +355,20 @@ export function MessagePane() {
   return (
     <div className="relative flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
       {/* header */}
-      <header className="flex h-14 items-center gap-2 border-b border-[var(--color-border)] px-4">
+      <header className="flex h-14 items-center gap-2 border-b border-[var(--color-border)] px-3 sm:px-4">
+        {isMobile && (
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            aria-label="Back to channels"
+            className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-dim)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+          >
+            <BackIcon />
+          </button>
+        )}
         <div className="flex min-w-0 items-center gap-2">
           {isDm ? (
-            <span className="flex items-center gap-2 font-semibold">
+            <span className="flex min-w-0 items-center gap-2 truncate font-semibold">
               {channel.dm_user && (
                 <Avatar
                   id={channel.dm_user.id}
@@ -364,16 +377,16 @@ export function MessagePane() {
                   online={dmOnline}
                 />
               )}
-              {channelLabel(channel)}
+              <span className="truncate">{channelLabel(channel)}</span>
             </span>
           ) : (
             <button
               onClick={() => setShowSettings(true)}
               title="Channel settings"
-              className="flex items-center gap-1 rounded-md px-1.5 py-1 font-semibold hover:bg-[var(--color-panel)]"
+              className="flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 font-semibold hover:bg-[var(--color-panel)]"
             >
               <span className="text-[var(--color-text-faint)]">#</span>
-              {channel.name}
+              <span className="truncate">{channel.name}</span>
               {channel.kind === 'private' && (
                 <span className="text-[var(--color-text-faint)]" title="Private">
                   🔒
@@ -382,7 +395,7 @@ export function MessagePane() {
             </button>
           )}
         </div>
-        {channel.topic && (
+        {channel.topic && !isMobile && (
           <>
             <span className="text-[var(--color-border)]">|</span>
             <span className="truncate text-sm text-[var(--color-text-dim)]">
@@ -400,7 +413,7 @@ export function MessagePane() {
             aria-label={voiceAction}
             aria-pressed={inThisVoiceRoom}
             title={voiceAction}
-            className={`voice-channel-button flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+            className={`voice-channel-button flex h-10 w-10 cursor-pointer items-center justify-center gap-1.5 rounded-md text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] sm:h-8 sm:w-auto sm:px-2 ${
               inThisVoiceRoom
                 ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)] ring-1 ring-inset ring-[var(--color-accent)]'
                 : 'text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]'
@@ -409,23 +422,27 @@ export function MessagePane() {
           >
             <VoiceIcon connecting={inThisVoiceRoom && voiceStatus === 'connecting'} />
             {voiceOccupancy > 0 && (
-              <span className="text-[11px] font-semibold tabular-nums">{voiceOccupancy}</span>
+              <span className="hidden text-[11px] font-semibold tabular-nums sm:inline">
+                {voiceOccupancy}
+              </span>
             )}
           </button>
-          <button
-            type="button"
-            onClick={() => setShowSchedule(true)}
-            aria-label="Schedule a meeting"
-            title="Schedule a meeting"
-            className="flex h-8 cursor-pointer items-center rounded-md px-2 text-sm text-[var(--color-text-faint)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
-          >
-            <ScheduleIcon />
-          </button>
+          {!isMobile && (
+            <button
+              type="button"
+              onClick={() => setShowSchedule(true)}
+              aria-label="Schedule a meeting"
+              title="Schedule a meeting"
+              className="flex h-8 cursor-pointer items-center rounded-md px-2 text-sm text-[var(--color-text-faint)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+            >
+              <ScheduleIcon />
+            </button>
+          )}
           <button
             onClick={() => setShowSettings(true)}
             aria-label={isDm ? 'Conversation settings' : 'Channel settings'}
             title={isDm ? 'Conversation settings' : 'Channel settings'}
-            className="rounded-md px-2 py-1 text-sm text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
+            className="flex h-10 w-10 items-center justify-center rounded-md text-sm text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] sm:h-8 sm:w-auto sm:px-2 sm:py-1"
           >
             ⚙
           </button>
@@ -582,6 +599,14 @@ function ScheduleIcon() {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <rect x="3" y="4" width="18" height="17" rx="2" />
       <path d="M3 9h18M8 2v4M16 2v4M12 13v4M10 15h4" />
+    </svg>
+  )
+}
+
+function BackIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="m15 18-6-6 6-6" />
     </svg>
   )
 }

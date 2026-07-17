@@ -9,7 +9,7 @@ import { UserSettingsModal } from './UserSettingsModal'
 import { Avatar } from './Avatar'
 import type { Channel } from '../lib/types'
 
-export function Sidebar() {
+export function Sidebar({ variant = 'desktop' }: { variant?: 'desktop' | 'mobile' }) {
   const channels = useStore((s) => s.channels)
   const online = useStore((s) => s.online)
   const voiceRooms = useStore((s) => s.voiceRooms)
@@ -49,8 +49,16 @@ export function Sidebar() {
     if (q) navigate(`/search?q=${encodeURIComponent(q)}`)
   }
 
+  const mobile = variant === 'mobile'
+
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-panel)]">
+    <aside
+      className={`flex shrink-0 flex-col bg-[var(--color-panel)] ${
+        mobile
+          ? 'h-full w-full min-w-0 flex-1'
+          : 'w-64 border-r border-[var(--color-border)]'
+      }`}
+    >
       {/* workspace header */}
       <div className="flex h-14 items-center gap-2 border-b border-[var(--color-border)] px-4">
         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--color-ink)] text-lg font-extrabold text-[var(--color-accent)] ring-1 ring-[var(--color-border)]">
@@ -218,7 +226,7 @@ function ChannelRow({
   return (
     <NavLink
       to={`/c/${channel.id}`}
-      className={`group flex items-center gap-1.5 rounded-md px-2 py-1 text-sm ${
+      className={`group flex min-h-11 items-center gap-1.5 rounded-md px-2 py-2 text-sm ${
         active
           ? 'bg-[var(--color-accent-soft)] text-white'
           : unread
@@ -239,7 +247,7 @@ function ChannelRow({
           onSettings()
         }}
         title="Channel settings"
-        className="hidden shrink-0 rounded px-1 text-[var(--color-text-faint)] hover:text-[var(--color-text)] group-hover:block"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded text-[var(--color-text-faint)] hover:text-[var(--color-text)] max-md:opacity-100 md:opacity-0 md:group-hover:opacity-100"
       >
         ⚙
       </button>
@@ -267,7 +275,7 @@ function DmRow({
   return (
     <NavLink
       to={`/c/${channel.id}`}
-      className={`flex items-center gap-2 rounded-md px-2 py-1 text-sm ${
+      className={`flex min-h-11 items-center gap-2 rounded-md px-2 py-2 text-sm ${
         active
           ? 'bg-[var(--color-accent-soft)] text-white'
           : 'text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)]'

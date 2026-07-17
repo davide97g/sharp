@@ -83,10 +83,13 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
   )
   const speaking = useStore((s) => s.voice.speaking)
   const muted = useStore((s) => s.voice.muted)
+  const noiseSuppression = useStore((s) => s.voice.noiseSuppression)
+  const noiseSuppressionAvailable = useStore((s) => s.voice.noiseSuppressionAvailable)
   const handRaised = useStore((s) => s.voice.handRaised)
   const transcribing = useStore((s) => s.voice.transcribing)
   const voiceStatus = useStore((s) => s.voice.status)
   const cameraStatus = useStore((s) => s.voice.cameraStatus)
+  const blurEnabled = useStore((s) => s.voice.blurEnabled)
   const screenStatus = useStore((s) => s.voice.screenStatus)
   const audioDeviceId = useStore((s) => s.voice.audioDeviceId)
   const videoDeviceId = useStore((s) => s.voice.videoDeviceId)
@@ -100,9 +103,11 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
   const isGuest = useStore((s) => s.isGuest)
   const channel = useStore((s) => s.channels.find((candidate) => candidate.id === channelId))
   const toggleVoiceMute = useStore((s) => s.toggleVoiceMute)
+  const toggleNoiseSuppression = useStore((s) => s.toggleNoiseSuppression)
   const toggleVoiceHand = useStore((s) => s.toggleVoiceHand)
   const toggleTranscription = useStore((s) => s.toggleTranscription)
   const toggleVoiceCamera = useStore((s) => s.toggleVoiceCamera)
+  const toggleVoiceBlur = useStore((s) => s.toggleVoiceBlur)
   const toggleVoiceScreen = useStore((s) => s.toggleVoiceScreen)
   const setVoiceAudioDevice = useStore((s) => s.setVoiceAudioDevice)
   const setVoiceVideoDevice = useStore((s) => s.setVoiceVideoDevice)
@@ -467,6 +472,20 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
       >
         <MicActivityIcon muted={muted} />
       </DeviceControl>
+      <CallControl
+        label={
+          !noiseSuppressionAvailable
+            ? 'Noise suppression unavailable'
+            : noiseSuppression
+              ? 'Turn off noise suppression'
+              : 'Turn on noise suppression'
+        }
+        active={noiseSuppression && noiseSuppressionAvailable}
+        disabled={voiceStatus !== 'connected' || !noiseSuppressionAvailable}
+        onClick={() => void toggleNoiseSuppression()}
+      >
+        <NoiseSuppressionIcon off={!noiseSuppression || !noiseSuppressionAvailable} />
+      </CallControl>
       {isSpeechSupported() && (
         <CallControl
           label={
@@ -504,6 +523,14 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
       >
         <CameraIcon off={cameraStatus === 'off'} />
       </DeviceControl>
+      <CallControl
+        label={blurEnabled ? 'Turn off background blur' : 'Blur my background'}
+        active={blurEnabled}
+        disabled={voiceStatus !== 'connected'}
+        onClick={toggleVoiceBlur}
+      >
+        <BlurIcon off={!blurEnabled} />
+      </CallControl>
       <CallControl
         label={
           someoneElseSharing
@@ -1529,6 +1556,25 @@ function MicIcon({ off }: { off: boolean }) {
   )
 }
 
+function NoiseSuppressionIcon({ off }: { off: boolean }) {
+  return (
+    <svg
+      width="17"
+      height="17"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M2 12h2l2-6 4 16 4-13 2 3h6" />
+      {off && <path d="m3 3 18 18" />}
+    </svg>
+  )
+}
+
 function CameraIcon({ off }: { off: boolean }) {
   return (
     <svg
@@ -1544,6 +1590,28 @@ function CameraIcon({ off }: { off: boolean }) {
     >
       <path d="m16 13 5 3V8l-5 3" />
       <rect x="3" y="6" width="13" height="12" rx="2" />
+      {off && <path d="m3 3 18 18" />}
+    </svg>
+  )
+}
+
+// Person silhouette on a dotted (blurred) backdrop; slashed when blur is off.
+function BlurIcon({ off }: { off: boolean }) {
+  return (
+    <svg
+      width="17"
+      height="17"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <circle cx="12" cy="8" r="3.2" />
+      <path d="M6 20a6 6 0 0 1 12 0" />
+      <path d="M3.5 5h0M7 3.5h0M12 3h0M17 3.5h0M20.5 5h0M21.5 9.5h0M21.5 14.5h0M2.5 9.5h0M2.5 14.5h0" />
       {off && <path d="m3 3 18 18" />}
     </svg>
   )

@@ -117,6 +117,9 @@ type VoiceState = {
   channelId: string | null
   status: 'idle' | 'connecting' | 'connected'
   muted: boolean
+  noiseSuppression: boolean
+  noiseSuppressionAvailable: boolean
+  blurEnabled: boolean
   handRaised: boolean
   transcribing: boolean
   roastArmed: boolean
@@ -319,6 +322,8 @@ type State = {
   ) => Promise<void>
   leaveVoice: () => void
   toggleVoiceMute: () => void
+  toggleNoiseSuppression: () => Promise<void>
+  toggleVoiceBlur: () => void
   toggleVoiceHand: () => void
   toggleTranscription: () => void
   toggleVoiceCamera: () => void
@@ -404,11 +409,35 @@ function emptyChannelMessages(): ChannelMessages {
   return { list: [], loaded: false, loading: false, hasMore: true }
 }
 
+const NOISE_SUPPRESSION_KEY = 'sharp.noiseSuppression'
+
+function storedNoiseSuppression(): boolean {
+  try {
+    return window.localStorage.getItem(NOISE_SUPPRESSION_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
+// Background blur is opt-in: default OFF unless the user turned it on before.
+const VIDEO_BLUR_KEY = 'sharp.videoBlur'
+
+function storedVideoBlur(): boolean {
+  try {
+    return window.localStorage.getItem(VIDEO_BLUR_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 function emptyVoiceState(): VoiceState {
   return {
     channelId: null,
     status: 'idle',
     muted: false,
+    noiseSuppression: storedNoiseSuppression(),
+    noiseSuppressionAvailable: true,
+    blurEnabled: storedVideoBlur(),
     handRaised: false,
     transcribing: false,
     roastArmed: false,
@@ -1092,6 +1121,9 @@ export const useStore = create<State>((set, get) => ({
         channelId,
         status: 'connecting',
         muted: false,
+        noiseSuppression: storedNoiseSuppression(),
+        noiseSuppressionAvailable: true,
+        blurEnabled: storedVideoBlur(),
         handRaised: false,
         transcribing: false,
         roastArmed: false,
@@ -1126,6 +1158,8 @@ export const useStore = create<State>((set, get) => ({
         myConnId,
         myUserId: me.id,
         iceServers: config.ice_servers,
+        noiseSuppression: get().voice.noiseSuppression,
+        blurBackground: get().voice.blurEnabled,
         send: (type, payload) => get().ws!.send(type, payload),
         onSpeaking: (connId, speaking) => {
           set((s) => {
@@ -1180,6 +1214,12 @@ export const useStore = create<State>((set, get) => ({
             if (stream?.getVideoTracks().length) remoteScreenStreams[connId] = stream
             else delete remoteScreenStreams[connId]
             return { voice: { ...s.voice, remoteScreenStreams } }
+          })
+        },
+        onNoiseSuppression: (available) => {
+          set((s) => {
+            if (s.voice.client !== client) return {}
+            return { voice: { ...s.voice, noiseSuppressionAvailable: available } }
           })
         },
       })
@@ -1243,6 +1283,37 @@ export const useStore = create<State>((set, get) => ({
       else voiceRecognizer?.resume()
     }
     get().ws?.send('voice.mute', { channel_id: channelId, muted: nextMuted })
+  },
+
+  // Purely local mic denoising — no WS event; peers only hear the cleaned track.
+  async toggleNoiseSuppression() {
+    const next = !get().voice.noiseSuppression
+    try {
+      window.localStorage.setItem(NOISE_SUPPRESSION_KEY, next ? '1' : '0')
+    } catch {
+      // ignore persistence failures (private mode etc.)
+    }
+    set((s) => ({ voice: { ...s.voice, noiseSuppression: next } }))
+    const { client } = get().voice
+    if (!client) return
+    await client.setNoiseSuppression(next)
+  },
+
+  // Purely local camera effect — no WS event. Persisted so the next call remembers
+  // it; if the camera is live the client swaps the published track in place.
+  toggleVoiceBlur() {
+    const next = !get().voice.blurEnabled
+    try {
+      window.localStorage.setItem(VIDEO_BLUR_KEY, next ? '1' : '0')
+    } catch {
+      // ignore persistence failures (private mode etc.)
+    }
+    set((s) => ({ voice: { ...s.voice, blurEnabled: next } }))
+    const { client } = get().voice
+    if (!client) return
+    void client.setBackgroundBlur(next).catch(() => {
+      toastError('Could not toggle background blur.')
+    })
   },
 
   toggleVoiceHand() {

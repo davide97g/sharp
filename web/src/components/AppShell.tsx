@@ -12,9 +12,11 @@ import { SearchPalette } from './SearchPalette'
 import { InboxPanel } from './NotificationCenter'
 import { VideoStage } from './voice/VideoStage'
 import { Onboarding } from './Onboarding'
+import { MobileTabBar } from './MobileTabBar'
 import { isOnboardingDone } from '../lib/onboarding'
 import { sound } from '../lib/sound'
 import { hasUnseenRelease } from '../lib/whatsNew'
+import { useIsMobile } from '../lib/useMediaQuery'
 import { useStore } from '../store'
 
 const SIDEBAR_OPEN_KEY = 'sharp.sidebarOpen'
@@ -33,6 +35,7 @@ export function AppShell() {
   const channels = useStore((s) => s.channels)
   const inVoice = useStore((s) => s.voice.channelId !== null)
   const location = useLocation()
+  const isMobile = useIsMobile()
   const [sidebarOpen, setSidebarOpen] = useState(
     () => window.localStorage.getItem(SIDEBAR_OPEN_KEY) !== 'false',
   )
@@ -48,14 +51,14 @@ export function AppShell() {
   const mode: 'chat' | 'docs' | 'canvas' | 'meetings' | 'calendar' | 'help' = helpMode
     ? 'help'
     : calendarMode
-    ? 'calendar'
-    : meetingsMode
-    ? 'meetings'
-    : canvasMode
-    ? 'canvas'
-    : docsMode
-      ? 'docs'
-      : 'chat'
+      ? 'calendar'
+      : meetingsMode
+        ? 'meetings'
+        : canvasMode
+          ? 'canvas'
+          : docsMode
+            ? 'docs'
+            : 'chat'
 
   const setInboxOpen = useStore((s) => s.setInboxOpen)
 
@@ -86,9 +89,11 @@ export function AppShell() {
     setSidebarOpen((open) => !open)
   }, [])
 
+  // Persist desktop sidebar preference only; mobile always uses list→detail.
   useEffect(() => {
+    if (isMobile) return
     window.localStorage.setItem(SIDEBAR_OPEN_KEY, String(sidebarOpen))
-  }, [sidebarOpen])
+  }, [sidebarOpen, isMobile])
 
   // Global shortcuts: ⌘K / Ctrl+K for quick switcher, \ for the sidebar.
   useEffect(() => {
@@ -106,37 +111,58 @@ export function AppShell() {
         return
       }
 
-      if (e.key === '\\' && !e.repeat && !isEditableTarget(e.target)) {
+      if (e.key === '\\' && !e.repeat && !isEditableTarget(e.target) && !isMobile) {
         e.preventDefault()
         toggleSidebar()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [setQuickSwitcher, setSearchOpen, toggleSidebar])
+  }, [setQuickSwitcher, setSearchOpen, toggleSidebar, isMobile])
 
   return (
-    <div className="flex h-full w-full overflow-hidden">
-      <ModeRail
-        mode={mode}
-        sidebarOpen={sidebarOpen}
-        onToggleSidebar={toggleSidebar}
-      />
-      {mode !== 'help' && (
-        <div
-          id="app-sidebar"
-          className="sidebar-shell relative"
-          data-open={sidebarOpen}
-        >
-          {sidebarOpen ? (
-            calendarMode ? <CalendarSidebar /> : meetingsMode ? <MeetingsSidebar /> : canvasMode ? <CanvasSidebar /> : docsMode ? <DocsSidebar /> : <Sidebar />
-          ) : (
-            <CompactSidebar mode={mode} />
+    <div className={`flex h-full w-full overflow-hidden ${isMobile ? 'flex-col' : ''}`}>
+      {!isMobile && (
+        <>
+          <ModeRail
+            mode={mode}
+            sidebarOpen={sidebarOpen}
+            onToggleSidebar={toggleSidebar}
+          />
+          {mode !== 'help' && (
+            <div
+              id="app-sidebar"
+              className="sidebar-shell relative"
+              data-open={sidebarOpen}
+            >
+              {sidebarOpen ? (
+                calendarMode ? (
+                  <CalendarSidebar />
+                ) : meetingsMode ? (
+                  <MeetingsSidebar />
+                ) : canvasMode ? (
+                  <CanvasSidebar />
+                ) : docsMode ? (
+                  <DocsSidebar />
+                ) : (
+                  <Sidebar />
+                )
+              ) : (
+                <CompactSidebar mode={mode} />
+              )}
+            </div>
           )}
-        </div>
+        </>
       )}
-      <Outlet />
-      {mode === 'chat' && <ThreadPanel />}
+      <div
+        className={`relative flex min-h-0 min-w-0 flex-1 overflow-hidden ${
+          isMobile ? 'mobile-main' : ''
+        }`}
+      >
+        <Outlet />
+        {mode === 'chat' && <ThreadPanel />}
+      </div>
+      {isMobile && <MobileTabBar />}
       {inVoice && <VideoStage />}
       <QuickSwitcher />
       <SearchPalette />
@@ -242,7 +268,17 @@ function ModeRail({
         onClick={() => navigate('/meetings')}
         title="Meetings"
         label={
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
             <path d="M4 6h16M4 12h16M4 18h10" />
             <circle cx="18" cy="18" r="3" />
           </svg>
@@ -302,7 +338,9 @@ function ModeRail({
         title={`${sidebarOpen ? 'Collapse' : 'Expand'} sidebar (\\)`}
         className="micro-icon-button mt-auto flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-faint)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-ink)]"
       >
-        <span className="micro-icon-glyph"><SidebarToggleIcon open={sidebarOpen} /></span>
+        <span className="micro-icon-glyph">
+          <SidebarToggleIcon open={sidebarOpen} />
+        </span>
       </button>
     </nav>
   )

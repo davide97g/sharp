@@ -546,7 +546,7 @@ export function Composer({
   const canSend = !sending && !uploading && (!!value.trim() || readyIds.length > 0)
 
   return (
-    <div className="composer-wrap relative px-4 pb-4 pt-1" data-has-draft={!!value || undefined}>
+    <div className="composer-wrap relative px-4 pb-3 pt-1 md:pb-4" data-has-draft={!!value || undefined}>
       {gifOpen && (
         <div className="composer-picker absolute bottom-full left-4 z-30 mb-2">
           <GifPicker
@@ -755,7 +755,7 @@ export function Composer({
             onClick={syncTrigger}
             onPaste={onPaste}
             placeholder={placeholder ?? 'Message'}
-            className="composer-textarea max-h-[260px] flex-1 resize-none bg-transparent py-1.5 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:outline-none"
+            className="composer-textarea min-h-11 max-h-[260px] flex-1 resize-none bg-transparent py-2.5 text-base text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:outline-none md:min-h-0 md:py-1.5 md:text-sm"
           />
           <button
             onClick={doSend}

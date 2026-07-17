@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Message, ReplyPreview } from '../lib/types'
 import { useStore } from '../store'
+import { useCoarsePointer } from '../lib/useMediaQuery'
 import { Avatar } from './Avatar'
 import { Markdown } from './Markdown'
 import { AttachmentList } from './Attachments'
@@ -114,13 +115,16 @@ export function MessageItem({
   const setReplyTarget = useStore((s) => s.setReplyTarget)
   const setActiveMessage = useStore((s) => s.setActiveMessage)
   const setPaletteFor = useStore((s) => s.setPaletteFor)
+  const coarsePointer = useCoarsePointer()
 
   // Palette open + "actioned" (keyboard/mouse target) come from the store so a
   // global shortcut handler can drive whichever message is hovered.
+  // On touch, tapping a message pins it as active so the toolbar can appear.
   const showPalette = useStore((s) => s.paletteForMessageId === message.id)
   const isReplyTarget = useStore((s) => s.replyTargets[message.channel_id]?.id === message.id)
   const isThreadTarget = useStore((s) => s.thread.open && s.thread.parentId === message.id)
-  const actioned = showPalette || isReplyTarget || isThreadTarget
+  const isActive = useStore((s) => s.activeMessageId === message.id)
+  const actioned = showPalette || isReplyTarget || isThreadTarget || (coarsePointer && isActive)
 
   // Landed here from search: sustained highlight + word highlight until the user acts.
   const isFocused = useStore(
@@ -132,6 +136,37 @@ export function MessageItem({
 
   const openPalette = () => setPaletteFor(showPalette ? null : message.id)
   const closePalette = () => setPaletteFor(null)
+
+  function onMessagePointerEnter() {
+    if (!coarsePointer) setActiveMessage(message.id)
+  }
+
+  function onMessagePointerLeave() {
+    if (coarsePointer) return
+    setActiveMessage(null)
+    if (showPalette) closePalette()
+  }
+
+  function onMessageTap(e: React.MouseEvent) {
+    if (!coarsePointer) return
+    // Don't steal taps from buttons / links inside the message.
+    if ((e.target as HTMLElement).closest('button, a, input, textarea')) return
+    setActiveMessage(isActive ? null : message.id)
+  }
+
+  // Clear tap-selected toolbar when tapping elsewhere.
+  useEffect(() => {
+    if (!coarsePointer || !isActive) return
+    function onDocPointerDown(ev: PointerEvent) {
+      const el = document.getElementById(`msg-${message.id}`)
+      if (el && !el.contains(ev.target as Node)) {
+        setActiveMessage(null)
+        if (showPalette) closePalette()
+      }
+    }
+    document.addEventListener('pointerdown', onDocPointerDown)
+    return () => document.removeEventListener('pointerdown', onDocPointerDown)
+  }, [coarsePointer, isActive, message.id, setActiveMessage, showPalette])
 
   const [editing, setEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -277,11 +312,9 @@ export function MessageItem({
           isMine ? 'justify-end' : 'justify-start'
         }`}
         data-message-mine={isMine || undefined}
-        onMouseEnter={() => setActiveMessage(message.id)}
-        onMouseLeave={() => {
-          setActiveMessage(null)
-          if (showPalette) closePalette()
-        }}
+        onMouseEnter={onMessagePointerEnter}
+        onMouseLeave={onMessagePointerLeave}
+        onClick={onMessageTap}
       >
         {burst}
         <div className={`relative flex max-w-[75%] flex-col ${isMine ? 'items-end' : 'items-start'}`}>
@@ -415,18 +448,16 @@ export function MessageItem({
             : 'hover:bg-[var(--color-panel)]/50'
       } ${grouped ? 'py-0.5' : 'pt-2 pb-0.5 mt-1'}`}
       data-message-mine={isMine || undefined}
-      onMouseEnter={() => setActiveMessage(message.id)}
-      onMouseLeave={() => {
-        setActiveMessage(null)
-        if (showPalette) closePalette()
-      }}
+      onMouseEnter={onMessagePointerEnter}
+      onMouseLeave={onMessagePointerLeave}
+      onClick={onMessageTap}
     >
       {burst}
       {/* gutter: avatar or hover timestamp */}
       <div className="relative w-9 shrink-0">
         {grouped ? (
           // Absolute + nowrap so the hover timestamp never reflows the row height.
-          <span className="absolute right-0 top-0.5 hidden whitespace-nowrap text-[10px] leading-5 tabular-nums text-[var(--color-text-faint)] group-hover:block">
+          <span className="absolute right-0 top-0.5 whitespace-nowrap text-[10px] leading-5 tabular-nums text-[var(--color-text-faint)] opacity-0 group-hover:opacity-100 max-md:hidden">
             {fmtTime(message.created_at)}
           </span>
         ) : (

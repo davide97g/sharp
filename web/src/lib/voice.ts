@@ -1,16 +1,30 @@
 import type { VoiceParticipant, VoiceSignalPayload } from './types'
+// RNNoise worklet script + wasm resolved to bundled asset URLs (no CDN). These
+// are just URL strings; the worklet/wasm code is emitted as separate assets and
+// the loader/node classes are dynamically imported only when NS is first used.
+import rnnoiseWorkletUrl from '@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?url'
+import rnnoiseWasmUrl from '@sapphi-red/web-noise-suppressor/rnnoise.wasm?url'
+import rnnoiseSimdWasmUrl from '@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?url'
 
 type VoiceClientOpts = {
   channelId: string
   myConnId: string
   myUserId: string
   iceServers: RTCIceServer[]
+  noiseSuppression?: boolean
+  blurBackground?: boolean
   send: (type: string, payload: unknown) => void
   onSpeaking?: (connId: string, speaking: boolean) => void
   onLocalStream?: (stream: MediaStream | null) => void
   onRemoteStream?: (connId: string, stream: MediaStream | null) => void
   onLocalScreen?: (stream: MediaStream | null) => void
   onRemoteScreen?: (connId: string, stream: MediaStream | null) => void
+  onNoiseSuppression?: (available: boolean) => void
+}
+
+type RnnoiseModule = {
+  RnnoiseWorkletNode: typeof import('@sapphi-red/web-noise-suppressor').RnnoiseWorkletNode
+  wasmBinary: ArrayBuffer
 }
 
 type Peer = {
@@ -61,6 +75,7 @@ export class VoiceClient {
   private onRemoteStream?: (connId: string, stream: MediaStream | null) => void
   private onLocalScreen?: (stream: MediaStream | null) => void
   private onRemoteScreen?: (connId: string, stream: MediaStream | null) => void
+  private onNoiseSuppression?: (available: boolean) => void
 
   private localStream: MediaStream | null = null
   private cameraTrack: MediaStreamTrack | null = null
@@ -75,17 +90,42 @@ export class VoiceClient {
   private spectrumSamples: Uint8Array<ArrayBuffer> | null = null
   private stopped = false
 
+  // Noise suppression (RNNoise). rawStream holds the unprocessed mic; when NS is
+  // active the localStream/senders carry the processed track from the worklet
+  // chain instead. nsUnavailable latches after a load/support failure so we stop
+  // retrying and surface the toggle as disabled.
+  private noiseSuppression: boolean
+  private rawStream: MediaStream | null = null
+  private micSource: MediaStreamAudioSourceNode | null = null
+  private rnnoiseNode: import('@sapphi-red/web-noise-suppressor').RnnoiseWorkletNode | null = null
+  private micDestination: MediaStreamAudioDestinationNode | null = null
+  private nsUnavailable = false
+  private nsLoad: Promise<RnnoiseModule> | null = null
+
+  // Background blur (MediaPipe selfie segmentation). rawCameraTrack is the live
+  // camera from getUserMedia (owns the 'ended' listener and the real deviceId);
+  // cameraTrack is what actually gets published — the raw track when blur is off,
+  // the processor's canvas output when blur is on. blurOp guards against
+  // overlapping toggles/device-switches racing each other across awaits.
+  private blurEnabled: boolean
+  private rawCameraTrack: MediaStreamTrack | null = null
+  private blurProcessor: import('./videoEffects').BackgroundBlurProcessor | null = null
+  private blurOp = 0
+
   constructor(opts: VoiceClientOpts) {
     this.channelId = opts.channelId
     this.myConnId = opts.myConnId
     this.myUserId = opts.myUserId
     this.iceServers = opts.iceServers
+    this.noiseSuppression = opts.noiseSuppression ?? true
+    this.blurEnabled = opts.blurBackground ?? false
     this.send = opts.send
     this.onSpeaking = opts.onSpeaking
     this.onLocalStream = opts.onLocalStream
     this.onRemoteStream = opts.onRemoteStream
     this.onLocalScreen = opts.onLocalScreen
     this.onRemoteScreen = opts.onRemoteScreen
+    this.onNoiseSuppression = opts.onNoiseSuppression
   }
 
   async start(audioDeviceId?: string | null) {
@@ -96,9 +136,21 @@ export class VoiceClient {
       for (const track of stream.getTracks()) track.stop()
       return
     }
-    this.localStream = stream
-    this.audioDeviceId = trackDeviceId(stream.getAudioTracks()[0]) ?? audioDeviceId ?? null
-    this.startSpeakingDetection(this.myConnId, stream)
+    this.rawStream = stream
+    const rawTrack = stream.getAudioTracks()[0]
+    this.audioDeviceId = trackDeviceId(rawTrack) ?? audioDeviceId ?? null
+    const active = await this.buildActiveAudioTrack(rawTrack)
+    if (this.stopped) {
+      for (const track of stream.getTracks()) track.stop()
+      this.teardownChain()
+      return
+    }
+    // localStream holds whatever is sent to peers (processed track when NS is
+    // active); the raw mic lives in rawStream feeding the worklet chain.
+    const local = new MediaStream()
+    if (active) local.addTrack(active)
+    this.localStream = local
+    this.startSpeakingDetection(this.myConnId, local)
   }
 
   getAudioDeviceId(): string | null {
@@ -106,7 +158,8 @@ export class VoiceClient {
   }
 
   getVideoDeviceId(): string | null {
-    return this.videoDeviceId ?? trackDeviceId(this.cameraTrack)
+    // Always the RAW camera track — the processed canvas track has no deviceId.
+    return this.videoDeviceId ?? trackDeviceId(this.rawCameraTrack)
   }
 
   // Fill `bands` with normalized (0..1) levels of the local mic's speech
@@ -144,58 +197,231 @@ export class VoiceClient {
     const nextStream = await navigator.mediaDevices.getUserMedia({
       audio: audioConstraints(deviceId),
     })
-    const nextTrack = nextStream.getAudioTracks()[0]
-    if (!nextTrack) {
+    const nextRaw = nextStream.getAudioTracks()[0]
+    if (!nextRaw) {
       for (const track of nextStream.getTracks()) track.stop()
       throw new Error('No microphone was found.')
     }
     if (this.stopped || !this.localStream) {
-      nextTrack.stop()
+      for (const track of nextStream.getTracks()) track.stop()
       return
     }
 
-    const previous = this.localStream.getAudioTracks()[0]
-    nextTrack.enabled = previous?.enabled ?? true
-    if (previous) {
-      this.localStream.removeTrack(previous)
-      previous.stop()
+    const previousActive = this.localStream.getAudioTracks()[0]
+    const wasEnabled = previousActive?.enabled ?? true
+    const previousRaw = this.rawStream?.getAudioTracks()[0] ?? null
+
+    // buildActiveAudioTrack tears down the old chain (releasing the old raw
+    // source) before wiring the new mic, so the old raw is safe to stop after.
+    this.rawStream = nextStream
+    const nextActive = await this.buildActiveAudioTrack(nextRaw)
+    if (this.stopped || !this.localStream || !nextActive) {
+      for (const track of nextStream.getTracks()) track.stop()
+      return
     }
-    this.localStream.addTrack(nextTrack)
-    this.audioDeviceId = trackDeviceId(nextTrack) ?? deviceId
-    await this.replaceSenderTrack('audio', nextTrack)
+    nextActive.enabled = wasEnabled
+
+    if (previousActive) {
+      this.localStream.removeTrack(previousActive)
+      if (previousActive !== previousRaw) previousActive.stop()
+    }
+    if (previousRaw) previousRaw.stop()
+    this.localStream.addTrack(nextActive)
+    this.audioDeviceId = trackDeviceId(nextRaw) ?? deviceId
+    await this.replaceSenderTrack('audio', nextActive)
     this.stopSpeakingDetection(this.myConnId)
     this.startSpeakingDetection(this.myConnId, this.localStream)
+  }
+
+  // Runtime toggle without rejoining: rebuild the active audio track from the
+  // live raw mic and swap it into the senders, preserving mute state, then
+  // re-run speaking detection on what peers now hear.
+  async setNoiseSuppression(enabled: boolean) {
+    if (this.stopped) return
+    this.noiseSuppression = enabled
+    const rawTrack = this.rawStream?.getAudioTracks()[0]
+    if (!this.localStream || !rawTrack) return
+
+    const previous = this.localStream.getAudioTracks()[0]
+    const wasEnabled = previous?.enabled ?? true
+    const nextActive = await this.buildActiveAudioTrack(rawTrack)
+    if (this.stopped || !this.localStream || !nextActive || nextActive === previous) return
+    nextActive.enabled = wasEnabled
+
+    if (previous) {
+      this.localStream.removeTrack(previous)
+      // The raw track is kept alive (it feeds the chain / is the fallback);
+      // only a processed destination track should be stopped here.
+      if (previous !== rawTrack) previous.stop()
+    }
+    this.localStream.addTrack(nextActive)
+    await this.replaceSenderTrack('audio', nextActive)
+    this.stopSpeakingDetection(this.myConnId)
+    this.startSpeakingDetection(this.myConnId, this.localStream)
+  }
+
+  // Returns the track to send for the current NS setting: the RNNoise-processed
+  // track when NS is on and usable, otherwise the raw (native-constraint) track.
+  // Always tears down any previous chain first. Reports availability so the UI
+  // can disable the toggle when NS can't run.
+  private async buildActiveAudioTrack(
+    rawTrack: MediaStreamTrack | undefined,
+  ): Promise<MediaStreamTrack | null> {
+    this.teardownChain()
+    if (!rawTrack) return null
+    if (!this.noiseSuppression) {
+      this.onNoiseSuppression?.(!this.nsUnavailable)
+      return rawTrack
+    }
+    const processed = await this.buildProcessedTrack(rawTrack)
+    this.onNoiseSuppression?.(processed !== null)
+    return processed ?? rawTrack
+  }
+
+  private async buildProcessedTrack(
+    rawTrack: MediaStreamTrack,
+  ): Promise<MediaStreamTrack | null> {
+    try {
+      const context = this.ensureAudioContext()
+      const mod = await this.ensureRnnoise(context)
+      if (!mod || this.stopped) return null
+      const source = context.createMediaStreamSource(new MediaStream([rawTrack]))
+      const node = new mod.RnnoiseWorkletNode(context, {
+        maxChannels: 1,
+        wasmBinary: mod.wasmBinary,
+      })
+      const destination = context.createMediaStreamDestination()
+      source.connect(node).connect(destination)
+      const track = destination.stream.getAudioTracks()[0]
+      if (!track) {
+        source.disconnect()
+        node.destroy()
+        return null
+      }
+      this.micSource = source
+      this.rnnoiseNode = node
+      this.micDestination = destination
+      return track
+    } catch (error) {
+      this.markNsUnavailable(error)
+      this.teardownChain()
+      return null
+    }
+  }
+
+  private ensureRnnoise(context: AudioContext): Promise<RnnoiseModule> | null {
+    if (this.nsUnavailable) return null
+    if (typeof AudioWorkletNode === 'undefined' || !context.audioWorklet) {
+      this.markNsUnavailable()
+      return null
+    }
+    // RNNoise assumes 48kHz; if we couldn't get a 48kHz context, don't process.
+    if (context.sampleRate !== 48_000) {
+      this.markNsUnavailable()
+      return null
+    }
+    if (!this.nsLoad) {
+      this.nsLoad = (async () => {
+        const mod = await import('@sapphi-red/web-noise-suppressor')
+        const wasmBinary = await mod.loadRnnoise({
+          url: rnnoiseWasmUrl,
+          simdUrl: rnnoiseSimdWasmUrl,
+        })
+        await context.audioWorklet.addModule(rnnoiseWorkletUrl)
+        return { RnnoiseWorkletNode: mod.RnnoiseWorkletNode, wasmBinary }
+      })().catch((error) => {
+        this.markNsUnavailable(error)
+        this.nsLoad = null
+        throw error
+      })
+    }
+    return this.nsLoad
+  }
+
+  private markNsUnavailable(error?: unknown) {
+    if (!this.nsUnavailable) {
+      this.nsUnavailable = true
+      console.warn('Microphone noise suppression is unavailable; using the raw mic.', error)
+    }
+  }
+
+  private teardownChain() {
+    if (this.rnnoiseNode) {
+      try {
+        this.rnnoiseNode.disconnect()
+        this.rnnoiseNode.destroy()
+      } catch {
+        // already torn down
+      }
+      this.rnnoiseNode = null
+    }
+    if (this.micSource) {
+      this.micSource.disconnect()
+      this.micSource = null
+    }
+    if (this.micDestination) {
+      this.micDestination.disconnect()
+      this.micDestination = null
+    }
+  }
+
+  private ensureAudioContext(): AudioContext {
+    if (!this.audioContext) {
+      try {
+        this.audioContext = new AudioContext({ sampleRate: 48_000 })
+      } catch {
+        this.audioContext = new AudioContext()
+      }
+    }
+    void this.audioContext.resume().catch(() => {})
+    return this.audioContext
   }
 
   async setVideoInput(deviceId: string) {
     if (this.stopped) return
     this.videoDeviceId = deviceId
-    if (!this.cameraTrack || !this.localStream) return
-    if (deviceId === trackDeviceId(this.cameraTrack)) return
+    if (!this.cameraTrack || !this.localStream || !this.rawCameraTrack) return
+    if (deviceId === trackDeviceId(this.rawCameraTrack)) return
 
     const cameraStream = await navigator.mediaDevices.getUserMedia({
       video: videoConstraints(deviceId),
     })
-    const nextTrack = cameraStream.getVideoTracks()[0]
-    if (!nextTrack) {
+    const nextRaw = cameraStream.getVideoTracks()[0]
+    if (!nextRaw) {
       for (const track of cameraStream.getTracks()) track.stop()
       throw new Error('No camera was found.')
     }
     if (this.stopped || !this.localStream || !this.cameraTrack) {
-      nextTrack.stop()
+      nextRaw.stop()
       return
     }
 
-    const previous = this.cameraTrack
-    previous.removeEventListener('ended', this.handleCameraEnded)
-    this.localStream.removeTrack(previous)
-    previous.stop()
+    const prevPublished = this.cameraTrack
+    const prevRaw = this.rawCameraTrack
+    const prevProcessor = this.blurProcessor
+    prevRaw?.removeEventListener('ended', this.handleCameraEnded)
+    this.rawCameraTrack = nextRaw
+    nextRaw.addEventListener('ended', this.handleCameraEnded, { once: true })
 
-    this.cameraTrack = nextTrack
-    this.videoDeviceId = trackDeviceId(nextTrack) ?? deviceId
-    this.localStream.addTrack(nextTrack)
-    nextTrack.addEventListener('ended', this.handleCameraEnded, { once: true })
-    await this.replaceSenderTrack('video', nextTrack)
+    // Rebuild the blur pipeline (if any) around the new raw track before swapping.
+    const { track: published, processor } = await this.makeCameraProcessor(nextRaw)
+    if (this.stopped || !this.localStream || this.rawCameraTrack !== nextRaw) {
+      processor?.stop()
+      if (published !== nextRaw) published.stop()
+      return
+    }
+
+    this.blurProcessor = processor
+    this.cameraTrack = published
+    this.videoDeviceId = trackDeviceId(nextRaw) ?? deviceId
+    this.localStream.removeTrack(prevPublished)
+    this.localStream.addTrack(published)
+    await this.replaceSenderTrack('video', published)
+
+    // Tear down the previous pipeline: its processor + processed output + raw mic.
+    prevProcessor?.stop()
+    if (prevPublished !== prevRaw) prevPublished.stop()
+    prevRaw?.stop()
     this.onLocalStream?.(this.localStream)
   }
 
@@ -204,38 +430,119 @@ export class VoiceClient {
     const cameraStream = await navigator.mediaDevices.getUserMedia({
       video: videoConstraints(this.videoDeviceId),
     })
-    const track = cameraStream.getVideoTracks()[0]
-    if (!track) {
+    const rawTrack = cameraStream.getVideoTracks()[0]
+    if (!rawTrack) {
       for (const mediaTrack of cameraStream.getTracks()) mediaTrack.stop()
       throw new Error('No camera was found.')
     }
     if (this.stopped || !this.localStream) {
-      track.stop()
+      rawTrack.stop()
       return
     }
 
-    this.cameraTrack = track
-    this.videoDeviceId = trackDeviceId(track) ?? this.videoDeviceId
-    this.localStream.addTrack(track)
-    track.addEventListener('ended', this.handleCameraEnded, { once: true })
+    this.rawCameraTrack = rawTrack
+    this.videoDeviceId = trackDeviceId(rawTrack) ?? this.videoDeviceId
+    // 'ended' (hardware unplug) fires on the raw hardware track, not the canvas.
+    rawTrack.addEventListener('ended', this.handleCameraEnded, { once: true })
+
+    const { track: published, processor } = await this.makeCameraProcessor(rawTrack)
+    if (this.stopped || !this.localStream || this.rawCameraTrack !== rawTrack) {
+      // Aborted mid-flight (stop/stopCamera ran): clean up anything we just built.
+      processor?.stop()
+      if (published !== rawTrack) published.stop()
+      return
+    }
+
+    this.blurProcessor = processor
+    this.cameraTrack = published
+    this.localStream.addTrack(published)
     for (const peer of this.peers.values()) {
-      const sender = peer.pc.addTrack(track, this.localStream)
+      const sender = peer.pc.addTrack(published, this.localStream)
       void configureVideoSender(sender)
     }
     this.onLocalStream?.(this.localStream)
   }
 
-  stopCamera() {
-    const track = this.cameraTrack
-    if (!track) return
-    this.cameraTrack = null
-    track.removeEventListener('ended', this.handleCameraEnded)
-    this.localStream?.removeTrack(track)
-    for (const peer of this.peers.values()) {
-      const sender = peer.pc.getSenders().find((candidate) => candidate.track === track)
-      if (sender) peer.pc.removeTrack(sender)
+  // Live blur toggle without dropping the call: rebuild the published track around
+  // the same raw camera and swap it into localStream + every sender. Persisting the
+  // flag alone (no camera live) applies it on the next startCamera.
+  async setBackgroundBlur(enabled: boolean) {
+    if (this.blurEnabled === enabled) return
+    this.blurEnabled = enabled
+    const op = ++this.blurOp
+    if (this.stopped || !this.localStream || !this.cameraTrack || !this.rawCameraTrack) return
+
+    const rawTrack = this.rawCameraTrack
+    const prevPublished = this.cameraTrack
+    const prevProcessor = this.blurProcessor
+    const { track: published, processor } = await this.makeCameraProcessor(rawTrack)
+    // Bail if anything changed under us: call ended, camera stopped/switched, or a
+    // newer toggle superseded this one.
+    if (
+      this.stopped ||
+      this.blurOp !== op ||
+      this.rawCameraTrack !== rawTrack ||
+      !this.localStream ||
+      !this.cameraTrack
+    ) {
+      processor?.stop()
+      if (published !== rawTrack) published.stop()
+      return
     }
-    track.stop()
+    if (published === prevPublished) return
+
+    this.blurProcessor = processor
+    this.cameraTrack = published
+    this.localStream.removeTrack(prevPublished)
+    this.localStream.addTrack(published)
+    await this.replaceSenderTrack('video', published)
+    // Retire the old pipeline. Never stop rawTrack — it's the live camera, still
+    // consumed by the new processor (blur on) or now published directly (blur off).
+    prevProcessor?.stop()
+    if (prevPublished !== rawTrack) prevPublished.stop()
+    this.onLocalStream?.(this.localStream)
+  }
+
+  // Derives the track to publish from a raw camera track. Blur off → the raw track
+  // itself. Blur on → the segmentation processor's canvas output; on any init
+  // failure it warns and falls back to the raw track so the call never breaks.
+  private async makeCameraProcessor(
+    rawTrack: MediaStreamTrack,
+  ): Promise<{ track: MediaStreamTrack; processor: import('./videoEffects').BackgroundBlurProcessor | null }> {
+    if (!this.blurEnabled) return { track: rawTrack, processor: null }
+    try {
+      const { BackgroundBlurProcessor } = await import('./videoEffects')
+      const processor = new BackgroundBlurProcessor()
+      const track = await processor.start(rawTrack)
+      return { track, processor }
+    } catch (error) {
+      console.warn('Could not start background blur; publishing the raw camera', error)
+      return { track: rawTrack, processor: null }
+    }
+  }
+
+  stopCamera() {
+    const published = this.cameraTrack
+    const raw = this.rawCameraTrack
+    const processor = this.blurProcessor
+    if (!published && !raw && !processor) return
+    this.cameraTrack = null
+    this.rawCameraTrack = null
+    this.blurProcessor = null
+    // Invalidate any in-flight startCamera/toggle so it aborts on wake.
+    this.blurOp++
+    raw?.removeEventListener('ended', this.handleCameraEnded)
+    if (published) {
+      this.localStream?.removeTrack(published)
+      for (const peer of this.peers.values()) {
+        const sender = peer.pc.getSenders().find((candidate) => candidate.track === published)
+        if (sender) peer.pc.removeTrack(sender)
+      }
+    }
+    // processor.stop() also stops its canvas output track; guard the double-stop.
+    processor?.stop()
+    if (published && published !== raw) published.stop()
+    raw?.stop()
     this.onLocalStream?.(null)
   }
 
@@ -568,8 +875,11 @@ export class VoiceClient {
     this.stopCamera()
     this.stopScreenShare()
     for (const connId of [...this.peers.keys()]) this.removePeer(connId)
+    this.teardownChain()
     for (const track of this.localStream?.getTracks() ?? []) track.stop()
+    for (const track of this.rawStream?.getTracks() ?? []) track.stop()
     this.localStream = null
+    this.rawStream = null
 
     if (this.speakingFrame !== null) {
       cancelAnimationFrame(this.speakingFrame)
@@ -585,7 +895,7 @@ export class VoiceClient {
   }
 
   private handleCameraEnded = () => {
-    if (this.stopped || !this.cameraTrack) return
+    if (this.stopped || !this.rawCameraTrack) return
     this.stopCamera()
     this.send('voice.camera', { channel_id: this.channelId, enabled: false })
   }
@@ -627,9 +937,7 @@ export class VoiceClient {
     if (this.stopped || this.speakingDetectors.has(connId) || !stream.getAudioTracks().length) {
       return
     }
-    const context = this.audioContext ?? new AudioContext()
-    this.audioContext = context
-    void context.resume().catch(() => {})
+    const context = this.ensureAudioContext()
 
     const source = context.createMediaStreamSource(stream)
     const analyser = context.createAnalyser()
@@ -711,9 +1019,14 @@ function trackDeviceId(track?: MediaStreamTrack | null): string | null {
   return id || null
 }
 
-function audioConstraints(deviceId?: string | null): MediaTrackConstraints | true {
-  if (!deviceId) return true
-  return { deviceId: { exact: deviceId } }
+function audioConstraints(deviceId?: string | null): MediaTrackConstraints {
+  const base: MediaTrackConstraints = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+  }
+  if (deviceId) return { ...base, deviceId: { exact: deviceId } }
+  return base
 }
 
 function videoConstraints(deviceId?: string | null): MediaTrackConstraints {

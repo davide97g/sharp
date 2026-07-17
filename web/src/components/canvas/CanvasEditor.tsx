@@ -181,7 +181,19 @@ export function CanvasEditor() {
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
       {/* toolbar */}
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border)] px-5">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-[var(--color-border)] px-3 sm:gap-3 sm:px-5">
+        <button
+          type="button"
+          onClick={() =>
+            navigate(doc.channel_id ? `/canvas/c/${doc.channel_id}` : '/canvas')
+          }
+          aria-label="Back to canvas"
+          className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] md:hidden"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="m15 18-6-6 6-6" />
+          </svg>
+        </button>
         <StatusDot status={status} />
         <div className="min-w-0 flex-1 truncate text-sm text-[var(--color-text-faint)]">
           {doc.icon ? `${doc.icon} ` : ''}

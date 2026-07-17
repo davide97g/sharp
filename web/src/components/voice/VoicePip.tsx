@@ -179,6 +179,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
   const muted = useStore((s) => s.voice.muted)
   const handRaised = useStore((s) => s.voice.handRaised)
   const cameraStatus = useStore((s) => s.voice.cameraStatus)
+  const blurEnabled = useStore((s) => s.voice.blurEnabled)
   const localStream = useStore((s) => s.voice.localStream)
   const remoteStreams = useStore((s) => s.voice.remoteStreams)
   const localScreenStream = useStore((s) => s.voice.localScreenStream)
@@ -192,6 +193,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
   const toggleVoiceMute = useStore((s) => s.toggleVoiceMute)
   const toggleVoiceHand = useStore((s) => s.toggleVoiceHand)
   const toggleVoiceCamera = useStore((s) => s.toggleVoiceCamera)
+  const toggleVoiceBlur = useStore((s) => s.toggleVoiceBlur)
   const leaveVoice = useStore((s) => s.leaveVoice)
 
   const participants = useMemo(() => {
@@ -352,6 +354,13 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
           onClick={toggleVoiceCamera}
         >
           <CameraIcon off={cameraStatus === 'off'} />
+        </PipControl>
+        <PipControl
+          label={blurEnabled ? 'Turn off background blur' : 'Blur my background'}
+          active={blurEnabled}
+          onClick={toggleVoiceBlur}
+        >
+          <BlurIcon off={!blurEnabled} />
         </PipControl>
         <PipControl label="Leave call" danger onClick={leaveVoice}>
           <LeaveIcon />
@@ -548,6 +557,17 @@ function CameraIcon({ off }: { off: boolean }) {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="m16 13 5 3V8l-5 3" />
       <rect x="3" y="6" width="13" height="12" rx="2" />
+      {off && <path d="m3 3 18 18" />}
+    </svg>
+  )
+}
+
+function BlurIcon({ off }: { off: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="12" cy="8" r="3.2" />
+      <path d="M6 20a6 6 0 0 1 12 0" />
+      <path d="M3.5 5h0M7 3.5h0M12 3h0M17 3.5h0M20.5 5h0M21.5 9.5h0M21.5 14.5h0M2.5 9.5h0M2.5 14.5h0" />
       {off && <path d="m3 3 18 18" />}
     </svg>
   )

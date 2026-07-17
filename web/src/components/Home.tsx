@@ -1,4 +1,13 @@
+import { useIsMobile } from '../lib/useMediaQuery'
+import { Sidebar } from './Sidebar'
+
 export function Home() {
+  const isMobile = useIsMobile()
+
+  if (isMobile) {
+    return <Sidebar variant="mobile" />
+  }
+
   return (
     <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-[var(--color-ink)] text-center">
       <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[var(--color-panel)] text-3xl font-extrabold text-[var(--color-accent)] ring-1 ring-[var(--color-border)]">
