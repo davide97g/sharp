@@ -31,6 +31,9 @@ pub struct VoiceParticipant {
     pub camera_on: bool,
     pub screen_on: bool,
     pub screen_stream_id: Option<String>,
+    pub hand_raised: bool,
+    /// Unix epoch milliseconds when the hand was raised; `None` while lowered.
+    pub hand_raised_at: Option<i64>,
     pub joined_at: DateTime<Utc>,
 }
 
@@ -187,6 +190,7 @@ pub async fn handle_voice_event(
         "voice.phrase" => handle_phrase(state, conn_id, &payload, tx).await,
         "voice.camera" => handle_camera(state, conn_id, &payload, tx).await,
         "voice.screen" => handle_screen(state, conn_id, &payload, tx).await,
+        "voice.hand" => handle_hand(state, conn_id, &payload, tx).await,
         "voice.signal" => handle_signal(state, user_id, conn_id, &payload, tx).await,
         _ => {}
     }
@@ -383,6 +387,8 @@ async fn handle_join(
                 camera_on: false,
                 screen_on: false,
                 screen_stream_id: None,
+                hand_raised: false,
+                hand_raised_at: None,
                 joined_at: Utc::now(),
             };
             room.participants.insert(conn_id, participant.clone());
@@ -490,6 +496,12 @@ async fn handle_mute(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &W
             .and_then(|room| room.participants.get_mut(&conn_id))
             .map(|participant| {
                 participant.muted = muted;
+                // Unmuting lowers a raised hand: one combined update carries both
+                // the mute and hand changes to the room.
+                if !muted && participant.hand_raised {
+                    participant.hand_raised = false;
+                    participant.hand_raised_at = None;
+                }
                 participant.clone()
             })
     };
@@ -499,6 +511,40 @@ async fn handle_mute(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &W
     };
 
     broadcast_participant_updated(state, channel_id, participant).await;
+}
+
+async fn handle_hand(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &WsSender) {
+    let Some(channel_id) = channel_id(payload) else {
+        return;
+    };
+    let Some(raised) = payload.get("raised").and_then(Value::as_bool) else {
+        return;
+    };
+
+    let result = {
+        let mut guard = state.voice_rooms.lock().unwrap();
+        match guard
+            .get_mut(&channel_id)
+            .and_then(|room| room.participants.get_mut(&conn_id))
+        {
+            Some(participant) => {
+                if participant.hand_raised == raised {
+                    // Idempotent no-op: nothing to broadcast.
+                    None
+                } else {
+                    participant.hand_raised = raised;
+                    participant.hand_raised_at =
+                        if raised { Some(Utc::now().timestamp_millis()) } else { None };
+                    Some(participant.clone())
+                }
+            }
+            None => return send_error(tx, channel_id, "not_in_room"),
+        }
+    };
+
+    if let Some(participant) = result {
+        broadcast_participant_updated(state, channel_id, participant).await;
+    }
 }
 
 async fn handle_transcribe(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &WsSender) {
@@ -1060,6 +1106,8 @@ mod tests {
             camera_on,
             screen_on: false,
             screen_stream_id: None,
+            hand_raised: false,
+            hand_raised_at: None,
             joined_at: Utc::now(),
         }
     }
@@ -1091,6 +1139,8 @@ mod tests {
             } else {
                 None
             },
+            hand_raised: false,
+            hand_raised_at: None,
             joined_at: Utc::now(),
         }
     }

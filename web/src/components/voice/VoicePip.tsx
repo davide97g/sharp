@@ -15,6 +15,8 @@ type PipParticipant = {
   userId: string
   muted: boolean
   speaking: boolean
+  handRaised: boolean
+  handRaisedAt: number | null
   cameraConnId: string | null
 }
 
@@ -167,6 +169,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
   const room = useStore((s) => (channelId ? s.voiceRooms[channelId] : undefined))
   const speaking = useStore((s) => s.voice.speaking)
   const muted = useStore((s) => s.voice.muted)
+  const handRaised = useStore((s) => s.voice.handRaised)
   const cameraStatus = useStore((s) => s.voice.cameraStatus)
   const localStream = useStore((s) => s.voice.localStream)
   const remoteStreams = useStore((s) => s.voice.remoteStreams)
@@ -177,6 +180,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
     s.channels.find((candidate) => candidate.id === channelId),
   )
   const toggleVoiceMute = useStore((s) => s.toggleVoiceMute)
+  const toggleVoiceHand = useStore((s) => s.toggleVoiceHand)
   const toggleVoiceCamera = useStore((s) => s.toggleVoiceCamera)
   const leaveVoice = useStore((s) => s.leaveVoice)
 
@@ -187,6 +191,15 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
       if (existing) {
         existing.muted = existing.muted && entry.muted
         existing.speaking = existing.speaking || Boolean(speaking[connId])
+        if (entry.hand_raised) {
+          existing.handRaised = true
+          existing.handRaisedAt =
+            existing.handRaisedAt === null
+              ? entry.hand_raised_at
+              : entry.hand_raised_at === null
+                ? existing.handRaisedAt
+                : Math.min(existing.handRaisedAt, entry.hand_raised_at)
+        }
         if (entry.camera_on && (!existing.cameraConnId || connId === myConnId)) {
           existing.cameraConnId = connId
         }
@@ -195,11 +208,18 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
           userId: entry.user_id,
           muted: entry.muted,
           speaking: Boolean(speaking[connId]),
+          handRaised: entry.hand_raised,
+          handRaisedAt: entry.hand_raised ? entry.hand_raised_at : null,
           cameraConnId: entry.camera_on ? connId : null,
         })
       }
     }
-    return [...byUser.values()]
+    // Raised hands first (oldest raise first); others keep insertion order.
+    return [...byUser.values()].sort((a, b) => {
+      if (a.handRaised !== b.handRaised) return a.handRaised ? -1 : 1
+      if (a.handRaised && b.handRaised) return (a.handRaisedAt ?? 0) - (b.handRaisedAt ?? 0)
+      return 0
+    })
   }, [myConnId, room, speaking])
 
   const roomName = channel
@@ -245,6 +265,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
               local={local}
               muted={participant.muted}
               speaking={participant.speaking}
+              handRaised={participant.handRaised}
             />
           )
         })}
@@ -257,6 +278,13 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
           onClick={toggleVoiceMute}
         >
           <MicIcon off={muted} />
+        </PipControl>
+        <PipControl
+          label={handRaised ? 'Lower hand' : 'Raise hand'}
+          active={handRaised}
+          onClick={toggleVoiceHand}
+        >
+          <HandIcon />
         </PipControl>
         <PipControl
           label={cameraStatus === 'on' ? 'Turn camera off' : 'Turn camera on'}
@@ -281,6 +309,7 @@ function PipTile({
   local,
   muted,
   speaking,
+  handRaised,
 }: {
   userId: string
   name: string
@@ -288,6 +317,7 @@ function PipTile({
   local: boolean
   muted: boolean
   speaking: boolean
+  handRaised: boolean
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const hasVideo = Boolean(stream?.getVideoTracks().length)
@@ -322,9 +352,21 @@ function PipTile({
         <span className="truncate">
           {name}{local ? ' (you)' : ''}
         </span>
-        {muted && (
-          <span className="ml-auto rounded-full bg-black/50 p-1" title="Muted">
-            <MicIcon off />
+        {(handRaised || muted) && (
+          <span className="ml-auto flex items-center gap-1">
+            {handRaised && (
+              <span
+                className="rounded-full bg-amber-400/90 p-1 text-[#3a2a00]"
+                title="Hand raised"
+              >
+                <HandIcon />
+              </span>
+            )}
+            {muted && (
+              <span className="rounded-full bg-black/50 p-1" title="Muted">
+                <MicIcon off />
+              </span>
+            )}
           </span>
         )}
       </div>
@@ -373,6 +415,17 @@ function ReturnIcon() {
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="m9 14-4-4 4-4" />
       <path d="M5 10h9a5 5 0 0 1 5 5v3" />
+    </svg>
+  )
+}
+
+function HandIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M18 11V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2" />
+      <path d="M14 10V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v2" />
+      <path d="M10 10.5V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v8" />
+      <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
     </svg>
   )
 }

@@ -5,7 +5,7 @@ import { isSpeechSupported, PhraseRecognizer } from './lib/speech'
 import { WsClient } from './lib/ws'
 import { cmpId } from './lib/util'
 import { gifPreviewText } from './lib/gif'
-import { toastError, toastNotify } from './lib/toast'
+import { toastError, toastInfo, toastNotify } from './lib/toast'
 import { navigateTo } from './lib/nav'
 import {
   initPush,
@@ -93,6 +93,8 @@ export type VoiceRoom = Record<
     camera_on: boolean
     screen_on: boolean
     screen_stream_id: string | null
+    hand_raised: boolean
+    hand_raised_at: number | null
     joined_at: string
   }
 >
@@ -103,6 +105,7 @@ type VoiceState = {
   channelId: string | null
   status: 'idle' | 'connecting' | 'connected'
   muted: boolean
+  handRaised: boolean
   transcribing: boolean
   roastArmed: boolean
   speaking: Record<string, boolean>
@@ -291,6 +294,7 @@ type State = {
   ) => Promise<void>
   leaveVoice: () => void
   toggleVoiceMute: () => void
+  toggleVoiceHand: () => void
   toggleTranscription: () => void
   toggleVoiceCamera: () => void
   toggleVoiceScreen: () => Promise<void>
@@ -350,6 +354,7 @@ function emptyVoiceState(): VoiceState {
     channelId: null,
     status: 'idle',
     muted: false,
+    handRaised: false,
     transcribing: false,
     roastArmed: false,
     speaking: {},
@@ -987,6 +992,7 @@ export const useStore = create<State>((set, get) => ({
         channelId,
         status: 'connecting',
         muted: false,
+        handRaised: false,
         transcribing: false,
         roastArmed: false,
         speaking: {},
@@ -1117,18 +1123,32 @@ export const useStore = create<State>((set, get) => ({
   },
 
   toggleVoiceMute() {
-    const { channelId, client, muted } = get().voice
+    const { channelId, client, muted, handRaised } = get().voice
     if (!channelId || !client) return
     const nextMuted = !muted
     client.setMuted(nextMuted)
     if (nextMuted) sound.micMute()
     else sound.micUnmute()
-    set((s) => ({ voice: { ...s.voice, muted: nextMuted } }))
+    // Unmuting optimistically lowers a raised hand; the server confirms via the
+    // participant_updated echo it broadcasts for the mute change.
+    const lowerHand = !nextMuted && handRaised
+    set((s) => ({
+      voice: { ...s.voice, muted: nextMuted, handRaised: lowerHand ? false : s.voice.handRaised },
+    }))
     if (get().voice.transcribing) {
       if (nextMuted) voiceRecognizer?.pause()
       else voiceRecognizer?.resume()
     }
     get().ws?.send('voice.mute', { channel_id: channelId, muted: nextMuted })
+  },
+
+  toggleVoiceHand() {
+    const { channelId, client, status, handRaised } = get().voice
+    if (!channelId || !client || status !== 'connected') return
+    const nextRaised = !handRaised
+    if (nextRaised) sound.handRaise()
+    set((s) => ({ voice: { ...s.voice, handRaised: nextRaised } }))
+    get().ws?.send('voice.hand', { channel_id: channelId, raised: nextRaised })
   },
 
   toggleTranscription() {
@@ -1611,6 +1631,8 @@ export const useStore = create<State>((set, get) => ({
                 camera_on: p.participant.camera_on,
                 screen_on: p.participant.screen_on,
                   screen_stream_id: p.participant.screen_stream_id,
+                  hand_raised: p.participant.hand_raised,
+                  hand_raised_at: p.participant.hand_raised_at,
                   joined_at: p.participant.joined_at,
               },
             },
@@ -1682,6 +1704,14 @@ export const useStore = create<State>((set, get) => ({
       }
       case 'voice.participant_updated': {
         const p = env.payload as VoiceParticipantUpdatedPayload
+        // Detect a false→true hand-raise transition for another participant (never
+        // our own). Comparing the stored flag against the incoming one dedupes:
+        // repeated updates while already raised won't re-fire.
+        const prevEntry = get().voiceRooms[p.channel_id]?.[p.participant.conn_id]
+        const handJustRaised =
+          p.participant.hand_raised &&
+          !prevEntry?.hand_raised &&
+          p.participant.conn_id !== get().myConnId
         set((s) => {
           const room = s.voiceRooms[p.channel_id]
           if (!room || !room[p.participant.conn_id]) return {}
@@ -1699,6 +1729,8 @@ export const useStore = create<State>((set, get) => ({
                   camera_on: p.participant.camera_on,
                   screen_on: p.participant.screen_on,
                 screen_stream_id: p.participant.screen_stream_id,
+                hand_raised: p.participant.hand_raised,
+                hand_raised_at: p.participant.hand_raised_at,
                 joined_at: p.participant.joined_at,
                 },
               },
@@ -1708,6 +1740,14 @@ export const useStore = create<State>((set, get) => ({
 
         const active = get().voice
         if (active.channelId !== p.channel_id) break
+        if (handJustRaised) {
+          sound.handRaise()
+          const name =
+            get().users[p.participant.user_id]?.display_name ??
+            p.participant.display_name ??
+            'Someone'
+          toastInfo(`${name} raised their hand`)
+        }
         if (p.participant.conn_id === get().myConnId) {
           // camera
           if (p.participant.camera_on && active.cameraStatus === 'starting' && active.client) {
@@ -2081,6 +2121,8 @@ function voiceRoomFromParticipants(
       camera_on: participant.camera_on,
       screen_on: participant.screen_on,
       screen_stream_id: participant.screen_stream_id,
+      hand_raised: participant.hand_raised,
+      hand_raised_at: participant.hand_raised_at,
       joined_at: participant.joined_at,
     }
   }

@@ -179,6 +179,9 @@ export type VoiceParticipant = {
   camera_on: boolean
   screen_on: boolean
   screen_stream_id: string | null
+  hand_raised: boolean
+  // Unix epoch milliseconds when the hand was raised; null while lowered.
+  hand_raised_at: number | null
   joined_at: string
 }
 

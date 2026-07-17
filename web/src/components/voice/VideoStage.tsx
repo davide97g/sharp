@@ -18,6 +18,8 @@ type StageParticipant = {
   muted: boolean
   transcribing: boolean
   speaking: boolean
+  handRaised: boolean
+  handRaisedAt: number | null
   cameraConnId: string | null
 }
 
@@ -34,6 +36,21 @@ function gridColsFor(count: number): number {
   if (count === 3) return 3
   if (count === 4) return 2
   return Math.ceil(Math.sqrt(count))
+}
+
+// Earliest of two raise timestamps (a user with multiple conns keeps the oldest).
+function earliestHand(a: number | null, b: number | null): number | null {
+  if (a === null) return b
+  if (b === null) return a
+  return Math.min(a, b)
+}
+
+// Sort raised hands first (oldest raise first); non-raised keep their order via
+// Array#sort stability.
+function handOrder(a: StageParticipant, b: StageParticipant): number {
+  if (a.handRaised !== b.handRaised) return a.handRaised ? -1 : 1
+  if (a.handRaised && b.handRaised) return (a.handRaisedAt ?? 0) - (b.handRaisedAt ?? 0)
+  return 0
 }
 
 const STAGE_SIZE: Record<
@@ -63,6 +80,7 @@ export function VideoStage() {
   )
   const speaking = useStore((s) => s.voice.speaking)
   const muted = useStore((s) => s.voice.muted)
+  const handRaised = useStore((s) => s.voice.handRaised)
   const transcribing = useStore((s) => s.voice.transcribing)
   const voiceStatus = useStore((s) => s.voice.status)
   const cameraStatus = useStore((s) => s.voice.cameraStatus)
@@ -79,6 +97,7 @@ export function VideoStage() {
   const isGuest = useStore((s) => s.isGuest)
   const channel = useStore((s) => s.channels.find((candidate) => candidate.id === channelId))
   const toggleVoiceMute = useStore((s) => s.toggleVoiceMute)
+  const toggleVoiceHand = useStore((s) => s.toggleVoiceHand)
   const toggleTranscription = useStore((s) => s.toggleTranscription)
   const toggleVoiceCamera = useStore((s) => s.toggleVoiceCamera)
   const toggleVoiceScreen = useStore((s) => s.toggleVoiceScreen)
@@ -196,6 +215,10 @@ export function VideoStage() {
         existing.muted = existing.muted && entry.muted
         existing.transcribing = existing.transcribing || entry.transcribing
         existing.speaking = existing.speaking || Boolean(speaking[connId])
+        if (entry.hand_raised) {
+          existing.handRaised = true
+          existing.handRaisedAt = earliestHand(existing.handRaisedAt, entry.hand_raised_at)
+        }
         if (entry.camera_on && (!existing.cameraConnId || connId === myConnId)) {
           existing.cameraConnId = connId
         }
@@ -208,11 +231,15 @@ export function VideoStage() {
           muted: entry.muted,
           transcribing: entry.transcribing,
           speaking: Boolean(speaking[connId]),
+          handRaised: entry.hand_raised,
+          handRaisedAt: entry.hand_raised ? entry.hand_raised_at : null,
           cameraConnId: entry.camera_on ? connId : null,
         })
       }
     }
-    return [...byUser.values()]
+    // Raised hands float to the front, oldest raise first; everyone else keeps
+    // their existing (insertion) order.
+    return [...byUser.values()].sort(handOrder)
   }, [myConnId, room, speaking])
   const sharingCount = participants.filter((participant) => participant.transcribing).length
 
@@ -331,6 +358,7 @@ export function VideoStage() {
                   muted={participant.muted}
                   transcribing={participant.transcribing}
                   speaking={participant.speaking}
+                  handRaised={participant.handRaised}
                   size={40}
                 />
               )
@@ -352,6 +380,7 @@ export function VideoStage() {
                   muted={participant.muted}
                   transcribing={participant.transcribing}
                   speaking={participant.speaking}
+                  handRaised={participant.handRaised}
                   compact
                 />
               </li>
@@ -387,6 +416,7 @@ export function VideoStage() {
               muted={participant.muted}
               transcribing={participant.transcribing}
               speaking={participant.speaking}
+              handRaised={participant.handRaised}
               compact={stageMode === 'compact'}
             />
           </div>
@@ -410,6 +440,7 @@ export function VideoStage() {
             muted={participant.muted}
             transcribing={participant.transcribing}
             speaking={participant.speaking}
+            handRaised={participant.handRaised}
             size={avatarSize}
           />
         )
@@ -447,6 +478,14 @@ export function VideoStage() {
           <CaptionsIcon />
         </CallControl>
       )}
+      <CallControl
+        label={handRaised ? 'Lower hand' : 'Raise hand'}
+        active={handRaised}
+        disabled={voiceStatus !== 'connected'}
+        onClick={toggleVoiceHand}
+      >
+        <HandIcon />
+      </CallControl>
       <DeviceControl
         label={cameraStatus === 'on' ? 'Turn camera off' : 'Turn camera on'}
         menuLabel="Choose camera"
@@ -780,6 +819,7 @@ function AudioTile({
   muted,
   transcribing,
   speaking,
+  handRaised,
   size,
 }: {
   userId: string
@@ -789,6 +829,7 @@ function AudioTile({
   muted: boolean
   transcribing: boolean
   speaking: boolean
+  handRaised: boolean
   size: number
 }) {
   return (
@@ -799,6 +840,14 @@ function AudioTile({
         }`}
       >
         <Avatar id={userId} name={name} size={size} />
+        {handRaised && (
+          <span
+            className="absolute -right-0.5 -top-0.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-[var(--color-ink)] bg-amber-400 text-[#3a2a00]"
+            title="Hand raised"
+          >
+            <HandIcon compact />
+          </span>
+        )}
         {muted && (
           <span
             className="absolute -bottom-0.5 -right-0.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-[var(--color-ink)] bg-[var(--color-panel-2)] text-[var(--color-text-dim)]"
@@ -836,6 +885,7 @@ function VideoTile({
   muted,
   transcribing,
   speaking,
+  handRaised,
   compact,
 }: {
   userId: string
@@ -846,6 +896,7 @@ function VideoTile({
   muted: boolean
   transcribing: boolean
   speaking: boolean
+  handRaised: boolean
   compact: boolean
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -885,8 +936,16 @@ function VideoTile({
           {local ? ' (you)' : ''}
         </span>
         {guest && <GuestBadge onDark />}
-        {(transcribing || muted) && (
+        {(handRaised || transcribing || muted) && (
           <span className="ml-auto flex items-center gap-1">
+            {handRaised && (
+              <span
+                className="rounded-full bg-amber-400/90 p-1 text-[#3a2a00]"
+                title="Hand raised"
+              >
+                <HandIcon compact />
+              </span>
+            )}
             {transcribing && (
               <span
                 className="rounded-full bg-black/45 p-1 text-[var(--color-accent-hover)]"
@@ -1411,6 +1470,28 @@ function CaptionsIcon({ compact = false }: { compact?: boolean }) {
     >
       <rect x="3" y="5" width="18" height="14" rx="2" />
       <path d="M7 11h2M13 11h4M7 15h4M15 15h2" />
+    </svg>
+  )
+}
+
+function HandIcon({ compact = false }: { compact?: boolean }) {
+  const size = compact ? 14 : 18
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M18 11V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2" />
+      <path d="M14 10V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v2" />
+      <path d="M10 10.5V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v8" />
+      <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
     </svg>
   )
 }

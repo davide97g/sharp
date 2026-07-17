@@ -543,7 +543,7 @@ through it and there is no SFU.
 All ids are strings in JSON (UUIDs). A WebSocket connection id is the peer identity.
 
 ```ts
-VoiceParticipant = { conn_id: string, user_id: string, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null, joined_at: string }
+VoiceParticipant = { conn_id: string, user_id: string, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null, hand_raised: boolean, hand_raised_at: number | null, joined_at: string }
 VoiceRoomSnapshot = { channel_id: string, participants: VoiceParticipant[], active_meeting_id: string | null }
 VoiceSignalKind = 'offer'|'answer'|'candidate'
 ```
@@ -567,6 +567,9 @@ Client → server:
 - `voice.camera` `{channel_id, enabled: boolean}`
 - `voice.screen` `{channel_id, enabled: boolean, stream_id?: string}` — `stream_id` is the
   msid of the sharer's screen `MediaStream`, sent only when enabling.
+- `voice.hand` `{channel_id, raised: boolean}` — raise or lower the participant's hand.
+  Idempotent (a request that matches the current state is a no-op with no broadcast).
+  Guests may send it. Unmuting via `voice.mute` also lowers a raised hand automatically.
 - `voice.signal` `{channel_id, to_user, to_conn, kind: "offer"|"answer"|"candidate", data: object}`
   — `data` is SDP `{type,sdp}` for an offer/answer, or `RTCIceCandidateInit` for a candidate.
 
@@ -575,7 +578,8 @@ Server → client:
 - `hello` payload is extended with `conn_id: string` and
   `voice_rooms: VoiceRoomSnapshot[]`, where each snapshot is
   `{channel_id, participants: VoiceParticipant[], active_meeting_id}` and each participant is
-  `{conn_id, user_id, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null, joined_at: string}`.
+  `{conn_id, user_id, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null, hand_raised: boolean, hand_raised_at: number | null, joined_at: string}`.
+  `hand_raised_at` is Unix epoch milliseconds set when the hand was raised and `null` while lowered.
   `display_name` is filled server-side for everyone (users from the `users` table,
   guests from their token) so clients can render names without `/users` access; `guest`
   marks public voice-link joiners.
@@ -586,7 +590,8 @@ Server → client:
 - `voice.participant_left` `{channel_id, conn_id, user_id}` — broadcast to the room
   audience.
 - `voice.participant_updated` `{channel_id, participant: VoiceParticipant}` — broadcast to
-  the room audience after mute, transcription, camera, or screen-share state changes.
+  the room audience after mute, transcription, camera, screen-share, or raise-hand state
+  changes.
 - `voice.roast_armed` `{channel_id, armed: boolean}` — broadcast to the room audience when
   three phrases with gaps of at most 20 seconds arm a voice roast, and with `armed=false`
   after a successful voice GIF suggestion consumes it.
@@ -609,7 +614,7 @@ Server → client:
   and its resolved `display_name`/`guest`, reply with `voice.state` on the sender's tx only,
   then broadcast `voice.participant_joined` to the room audience. Joining twice from the same
   conn is idempotent and re-sends `voice.state`. New participants start with
-  `transcribing=false`. Demoting a registered participant to channel viewer removes all of that
+  `transcribing=false` and hand lowered (`hand_raised=false`, `hand_raised_at=null`). Demoting a registered participant to channel viewer removes all of that
   user's connections from the room immediately.
 - **Broadcast targeting**: every voice broadcast (`participant_joined`/`left`/`updated` and
   `voice.roast_armed`)
@@ -619,7 +624,15 @@ Server → client:
   participant events. `voice.signal` targets an explicit `to_user` and is unchanged.
 - `voice.leave`: remove the sender's conn from the room, drop the room when empty, and
   broadcast `voice.participant_left`.
-- `voice.mute`: update the participant's flag and broadcast `voice.participant_updated`.
+- `voice.mute`: update the participant's flag and broadcast `voice.participant_updated`. When
+  the change is an unmute (`muted=false`) and the participant's hand is raised, also clear
+  `hand_raised`/`hand_raised_at` in the same participant snapshot so a single
+  `voice.participant_updated` carries both changes.
+- `voice.hand`: require an active room participant; set `hand_raised` to the requested
+  `raised` value (stamping `hand_raised_at` with the current Unix epoch ms when raising,
+  clearing it to `null` when lowering) and broadcast the complete participant through
+  `voice.participant_updated`. A request that matches the current state is an idempotent
+  no-op with no broadcast. Guests may raise/lower their hand.
 - `voice.transcribe`: require an active room participant, update `transcribing`, and broadcast
   the complete participant through `voice.participant_updated`. First opt-in creates a durable
   meeting and snapshots current attendance. Disabling stops future phrases from that connection
@@ -711,8 +724,9 @@ REST.
 - **Guest restrictions**: the `AuthUser` extractor rejects any token with `guest: true`
   (401), so guests cannot reach REST endpoints; `/voice/config` uses a separate
   `VoiceConfigAuth` extractor that accepts both. On the main WS, a guest may only send `ping`
-  plus `voice.join`, `voice.leave`, `voice.mute`, `voice.camera`, `voice.screen`, and
-  `voice.signal`, and only when the event's `channel_id` matches its bound channel. Member-only
+  plus `voice.join`, `voice.leave`, `voice.mute`, `voice.camera`, `voice.screen`,
+  `voice.hand`, and `voice.signal`, and only when the event's `channel_id` matches its bound
+  channel. Member-only
   `voice.transcribe` and `voice.phrase`, plus all other events, are silently dropped. Guest
   connect/disconnect does **not** emit presence.
 - **Revocation at join**: `voice.join` re-checks the guest token's `link` against the

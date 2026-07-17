@@ -454,6 +454,18 @@ function cameraOn() {
   })
 }
 
+/** Bright two-note rising chime when another participant raises their hand. */
+function handRaise() {
+  play('hand.raise', 200, (context, t0, out) => {
+    const group = context.createGain()
+    group.gain.value = 0.12
+    group.connect(out)
+    // A6 → C#7, a small bright lift that pops above call audio.
+    tone(context, group, t0, { freq: 1760, type: 'sine', attack: 0.006, decay: 0.16, peak: 1 })
+    tone(context, group, t0 + 0.1, { freq: 2217, type: 'sine', attack: 0.006, decay: 0.2, peak: 0.9 })
+  })
+}
+
 function cameraOff() {
   play('camera.off', 90, (context, t0, out) => {
     const lp = context.createBiquadFilter()
@@ -588,6 +600,7 @@ export const sound = {
   screenShareStop,
   cameraOn,
   cameraOff,
+  handRaise,
   // ui navigation
   modalOpen,
   modalClose,

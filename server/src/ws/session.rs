@@ -128,7 +128,7 @@ async fn handle_client_event(
         let voice_event = matches!(
             event_type,
             "voice.join" | "voice.leave" | "voice.mute" | "voice.camera" | "voice.screen"
-                | "voice.signal" | "voice.transcribe" | "voice.phrase"
+                | "voice.signal" | "voice.transcribe" | "voice.phrase" | "voice.hand"
         );
         if event_type != "ping" && !voice_event {
             return;
@@ -169,7 +169,7 @@ async fn handle_client_event(
             }
         }
         "voice.join" | "voice.leave" | "voice.mute" | "voice.transcribe" | "voice.phrase"
-        | "voice.camera" | "voice.screen" | "voice.signal" => {
+        | "voice.camera" | "voice.screen" | "voice.signal" | "voice.hand" => {
             voice::handle_voice_event(
                 state,
                 user_id,
