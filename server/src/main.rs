@@ -120,6 +120,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         giphy_usage: Default::default(),
     });
 
+    // Heartbeats distinguish quiet live calls from records orphaned by a process
+    // crash. Delay recovery so other replicas have time to refresh their rooms.
+    let meeting_state = app_state.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+        loop {
+            if let Err(error) = routes::meetings::heartbeat_live_meetings(&meeting_state).await {
+                tracing::warn!("meeting heartbeat failed: {}", error);
+            }
+            if let Err(error) = routes::meetings::recover_interrupted_meetings(&meeting_state).await {
+                tracing::warn!("meeting recovery failed: {}", error);
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        }
+    });
+
     let api = Router::new()
         .route("/auth/register", post(auth::register))
         .route("/auth/login", post(auth::login))
@@ -141,6 +157,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(routes::gifs::get_settings).put(routes::gifs::put_settings),
         )
         .route("/voice/config", get(routes::voice::voice_config))
+        .route("/meetings", get(routes::meetings::list_meetings))
+        .route(
+            "/meetings/:id",
+            get(routes::meetings::get_meeting)
+                .patch(routes::meetings::update_meeting)
+                .delete(routes::meetings::delete_meeting),
+        )
+        .route(
+            "/meetings/:id/actions",
+            put(routes::meetings::save_actions),
+        )
+        .route(
+            "/meetings/:id/regenerate",
+            post(routes::meetings::regenerate_meeting),
+        )
         .route(
             "/channels",
             get(routes::channels::list_channels).post(routes::channels::create_channel),

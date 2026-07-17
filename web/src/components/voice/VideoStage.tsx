@@ -58,6 +58,9 @@ export function VideoStage() {
   const channelId = useStore((s) => s.voice.channelId)
   const stageMode = useStore((s) => s.voice.stageMode)
   const room = useStore((s) => (channelId ? s.voiceRooms[channelId] : undefined))
+  const activeMeetingId = useStore((s) =>
+    channelId ? s.activeMeetings[channelId] ?? null : null,
+  )
   const speaking = useStore((s) => s.voice.speaking)
   const muted = useStore((s) => s.voice.muted)
   const transcribing = useStore((s) => s.voice.transcribing)
@@ -206,6 +209,7 @@ export function VideoStage() {
     }
     return [...byUser.values()]
   }, [myConnId, room, speaking])
+  const sharingCount = participants.filter((participant) => participant.transcribing).length
 
   const screenShares = useMemo(() => {
     const shares: {
@@ -400,9 +404,15 @@ export function VideoStage() {
       >
         <MicIcon off={muted} />
       </DeviceControl>
-      {!isGuest && isSpeechSupported() && (
+      {isSpeechSupported() && (
         <CallControl
-          label={transcribing ? 'Stop transcribing' : 'Transcribe microphone'}
+          label={
+            transcribing
+              ? 'Stop sharing my transcript'
+              : activeMeetingId
+                ? 'Share my transcript'
+                : 'Start meeting notes'
+          }
           active={transcribing}
           disabled={voiceStatus !== 'connected'}
           onClick={toggleTranscription}
@@ -613,6 +623,15 @@ export function VideoStage() {
             {participants.length} {participants.length === 1 ? 'participant' : 'participants'}
           </div>
         </div>
+        {activeMeetingId && (
+          <div
+            className="flex shrink-0 items-center gap-1.5 rounded-full border border-[#ff6b5f]/35 bg-[#ff6b5f]/10 px-2.5 py-1 text-[10px] font-semibold text-[#ff8a80]"
+            title="Meeting record is active. Only opted-in microphones are transcribed."
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-[#ff6b5f]" />
+            Notes on · {sharingCount} sharing
+          </div>
+        )}
         {!isGuest && (
           <CopyLinkControl channelId={channelId} buttonClass={headerBtnClass} />
         )}

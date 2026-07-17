@@ -3,6 +3,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { DocsSidebar } from './docs/DocsSidebar'
 import { CanvasSidebar } from './canvas/CanvasSidebar'
+import { MeetingsSidebar } from './meetings/MeetingsSidebar'
 import { CompactSidebar } from './CompactSidebar'
 import { ThreadPanel } from './ThreadPanel'
 import { QuickSwitcher } from './QuickSwitcher'
@@ -39,7 +40,10 @@ export function AppShell() {
     location.pathname.startsWith('/docs') || location.pathname.startsWith('/d/')
   const canvasMode =
     location.pathname.startsWith('/canvas') || location.pathname.startsWith('/x/')
-  const mode: 'chat' | 'docs' | 'canvas' = canvasMode
+  const meetingsMode = location.pathname.startsWith('/meetings')
+  const mode: 'chat' | 'docs' | 'canvas' | 'meetings' = meetingsMode
+    ? 'meetings'
+    : canvasMode
     ? 'canvas'
     : docsMode
       ? 'docs'
@@ -116,7 +120,7 @@ export function AppShell() {
         data-open={sidebarOpen}
       >
         {sidebarOpen ? (
-          canvasMode ? <CanvasSidebar /> : docsMode ? <DocsSidebar /> : <Sidebar />
+          meetingsMode ? <MeetingsSidebar /> : canvasMode ? <CanvasSidebar /> : docsMode ? <DocsSidebar /> : <Sidebar />
         ) : (
           <CompactSidebar mode={mode} />
         )}
@@ -137,7 +141,7 @@ function ModeRail({
   sidebarOpen,
   onToggleSidebar,
 }: {
-  mode: 'chat' | 'docs' | 'canvas'
+  mode: 'chat' | 'docs' | 'canvas' | 'meetings'
   sidebarOpen: boolean
   onToggleSidebar: () => void
 }) {
@@ -209,6 +213,17 @@ function ModeRail({
             <rect x="4" y="4" width="7" height="7" rx="1" />
             <circle cx="16.5" cy="7.5" r="3.5" />
             <path d="M7.5 21 3 14h9z" />
+          </svg>
+        }
+      />
+      <RailButton
+        active={mode === 'meetings'}
+        onClick={() => navigate('/meetings')}
+        title="Meetings"
+        label={
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M4 6h16M4 12h16M4 18h10" />
+            <circle cx="18" cy="18" r="3" />
           </svg>
         }
       />

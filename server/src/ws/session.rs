@@ -128,7 +128,7 @@ async fn handle_client_event(
         let voice_event = matches!(
             event_type,
             "voice.join" | "voice.leave" | "voice.mute" | "voice.camera" | "voice.screen"
-                | "voice.signal"
+                | "voice.signal" | "voice.transcribe" | "voice.phrase"
         );
         if event_type != "ping" && !voice_event {
             return;

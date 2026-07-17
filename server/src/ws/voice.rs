@@ -1,7 +1,9 @@
 use crate::routes::is_member;
+use crate::routes::meetings::{self, LiveAttendee};
 use crate::state::SharedState;
 use crate::ws::{channel_member_ids, envelope, GuestInfo, WsSender};
 use axum::extract::ws::Message;
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::{json, Value};
 use sqlx::Row;
@@ -29,6 +31,7 @@ pub struct VoiceParticipant {
     pub camera_on: bool,
     pub screen_on: bool,
     pub screen_stream_id: Option<String>,
+    pub joined_at: DateTime<Utc>,
 }
 
 pub struct VoicePhrase {
@@ -41,7 +44,11 @@ pub struct VoicePhrase {
 /// members and the user-ids currently in the room (so guests, who are not
 /// channel members, still receive participant events), plus any extra ids the
 /// caller supplies (e.g. a just-removed participant for `participant_left`).
-async fn voice_targets(state: &SharedState, channel_id: Uuid, extra: &[Uuid]) -> Vec<Uuid> {
+pub(crate) async fn voice_targets(
+    state: &SharedState,
+    channel_id: Uuid,
+    extra: &[Uuid],
+) -> Vec<Uuid> {
     let mut ids: HashSet<Uuid> = HashSet::new();
     match channel_member_ids(&state.pool, channel_id).await {
         Ok(members) => ids.extend(members),
@@ -85,28 +92,32 @@ pub struct VoiceRoom {
     pub phrase_count: u32,
     pub last_phrase_at: Option<Instant>,
     pub roast_armed: bool,
+    pub active_meeting_id: Option<Uuid>,
+    pub meeting_starting: bool,
+    pub attendance_ids: HashMap<Uuid, Uuid>,
 }
 
 pub type VoiceRooms = Mutex<HashMap<Uuid, VoiceRoom>>;
 
 pub fn snapshot_all(state: &SharedState) -> Value {
     let guard = state.voice_rooms.lock().unwrap();
-    let mut rooms: Vec<(Uuid, Vec<VoiceParticipant>)> = guard
+    let mut rooms: Vec<(Uuid, Vec<VoiceParticipant>, Option<Uuid>)> = guard
         .iter()
         .map(|(channel_id, room)| {
             let mut participants: Vec<VoiceParticipant> =
                 room.participants.values().cloned().collect();
             participants.sort_by_key(|participant| participant.conn_id);
-            (*channel_id, participants)
+            (*channel_id, participants, room.active_meeting_id)
         })
         .collect();
-    rooms.sort_by_key(|(channel_id, _)| *channel_id);
+    rooms.sort_by_key(|(channel_id, _, _)| *channel_id);
 
     json!(rooms
         .into_iter()
-        .map(|(channel_id, participants)| json!({
+        .map(|(channel_id, participants, active_meeting_id)| json!({
             "channel_id": channel_id.to_string(),
             "participants": participants,
+            "active_meeting_id": active_meeting_id,
         }))
         .collect::<Vec<_>>())
 }
@@ -182,26 +193,43 @@ pub async fn handle_voice_event(
 }
 
 pub async fn cleanup_conn(state: &SharedState, user_id: Uuid, conn_id: Uuid) {
-    let removed: Vec<(Uuid, VoiceParticipant)> = {
+    let removed: Vec<(Uuid, VoiceParticipant, Option<Uuid>, bool)> = {
         let mut guard = state.voice_rooms.lock().unwrap();
         let mut removed = Vec::new();
         for (channel_id, room) in guard.iter_mut() {
             if let Some(participant) = room.participants.remove(&conn_id) {
-                removed.push((*channel_id, participant));
+                room.attendance_ids.remove(&conn_id);
+                removed.push((
+                    *channel_id,
+                    participant,
+                    room.active_meeting_id,
+                    room.participants.is_empty(),
+                ));
             }
         }
         guard.retain(|_, room| !room.participants.is_empty());
         removed
     };
 
-    for (channel_id, participant) in removed {
+    for (channel_id, participant, meeting_id, room_ended) in removed {
         debug_assert_eq!(participant.user_id, user_id);
+        let left_at = Utc::now();
+        if let Some(meeting_id) = meeting_id {
+            if let Err(error) =
+                meetings::close_live_attendee(state, meeting_id, conn_id, left_at).await
+            {
+                tracing::warn!("meeting disconnect attendance failed: {}", error);
+            }
+            if room_ended {
+                finish_and_broadcast_meeting(state, channel_id, meeting_id, left_at, false).await;
+            }
+        }
         broadcast_participant_left(state, channel_id, conn_id, user_id).await;
     }
 }
 
 pub async fn remove_member_from_room(state: &SharedState, channel_id: Uuid, user_id: Uuid) {
-    let mut removed: Vec<VoiceParticipant> = {
+    let (mut removed, meeting_id, room_ended): (Vec<VoiceParticipant>, Option<Uuid>, bool) = {
         let mut guard = state.voice_rooms.lock().unwrap();
         let Some(room) = guard.get_mut(&channel_id) else {
             return;
@@ -216,12 +244,33 @@ pub async fn remove_member_from_room(state: &SharedState, channel_id: Uuid, user
             .iter()
             .filter_map(|conn_id| room.participants.remove(conn_id))
             .collect();
-        if room.participants.is_empty() {
+        for conn_id in &conn_ids {
+            room.attendance_ids.remove(conn_id);
+        }
+        let meeting_id = room.active_meeting_id;
+        let room_ended = room.participants.is_empty();
+        if room_ended {
             guard.remove(&channel_id);
         }
-        removed
+        (removed, meeting_id, room_ended)
     };
     removed.sort_by_key(|participant| participant.conn_id);
+
+    let left_at = Utc::now();
+    if let Some(meeting_id) = meeting_id {
+        for participant in &removed {
+            let _ = meetings::close_live_attendee(
+                state,
+                meeting_id,
+                participant.conn_id,
+                left_at,
+            )
+            .await;
+        }
+        if room_ended {
+            finish_and_broadcast_meeting(state, channel_id, meeting_id, left_at, false).await;
+        }
+    }
 
     // Include removed (possibly-guest) user-ids so they receive their leave event.
     let extra: Vec<Uuid> = removed.iter().map(|p| p.user_id).collect();
@@ -233,14 +282,28 @@ pub async fn remove_member_from_room(state: &SharedState, channel_id: Uuid, user
 }
 
 pub async fn close_room(state: &SharedState, channel_id: Uuid) {
-    let mut removed: Vec<VoiceParticipant> = {
+    let (mut removed, meeting_id): (Vec<VoiceParticipant>, Option<Uuid>) = {
         let mut guard = state.voice_rooms.lock().unwrap();
         match guard.remove(&channel_id) {
-            Some(room) => room.participants.into_values().collect(),
+            Some(room) => (room.participants.into_values().collect(), room.active_meeting_id),
             None => return,
         }
     };
     removed.sort_by_key(|participant| participant.conn_id);
+
+    let left_at = Utc::now();
+    if let Some(meeting_id) = meeting_id {
+        for participant in &removed {
+            let _ = meetings::close_live_attendee(
+                state,
+                meeting_id,
+                participant.conn_id,
+                left_at,
+            )
+            .await;
+        }
+        finish_and_broadcast_meeting(state, channel_id, meeting_id, left_at, false).await;
+    }
 
     // Room is gone from the map, so seed targets with all removed user-ids
     // (members + guests) to guarantee delivery of the leave events.
@@ -306,7 +369,7 @@ async fn handle_join(
         let mut guard = state.voice_rooms.lock().unwrap();
         let room = guard.entry(channel_id).or_default();
         if room.participants.contains_key(&conn_id) {
-            JoinResult::Existing(room_participants(room))
+            JoinResult::Existing(room_participants(room), room.active_meeting_id)
         } else if room.participants.len() >= MAX_PARTICIPANTS {
             JoinResult::Full
         } else {
@@ -320,25 +383,45 @@ async fn handle_join(
                 camera_on: false,
                 screen_on: false,
                 screen_stream_id: None,
+                joined_at: Utc::now(),
             };
             room.participants.insert(conn_id, participant.clone());
-            JoinResult::Joined(participant, room_participants(room))
+            JoinResult::Joined(participant, room_participants(room), room.active_meeting_id)
         }
     };
 
-    let (participant, participants) = match result {
+    let participant = match result {
         JoinResult::Full => {
             send_error(tx, channel_id, "room_full");
             return;
         }
-        JoinResult::Existing(participants) => {
-            send_state(tx, channel_id, participants);
+        JoinResult::Existing(participants, active_meeting_id) => {
+            send_state(tx, channel_id, participants, active_meeting_id);
             return;
         }
-        JoinResult::Joined(participant, participants) => (participant, participants),
+        JoinResult::Joined(participant, participants, active_meeting_id) => {
+            send_state(tx, channel_id, participants, active_meeting_id);
+            participant
+        }
     };
 
-    send_state(tx, channel_id, participants);
+
+    let active_meeting_id = {
+        let guard = state.voice_rooms.lock().unwrap();
+        guard.get(&channel_id).and_then(|room| room.active_meeting_id)
+    };
+    if let Some(meeting_id) = active_meeting_id {
+        let attendee = live_attendee(&participant);
+        match meetings::add_live_attendee(state, meeting_id, &attendee).await {
+            Ok(attendance_id) => {
+                let mut guard = state.voice_rooms.lock().unwrap();
+                if let Some(room) = guard.get_mut(&channel_id) {
+                    room.attendance_ids.insert(conn_id, attendance_id);
+                }
+            }
+            Err(error) => tracing::warn!("meeting attendance join failed: {}", error),
+        }
+    }
     let targets = voice_targets(state, channel_id, &[]).await;
     let event = envelope(
         "voice.participant_joined",
@@ -360,18 +443,20 @@ async fn handle_leave(
     let Some(channel_id) = channel_id(payload) else {
         return;
     };
-    let participant = {
+    let (participant, meeting_id, room_ended) = {
         let mut guard = state.voice_rooms.lock().unwrap();
-        let removed = guard
-            .get_mut(&channel_id)
-            .and_then(|room| room.participants.remove(&conn_id));
-        if guard
-            .get(&channel_id)
-            .is_some_and(|room| room.participants.is_empty())
-        {
+        let Some(room) = guard.get_mut(&channel_id) else {
+            send_error(tx, channel_id, "not_in_room");
+            return;
+        };
+        let removed = room.participants.remove(&conn_id);
+        room.attendance_ids.remove(&conn_id);
+        let meeting_id = room.active_meeting_id;
+        let room_ended = room.participants.is_empty();
+        if room_ended {
             guard.remove(&channel_id);
         }
-        removed
+        (removed, meeting_id, room_ended)
     };
 
     let Some(participant) = participant else {
@@ -379,6 +464,15 @@ async fn handle_leave(
         return;
     };
     debug_assert_eq!(participant.user_id, user_id);
+    let left_at = Utc::now();
+    if let Some(meeting_id) = meeting_id {
+        if let Err(error) = meetings::close_live_attendee(state, meeting_id, conn_id, left_at).await {
+            tracing::warn!("meeting attendance leave failed: {}", error);
+        }
+        if room_ended {
+            finish_and_broadcast_meeting(state, channel_id, meeting_id, left_at, false).await;
+        }
+    }
     broadcast_participant_left(state, channel_id, conn_id, user_id).await;
 }
 
@@ -430,6 +524,9 @@ async fn handle_transcribe(state: &SharedState, conn_id: Uuid, payload: &Value, 
     };
 
     broadcast_participant_updated(state, channel_id, participant).await;
+    if enabled {
+        ensure_meeting_started(state, channel_id, conn_id).await;
+    }
 }
 
 async fn handle_phrase(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &WsSender) {
@@ -444,6 +541,7 @@ async fn handle_phrase(state: &SharedState, conn_id: Uuid, payload: &Value, tx: 
         return;
     }
 
+    let at = Utc::now();
     let result = {
         let mut guard = state.voice_rooms.lock().unwrap();
         let Some(room) = guard.get_mut(&channel_id) else {
@@ -453,14 +551,62 @@ async fn handle_phrase(state: &SharedState, conn_id: Uuid, payload: &Value, tx: 
             return send_error(tx, channel_id, "not_in_room");
         };
         if !participant.transcribing {
-            false
+            None
         } else {
-            let display_name = participant.display_name.clone();
-            record_phrase(room, display_name, text, Instant::now())
+            let participant = participant.clone();
+            let attendance_id = room.attendance_ids.get(&conn_id).copied();
+            let meeting_id = room.active_meeting_id;
+            let armed = record_phrase(
+                room,
+                participant.display_name.clone(),
+                text.clone(),
+                Instant::now(),
+            );
+            Some((participant, attendance_id, meeting_id, armed))
         }
     };
 
-    if result {
+    let Some((participant, attendance_id, meeting_id, armed)) = result else {
+        return;
+    };
+    if let Some(meeting_id) = meeting_id {
+        let attendee = live_attendee(&participant);
+        match meetings::save_live_phrase(
+            state,
+            meeting_id,
+            attendance_id,
+            &attendee,
+            &text,
+            at,
+        )
+        .await
+        {
+            Ok(id) => {
+                let targets = voice_targets(state, channel_id, &[]).await;
+                state
+                    .hub
+                    .broadcast(
+                        envelope(
+                            "meeting.phrase",
+                            json!({
+                                "meeting_id": meeting_id,
+                                "channel_id": channel_id,
+                                "id": id.to_string(),
+                                "user_id": participant.user_id,
+                                "display_name": participant.display_name,
+                                "guest": participant.guest,
+                                "text": text,
+                                "spoken_at": at,
+                            }),
+                        ),
+                        targets,
+                    )
+                    .await;
+            }
+            Err(error) => tracing::warn!("meeting phrase persistence failed: {}", error),
+        }
+    }
+    if armed {
         broadcast_roast_armed(state, channel_id, true).await;
     }
 }
@@ -495,6 +641,106 @@ fn record_phrase(
         true
     } else {
         false
+    }
+}
+
+fn live_attendee(participant: &VoiceParticipant) -> LiveAttendee {
+    LiveAttendee {
+        connection_id: participant.conn_id,
+        user_id: if participant.guest { None } else { Some(participant.user_id) },
+        display_name: participant.display_name.clone(),
+        guest: participant.guest,
+        joined_at: participant.joined_at,
+    }
+}
+
+async fn ensure_meeting_started(state: &SharedState, channel_id: Uuid, conn_id: Uuid) {
+    let (creator, attendees) = {
+        let mut guard = state.voice_rooms.lock().unwrap();
+        let Some(room) = guard.get_mut(&channel_id) else {
+            return;
+        };
+        if room.active_meeting_id.is_some() || room.meeting_starting {
+            return;
+        }
+        room.meeting_starting = true;
+        let creator = room
+            .participants
+            .get(&conn_id)
+            .filter(|participant| !participant.guest)
+            .map(|participant| participant.user_id);
+        let attendees = room.participants.values().map(live_attendee).collect::<Vec<_>>();
+        (creator, attendees)
+    };
+
+    match meetings::start_live_meeting(state, channel_id, creator, &attendees).await {
+        Ok((meeting_id, attendance_ids)) => {
+            let (room_still_active, missing, departed) = {
+                let mut guard = state.voice_rooms.lock().unwrap();
+                if let Some(room) = guard.get_mut(&channel_id) {
+                    room.active_meeting_id = Some(meeting_id);
+                    room.meeting_starting = false;
+                    room.attendance_ids.extend(attendance_ids);
+                    let missing = room
+                        .participants
+                        .values()
+                        .filter(|participant| !room.attendance_ids.contains_key(&participant.conn_id))
+                        .map(live_attendee)
+                        .collect::<Vec<_>>();
+                    let departed = room
+                        .attendance_ids
+                        .keys()
+                        .filter(|conn_id| !room.participants.contains_key(conn_id))
+                        .copied()
+                        .collect::<Vec<_>>();
+                    (!room.participants.is_empty(), missing, departed)
+                } else {
+                    (false, Vec::new(), Vec::new())
+                }
+            };
+            if !room_still_active {
+                let _ = meetings::finish_live_meeting(state, meeting_id, Utc::now(), false).await;
+                return;
+            }
+            for attendee in missing {
+                if let Ok(attendance_id) =
+                    meetings::add_live_attendee(state, meeting_id, &attendee).await
+                {
+                    let mut guard = state.voice_rooms.lock().unwrap();
+                    if let Some(room) = guard.get_mut(&channel_id) {
+                        room.attendance_ids
+                            .insert(attendee.connection_id, attendance_id);
+                    }
+                }
+            }
+            for connection_id in departed {
+                let _ = meetings::close_live_attendee(
+                    state,
+                    meeting_id,
+                    connection_id,
+                    Utc::now(),
+                )
+                .await;
+            }
+            let targets = voice_targets(state, channel_id, &[]).await;
+            state
+                .hub
+                .broadcast(
+                    envelope(
+                        "meeting.started",
+                        json!({ "meeting_id": meeting_id, "channel_id": channel_id, "started_at": Utc::now() }),
+                    ),
+                    targets,
+                )
+                .await;
+        }
+        Err(error) => {
+            tracing::warn!("meeting start failed: {}", error);
+            let mut guard = state.voice_rooms.lock().unwrap();
+            if let Some(room) = guard.get_mut(&channel_id) {
+                room.meeting_starting = false;
+            }
+        }
     }
 }
 
@@ -698,8 +944,8 @@ async fn handle_signal(
 
 enum JoinResult {
     Full,
-    Existing(Vec<VoiceParticipant>),
-    Joined(VoiceParticipant, Vec<VoiceParticipant>),
+    Existing(Vec<VoiceParticipant>, Option<Uuid>),
+    Joined(VoiceParticipant, Vec<VoiceParticipant>, Option<Uuid>),
 }
 
 fn room_participants(room: &VoiceRoom) -> Vec<VoiceParticipant> {
@@ -719,12 +965,18 @@ fn uuid_field(payload: &Value, field: &str) -> Option<Uuid> {
         .and_then(|value| Uuid::parse_str(value).ok())
 }
 
-fn send_state(tx: &WsSender, channel_id: Uuid, participants: Vec<VoiceParticipant>) {
+fn send_state(
+    tx: &WsSender,
+    channel_id: Uuid,
+    participants: Vec<VoiceParticipant>,
+    active_meeting_id: Option<Uuid>,
+) {
     let event = envelope(
         "voice.state",
         json!({
             "channel_id": channel_id.to_string(),
             "participants": participants,
+            "active_meeting_id": active_meeting_id,
         }),
     );
     let _ = tx.send(Message::Text(event.to_string()));
@@ -762,6 +1014,37 @@ async fn broadcast_participant_left(
     state.hub.broadcast(event, targets).await;
 }
 
+async fn finish_and_broadcast_meeting(
+    state: &SharedState,
+    channel_id: Uuid,
+    meeting_id: Uuid,
+    ended_at: DateTime<Utc>,
+    interrupted: bool,
+) {
+    if let Err(error) =
+        meetings::finish_live_meeting(state, meeting_id, ended_at, interrupted).await
+    {
+        tracing::warn!("meeting finish failed: {}", error);
+        return;
+    }
+    let targets = voice_targets(state, channel_id, &[]).await;
+    state
+        .hub
+        .broadcast(
+            envelope(
+                "meeting.ended",
+                json!({
+                    "meeting_id": meeting_id,
+                    "channel_id": channel_id,
+                    "ended_at": ended_at,
+                    "status": if interrupted { "interrupted" } else { "completed" },
+                }),
+            ),
+            targets,
+        )
+        .await;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -777,6 +1060,7 @@ mod tests {
             camera_on,
             screen_on: false,
             screen_stream_id: None,
+            joined_at: Utc::now(),
         }
     }
 
@@ -807,6 +1091,7 @@ mod tests {
             } else {
                 None
             },
+            joined_at: Utc::now(),
         }
     }
 

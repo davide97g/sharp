@@ -176,12 +176,71 @@ export type VoiceParticipant = {
   camera_on: boolean
   screen_on: boolean
   screen_stream_id: string | null
+  joined_at: string
 }
 
 export type VoiceRoomSnapshot = {
   channel_id: string
   participants: VoiceParticipant[]
+  active_meeting_id: string | null
 }
+
+export type MeetingStatus = 'active' | 'completed' | 'interrupted'
+export type MeetingSummaryStatus = 'pending' | 'ready' | 'failed' | 'unavailable'
+
+export type MeetingListItem = {
+  id: string
+  channel_id: string
+  channel_name: string
+  channel_kind: ChannelKind
+  title: string
+  status: MeetingStatus
+  summary_status: MeetingSummaryStatus
+  started_at: string
+  ended_at: string | null
+  participant_count: number
+  transcript_count: number
+}
+
+export type MeetingAttendance = {
+  id: string
+  user_id: string | null
+  display_name: string
+  guest: boolean
+  joined_at: string
+  left_at: string | null
+}
+
+export type MeetingTranscriptPhrase = {
+  id: string
+  attendance_id: string | null
+  user_id: string | null
+  display_name: string
+  guest: boolean
+  text: string
+  spoken_at: string
+}
+
+export type MeetingAction = {
+  id: string
+  text: string
+  assignee_user_id: string | null
+  assignee_name: string | null
+  completed: boolean
+  position: number
+}
+
+export type MeetingDetail = MeetingListItem & {
+  summary: string
+  decisions: string
+  created_at: string
+  updated_at: string
+  attendance: MeetingAttendance[]
+  transcript: MeetingTranscriptPhrase[]
+  actions: MeetingAction[]
+}
+
+export type MeetingsResponse = { meetings: MeetingListItem[] }
 
 export type HelloPayload = {
   user_id: string
@@ -239,6 +298,17 @@ export type VoiceSignalPayload = {
   data: unknown
 }
 export type VoiceErrorPayload = { channel_id: string; code: string }
+export type MeetingStartedPayload = {
+  meeting_id: string
+  channel_id: string
+  started_at: string
+}
+export type MeetingEndedPayload = {
+  meeting_id: string
+  channel_id: string
+  ended_at: string
+  status: 'completed' | 'interrupted'
+}
 
 // --- Phase 2: Docs ---
 

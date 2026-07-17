@@ -55,6 +55,8 @@ import type {
   VoiceRoomSnapshot,
   VoiceSignalPayload,
   VoiceStatePayload,
+  MeetingStartedPayload,
+  MeetingEndedPayload,
   WsEnvelope,
 } from './lib/types'
 
@@ -88,6 +90,7 @@ export type VoiceRoom = Record<
     camera_on: boolean
     screen_on: boolean
     screen_stream_id: string | null
+    joined_at: string
   }
 >
 
@@ -201,6 +204,7 @@ type State = {
 
   // ephemeral voice rooms + this connection's active call
   voiceRooms: Record<string, VoiceRoom>
+  activeMeetings: Record<string, string>
   voice: VoiceState
 
   // ws
@@ -396,6 +400,7 @@ export const useStore = create<State>((set, get) => ({
   notifHasMore: false,
   chatLayout: null,
   voiceRooms: {},
+  activeMeetings: {},
   voice: emptyVoiceState(),
   ws: null,
 
@@ -523,6 +528,7 @@ export const useStore = create<State>((set, get) => ({
       chatLayout: null,
       notifHasMore: false,
       voiceRooms: {},
+      activeMeetings: {},
       voice: emptyVoiceState(),
       ws: null,
     })
@@ -1067,8 +1073,8 @@ export const useStore = create<State>((set, get) => ({
   },
 
   toggleTranscription() {
-    const { isGuest, voice, ws } = get()
-    if (isGuest || !isSpeechSupported() || !voice.channelId || voice.status !== 'connected') {
+    const { voice, ws } = get()
+    if (!isSpeechSupported() || !voice.channelId || voice.status !== 'connected') {
       return
     }
 
@@ -1455,6 +1461,7 @@ export const useStore = create<State>((set, get) => ({
           online: new Set(p.online_user_ids),
           myConnId: p.conn_id,
           voiceRooms: voiceRoomsFromSnapshots(p.voice_rooms),
+          activeMeetings: activeMeetingsFromSnapshots(p.voice_rooms),
           ...(voiceReconnected ? { voice: emptyVoiceState() } : {}),
         })
         // Guest bootstrap: once we have a conn id, auto-join the bound channel's
@@ -1500,6 +1507,9 @@ export const useStore = create<State>((set, get) => ({
             ...s.voiceRooms,
             [p.channel_id]: voiceRoomFromParticipants(p.participants),
           },
+          activeMeetings: p.active_meeting_id
+            ? { ...s.activeMeetings, [p.channel_id]: p.active_meeting_id }
+            : s.activeMeetings,
           ...(s.voice.channelId === p.channel_id
             ? {
                 voice: {
@@ -1541,7 +1551,8 @@ export const useStore = create<State>((set, get) => ({
                 transcribing: p.participant.transcribing,
                 camera_on: p.participant.camera_on,
                 screen_on: p.participant.screen_on,
-                screen_stream_id: p.participant.screen_stream_id,
+                  screen_stream_id: p.participant.screen_stream_id,
+                  joined_at: p.participant.joined_at,
               },
             },
           },
@@ -1628,7 +1639,8 @@ export const useStore = create<State>((set, get) => ({
                   transcribing: p.participant.transcribing,
                   camera_on: p.participant.camera_on,
                   screen_on: p.participant.screen_on,
-                  screen_stream_id: p.participant.screen_stream_id,
+                screen_stream_id: p.participant.screen_stream_id,
+                joined_at: p.participant.joined_at,
                 },
               },
             },
@@ -1676,6 +1688,27 @@ export const useStore = create<State>((set, get) => ({
             p.participant.screen_on ? p.participant.screen_stream_id : null,
           )
         }
+        break
+      }
+      case 'meeting.started': {
+        const p = env.payload as MeetingStartedPayload
+        set((s) => ({ activeMeetings: { ...s.activeMeetings, [p.channel_id]: p.meeting_id } }))
+        break
+      }
+      case 'meeting.ended': {
+        const p = env.payload as MeetingEndedPayload
+        set((s) => {
+          const activeMeetings = { ...s.activeMeetings }
+          delete activeMeetings[p.channel_id]
+          return { activeMeetings }
+        })
+        window.dispatchEvent(new CustomEvent('sharp:meeting-updated', { detail: p }))
+        break
+      }
+      case 'meeting.phrase':
+      case 'meeting.summary_ready': {
+        const p = env.payload as { meeting_id: string; channel_id: string }
+        window.dispatchEvent(new CustomEvent('sharp:meeting-updated', { detail: p }))
         break
       }
       case 'voice.roast_armed': {
@@ -1967,9 +2000,18 @@ function voiceRoomFromParticipants(
       camera_on: participant.camera_on,
       screen_on: participant.screen_on,
       screen_stream_id: participant.screen_stream_id,
+      joined_at: participant.joined_at,
     }
   }
   return room
+}
+
+function activeMeetingsFromSnapshots(snapshots: VoiceRoomSnapshot[]): Record<string, string> {
+  const meetings: Record<string, string> = {}
+  for (const snapshot of snapshots) {
+    if (snapshot.active_meeting_id) meetings[snapshot.channel_id] = snapshot.active_meeting_id
+  }
+  return meetings
 }
 
 function voiceRoomsFromSnapshots(snapshots: VoiceRoomSnapshot[]): Record<string, VoiceRoom> {

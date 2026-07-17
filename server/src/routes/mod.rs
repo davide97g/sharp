@@ -4,6 +4,7 @@ pub mod docs;
 pub mod files;
 pub mod gifs;
 pub mod messages;
+pub mod meetings;
 pub mod notifications;
 pub mod search;
 pub mod users;

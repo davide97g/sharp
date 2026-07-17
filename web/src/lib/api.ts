@@ -28,6 +28,9 @@ import type {
   VoiceLinkCreateResponse,
   CallLinkInfoResponse,
   CallLinkJoinResponse,
+  MeetingDetail,
+  MeetingsResponse,
+  MeetingAction,
 } from './types'
 
 const TOKEN_KEY = 'sharp.token'
@@ -141,6 +144,30 @@ async function request<T>(path: string, opts: ReqOpts = {}): Promise<T> {
 }
 
 export const api = {
+  meetings: {
+    list: (input: { channelId?: string; q?: string; before?: string; limit?: number } = {}) => {
+      const params = new URLSearchParams()
+      if (input.channelId) params.set('channel_id', input.channelId)
+      if (input.q) params.set('q', input.q)
+      if (input.before) params.set('before', input.before)
+      if (input.limit) params.set('limit', String(input.limit))
+      const query = params.toString()
+      return request<MeetingsResponse>(`/meetings${query ? `?${query}` : ''}`)
+    },
+    get: (id: string) => request<MeetingDetail>(`/meetings/${id}`),
+    update: (id: string, input: { title?: string; summary?: string; decisions?: string }) =>
+      request<MeetingDetail>(`/meetings/${id}`, { method: 'PATCH', body: input }),
+    saveActions: (
+      id: string,
+      actions: Pick<MeetingAction, 'id' | 'text' | 'assignee_user_id' | 'completed'>[],
+    ) => request<MeetingDetail>(`/meetings/${id}/actions`, {
+      method: 'PUT',
+      body: { actions },
+    }),
+    regenerate: (id: string) =>
+      request<{ summary_status: string }>(`/meetings/${id}/regenerate`, { method: 'POST' }),
+    delete: (id: string) => request<void>(`/meetings/${id}`, { method: 'DELETE' }),
+  },
   voice: {
     config: () => request<IceConfigResponse>('/voice/config'),
   },

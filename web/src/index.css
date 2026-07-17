@@ -59,6 +59,77 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* Meeting records: editorial hierarchy comes from time, consent, speaker lanes. */
+.meeting-kicker {
+  font-size: 0.66rem;
+  font-weight: 650;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-faint);
+}
+
+.meeting-label {
+  display: block;
+  font-size: 0.64rem;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-faint);
+}
+
+.meeting-surface {
+  border: 1px solid var(--color-border);
+  border-radius: 0.85rem;
+  background: var(--color-panel);
+  padding: 1.25rem;
+}
+
+.meeting-textarea {
+  margin-top: 0.55rem;
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--color-border);
+  border-radius: 0.65rem;
+  background: var(--color-panel-2);
+  padding: 0.75rem;
+  color: var(--color-text);
+  font-size: 0.875rem;
+  line-height: 1.6;
+  outline: none;
+}
+
+.meeting-textarea:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
+}
+
+.meeting-button,
+.meeting-button-primary {
+  border-radius: 0.55rem;
+  padding: 0.42rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.meeting-button {
+  border: 1px solid var(--color-border);
+  color: var(--color-text-dim);
+}
+
+.meeting-button:hover {
+  border-color: var(--color-text-faint);
+  color: var(--color-text);
+}
+
+.meeting-button-primary {
+  background: var(--color-accent);
+  color: white;
+}
+
+.meeting-button-primary:hover {
+  background: var(--color-accent-hover);
+}
+
 * {
   transition-property: background-color, border-color, color, box-shadow, opacity;
   transition-duration: 120ms;
@@ -145,6 +216,21 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .sidebar-shell {
     transition-duration: 0.01ms;
+  }
+}
+
+@media (max-width: 800px) {
+  .sidebar-shell {
+    position: fixed;
+    z-index: 40;
+    top: var(--titlebar-h);
+    bottom: 0;
+    left: 3.5rem;
+    box-shadow: 24px 0 48px -30px #000;
+  }
+
+  .sidebar-shell[data-open="false"] {
+    width: 0;
   }
 }
 

@@ -19,6 +19,8 @@ import { ChannelDocs } from './components/docs/ChannelDocs'
 import { DocEditor } from './components/docs/DocEditor'
 import { CanvasHome } from './components/canvas/CanvasHome'
 import { ChannelCanvases } from './components/canvas/ChannelCanvases'
+import { MeetingsHome } from './components/meetings/MeetingsHome'
+import { MeetingDetailView } from './components/meetings/MeetingDetailView'
 // tldraw is a large dependency; keep it out of the main bundle by loading the
 // canvas editor lazily (only fetched when a whiteboard is actually opened).
 const CanvasEditor = lazy(() =>
@@ -133,6 +135,8 @@ export function App() {
           <Route path="d/:docId" element={<DocEditor />} />
           <Route path="canvas" element={<CanvasHome />} />
           <Route path="canvas/c/:channelId" element={<ChannelCanvases />} />
+          <Route path="meetings" element={<MeetingsHome />} />
+          <Route path="meetings/:meetingId" element={<MeetingDetailView />} />
           <Route
             path="x/:docId"
             element={

@@ -508,8 +508,9 @@ through it and there is no SFU.
 
 - **One room per channel/DM**: every channel kind (`public`, `private`, or `dm`) may have
   one voice room. A room exists while it has at least one participant.
-- **Ephemeral state**: rooms have no database tables, persistence, or migration. The room
-  registry lives in server memory.
+- **Ephemeral media state, durable notes**: WebRTC rooms remain in server memory. Once a
+  participant opts into meeting notes, attendance, opted-in transcript phrases, generated
+  notes, and action items are persisted in Postgres.
 - **P2P mesh media**: every eligible participant connects directly to every other eligible
   participant. The server relays signaling messages only and never handles media.
 - **Capacity**: the server enforces a maximum of **8 audio participants**, **4 active
@@ -524,8 +525,8 @@ through it and there is no SFU.
 All ids are strings in JSON (UUIDs). A WebSocket connection id is the peer identity.
 
 ```ts
-VoiceParticipant = { conn_id: string, user_id: string, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null }
-VoiceRoomSnapshot = { channel_id: string, participants: VoiceParticipant[] }
+VoiceParticipant = { conn_id: string, user_id: string, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null, joined_at: string }
+VoiceRoomSnapshot = { channel_id: string, participants: VoiceParticipant[], active_meeting_id: string | null }
 VoiceSignalKind = 'offer'|'answer'|'candidate'
 ```
 
@@ -538,11 +539,13 @@ Client → server:
 - `voice.join` `{channel_id}`
 - `voice.leave` `{channel_id}`
 - `voice.mute` `{channel_id, muted: boolean}`
-- `voice.transcribe` `{channel_id, enabled: boolean}` — member-only; opt in or out of sending
+- `voice.transcribe` `{channel_id, enabled: boolean}` — opt in or out of sending
   locally transcribed phrases for the participant's active room connection.
-- `voice.phrase` `{channel_id, text: string}` — member-only; accepted only from an active
+- `voice.phrase` `{channel_id, text: string}` — accepted only from an active
   participant with `transcribing=true`. Text is trimmed, capped at 500 characters, and empty
   phrases are ignored.
+- Registered users and call-link guests may use `voice.transcribe` / `voice.phrase`. Guest
+  tokens remain scoped to their bound channel and cannot access meeting REST endpoints.
 - `voice.camera` `{channel_id, enabled: boolean}`
 - `voice.screen` `{channel_id, enabled: boolean, stream_id?: string}` — `stream_id` is the
   msid of the sharer's screen `MediaStream`, sent only when enabling.
@@ -553,8 +556,8 @@ Server → client:
 
 - `hello` payload is extended with `conn_id: string` and
   `voice_rooms: VoiceRoomSnapshot[]`, where each snapshot is
-  `{channel_id, participants: VoiceParticipant[]}` and each participant is
-  `{conn_id, user_id, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null}`.
+  `{channel_id, participants: VoiceParticipant[], active_meeting_id}` and each participant is
+  `{conn_id, user_id, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null, joined_at: string}`.
   `display_name` is filled server-side for everyone (users from the `users` table,
   guests from their token) so clients can render names without `/users` access; `guest`
   marks public voice-link joiners.
@@ -599,8 +602,9 @@ Server → client:
   broadcast `voice.participant_left`.
 - `voice.mute`: update the participant's flag and broadcast `voice.participant_updated`.
 - `voice.transcribe`: require an active room participant, update `transcribing`, and broadcast
-  the complete participant through `voice.participant_updated`. Disabling transcription keeps
-  already buffered phrases.
+  the complete participant through `voice.participant_updated`. First opt-in creates a durable
+  meeting and snapshots current attendance. Disabling stops future phrases from that connection
+  but does not end the meeting.
 - `voice.phrase`: require an active participant with `transcribing=true`; append the server-known
   display name and trimmed text to the room's oldest-first transcript buffer (maximum 50 phrases).
   A phrase within 20 seconds of the previous phrase increments the room streak; otherwise it
@@ -618,7 +622,8 @@ Server → client:
   `voice.error` with `code: "not_in_room"`. Relay with
   `hub.broadcast(envelope, vec![to_user])`, adding `from_user` and `from_conn`.
 - WS disconnect: remove that conn from every room it is in, broadcast
-  `voice.participant_left` for each, and drop empty rooms.
+  `voice.participant_left` for each, close durable attendance, and drop empty rooms. Last leave
+  finalizes the meeting and queues AI notes.
 - Member removed from channel / leaves channel / channel deleted: evict all of that user's
   conns from the room (all conns for channel delete), with `voice.participant_left`
   broadcasts.
@@ -914,6 +919,27 @@ watches fast chat streaks and auto-picks a mean roast GIF to send.
 
 `GifResult = {id, url, preview_url, width, height, title}` — `url` is the provider-CDN GIF
 (hotlinked, nothing stored server-side).
+
+## Durable meeting notes
+
+- **Lifecycle**: first transcription opt-in creates one `meetings` row and snapshots the
+  room's joined participants. Later joins/leaves create attendance intervals. The last leave
+  finalizes the meeting; a heartbeat watchdog marks stale orphaned meetings `interrupted` at
+  their last durable activity while preserving calls owned by another replica.
+- **Attribution**: every accepted phrase uses the server-known participant for that WebSocket
+  connection. This is source attribution, not acoustic voice biometrics. Raw transcript phrases
+  are immutable and carry server timestamps.
+- **Consent**: only opted-in connections contribute phrases. Opting out stops future phrases;
+  attendance and meeting lifecycle continue. Guests may contribute but cannot use meeting REST.
+- **Notes**: on completion, configured DeepSeek generates summary, decisions, and structured
+  actions asynchronously. Long transcripts are chunked. Missing configuration leaves the record
+  usable with `summary_status=unavailable`; failures may be retried.
+- **Access**: every REST operation verifies current channel membership. Members may list/search,
+  read, edit title/summary/decisions/actions, regenerate notes, or permanently delete a record.
+- **REST**: `GET /meetings`, `GET|PATCH|DELETE /meetings/:id`,
+  `PUT /meetings/:id/actions`, `POST /meetings/:id/regenerate`.
+- **Live events**: `meeting.started`, `meeting.phrase`, `meeting.ended`, and
+  `meeting.summary_ready` update connected channel members without exposing saved records to guests.
 
 ## Message content token
 
