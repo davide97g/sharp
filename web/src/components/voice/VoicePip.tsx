@@ -253,7 +253,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
       <footer className="flex shrink-0 items-center justify-center gap-2 border-t border-[var(--color-border)] px-2 py-1.5">
         <PipControl
           label={muted ? 'Unmute microphone' : 'Mute microphone'}
-          active={muted}
+          active={!muted}
           onClick={toggleVoiceMute}
         >
           <MicIcon off={muted} />

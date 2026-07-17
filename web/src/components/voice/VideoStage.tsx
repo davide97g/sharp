@@ -422,7 +422,7 @@ export function VideoStage() {
       <DeviceControl
         label={muted ? 'Unmute microphone' : 'Mute microphone'}
         menuLabel="Choose microphone"
-        active={muted}
+        active={!muted}
         onClick={toggleVoiceMute}
         devices={mics}
         selectedDeviceId={audioDeviceId}
