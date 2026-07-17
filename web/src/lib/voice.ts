@@ -72,6 +72,7 @@ export class VoiceClient {
   private audioContext: AudioContext | null = null
   private speakingDetectors = new Map<string, SpeakingDetector>()
   private speakingFrame: number | null = null
+  private spectrumSamples: Uint8Array<ArrayBuffer> | null = null
   private stopped = false
 
   constructor(opts: VoiceClientOpts) {
@@ -106,6 +107,34 @@ export class VoiceClient {
 
   getVideoDeviceId(): string | null {
     return this.videoDeviceId ?? trackDeviceId(this.cameraTrack)
+  }
+
+  // Fill `bands` with normalized (0..1) levels of the local mic's speech
+  // spectrum (~90Hz–6kHz, log-spaced bands, low frequencies first). Reuses the
+  // speaking-detection analyser, so it costs one getByteFrequencyData per call.
+  // Returns false when no local mic is being analysed.
+  getLocalSpectrum(bands: Float32Array): boolean {
+    const detector = this.speakingDetectors.get(this.myConnId)
+    if (!detector || this.stopped || bands.length === 0) return false
+    const analyser = detector.analyser
+    if (!this.spectrumSamples || this.spectrumSamples.length !== analyser.frequencyBinCount) {
+      this.spectrumSamples = new Uint8Array(analyser.frequencyBinCount)
+    }
+    analyser.getByteFrequencyData(this.spectrumSamples)
+    const binHz = (this.audioContext?.sampleRate ?? 48_000) / analyser.fftSize
+    const maxBin = Math.max(2, Math.min(analyser.frequencyBinCount - 1, Math.round(6000 / binHz)))
+    let start = 1
+    for (let i = 0; i < bands.length; i++) {
+      const end =
+        i === bands.length - 1
+          ? maxBin + 1
+          : Math.min(maxBin + 1, Math.max(start + 1, Math.round(maxBin ** ((i + 1) / bands.length))))
+      let sum = 0
+      for (let bin = start; bin < end; bin++) sum += this.spectrumSamples[bin]
+      bands[i] = end > start ? sum / ((end - start) * 255) : 0
+      start = end
+    }
+    return true
   }
 
   async setAudioInput(deviceId: string) {

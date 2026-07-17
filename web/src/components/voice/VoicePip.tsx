@@ -10,6 +10,7 @@ import {
 } from '../../lib/pip'
 import { useStore } from '../../store'
 import { Avatar } from '../Avatar'
+import { MicActivityIcon } from './MicActivityIcon'
 
 type PipParticipant = {
   userId: string
@@ -277,7 +278,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
           active={!muted}
           onClick={toggleVoiceMute}
         >
-          <MicIcon off={muted} />
+          <MicActivityIcon muted={muted} size={15} />
         </PipControl>
         <PipControl
           label={handRaised ? 'Lower hand' : 'Raise hand'}

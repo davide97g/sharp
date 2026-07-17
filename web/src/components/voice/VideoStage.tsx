@@ -10,6 +10,7 @@ import { VoiceMiniWidget } from './VoiceMiniWidget'
 import { CallChatRail } from './CallChatRail'
 import { VoiceDuckSuggest } from './VoiceDuckSuggest'
 import { useVoicePip } from './VoicePip'
+import { MicActivityIcon } from './MicActivityIcon'
 
 type StageParticipant = {
   userId: string
@@ -462,7 +463,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
         onSelectDevice={(deviceId) => void setVoiceAudioDevice(deviceId)}
         menuPlacement="up"
       >
-        <MicIcon off={muted} />
+        <MicActivityIcon muted={muted} />
       </DeviceControl>
       {isSpeechSupported() && (
         <CallControl
