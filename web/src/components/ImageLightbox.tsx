@@ -29,7 +29,7 @@ export function ImageLightbox({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[110] flex items-center justify-center bg-black/90 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[110] flex items-center justify-center bg-black/90 p-4 safe-pad backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-label={alt || 'Image'}

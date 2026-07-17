@@ -95,6 +95,20 @@ function urlBase64ToUint8Array(base64: string): Uint8Array {
   return arr
 }
 
+/** Register the service worker (PWA installability + push). Safe to call often. */
+export async function registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {
+  if (isTauri) return null
+  if (!('serviceWorker' in navigator)) return null
+  // Skip in Vite dev — a caching SW breaks HMR; push still works on prod builds.
+  if (import.meta.env.DEV) return null
+  try {
+    return await navigator.serviceWorker.register('/sw.js')
+  } catch (e) {
+    console.warn('service worker registration failed', e)
+    return null
+  }
+}
+
 /** Register the service worker and subscribe this browser to web push. */
 export async function initPush(): Promise<void> {
   if (isTauri) return // desktop relies on native notifications
@@ -102,7 +116,8 @@ export async function initPush(): Promise<void> {
   try {
     const { public_key } = await api.vapidPublicKey()
     if (!public_key) return // server has web push disabled
-    const reg = await navigator.serviceWorker.register('/sw.js')
+    const reg = await registerServiceWorker()
+    if (!reg) return
     await navigator.serviceWorker.ready
     let sub = await reg.pushManager.getSubscription()
     if (!sub) {

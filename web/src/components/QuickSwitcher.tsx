@@ -122,7 +122,7 @@ export function QuickSwitcher() {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/60 p-4 pt-[14vh] backdrop-blur-sm"
+      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/60 p-4 pt-[max(14vh,calc(var(--safe-top)+1.5rem))] pb-[max(1rem,var(--safe-bottom))] pl-[max(1rem,var(--safe-left))] pr-[max(1rem,var(--safe-right))] backdrop-blur-sm"
       onMouseDown={() => setOpen(false)}
     >
       <div

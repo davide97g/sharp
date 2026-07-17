@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { App } from './App'
+import { registerServiceWorker } from './lib/notify'
 import './index.css'
 
 // Tauri on macOS uses titleBarStyle: Overlay — the traffic lights float over
@@ -18,6 +19,9 @@ if (isTauri && isMac) {
   bar.setAttribute('data-tauri-drag-region', '')
   document.body.appendChild(bar)
 }
+
+// Register in production only — Vite HMR fights a caching SW in dev.
+if (import.meta.env.PROD) void registerServiceWorker()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

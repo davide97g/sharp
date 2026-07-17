@@ -28,7 +28,7 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 pt-[12vh] backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 pt-[max(12vh,calc(var(--safe-top)+1.5rem))] pb-[max(1rem,var(--safe-bottom))] pl-[max(1rem,var(--safe-left))] pr-[max(1rem,var(--safe-right))] backdrop-blur-sm"
       onMouseDown={onClose}
     >
       <div

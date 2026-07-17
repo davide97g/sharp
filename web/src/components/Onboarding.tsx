@@ -79,7 +79,7 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
   const back = () => setStep((s) => Math.max(0, s - 1))
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-[var(--color-ink)]">
+    <div className="fixed inset-0 z-[60] flex flex-col bg-[var(--color-ink)] safe-pad">
       {/* header: brand + skip + step progress */}
       <div className="flex items-center justify-between px-6 pt-[max(1.5rem,var(--titlebar-h))] pb-2">
         <div className="flex items-center gap-2">

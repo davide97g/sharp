@@ -457,7 +457,15 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
         className="voice-stage fixed inset-0 z-[60] flex bg-black text-[var(--color-text)]"
       >
         <div className="relative flex min-w-0 flex-1 flex-col">
-          <header className="flex h-14 shrink-0 items-center gap-3 px-5">
+          <header
+            className="flex h-14 shrink-0 items-center gap-3 px-5"
+            style={{
+              paddingTop: 'var(--safe-top)',
+              height: 'calc(3.5rem + var(--safe-top))',
+              paddingLeft: 'max(1.25rem, var(--safe-left))',
+              paddingRight: 'max(1.25rem, var(--safe-right))',
+            }}
+          >
             <div className="min-w-0">
               <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--color-text-faint)]">
                 Huddle
@@ -517,7 +525,10 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
             {channel?.is_member ? <VoiceDuckSuggest /> : null}
           </div>
 
-          <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center px-3">
+          <div
+            className="pointer-events-none absolute inset-x-0 flex justify-center px-3"
+            style={{ bottom: 'max(1.5rem, var(--safe-bottom))' }}
+          >
             <div className="pointer-events-auto voice-cmd-bar flex items-center justify-center gap-2 rounded-[1.35rem] border border-[var(--color-border)] bg-[var(--color-ink)]/92 px-2.5 py-2 shadow-2xl backdrop-blur-md sm:gap-2.5 sm:px-3">
               {stageControls}
             </div>

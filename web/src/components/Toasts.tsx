@@ -5,7 +5,13 @@ export function Toasts() {
   const dismiss = useToasts((s) => s.dismiss)
 
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-[100] flex flex-col gap-2">
+    <div
+      className="pointer-events-none fixed z-[100] flex flex-col gap-2"
+      style={{
+        right: 'max(1rem, env(safe-area-inset-right, 0px))',
+        bottom: 'max(1rem, calc(var(--mobile-tab-h, 0px) + env(safe-area-inset-bottom, 0px)))',
+      }}
+    >
       {toasts.map((t) => {
         if (t.kind === 'notify') {
           return (

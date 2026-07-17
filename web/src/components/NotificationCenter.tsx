@@ -179,7 +179,14 @@ export function InboxPanel() {
         className="absolute inset-0 cursor-default bg-black/45 backdrop-blur-[2px]"
         onClick={() => setInboxOpen(false)}
       />
-      <aside className="inbox-panel relative flex h-full w-full max-w-[26rem] flex-col border-l border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl max-md:max-w-none">
+      <aside
+        className="inbox-panel relative flex h-full w-full max-w-[26rem] flex-col border-l border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl max-md:max-w-none"
+        style={{
+          paddingTop: 'var(--safe-top)',
+          paddingBottom: 'var(--safe-bottom)',
+          paddingRight: 'var(--safe-right)',
+        }}
+      >
         {/* header */}
         <div className="flex items-start justify-between gap-3 border-b border-[var(--color-border)] px-5 pb-3 pt-4">
           <div className="min-w-0">
