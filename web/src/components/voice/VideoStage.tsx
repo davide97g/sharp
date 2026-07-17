@@ -99,11 +99,16 @@ export function VideoStage() {
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
   const [dragging, setDragging] = useState(false)
   const [chatOpen, setChatOpen] = useState(true)
+  const [handledNotesMeetingId, setHandledNotesMeetingId] = useState<string | null>(null)
   const hasFallbackVideo = Boolean(
     localStream?.getVideoTracks().length ||
       Object.values(remoteStreams).some((stream) => stream.getVideoTracks().length > 0),
   )
   const pip = useVoicePip(hasFallbackVideo)
+
+  useEffect(() => {
+    if (activeMeetingId && transcribing) setHandledNotesMeetingId(activeMeetingId)
+  }, [activeMeetingId, transcribing])
 
   useEffect(() => {
     let cancelled = false
@@ -249,11 +254,26 @@ export function VideoStage() {
     ? resolveName(otherSharer.userId, otherSharer.displayName)
     : ''
 
+  const notesConsentPrompt =
+    activeMeetingId &&
+    !transcribing &&
+    handledNotesMeetingId !== activeMeetingId &&
+    isSpeechSupported() ? (
+      <NotesConsentPrompt
+        onAccept={() => {
+          setHandledNotesMeetingId(activeMeetingId)
+          toggleTranscription()
+        }}
+        onDismiss={() => setHandledNotesMeetingId(activeMeetingId)}
+      />
+    ) : null
+
   if (!channelId) return null
   if (pip.pipWindow) {
     return (
       <>
         {pip.portal}
+        {notesConsentPrompt}
         <button
           type="button"
           onClick={pip.closeAndFocus}
@@ -264,7 +284,14 @@ export function VideoStage() {
       </>
     )
   }
-  if (stageMode === 'mini') return <VoiceMiniWidget />
+  if (stageMode === 'mini') {
+    return (
+      <>
+        <VoiceMiniWidget />
+        {notesConsentPrompt}
+      </>
+    )
+  }
 
   const roomName = channel
     ? channel.kind === 'dm'
@@ -591,6 +618,7 @@ export function VideoStage() {
   }
 
   return (
+    <>
     <section
       ref={panelRef}
       aria-label={`${roomName} huddle`}
@@ -684,6 +712,63 @@ export function VideoStage() {
         {stageControls}
       </footer>
     </section>
+    {notesConsentPrompt}
+    </>
+  )
+}
+
+function NotesConsentPrompt({
+  onAccept,
+  onDismiss,
+}: {
+  onAccept: () => void
+  onDismiss: () => void
+}) {
+  return (
+    <aside
+      role="dialog"
+      aria-labelledby="meeting-notes-prompt-title"
+      aria-describedby="meeting-notes-prompt-description"
+      className="fixed bottom-5 left-1/2 z-[70] w-[min(30rem,calc(100vw-2rem))] -translate-x-1/2 overflow-hidden rounded-2xl border border-[#ff6b5f]/35 bg-[var(--color-panel)] shadow-[0_24px_70px_-22px_rgba(0,0,0,0.9)]"
+    >
+      <div className="h-0.5 w-full bg-[#ff6b5f]" />
+      <div className="grid grid-cols-[auto_1fr] gap-3 p-4 sm:p-5">
+        <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-[#ff6b5f]/10 text-[#ff8a80] ring-1 ring-[#ff6b5f]/20">
+          <CaptionsIcon />
+        </div>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#ff6b5f]" />
+            <h2 id="meeting-notes-prompt-title" className="text-sm font-semibold">
+              Meeting notes are on
+            </h2>
+          </div>
+          <p
+            id="meeting-notes-prompt-description"
+            className="mt-1.5 text-xs leading-5 text-[var(--color-text-dim)]"
+          >
+            Share your microphone transcript so your speech is attributed to you. No audio or
+            video is recorded.
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="rounded-lg px-3 py-2 text-xs font-medium text-[var(--color-text-faint)] outline-none hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+            >
+              Not now
+            </button>
+            <button
+              type="button"
+              onClick={onAccept}
+              className="rounded-lg bg-[#ff6b5f] px-3.5 py-2 text-xs font-semibold text-white outline-none hover:bg-[#ff7d72] focus-visible:ring-2 focus-visible:ring-[#ff8a80] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-panel)]"
+            >
+              Share my transcript
+            </button>
+          </div>
+        </div>
+      </div>
+    </aside>
   )
 }
 

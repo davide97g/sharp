@@ -950,6 +950,8 @@ watches fast chat streaks and auto-picks a mean roast GIF to send.
   are immutable and carry server timestamps.
 - **Consent**: only opted-in connections contribute phrases. Opting out stops future phrases;
   attendance and meeting lifecycle continue. Guests may contribute but cannot use meeting REST.
+  Once notes start, every other current or late-joining participant gets one non-blocking prompt
+  to share their microphone transcript; accepting and declining are both respected for that meeting.
 - **Notes**: on completion, configured DeepSeek generates summary, decisions, and structured
   actions asynchronously. Long transcripts are chunked. Missing configuration leaves the record
   usable with `summary_status=unavailable`; failures may be retried.
