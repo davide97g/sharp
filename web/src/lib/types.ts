@@ -19,6 +19,7 @@ export type DesktopCodeResponse = {
 export type ChatLayout = 'bubble' | 'classic'
 
 export type ChannelKind = 'public' | 'private' | 'dm'
+export type ChannelRole = 'owner' | 'editor' | 'viewer'
 
 export type Channel = {
   id: string
@@ -28,6 +29,7 @@ export type Channel = {
   created_by: string | null
   created_at: string
   is_member: boolean
+  my_role: ChannelRole | null
   unread_count: number
   last_message_at: string | null
   dm_user: User | null
@@ -102,7 +104,8 @@ export type Prefs = {
 export type AuthResponse = { token: string; user: User }
 export type UsersResponse = { users: User[]; online_user_ids: string[] }
 export type ChannelsResponse = { channels: Channel[] }
-export type MembersResponse = { members: User[] }
+export type ChannelMember = User & { role: ChannelRole }
+export type MembersResponse = { members: ChannelMember[] }
 export type MessagesResponse = { messages: Message[] }
 export type ThreadResponse = { parent: Message; replies: Message[] }
 export type SearchResult = Message & { channel_name: string; snippet: string }
@@ -214,7 +217,12 @@ export type UserUpdatedPayload = { user: User }
 export type ChannelCreatedPayload = { channel: Channel }
 export type ChannelUpdatedPayload = { channel: Channel }
 export type ChannelDeletedPayload = { channel_id: string }
-export type ChannelMemberPayload = { channel_id: string; user: User }
+export type ChannelMemberPayload = { channel_id: string; user: User; role: ChannelRole }
+export type ChannelMemberUpdatedPayload = {
+  channel_id: string
+  user_id: string
+  role: ChannelRole
+}
 export type VoiceStatePayload = VoiceRoomSnapshot
 export type VoiceParticipantJoinedPayload = {
   channel_id: string
@@ -255,7 +263,7 @@ export type Doc = {
   created_at: string
   updated_at: string
   deleted_at: string | null
-  everyone_role: 'editor' | 'viewer' | 'none'
+  everyone_role: 'editor' | 'viewer' | 'none' | 'inherit'
   my_role: DocRole // resolved for the requesting/receiving user
   preview: string // first 160 chars of content_text
 }

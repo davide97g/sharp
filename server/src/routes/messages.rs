@@ -3,7 +3,7 @@ use crate::error::{AppError, AppResult};
 use crate::gif;
 use crate::models::{Attachment, Message, MessageUser, Reaction, ReplyPreview};
 use crate::notify;
-use crate::routes::{channel_kind, is_member};
+use crate::routes::{channel_kind, is_member, member_role};
 use crate::state::SharedState;
 use crate::ws::{channel_member_ids, envelope};
 use axum::extract::{Path, Query, State};
@@ -225,6 +225,21 @@ async fn require_member(state: &SharedState, channel_id: Uuid, user_id: Uuid) ->
     Ok(())
 }
 
+async fn require_can_post(state: &SharedState, channel_id: Uuid, user_id: Uuid) -> AppResult<()> {
+    if channel_kind(&state.pool, channel_id).await?.is_none() {
+        return Err(AppError::NotFound("channel not found".to_string()));
+    }
+    if !member_role(&state.pool, channel_id, user_id)
+        .await?
+        .is_some_and(|role| role.can_post())
+    {
+        return Err(AppError::Forbidden(
+            "posting requires owner or editor role".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 fn validate_content(content: &str) -> AppResult<()> {
     let len = content.chars().count();
     if content.trim().is_empty() {
@@ -296,7 +311,7 @@ pub async fn create_message(
     auth: AuthUser,
     Json(body): Json<CreateMessageRequest>,
 ) -> AppResult<(StatusCode, Json<Message>)> {
-    require_member(&state, channel_id, auth.id).await?;
+    require_can_post(&state, channel_id, auth.id).await?;
 
     let attachment_ids: Vec<Uuid> = body.attachment_ids.clone().unwrap_or_default();
     // Content may be empty only when the message carries at least one attachment —
@@ -479,6 +494,7 @@ pub async fn edit_message(
     if meta.user_id != auth.id {
         return Err(AppError::Forbidden("not the author".to_string()));
     }
+    require_can_post(&state, meta.channel_id, auth.id).await?;
     if meta.deleted {
         return Err(AppError::BadRequest(
             "cannot edit a deleted message".to_string(),
@@ -510,6 +526,7 @@ pub async fn delete_message(
     if meta.user_id != auth.id {
         return Err(AppError::Forbidden("not the author".to_string()));
     }
+    require_member(&state, meta.channel_id, auth.id).await?;
 
     if !meta.deleted {
         sqlx::query("UPDATE messages SET deleted_at = now(), content = '' WHERE id = $1")
@@ -538,7 +555,7 @@ pub async fn add_reaction(
     auth: AuthUser,
 ) -> AppResult<StatusCode> {
     let meta = message_meta(&state.pool, id).await?;
-    require_member(&state, meta.channel_id, auth.id).await?;
+    require_can_post(&state, meta.channel_id, auth.id).await?;
     if emoji.trim().is_empty() || emoji.chars().count() > 64 {
         return Err(AppError::Validation("invalid emoji".to_string()));
     }

@@ -66,6 +66,7 @@ pub struct Channel {
     pub created_by: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub is_member: bool,
+    pub my_role: Option<String>,
     pub unread_count: i64,
     pub last_message_at: Option<DateTime<Utc>>,
     pub dm_user: Option<User>,

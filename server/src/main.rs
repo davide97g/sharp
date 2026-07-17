@@ -160,6 +160,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/channels/:id/members/:user_id",
             delete(routes::channels::remove_member),
         )
+        .route(
+            "/channels/:id/members/:user_id/role",
+            put(routes::channels::set_member_role),
+        )
         .route("/channels/:id/read", post(routes::channels::mark_read))
         .route("/channels/:id/gif-suggest", post(routes::gifs::suggest))
         .route(

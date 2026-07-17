@@ -2,6 +2,7 @@ import type {
   Attachment,
   AuthResponse,
   Channel,
+  ChannelRole,
   ChannelsResponse,
   DesktopCodeResponse,
   Doc,
@@ -283,6 +284,12 @@ export const api = {
   removeMember(id: string, userId: string) {
     return request<void>(`/channels/${id}/members/${userId}`, { method: 'DELETE' })
   },
+  setChannelMemberRole(id: string, userId: string, role: ChannelRole) {
+    return request<void>(`/channels/${id}/members/${userId}/role`, {
+      method: 'PUT',
+      body: { role },
+    })
+  },
   joinChannel(id: string) {
     return request<void>(`/channels/${id}/join`, { method: 'POST' })
   },
@@ -487,7 +494,11 @@ export const api = {
   },
   patchDoc(
     id: string,
-    input: { title?: string; icon?: string; everyone_role?: 'editor' | 'viewer' | 'none' },
+    input: {
+      title?: string
+      icon?: string
+      everyone_role?: 'editor' | 'viewer' | 'none' | 'inherit'
+    },
   ) {
     return request<Doc>(`/docs/${id}`, { method: 'PATCH', body: input })
   },

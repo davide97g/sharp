@@ -1,7 +1,7 @@
 use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
 use crate::models::Attachment;
-use crate::routes::{channel_kind, is_member};
+use crate::routes::{channel_kind, is_member, member_role};
 use crate::state::SharedState;
 use axum::body::Body;
 use axum::extract::{Multipart, Path, Query, State};
@@ -60,18 +60,32 @@ async fn require_member(state: &SharedState, channel_id: Uuid, user_id: Uuid) ->
     Ok(())
 }
 
+async fn require_can_post(state: &SharedState, channel_id: Uuid, user_id: Uuid) -> AppResult<()> {
+    if channel_kind(&state.pool, channel_id).await?.is_none() {
+        return Err(AppError::NotFound("channel not found".to_string()));
+    }
+    if !member_role(&state.pool, channel_id, user_id)
+        .await?
+        .is_some_and(|role| role.can_post())
+    {
+        return Err(AppError::Forbidden(
+            "uploading requires owner or editor role".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 pub async fn upload(
     State(state): State<SharedState>,
     Path(channel_id): Path<Uuid>,
     auth: AuthUser,
     mut multipart: Multipart,
 ) -> AppResult<(StatusCode, Json<Attachment>)> {
+    require_can_post(&state, channel_id, auth.id).await?;
     let storage = state
         .storage
         .as_ref()
         .ok_or_else(|| AppError::BadRequest("file uploads are not configured".to_string()))?;
-    require_member(&state, channel_id, auth.id).await?;
-
     // Find the "file" field (accept the first file-bearing field otherwise).
     let mut chosen: Option<(String, String, bytes::Bytes)> = None;
     while let Some(field) = multipart

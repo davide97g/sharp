@@ -7,7 +7,7 @@ import { toastError } from '../../lib/toast'
 import type { Doc } from '../../lib/types'
 import { visibleEmail } from '../../lib/util'
 
-type EveryoneRole = 'editor' | 'viewer' | 'none'
+type EveryoneRole = 'editor' | 'viewer' | 'none' | 'inherit'
 type MemberRole = 'editor' | 'viewer' | 'none'
 
 export function DocRolesModal({ doc, onClose }: { doc: Doc; onClose: () => void }) {
@@ -88,6 +88,7 @@ export function DocRolesModal({ doc, onClose }: { doc: Doc; onClose: () => void 
           <RoleSelect
             value={everyoneRole}
             onChange={(v) => changeEveryone(v as EveryoneRole)}
+            allowInherit
           />
         </div>
       </div>
@@ -103,7 +104,16 @@ export function DocRolesModal({ doc, onClose }: { doc: Doc; onClose: () => void 
         <div className="max-h-[45vh] space-y-1 overflow-y-auto">
           {rows.map((u) => {
             const isCreator = u.id === doc.created_by
-            const role = overrides[u.id] ?? everyoneRole
+            const override = overrides[u.id]
+            const inheritedLabel =
+              everyoneRole === 'inherit' && override === undefined
+                ? u.role === 'owner'
+                  ? 'Owner'
+                  : u.role === 'editor'
+                    ? 'Can edit'
+                    : 'Can view'
+                : undefined
+            const role = override ?? (everyoneRole === 'inherit' ? '__fallback__' : everyoneRole)
             return (
               <div key={u.id} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5">
                 <Avatar id={u.id} name={u.display_name} size={30} />
@@ -123,6 +133,7 @@ export function DocRolesModal({ doc, onClose }: { doc: Doc; onClose: () => void 
                   <RoleSelect
                     value={role}
                     onChange={(v) => changeMember(u.id, v as MemberRole)}
+                    fallbackLabel={inheritedLabel}
                   />
                 )}
               </div>
@@ -137,9 +148,13 @@ export function DocRolesModal({ doc, onClose }: { doc: Doc; onClose: () => void 
 function RoleSelect({
   value,
   onChange,
+  allowInherit = false,
+  fallbackLabel,
 }: {
   value: string
   onChange: (v: string) => void
+  allowInherit?: boolean
+  fallbackLabel?: string
 }) {
   return (
     <select
@@ -147,6 +162,12 @@ function RoleSelect({
       onChange={(e) => onChange(e.target.value)}
       className="rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1 text-sm focus:border-[var(--color-accent)] focus:outline-none"
     >
+      {fallbackLabel && (
+        <option value="__fallback__" disabled>
+          {fallbackLabel}
+        </option>
+      )}
+      {allowInherit && <option value="inherit">Inherit from channel role</option>}
       <option value="editor">Can edit</option>
       <option value="viewer">Can view</option>
       <option value="none">No access</option>

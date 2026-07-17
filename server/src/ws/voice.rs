@@ -1,4 +1,4 @@
-use crate::routes::is_member;
+use crate::routes::member_role;
 use crate::state::SharedState;
 use crate::ws::{channel_member_ids, envelope, GuestInfo, WsSender};
 use axum::extract::ws::Message;
@@ -285,9 +285,9 @@ async fn handle_join(
                 return;
             }
         },
-        None => match is_member(&state.pool, channel_id, user_id).await {
-            Ok(true) => {}
-            Ok(false) => {
+        None => match member_role(&state.pool, channel_id, user_id).await {
+            Ok(Some(role)) if role.can_post() => {}
+            Ok(_) => {
                 send_error(tx, channel_id, "not_member");
                 return;
             }

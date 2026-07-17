@@ -15,8 +15,8 @@ use crate::routes::docs::{
     broadcast_doc_event, fetch_all_overrides, fetch_raw_doc, sync_decision, sync_decision_for,
     SyncDecision,
 };
+use crate::routes::channel_member_roles;
 use crate::state::SharedState;
-use crate::ws::channel_member_ids;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -24,7 +24,7 @@ use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use sqlx::{PgPool, Row};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::Sender;
@@ -208,8 +208,8 @@ pub async fn refresh_room_access(state: &SharedState, doc_id: Uuid) {
             return;
         }
     };
-    let member_set: HashSet<Uuid> = match channel_member_ids(&state.pool, raw.channel_id).await {
-        Ok(ids) => ids.into_iter().collect(),
+    let member_roles = match channel_member_roles(&state.pool, raw.channel_id).await {
+        Ok(roles) => roles,
         Err(e) => {
             tracing::warn!("doc {} access refresh: members failed: {}", doc_id, e);
             return;
@@ -237,7 +237,7 @@ pub async fn refresh_room_access(state: &SharedState, doc_id: Uuid) {
         };
         match sync_decision_for(
             &raw,
-            member_set.contains(&user_id),
+            member_roles.get(&user_id).copied(),
             overrides.get(&user_id).map(|s| s.as_str()),
             user_id,
         ) {
@@ -257,6 +257,46 @@ pub async fn refresh_room_access(state: &SharedState, doc_id: Uuid) {
     }
     if room.conns.is_empty() {
         guard.remove(&doc_id);
+    }
+}
+
+/// Re-evaluate every open doc room belonging to a channel after channel membership or
+/// role changes.
+pub async fn refresh_channel_rooms(state: &SharedState, channel_id: Uuid) {
+    let open_doc_ids: Vec<Uuid> = {
+        let guard = state.doc_rooms.lock().unwrap();
+        guard.keys().copied().collect()
+    };
+    if open_doc_ids.is_empty() {
+        return;
+    }
+
+    let rows = match sqlx::query("SELECT id FROM docs WHERE channel_id = $1 AND id = ANY($2)")
+        .bind(channel_id)
+        .bind(open_doc_ids)
+        .fetch_all(&state.pool)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::warn!(
+                "channel {} doc-room refresh lookup failed: {}",
+                channel_id,
+                error
+            );
+            return;
+        }
+    };
+
+    for row in rows {
+        match row.try_get::<Uuid, _>("id") {
+            Ok(doc_id) => refresh_room_access(state, doc_id).await,
+            Err(error) => tracing::warn!(
+                "channel {} doc-room refresh row failed: {}",
+                channel_id,
+                error
+            ),
+        }
     }
 }
 

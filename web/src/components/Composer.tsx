@@ -113,7 +113,8 @@ export function Composer({
   const gifOpen = gifEnabled && (manualGifOpen || slashGifOpen)
   const gifInitialQuery = slashGifOpen ? (gifCommand?.[1] ?? '') : ''
 
-  const canPost = channel.kind === 'dm' || channel.is_member
+  const canPost =
+    channel.kind === 'dm' || (channel.is_member && channel.my_role !== 'viewer')
 
   // Ensure channel members are loaded so the @ picker can surface them first.
   useEffect(() => {
@@ -497,6 +498,16 @@ export function Composer({
       e.preventDefault()
       addFiles(e.clipboardData.files)
     }
+  }
+
+  if (channel.kind !== 'dm' && channel.is_member && channel.my_role === 'viewer') {
+    return (
+      <div className="border-t border-[var(--color-border)] px-4 py-3">
+        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-4 py-3 text-sm text-[var(--color-text-dim)]">
+          You have view-only access to this channel
+        </div>
+      </div>
+    )
   }
 
   if (!canPost) {
