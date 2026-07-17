@@ -24,6 +24,7 @@ type Pending = {
 // A completion candidate: person (@), resource (#), or emoji (:).
 type PickItem =
   | { kind: 'user'; id: string; name: string }
+  | { kind: 'all' } // @all — broadcast mention to everyone in the channel
   | { kind: 'doc' | 'canvas'; id: string; title: string; channelName?: string }
   | { kind: 'emoji'; id: string; name: string; native: string; shortcode: string }
 
@@ -167,6 +168,11 @@ export function Composer({
         })
         .slice(0, 8)
         .map<PickItem>((u) => ({ kind: 'user', id: u.id, name: u.display_name }))
+      // `@all` (notify everyone) ranks after matching people, and stays offered
+      // even when fully typed — it only leaves once picked (Tab/Enter/click).
+      if (channel.kind !== 'dm' && 'all'.startsWith(ql)) {
+        people.push({ kind: 'all' })
+      }
       setResults(people)
       setSel(0)
       return
@@ -272,6 +278,9 @@ export function Composer({
     switch (item.kind) {
       case 'user':
         token = `@${item.name} `
+        break
+      case 'all':
+        token = '@all '
         break
       case 'emoji':
         token = `${item.native} `
@@ -558,7 +567,7 @@ export function Composer({
           </div>
           {results.map((r, i) => (
             <button
-              key={`${r.kind}-${r.id}`}
+              key={r.kind === 'all' ? 'all' : `${r.kind}-${r.id}`}
               onMouseEnter={() => setSel(i)}
               onMouseDown={(e) => {
                 e.preventDefault()
@@ -572,6 +581,16 @@ export function Composer({
                 <>
                   <Avatar id={r.id} name={r.name} size={22} />
                   <span className="min-w-0 flex-1 truncate">{r.name}</span>
+                </>
+              ) : r.kind === 'all' ? (
+                <>
+                  <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-xs">
+                    📣
+                  </span>
+                  <span className="min-w-0 shrink-0 font-medium">all</span>
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--color-text-faint)]">
+                    Notify everyone in this channel
+                  </span>
                 </>
               ) : r.kind === 'emoji' ? (
                 <>

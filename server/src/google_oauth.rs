@@ -17,7 +17,9 @@ use uuid::Uuid;
 const AUTH_ENDPOINT: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
 const USERINFO_ENDPOINT: &str = "https://www.googleapis.com/oauth2/v3/userinfo";
-pub const CALENDAR_SCOPE: &str = "https://www.googleapis.com/auth/calendar.readonly";
+// `openid email` are non-sensitive and required for the userinfo email lookup.
+pub const CALENDAR_SCOPE: &str =
+    "openid email https://www.googleapis.com/auth/calendar.readonly";
 const STATE_PURPOSE: &str = "cal_oauth";
 /// The OAuth flow must complete within this window.
 const STATE_TTL_MINUTES: i64 = 10;

@@ -912,6 +912,9 @@ attachments as blobs with the `Authorization` header.
 Triggers, computed on message create:
 - **dm** — any message in a `dm` channel notifies the other member(s).
 - **mention** — `@Display Name` matching a channel member (longest match wins) notifies them.
+  `@all` (word-boundary match, case-insensitive) notifies every other channel member with
+  kind `mention`; not applicable in DMs. The composer suggests `@all` in the `@` picker
+  after matching people (hidden in DMs).
 - **reply** — a thread reply notifies the parent message's author.
 Author is never notified; within a normal channel a mention supersedes a reply for the
 same user.
@@ -1082,7 +1085,7 @@ module `routes/calendar.rs`. Never conflate the two.
 
 ## Principles
 
-- **Read-only Google sync**: scope `https://www.googleapis.com/auth/calendar.readonly`. sharp
+- **Read-only Google sync**: scope `openid email https://www.googleapis.com/auth/calendar.readonly` (openid+email feed the userinfo account-email lookup). sharp
   never writes to Google; native meetings live only in sharp.
 - **Provider-ready**: `provider` column (`google` today) leaves room for Outlook/CalDAV.
 - **Tokens encrypted at rest**: access/refresh tokens are sealed with AES-256-GCM under a key
@@ -1188,7 +1191,7 @@ OAuth client via env. Flow (`google_oauth.rs`, hand-rolled reqwest + serde — n
 1. `GET /calendar/google/connect` mints a **short-lived (10 min) HS256 state JWT**
    `{sub:user_id, purpose:"cal_oauth"}` signed with `JWT_SECRET` (stateless, multi-replica
    safe), and returns the consent URL: `response_type=code`,
-   `scope=…/auth/calendar.readonly`, `access_type=offline`, `prompt=consent`,
+   `scope=openid email …/auth/calendar.readonly`, `access_type=offline`, `prompt=consent`,
    `include_granted_scopes=true`.
 2. The callback verifies the state JWT, exchanges the code at
    `https://oauth2.googleapis.com/token`, fetches the account email from the userinfo endpoint,

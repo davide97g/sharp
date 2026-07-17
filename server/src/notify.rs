@@ -3,7 +3,8 @@
 //!
 //! Triggers (per the product contract):
 //!   - `dm`      — any message in a DM channel notifies the other member(s)
-//!   - `mention` — `@Display Name` matching a channel member notifies them
+//!   - `mention` — `@Display Name` matching a channel member notifies them;
+//!     `@all` notifies every other channel member
 //!   - `reply`   — a thread reply notifies the parent message's author
 //!
 //! Muted channels produce no notification at all. Do-Not-Disturb keeps the inbox
@@ -188,7 +189,7 @@ fn build_preview(content: &str, first_attachment: Option<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::preview_text;
+    use super::{contains_all_mention, preview_text};
 
     #[test]
     fn humanizes_standalone_gif_token() {
@@ -209,6 +210,23 @@ mod tests {
     }
 
     #[test]
+    fn detects_all_mention_at_boundaries() {
+        assert!(contains_all_mention("@all"));
+        assert!(contains_all_mention("hey @all, standup time"));
+        assert!(contains_all_mention("(@ALL)"));
+        assert!(contains_all_mention("@all!"));
+    }
+
+    #[test]
+    fn rejects_non_broadcast_at_tokens() {
+        assert!(!contains_all_mention("no mention here"));
+        assert!(!contains_all_mention("@allison hi")); // longer word
+        assert!(!contains_all_mention("mail@all.com is fine")); // '@' after alnum
+        assert!(!contains_all_mention("ball@all")); // ditto
+        assert!(!contains_all_mention("@al"));
+    }
+
+    #[test]
     fn humanizes_standalone_duck_roast_gif_token() {
         assert_eq!(
             preview_text("[[gif:https://media.example/roast.gif|Gotcha|duck]]"),
@@ -219,6 +237,33 @@ mod tests {
             "sent a GIF"
         );
     }
+}
+
+/// Does `content` contain an `@all` broadcast mention? Same boundary rules as
+/// name mentions: the `@` must not follow an alphanumeric (emails), and `all`
+/// must end at a non-alphanumeric boundary (so "@allison" doesn't match).
+fn contains_all_mention(content: &str) -> bool {
+    let lower = content.to_lowercase();
+    for (i, ch) in lower.char_indices() {
+        if ch != '@' {
+            continue;
+        }
+        if i > 0 {
+            if let Some(prev) = lower[..i].chars().last() {
+                if prev.is_alphanumeric() {
+                    continue;
+                }
+            }
+        }
+        let after = &lower[i + 1..];
+        if let Some(rest) = after.strip_prefix("all") {
+            let boundary = rest.chars().next().map(|c| !c.is_alphanumeric()).unwrap_or(true);
+            if boundary {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Channel members mentioned by `@Display Name` in `content`, excluding `author`.
@@ -415,6 +460,15 @@ async fn dispatch_inner(
             }
         }
     } else {
+        // `@all` broadcasts a mention to every other channel member (Slack's
+        // @channel); individual name mentions below then dedup via `seen`.
+        if contains_all_mention(content) {
+            for uid in other_member_ids(pool, channel_id, author).await? {
+                if seen.insert(uid) {
+                    targets.push((uid, "mention"));
+                }
+            }
+        }
         for uid in mentioned_ids(pool, channel_id, content, author).await? {
             if seen.insert(uid) {
                 targets.push((uid, "mention"));
