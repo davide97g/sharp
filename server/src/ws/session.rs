@@ -55,7 +55,7 @@ pub async fn handle_socket(
             "user_id": user_id.to_string(),
             "conn_id": conn_id.to_string(),
             "online_user_ids": online,
-            "voice_rooms": voice::snapshot_all(&state),
+            "voice_rooms": voice::snapshot_for(&state, user_id, guest.as_ref()).await,
         }),
     );
     let _ = tx.send(Message::Text(hello.to_string()));

@@ -180,7 +180,7 @@ pub struct WsQuery {
 }
 
 /// Session context for a public voice-link guest. A guest is scoped to exactly
-/// one channel's voice room and carries its display name in the token.
+/// one voice room and carries its display name in the token.
 pub struct GuestInfo {
     pub name: String,
     pub channel_id: Uuid,

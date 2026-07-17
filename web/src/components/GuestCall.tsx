@@ -9,16 +9,18 @@ const GUEST_NAME_KEY = 'sharp.guestName'
 
 type Phase = 'loading' | 'invalid' | 'form' | 'connecting' | 'incall' | 'left'
 
-// Public guest entry point (route `/call/:token`). Anonymous visitors — and
-// logged-in members who follow the link — see the same voice-only flow: resolve
-// the link, enter a name, join the channel's voice room as a guest.
+// Public call entry point (route `/call/:token`). Signed-in visitors keep their
+// account identity; anonymous visitors enter a name and receive a guest token.
 export function GuestCall() {
-  const { token } = useParams<{ token: string }>()
+  const { token: linkToken } = useParams<{ token: string }>()
   const initGuestCall = useStore((s) => s.initGuestCall)
   const rejoinGuestCall = useStore((s) => s.rejoinGuestCall)
+  const joinVoice = useStore((s) => s.joinVoice)
   const setVoiceStageMode = useStore((s) => s.setVoiceStageMode)
   const voiceChannelId = useStore((s) => s.voice.channelId)
   const guestRevoked = useStore((s) => s.guestRevoked)
+  const connectionId = useStore((s) => s.myConnId)
+  const accountSession = useStore((s) => Boolean(s.token && s.me && !s.isGuest))
 
   const [phase, setPhase] = useState<Phase>('loading')
   const [channelName, setChannelName] = useState('')
@@ -28,20 +30,26 @@ export function GuestCall() {
   const boundChannelRef = useRef<string | null>(null)
   const wasInCallRef = useRef(false)
   const forcedFullRef = useRef(false)
+  const accountSessionRef = useRef(accountSession)
+  const memberJoinStartedRef = useRef(false)
+  const guestSessionRef = useRef(false)
 
   // Resolve the link → channel name, or mark it invalid.
   useEffect(() => {
-    if (!token) {
+    if (!linkToken) {
       setPhase('invalid')
       return
     }
     let cancelled = false
     api.callLink
-      .info(token)
+      .info(linkToken)
       .then((res) => {
         if (cancelled) return
         setChannelName(res.channel_name)
-        setPhase((prev) => (prev === 'loading' ? 'form' : prev))
+        boundChannelRef.current = res.room_id
+        setPhase((prev) =>
+          prev === 'loading' ? (accountSessionRef.current ? 'connecting' : 'form') : prev,
+        )
       })
       .catch(() => {
         if (!cancelled) setPhase('invalid')
@@ -49,7 +57,22 @@ export function GuestCall() {
     return () => {
       cancelled = true
     }
-  }, [token])
+  }, [linkToken])
+
+  // A signed-in visitor keeps their existing account + websocket. The link is
+  // supplied only as room admission proof; no guest identity is minted.
+  useEffect(() => {
+    const roomId = boundChannelRef.current
+    if (
+      !accountSessionRef.current ||
+      !roomId ||
+      !linkToken ||
+      !connectionId ||
+      memberJoinStartedRef.current
+    ) return
+    memberJoinStartedRef.current = true
+    void joinVoice(roomId, { stageMode: 'full', linkToken })
+  }, [channelName, connectionId, joinVoice, linkToken])
 
   // Drive the call phases off the shared voice state. Once the bound room is
   // joined we're in-call; when it clears after having been in-call, we've left.
@@ -81,13 +104,13 @@ export function GuestCall() {
   useEffect(() => {
     return () => {
       useStore.getState().leaveVoice()
-      setSessionToken(null)
+      if (guestSessionRef.current) setSessionToken(null)
     }
   }, [])
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
-    if (busy || !token) return
+    if (busy || !linkToken) return
     const trimmed = name.trim()
     if (trimmed.length < 1 || trimmed.length > 80) {
       toastError('Enter a name between 1 and 80 characters.')
@@ -95,11 +118,12 @@ export function GuestCall() {
     }
     setBusy(true)
     try {
-      const res = await api.callLink.join(token, trimmed)
+      const res = await api.callLink.join(linkToken, trimmed)
       localStorage.setItem(GUEST_NAME_KEY, trimmed)
       boundChannelRef.current = res.channel_id
       wasInCallRef.current = false
       setPhase('connecting')
+      guestSessionRef.current = true
       initGuestCall(res.token, { id: res.user_id, name: res.name }, res.channel_id)
     } catch (err) {
       if (err instanceof ApiRequestError && err.status === 404) setPhase('invalid')
@@ -113,13 +137,18 @@ export function GuestCall() {
     forcedFullRef.current = false
     wasInCallRef.current = false
     setPhase('connecting')
-    rejoinGuestCall()
+    const roomId = boundChannelRef.current
+    if (accountSessionRef.current && roomId && linkToken) {
+      void joinVoice(roomId, { stageMode: 'full', linkToken })
+    } else {
+      rejoinGuestCall()
+    }
   }
 
   if (phase === 'incall') {
     return (
       <div className="min-h-full bg-[var(--color-ink)]">
-        <VideoStage />
+        <VideoStage roomName={channelName} />
       </div>
     )
   }

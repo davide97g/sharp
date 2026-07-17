@@ -31,11 +31,11 @@ pub struct Claims {
     /// Guest display name, carried in the token so guests never need /users.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// The single channel a guest token is bound to.
+    /// The single voice room a guest token is bound to (legacy wire name).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel_id: Option<Uuid>,
-    /// The voice-link token the guest joined with; checked against the channel's
-    /// current link at join time so revocation (regenerate) invalidates guests.
+    /// The voice-link token the guest joined with; checked against the room's
+    /// current link at join time so revocation invalidates guests.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<String>,
 }
@@ -92,7 +92,7 @@ pub fn create_token(user_id: Uuid, secret: &str) -> AppResult<String> {
     .map_err(|e| AppError::Internal(format!("token error: {}", e)))
 }
 
-/// Mint a limited guest token bound to a single channel's voice room. The
+/// Mint a limited guest token bound to a single voice room. The
 /// subject is a fresh random UUID (the guest's identity for the session);
 /// tokens are stateless and expire after 12 hours. Revocation is achieved by
 /// regenerating the channel's voice link (checked at `voice.join`).

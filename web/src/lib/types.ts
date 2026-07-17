@@ -153,7 +153,16 @@ export type IceConfigResponse = { ice_servers: RTCIceServer[] }
 // --- Public guest call links ---
 export type VoiceLinkResponse = { token: string | null }
 export type VoiceLinkCreateResponse = { token: string }
-export type CallLinkInfoResponse = { channel_name: string }
+export type CallLinkInfoResponse = {
+  room_id: string
+  room_kind: ChannelKind | 'standalone'
+  channel_name: string
+}
+export type StandaloneCallCreateResponse = {
+  room_id: string
+  token: string
+  title: string
+}
 export type CallLinkJoinResponse = {
   token: string // guest JWT (12h)
   channel_id: string
@@ -198,7 +207,7 @@ export type MeetingListItem = {
   id: string
   channel_id: string
   channel_name: string
-  channel_kind: ChannelKind
+  channel_kind: ChannelKind | 'standalone'
   title: string
   status: MeetingStatus
   summary_status: MeetingSummaryStatus

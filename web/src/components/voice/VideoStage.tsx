@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { isSpeechSupported } from '../../lib/speech'
 import { useStore, type VoiceStageMode } from '../../store'
@@ -71,7 +72,8 @@ const STAGE_SIZE: Record<
   },
 }
 
-export function VideoStage() {
+export function VideoStage({ roomName: roomNameOverride }: { roomName?: string } = {}) {
+  const { token: currentLinkToken } = useParams<{ token?: string }>()
   const channelId = useStore((s) => s.voice.channelId)
   const stageMode = useStore((s) => s.voice.stageMode)
   const room = useStore((s) => (channelId ? s.voiceRooms[channelId] : undefined))
@@ -320,11 +322,11 @@ export function VideoStage() {
     )
   }
 
-  const roomName = channel
+  const roomName = roomNameOverride ?? (channel
     ? channel.kind === 'dm'
       ? channel.dm_user?.display_name ?? channelLabel(channel)
       : `# ${channel.name}`
-    : 'Call'
+    : 'Meet')
   const anyCamera = participants.some((p) => p.cameraConnId)
   const avatarSize = stageMode === 'compact' ? 56 : 88
   const cols = gridColsFor(participants.length)
@@ -534,8 +536,8 @@ export function VideoStage() {
               <div className="truncate text-sm font-semibold">{roomName}</div>
             </div>
             <div className="ml-auto flex items-center gap-1">
-              {!isGuest && (
-                <CopyLinkControl channelId={channelId} buttonClass={headerBtnClass} />
+              {!isGuest && (channel || currentLinkToken) && (
+                <CopyLinkControl channelId={channel?.id} directToken={currentLinkToken} buttonClass={headerBtnClass} />
               )}
               {pip.supported && (
                 <button
@@ -548,7 +550,7 @@ export function VideoStage() {
                   <PipIcon />
                 </button>
               )}
-              {!isGuest && (
+              {!isGuest && channel?.is_member && (
                 <button
                   type="button"
                   aria-label={chatOpen ? 'Hide chat' : 'Show chat'}
@@ -583,7 +585,7 @@ export function VideoStage() {
 
           <div className="relative min-h-0 flex-1 overflow-hidden px-8 pb-24 pt-2">
             {stageBody}
-            <VoiceDuckSuggest />
+            {channel?.is_member ? <VoiceDuckSuggest /> : null}
           </div>
 
           <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center">
@@ -593,7 +595,7 @@ export function VideoStage() {
           </div>
         </div>
 
-        {!isGuest && (
+        {!isGuest && channel?.is_member && (
           <div
             className="shrink-0 overflow-hidden border-l border-[var(--color-border)] bg-[var(--color-ink)] transition-[width] duration-200 ease-out motion-reduce:transition-none"
             style={{ width: chatOpen ? 380 : 0 }}
@@ -699,8 +701,8 @@ export function VideoStage() {
             Notes on · {sharingCount} sharing
           </div>
         )}
-        {!isGuest && (
-          <CopyLinkControl channelId={channelId} buttonClass={headerBtnClass} />
+        {!isGuest && (channel || currentLinkToken) && (
+          <CopyLinkControl channelId={channel?.id} directToken={currentLinkToken} buttonClass={headerBtnClass} />
         )}
         {pip.supported && (
           <button
@@ -744,7 +746,7 @@ export function VideoStage() {
 
       <div className="relative min-h-0 flex-1 overflow-y-auto p-3">
         {stageBody}
-        <VoiceDuckSuggest />
+        {channel?.is_member ? <VoiceDuckSuggest /> : null}
       </div>
 
       <footer className="flex shrink-0 items-center justify-center gap-2 border-t border-[var(--color-border)] px-3 py-2.5">
@@ -966,13 +968,15 @@ function VideoTile({
   )
 }
 
-// Members-only header control: copy or regenerate the channel's public call
-// link. Lazily resolves/creates the token only when an action is taken.
+// Header control: link routes can copy their known token directly; channel
+// members can lazily resolve or regenerate the channel's public call link.
 function CopyLinkControl({
   channelId,
+  directToken,
   buttonClass,
 }: {
-  channelId: string
+  channelId?: string
+  directToken?: string
   buttonClass: string
 }) {
   const [open, setOpen] = useState(false)
@@ -1003,8 +1007,10 @@ function CopyLinkControl({
     if (busy) return
     setBusy(true)
     try {
-      const { token } = await api.voiceLink.get(channelId)
-      const active = token ?? (await api.voiceLink.create(channelId)).token
+      const active = directToken ?? (channelId
+        ? (await api.voiceLink.get(channelId)).token ?? (await api.voiceLink.create(channelId)).token
+        : null)
+      if (!active) throw new Error('Call link unavailable.')
       await writeLink(active)
       toastSuccess('Call link copied')
       setOpen(false)
@@ -1016,7 +1022,7 @@ function CopyLinkControl({
   }
 
   async function newLink() {
-    if (busy) return
+    if (busy || !channelId) return
     setBusy(true)
     try {
       const { token } = await api.voiceLink.create(channelId)
@@ -1058,15 +1064,17 @@ function CopyLinkControl({
           >
             Copy call link
           </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={busy}
-            onClick={() => void newLink()}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm text-[var(--color-text)] outline-none hover:bg-[var(--color-panel-2)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:opacity-60"
-          >
-            New link (revokes old)
-          </button>
+          {channelId ? (
+            <button
+              type="button"
+              role="menuitem"
+              disabled={busy}
+              onClick={() => void newLink()}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm text-[var(--color-text)] outline-none hover:bg-[var(--color-panel-2)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:opacity-60"
+            >
+              New link (revokes old)
+            </button>
+          ) : null}
         </div>
       )}
     </div>

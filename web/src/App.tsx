@@ -116,8 +116,8 @@ export function App() {
           path="/login"
           element={authed ? <Navigate to="/" replace /> : <Login />}
         />
-        {/* Public guest call link: works for anonymous visitors and logged-in
-            members alike — always render the voice-only guest flow. */}
+        {/* Public call link: authenticated visitors keep their account session;
+            anonymous visitors get the scoped guest flow. */}
         <Route path="/call/:token" element={<GuestCall />} />
         <Route
           path="/"

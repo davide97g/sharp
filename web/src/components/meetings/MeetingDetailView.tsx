@@ -93,7 +93,9 @@ export function MeetingDetailView() {
         <button onClick={() => navigate('/meetings')} className="rounded-lg p-2 text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]" aria-label="Back to meetings">←</button>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold">{meeting.title}</div>
-          <div className="text-[10px] text-[var(--color-text-faint)]">#{meeting.channel_name}</div>
+          <div className="text-[10px] text-[var(--color-text-faint)]">
+            {meeting.channel_kind === 'standalone' ? 'Standalone meet' : meeting.channel_kind === 'dm' ? meeting.channel_name : `#${meeting.channel_name}`}
+          </div>
         </div>
         <StatusChip meeting={meeting} />
         <button onClick={() => void regenerate()} disabled={meeting.status === 'active'} className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-40">Regenerate</button>

@@ -74,7 +74,14 @@ pub async fn get_call_link(
     State(state): State<SharedState>,
     Path(token): Path<String>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let row = sqlx::query("SELECT name, kind FROM channels WHERE voice_link_token = $1")
+    let row = sqlx::query(
+        "SELECT id, name, kind FROM (
+             SELECT id, name, kind, voice_link_token AS token FROM channels
+             UNION ALL
+             SELECT id, title AS name, 'standalone'::text AS kind, link_token AS token
+               FROM standalone_calls
+         ) links WHERE token = $1",
+    )
         .bind(&token)
         .fetch_optional(&state.pool)
         .await?
@@ -88,7 +95,11 @@ pub async fn get_call_link(
         row.try_get::<String, _>("name")?
     };
 
-    Ok(Json(json!({ "channel_name": channel_name })))
+    Ok(Json(json!({
+        "room_id": row.try_get::<Uuid, _>("id")?,
+        "room_kind": kind,
+        "channel_name": channel_name,
+    })))
 }
 
 #[derive(Deserialize)]
@@ -96,8 +107,44 @@ pub struct JoinCallLinkRequest {
     pub name: String,
 }
 
+#[derive(Deserialize)]
+pub struct CreateStandaloneCallRequest {
+    pub title: String,
+}
+
+/// POST /calls — create a shareable call room independent from channels and DMs.
+pub async fn create_standalone_call(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Json(body): Json<CreateStandaloneCallRequest>,
+) -> AppResult<(axum::http::StatusCode, Json<serde_json::Value>)> {
+    let title = body.title.trim();
+    let len = title.chars().count();
+    if len < 1 || len > 160 {
+        return Err(AppError::Validation(
+            "title must be between 1 and 160 characters".to_string(),
+        ));
+    }
+
+    let token = generate_link_token();
+    let room_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO standalone_calls (title, link_token, created_by)
+         VALUES ($1, $2, $3) RETURNING id",
+    )
+    .bind(title)
+    .bind(&token)
+    .bind(auth.id)
+    .fetch_one(&state.pool)
+    .await?;
+
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(json!({ "room_id": room_id, "token": token, "title": title })),
+    ))
+}
+
 /// POST /call-links/{token}/join — mint a limited guest token for the bound
-/// channel's voice room (no auth).
+/// voice room (no auth).
 pub async fn join_call_link(
     State(state): State<SharedState>,
     Path(token): Path<String>,
@@ -111,7 +158,13 @@ pub async fn join_call_link(
         ));
     }
 
-    let row = sqlx::query("SELECT id FROM channels WHERE voice_link_token = $1")
+    let row = sqlx::query(
+        "SELECT id FROM (
+             SELECT id, voice_link_token AS token FROM channels
+             UNION ALL
+             SELECT id, link_token AS token FROM standalone_calls
+         ) links WHERE token = $1",
+    )
         .bind(&token)
         .fetch_optional(&state.pool)
         .await?

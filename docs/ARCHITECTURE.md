@@ -517,15 +517,17 @@ doc REST surface, the per-channel + per-doc role model, trash/restore, and the
 
 # Phase 4 — Voice + camera rooms (WebRTC mesh)
 
-Ephemeral P2P-mesh WebRTC audio rooms with optional webcam video on every channel and DM.
+Ephemeral P2P-mesh WebRTC audio rooms with optional webcam video on channels, DMs, and
+standalone meets.
 Browsers connect directly; the server does signaling, media-state coordination, and buffering
 of member-submitted speech-recognition phrases for roast GIF suggestions. No media passes
 through it and there is no SFU.
 
 ## Principles
 
-- **One room per channel/DM**: every channel kind (`public`, `private`, or `dm`) may have
-  one voice room. A room exists while it has at least one participant.
+- **Channel or standalone context**: every channel kind (`public`, `private`, or `dm`) may
+  have one voice room. `standalone_calls` provides independently named, shareable rooms with
+  no channel/DM foreign key. A room exists in memory while it has participants.
 - **Ephemeral media state, durable notes**: WebRTC rooms remain in server memory. Once a
   participant opts into meeting notes, attendance, opted-in transcript phrases, generated
   notes, and action items are persisted in Postgres.
@@ -554,7 +556,9 @@ The existing envelope remains `{"type": string, "payload": object}` in both dire
 
 Client → server:
 
-- `voice.join` `{channel_id}`
+- `voice.join` `{channel_id, link_token?}` — `channel_id` is the room UUID for wire
+  compatibility. Authenticated link visitors send `link_token` as admission proof without
+  replacing their account session.
 - `voice.leave` `{channel_id}`
 - `voice.mute` `{channel_id, muted: boolean}`
 - `voice.transcribe` `{channel_id, enabled: boolean}` — opt in or out of sending
@@ -606,10 +610,11 @@ Server → client:
 
 ## Server behavior
 
-- `voice.join`: for registered users, require channel role `owner` or `editor`; for
-  guests, skip membership and instead verify the token's `link` equals the channel's
-  **current** `voice_link_token` (send `voice.error` `code: "link_revoked"` and bail if it
-  does not). Then check the 8-participant cap and send `voice.error` with `code: "room_full"`
+- `voice.join`: registered users may enter through channel owner/editor membership,
+  standalone-call ownership, or a matching `link_token`. A registered link visitor remains
+  a registered participant. Guests skip membership and instead verify the JWT's bound link
+  against the room's current token. Then check the 8-participant cap and send `voice.error`
+  with `code: "room_full"`
   to the sender only when full. Insert the participant with `muted=false, camera_on=false`
   and its resolved `display_name`/`guest`, reply with `voice.state` on the sender's tx only,
   then broadcast `voice.participant_joined` to the room audience. Joining twice from the same
@@ -703,15 +708,16 @@ Server → client:
 | GET | `/channels/{id}/gifs/suggest-voice` | (member-only) → `{query, results}` from recent buffered voice phrases; fewer than two phrases or shared channel cooldown returns 200 `{query: null, results: []}`; 503 when duck suggestions are disabled. Success resets only the voice phrase streak/armed state and broadcasts `voice.roast_armed {armed:false}`. |
 | GET | `/channels/{id}/voice-link` | (Bearer auth, channel member) → `{"token": string \| null}` — the channel's current public voice-link token, or `null` if none exists. |
 | POST | `/channels/{id}/voice-link` | (Bearer auth, channel owner/editor) → `{"token": string}` — generate a fresh 32-byte URL-safe token, **replacing** (revoking) any previous value. |
-| GET | `/call-links/{token}` | (public, no auth) → `{"channel_name": string}`; `404` if no channel has this token. For DM channels the literal `"Call"` is returned instead of the hidden DM name. |
+| POST | `/calls` | (Bearer auth) `{"title": string}` → `201 {"room_id", "token", "title"}`. Creates a standalone call with no channel/DM association. |
+| GET | `/call-links/{token}` | (public, no auth) → `{"room_id": string, "room_kind": "public"\|"private"\|"dm"\|"standalone", "channel_name": string}`; `404` if unknown. For DMs the literal `"Call"` replaces the hidden name. |
 | POST | `/call-links/{token}/join` | (public, no auth) body `{"name": string}` (trimmed, 1..=80 chars, else `422`) → `{"token": <guest JWT>, "channel_id": string, "user_id": string, "name": string}`; `404` for an unknown token. `user_id` is the minted guest subject UUID. |
 
 ## Public guest voice links
 
-Any channel owner/editor can create a stable, revocable public link to a channel's voice room. An
-unregistered guest opens the link, enters a display name, and receives a limited guest JWT
-that lets them join **only that channel's** voice room over the main WS — no chat, no other
-REST.
+Channel owner/editors can create stable, revocable room links; `New meet` creates a
+`standalone_calls` row with its own link. A signed-in visitor keeps their current JWT and
+account identity when opening either link. An anonymous visitor enters a display name and
+receives a limited guest JWT bound to that room — no chat, no other REST.
 
 - **Link token**: stored on `channels.voice_link_token` (nullable `text`, unique when set —
   migration `0010_voice_link.sql`). `POST /channels/{id}/voice-link` overwrites it, so a

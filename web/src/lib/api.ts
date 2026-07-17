@@ -32,6 +32,7 @@ import type {
   MeetingDetail,
   MeetingsResponse,
   MeetingAction,
+  StandaloneCallCreateResponse,
 } from './types'
 
 const TOKEN_KEY = 'sharp.token'
@@ -145,6 +146,10 @@ async function request<T>(path: string, opts: ReqOpts = {}): Promise<T> {
 }
 
 export const api = {
+  calls: {
+    create: (title: string) =>
+      request<StandaloneCallCreateResponse>('/calls', { method: 'POST', body: { title } }),
+  },
   meetings: {
     list: (input: { channelId?: string; q?: string; before?: string; limit?: number } = {}) => {
       const params = new URLSearchParams()
@@ -185,7 +190,7 @@ export const api = {
       }),
   },
   callLink: {
-    // Public: resolve a call link token to its channel name (404 if invalid).
+    // Public: resolve a call link token to its room metadata (404 if invalid).
     info: (token: string) =>
       request<CallLinkInfoResponse>(`/call-links/${token}`, { auth: false }),
     // Public: join the call as a guest, receiving a short-lived guest JWT.

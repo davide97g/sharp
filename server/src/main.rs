@@ -157,6 +157,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(routes::gifs::get_settings).put(routes::gifs::put_settings),
         )
         .route("/voice/config", get(routes::voice::voice_config))
+        .route("/calls", post(routes::call_links::create_standalone_call))
         .route("/meetings", get(routes::meetings::list_meetings))
         .route(
             "/meetings/:id",

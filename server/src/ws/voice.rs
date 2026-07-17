@@ -1,7 +1,6 @@
 use crate::routes::meetings::{self, LiveAttendee};
-use crate::routes::member_role;
 use crate::state::SharedState;
-use crate::ws::{channel_member_ids, envelope, GuestInfo, WsSender};
+use crate::ws::{envelope, GuestInfo, WsSender};
 use axum::extract::ws::Message;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -49,21 +48,34 @@ pub struct VoicePhrase {
 /// caller supplies (e.g. a just-removed participant for `participant_left`).
 pub(crate) async fn voice_targets(
     state: &SharedState,
-    channel_id: Uuid,
+    room_id: Uuid,
     extra: &[Uuid],
 ) -> Vec<Uuid> {
     let mut ids: HashSet<Uuid> = HashSet::new();
-    match channel_member_ids(&state.pool, channel_id).await {
+    match sqlx::query_scalar::<_, Uuid>(
+        "SELECT user_id FROM channel_members WHERE channel_id = $1
+         UNION
+         SELECT created_by AS user_id FROM standalone_calls WHERE id = $1
+         UNION
+         SELECT DISTINCT a.user_id
+           FROM meetings m
+           JOIN meeting_attendance a ON a.meeting_id = m.id
+          WHERE m.standalone_call_id = $1 AND a.user_id IS NOT NULL",
+    )
+    .bind(room_id)
+    .fetch_all(&state.pool)
+    .await
+    {
         Ok(members) => ids.extend(members),
         Err(error) => {
             // Still deliver to in-room users (incl. guests) even if the member
             // lookup fails, so live events aren't silently dropped.
-            tracing::warn!("voice room {} member lookup failed: {}", channel_id, error);
+            tracing::warn!("voice room {} audience lookup failed: {}", room_id, error);
         }
     }
     {
         let guard = state.voice_rooms.lock().unwrap();
-        if let Some(room) = guard.get(&channel_id) {
+        if let Some(room) = guard.get(&room_id) {
             for participant in room.participants.values() {
                 ids.insert(participant.user_id);
             }
@@ -73,19 +85,51 @@ pub(crate) async fn voice_targets(
     ids.into_iter().collect()
 }
 
-/// Fetch a channel's current voice-link token (used to validate guest joins).
+/// Fetch a room's current voice-link token (used to validate guest joins).
 async fn current_voice_link_token(
     pool: &sqlx::PgPool,
-    channel_id: Uuid,
+    room_id: Uuid,
 ) -> Result<Option<String>, sqlx::Error> {
-    let row = sqlx::query("SELECT voice_link_token FROM channels WHERE id = $1")
-        .bind(channel_id)
+    let row = sqlx::query(
+        "SELECT token FROM (
+             SELECT id, voice_link_token AS token FROM channels
+             UNION ALL
+             SELECT id, link_token AS token FROM standalone_calls
+         ) rooms WHERE id = $1",
+    )
+        .bind(room_id)
         .fetch_optional(pool)
         .await?;
     match row {
-        Some(row) => row.try_get::<Option<String>, _>("voice_link_token"),
+        Some(row) => row.try_get::<Option<String>, _>("token"),
         None => Ok(None),
     }
+}
+
+async fn can_registered_user_join(
+    state: &SharedState,
+    room_id: Uuid,
+    user_id: Uuid,
+    supplied_link: Option<&str>,
+) -> Result<bool, sqlx::Error> {
+    if let Some(link) = supplied_link {
+        if current_voice_link_token(&state.pool, room_id).await?.as_deref() == Some(link) {
+            return Ok(true);
+        }
+    }
+    let allowed: bool = sqlx::query_scalar(
+        "SELECT EXISTS (
+             SELECT 1 FROM channel_members
+              WHERE channel_id = $1 AND user_id = $2 AND role IN ('owner', 'editor')
+         ) OR EXISTS (
+             SELECT 1 FROM standalone_calls WHERE id = $1 AND created_by = $2
+         )",
+    )
+    .bind(room_id)
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await?;
+    Ok(allowed)
 }
 
 #[derive(Default)]
@@ -102,10 +146,38 @@ pub struct VoiceRoom {
 
 pub type VoiceRooms = Mutex<HashMap<Uuid, VoiceRoom>>;
 
-pub fn snapshot_all(state: &SharedState) -> Value {
+pub async fn snapshot_for(
+    state: &SharedState,
+    user_id: Uuid,
+    guest: Option<&GuestInfo>,
+) -> Value {
+    let visible: HashSet<Uuid> = match guest {
+        Some(info) => HashSet::from([info.channel_id]),
+        None => sqlx::query_scalar::<_, Uuid>(
+            "SELECT channel_id AS room_id FROM channel_members
+              WHERE user_id = $1 AND role IN ('owner', 'editor')
+             UNION
+             SELECT id AS room_id FROM standalone_calls WHERE created_by = $1
+             UNION
+             SELECT DISTINCT m.standalone_call_id AS room_id
+               FROM meetings m
+               JOIN meeting_attendance a ON a.meeting_id = m.id
+              WHERE a.user_id = $1 AND m.standalone_call_id IS NOT NULL",
+        )
+        .bind(user_id)
+        .fetch_all(&state.pool)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect(),
+    };
     let guard = state.voice_rooms.lock().unwrap();
     let mut rooms: Vec<(Uuid, Vec<VoiceParticipant>, Option<Uuid>)> = guard
         .iter()
+        .filter(|(room_id, room)| {
+            visible.contains(room_id)
+                || room.participants.values().any(|participant| participant.user_id == user_id)
+        })
         .map(|(channel_id, room)| {
             let mut participants: Vec<VoiceParticipant> =
                 room.participants.values().cloned().collect();
@@ -352,9 +424,16 @@ async fn handle_join(
                 return;
             }
         },
-        None => match member_role(&state.pool, channel_id, user_id).await {
-            Ok(Some(role)) if role.can_post() => {}
-            Ok(_) => {
+        None => match can_registered_user_join(
+            state,
+            channel_id,
+            user_id,
+            payload.get("link_token").and_then(Value::as_str),
+        )
+        .await
+        {
+            Ok(true) => {}
+            Ok(false) => {
                 send_error(tx, channel_id, "not_member");
                 return;
             }

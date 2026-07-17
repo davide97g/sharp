@@ -1,9 +1,8 @@
 use crate::auth::AuthUser;
 use crate::deepseek;
 use crate::error::{AppError, AppResult};
-use crate::routes::is_member;
 use crate::state::SharedState;
-use crate::ws::{channel_member_ids, envelope};
+use crate::ws::envelope;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
@@ -24,24 +23,26 @@ pub(crate) struct LiveAttendee {
 
 pub(crate) async fn start_live_meeting(
     state: &SharedState,
-    channel_id: Uuid,
+    room_id: Uuid,
     created_by: Option<Uuid>,
     attendees: &[LiveAttendee],
 ) -> AppResult<(Uuid, Vec<(Uuid, Uuid)>)> {
     let now = Utc::now();
-    let channel_name: String = sqlx::query_scalar("SELECT name FROM channels WHERE id = $1")
-        .bind(channel_id)
-        .fetch_one(&state.pool)
-        .await?;
-    let title = format!("{} · {}", channel_name, now.format("%b %-d, %Y · %H:%M"));
+    let context = load_room_context(state, room_id).await?;
+    let title = if context.kind == "standalone" {
+        context.name.clone()
+    } else {
+        format!("{} · {}", context.name, now.format("%b %-d, %Y · %H:%M"))
+    };
     let summary_status = if state.config.deepseek.is_some() { "pending" } else { "unavailable" };
     let mut tx = state.pool.begin().await?;
     let meeting_id: Uuid = sqlx::query_scalar(
         "INSERT INTO meetings
-            (channel_id, title, summary_status, started_at, last_activity_at, created_by)
-         VALUES ($1, $2, $3, $4, $4, $5) RETURNING id",
+            (channel_id, standalone_call_id, title, summary_status, started_at, last_activity_at, created_by)
+         VALUES ($1, $2, $3, $4, $5, $5, $6) RETURNING id",
     )
-    .bind(channel_id)
+    .bind(context.channel_id)
+    .bind(context.standalone_call_id)
     .bind(title)
     .bind(summary_status)
     .bind(now)
@@ -67,6 +68,37 @@ pub(crate) async fn start_live_meeting(
     }
     tx.commit().await?;
     Ok((meeting_id, ids))
+}
+
+struct RoomContext {
+    channel_id: Option<Uuid>,
+    standalone_call_id: Option<Uuid>,
+    name: String,
+    kind: String,
+}
+
+async fn load_room_context(state: &SharedState, room_id: Uuid) -> AppResult<RoomContext> {
+    let row = sqlx::query(
+        "SELECT channel_id, standalone_call_id, name, kind FROM (
+             SELECT id AS room_id, id AS channel_id, NULL::uuid AS standalone_call_id,
+                    name, kind
+               FROM channels
+             UNION ALL
+             SELECT id AS room_id, NULL::uuid AS channel_id, id AS standalone_call_id,
+                    title AS name, 'standalone'::text AS kind
+               FROM standalone_calls
+         ) contexts WHERE room_id = $1",
+    )
+    .bind(room_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("call room not found".into()))?;
+    Ok(RoomContext {
+        channel_id: row.try_get("channel_id")?,
+        standalone_call_id: row.try_get("standalone_call_id")?,
+        name: row.try_get("name")?,
+        kind: row.try_get("kind")?,
+    })
 }
 
 pub(crate) async fn add_live_attendee(
@@ -271,16 +303,30 @@ pub async fn list_meetings(
     let search = query.q.unwrap_or_default().trim().to_string();
     let limit = query.limit.unwrap_or(50).clamp(1, 100);
     let rows = sqlx::query(
-        "SELECT m.id, m.channel_id, c.name AS channel_name, c.kind AS channel_kind,
+        "SELECT m.id, COALESCE(m.channel_id, m.standalone_call_id) AS room_id,
+                COALESCE(c.name, sc.title) AS channel_name,
+                COALESCE(c.kind, 'standalone') AS channel_kind,
                 m.title, m.status, m.summary_status, m.started_at, m.ended_at,
                 (SELECT count(DISTINCT COALESCE(a.user_id::text, a.id::text))
                    FROM meeting_attendance a WHERE a.meeting_id = m.id) AS participant_count,
                 (SELECT count(*) FROM meeting_transcript_phrases p
                    WHERE p.meeting_id = m.id) AS transcript_count
            FROM meetings m
-           JOIN channels c ON c.id = m.channel_id
-           JOIN channel_members cm ON cm.channel_id = m.channel_id AND cm.user_id = $1
-          WHERE ($2::uuid IS NULL OR m.channel_id = $2)
+           LEFT JOIN channels c ON c.id = m.channel_id
+           LEFT JOIN standalone_calls sc ON sc.id = m.standalone_call_id
+          WHERE (
+                (m.channel_id IS NOT NULL AND EXISTS (
+                    SELECT 1 FROM channel_members cm
+                     WHERE cm.channel_id = m.channel_id AND cm.user_id = $1
+                ))
+                OR (m.standalone_call_id IS NOT NULL AND (
+                    sc.created_by = $1 OR EXISTS (
+                        SELECT 1 FROM meeting_attendance ma
+                         WHERE ma.meeting_id = m.id AND ma.user_id = $1
+                    )
+                ))
+            )
+            AND ($2::uuid IS NULL OR COALESCE(m.channel_id, m.standalone_call_id) = $2)
             AND ($3::timestamptz IS NULL OR m.started_at < $3)
             AND ($4 = '' OR m.title ILIKE '%' || $4 || '%'
                  OR m.summary ILIKE '%' || $4 || '%'
@@ -304,7 +350,7 @@ pub async fn list_meetings(
         .map(|row| -> Result<MeetingListItem, sqlx::Error> {
             Ok(MeetingListItem {
                 id: row.try_get("id")?,
-                channel_id: row.try_get("channel_id")?,
+                channel_id: row.try_get("room_id")?,
                 channel_name: row.try_get("channel_name")?,
                 channel_kind: row.try_get("channel_kind")?,
                 title: row.try_get("title")?,
@@ -465,23 +511,42 @@ pub async fn delete_meeting(
 }
 
 async fn ensure_meeting_access(state: &SharedState, id: Uuid, user_id: Uuid) -> AppResult<Uuid> {
-    let channel_id: Uuid = sqlx::query_scalar("SELECT channel_id FROM meetings WHERE id = $1")
+    let room_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT COALESCE(m.channel_id, m.standalone_call_id)
+           FROM meetings m
+           LEFT JOIN standalone_calls sc ON sc.id = m.standalone_call_id
+          WHERE m.id = $1 AND (
+                (m.channel_id IS NOT NULL AND EXISTS (
+                    SELECT 1 FROM channel_members cm
+                     WHERE cm.channel_id = m.channel_id AND cm.user_id = $2
+                ))
+                OR (m.standalone_call_id IS NOT NULL AND (
+                    sc.created_by = $2 OR EXISTS (
+                        SELECT 1 FROM meeting_attendance ma
+                         WHERE ma.meeting_id = m.id AND ma.user_id = $2
+                    )
+                ))
+          )",
+    )
         .bind(id)
+        .bind(user_id)
         .fetch_optional(&state.pool)
         .await?
-        .ok_or_else(|| AppError::NotFound("meeting not found".into()))?;
-    if !is_member(&state.pool, channel_id, user_id).await? {
-        return Err(AppError::NotFound("meeting not found".into()));
-    }
-    Ok(channel_id)
+        .flatten();
+    room_id.ok_or_else(|| AppError::NotFound("meeting not found".into()))
 }
 
 async fn load_meeting_detail(state: &SharedState, id: Uuid) -> AppResult<Value> {
     let meeting = sqlx::query(
-        "SELECT m.id, m.channel_id, c.name AS channel_name, c.kind AS channel_kind,
+        "SELECT m.id, COALESCE(m.channel_id, m.standalone_call_id) AS room_id,
+                COALESCE(c.name, sc.title) AS channel_name,
+                COALESCE(c.kind, 'standalone') AS channel_kind,
                 m.title, m.status, m.summary_status, m.summary, m.decisions,
                 m.started_at, m.ended_at, m.created_at, m.updated_at
-           FROM meetings m JOIN channels c ON c.id = m.channel_id WHERE m.id = $1",
+           FROM meetings m
+           LEFT JOIN channels c ON c.id = m.channel_id
+           LEFT JOIN standalone_calls sc ON sc.id = m.standalone_call_id
+          WHERE m.id = $1",
     )
     .bind(id)
     .fetch_one(&state.pool)
@@ -541,7 +606,7 @@ async fn load_meeting_detail(state: &SharedState, id: Uuid) -> AppResult<Value> 
         .len();
     let transcript_count = transcript.len();
     Ok(json!({
-        "id": meeting.get::<Uuid, _>("id"), "channel_id": meeting.get::<Uuid, _>("channel_id"),
+        "id": meeting.get::<Uuid, _>("id"), "channel_id": meeting.get::<Uuid, _>("room_id"),
         "channel_name": meeting.get::<String, _>("channel_name"),
         "channel_kind": meeting.get::<String, _>("channel_kind"),
         "title": meeting.get::<String, _>("title"), "status": meeting.get::<String, _>("status"),
@@ -629,21 +694,22 @@ async fn generate_summary(state: &SharedState, meeting_id: Uuid) -> anyhow::Resu
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    let channel_id: Uuid = sqlx::query_scalar("SELECT channel_id FROM meetings WHERE id = $1")
+    let room_id: Uuid = sqlx::query_scalar(
+        "SELECT COALESCE(channel_id, standalone_call_id) FROM meetings WHERE id = $1",
+    )
         .bind(meeting_id)
         .fetch_one(&state.pool)
         .await?;
-    if let Ok(targets) = channel_member_ids(&state.pool, channel_id).await {
-        state
-            .hub
-            .broadcast(
-                envelope(
-                    "meeting.summary_ready",
-                    json!({ "meeting_id": meeting_id, "channel_id": channel_id }),
-                ),
-                targets,
-            )
-            .await;
-    }
+    let targets = crate::ws::voice::voice_targets(state, room_id, &[]).await;
+    state
+        .hub
+        .broadcast(
+            envelope(
+                "meeting.summary_ready",
+                json!({ "meeting_id": meeting_id, "channel_id": room_id }),
+            ),
+            targets,
+        )
+        .await;
     Ok(())
 }

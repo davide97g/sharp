@@ -97,7 +97,11 @@ export function MeetingsSidebar() {
                     <span className="min-w-0 flex-1 truncate text-xs font-medium">{meeting.title}</span>
                   </div>
                   <div className="mt-1 truncate pl-3.5 text-[10px] text-[var(--color-text-faint)]">
-                    {meeting.channel_kind === 'dm' ? meeting.channel_name : `#${meeting.channel_name}`}
+                    {meeting.channel_kind === 'standalone'
+                      ? 'Standalone meet'
+                      : meeting.channel_kind === 'dm'
+                        ? meeting.channel_name
+                        : `#${meeting.channel_name}`}
                     {' · '}{shortTime(meeting.started_at)}
                   </div>
                 </NavLink>

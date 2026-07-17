@@ -290,7 +290,7 @@ type State = {
   // voice actions
   joinVoice: (
     channelId: string,
-    opts?: { stageMode?: VoiceStageMode },
+    opts?: { stageMode?: VoiceStageMode; linkToken?: string },
   ) => Promise<void>
   leaveVoice: () => void
   toggleVoiceMute: () => void
@@ -1098,7 +1098,10 @@ export const useStore = create<State>((set, get) => ({
           audioDeviceId: startedClient.getAudioDeviceId(),
         },
       }))
-      get().ws?.send('voice.join', { channel_id: channelId })
+      get().ws?.send('voice.join', {
+        channel_id: channelId,
+        ...(opts?.linkToken ? { link_token: opts.linkToken } : {}),
+      })
     } catch (e) {
       client?.stop()
       const active = get().voice
@@ -2150,7 +2153,7 @@ function voiceErrorMessage(code: string): string {
     case 'room_full':
       return 'This voice room is full.'
     case 'not_member':
-      return 'You are not a member of this channel.'
+      return 'You do not have access to this call.'
     case 'not_in_room':
       return 'You are no longer in this voice room.'
     case 'camera_full':

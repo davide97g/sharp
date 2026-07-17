@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import type { MeetingListItem } from '../../lib/types'
 import { useStore } from '../../store'
+import { NewMeetDialog } from './NewMeetDialog'
 
 export function MeetingsHome() {
   const [params] = useSearchParams()
@@ -10,6 +11,7 @@ export function MeetingsHome() {
   const activeMeetings = useStore((state) => state.activeMeetings)
   const [meetings, setMeetings] = useState<MeetingListItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [creatingMeet, setCreatingMeet] = useState(false)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -30,9 +32,18 @@ export function MeetingsHome() {
 
   return (
     <main className="flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
-      <header className="flex h-14 items-center border-b border-[var(--color-border)] px-5">
-        <span className="font-semibold">Meeting records</span>
-        <span className="ml-2 text-sm text-[var(--color-text-faint)]">Attendance, notes, transcript</span>
+      <header className="flex min-h-14 items-center gap-3 border-b border-[var(--color-border)] px-5 py-2">
+        <div className="min-w-0 flex-1">
+          <span className="font-semibold">Meeting records</span>
+          <span className="ml-2 hidden text-sm text-[var(--color-text-faint)] sm:inline">Attendance, notes, transcript</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setCreatingMeet(true)}
+          className="meeting-button-primary flex h-10 items-center gap-2 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+        >
+          <PlusIcon /> New meet
+        </button>
       </header>
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl px-5 py-8 sm:px-8">
@@ -75,7 +86,7 @@ export function MeetingsHome() {
                 <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#ff6b5f]/10 text-[#ff8a80]">●</div>
                 <h3 className="font-medium">No completed meeting records</h3>
                 <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--color-text-faint)]">
-                  Join a channel call and choose “Start meeting notes.” Record ends when last participant leaves.
+                  Start a new meet or join a channel call, then choose “Start meeting notes.” Record ends when everyone leaves.
                 </p>
               </div>
             ) : (
@@ -88,6 +99,7 @@ export function MeetingsHome() {
           </section>
         </div>
       </div>
+      {creatingMeet ? <NewMeetDialog onClose={() => setCreatingMeet(false)} /> : null}
     </main>
   )
 }
@@ -112,7 +124,7 @@ function MeetingCard({ meeting, onOpen, live }: { meeting: MeetingListItem; onOp
         <span className="font-mono text-[11px] text-[var(--color-text-faint)]">{timeOf(meeting.started_at)}</span>
       </div>
       <div className="font-semibold group-hover:text-white">{meeting.title}</div>
-      <div className="mt-2 text-xs text-[var(--color-text-faint)]">#{meeting.channel_name} · {meeting.participant_count} participants</div>
+      <div className="mt-2 text-xs text-[var(--color-text-faint)]">{meetingContext(meeting)} · {meeting.participant_count} participants</div>
     </button>
   )
 }
@@ -126,7 +138,7 @@ function MeetingRow({ meeting, onOpen }: { meeting: MeetingListItem; onOpen: () 
       </div>
       <div className="min-w-0">
         <div className="truncate text-sm font-medium group-hover:text-white">{meeting.title}</div>
-        <div className="mt-1 truncate text-xs text-[var(--color-text-faint)]">#{meeting.channel_name} · {meeting.participant_count} participants · {meeting.transcript_count} phrases</div>
+        <div className="mt-1 truncate text-xs text-[var(--color-text-faint)]">{meetingContext(meeting)} · {meeting.participant_count} participants · {meeting.transcript_count} phrases</div>
       </div>
       <div className="text-right">
         <div className="font-mono text-xs tabular-nums text-[var(--color-text-dim)]">{formatMinutes(durationMinutes(meeting))}</div>
@@ -150,3 +162,15 @@ function formatMinutes(value: number) {
 
 const dayOf = (value: string) => new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(value))
 const timeOf = (value: string) => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(value))
+
+function meetingContext(meeting: MeetingListItem) {
+  return meeting.channel_kind === 'standalone' ? 'Standalone meet' : meeting.channel_kind === 'dm' ? meeting.channel_name : `#${meeting.channel_name}`
+}
+
+function PlusIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  )
+}
