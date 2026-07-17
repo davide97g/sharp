@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { isSpeechSupported } from '../../lib/speech'
+import { useIsMobile } from '../../lib/useMediaQuery'
 import { useStore, type VoiceStageMode } from '../../store'
 import { channelLabel } from '../../lib/util'
 import { toastError, toastSuccess } from '../../lib/toast'
@@ -82,17 +83,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
     channelId ? s.activeMeetings[channelId] ?? null : null,
   )
   const speaking = useStore((s) => s.voice.speaking)
-  const muted = useStore((s) => s.voice.muted)
-  const noiseSuppression = useStore((s) => s.voice.noiseSuppression)
-  const noiseSuppressionAvailable = useStore((s) => s.voice.noiseSuppressionAvailable)
-  const handRaised = useStore((s) => s.voice.handRaised)
   const transcribing = useStore((s) => s.voice.transcribing)
-  const voiceStatus = useStore((s) => s.voice.status)
-  const cameraStatus = useStore((s) => s.voice.cameraStatus)
-  const blurEnabled = useStore((s) => s.voice.blurEnabled)
-  const screenStatus = useStore((s) => s.voice.screenStatus)
-  const audioDeviceId = useStore((s) => s.voice.audioDeviceId)
-  const videoDeviceId = useStore((s) => s.voice.videoDeviceId)
   const localStream = useStore((s) => s.voice.localStream)
   const remoteStreams = useStore((s) => s.voice.remoteStreams)
   const localScreenStream = useStore((s) => s.voice.localScreenStream)
@@ -102,17 +93,9 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
   const users = useStore((s) => s.users)
   const isGuest = useStore((s) => s.isGuest)
   const channel = useStore((s) => s.channels.find((candidate) => candidate.id === channelId))
-  const toggleVoiceMute = useStore((s) => s.toggleVoiceMute)
-  const toggleNoiseSuppression = useStore((s) => s.toggleNoiseSuppression)
-  const toggleVoiceHand = useStore((s) => s.toggleVoiceHand)
   const toggleTranscription = useStore((s) => s.toggleTranscription)
-  const toggleVoiceCamera = useStore((s) => s.toggleVoiceCamera)
-  const toggleVoiceBlur = useStore((s) => s.toggleVoiceBlur)
-  const toggleVoiceScreen = useStore((s) => s.toggleVoiceScreen)
-  const setVoiceAudioDevice = useStore((s) => s.setVoiceAudioDevice)
-  const setVoiceVideoDevice = useStore((s) => s.setVoiceVideoDevice)
   const setVoiceStageMode = useStore((s) => s.setVoiceStageMode)
-  const leaveVoice = useStore((s) => s.leaveVoice)
+  const isMobile = useIsMobile()
   const [mics, setMics] = useState<MediaDeviceOption[]>([])
   const [cameras, setCameras] = useState<MediaDeviceOption[]>([])
   const panelRef = useRef<HTMLElement>(null)
@@ -459,96 +442,12 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
   )
 
   const stageControls = (
-    <>
-      <DeviceControl
-        label={muted ? 'Unmute microphone' : 'Mute microphone'}
-        menuLabel="Choose microphone"
-        active={!muted}
-        onClick={toggleVoiceMute}
-        devices={mics}
-        selectedDeviceId={audioDeviceId}
-        onSelectDevice={(deviceId) => void setVoiceAudioDevice(deviceId)}
-        menuPlacement="up"
-      >
-        <MicActivityIcon muted={muted} />
-      </DeviceControl>
-      <CallControl
-        label={
-          !noiseSuppressionAvailable
-            ? 'Noise suppression unavailable'
-            : noiseSuppression
-              ? 'Turn off noise suppression'
-              : 'Turn on noise suppression'
-        }
-        active={noiseSuppression && noiseSuppressionAvailable}
-        disabled={voiceStatus !== 'connected' || !noiseSuppressionAvailable}
-        onClick={() => void toggleNoiseSuppression()}
-      >
-        <NoiseSuppressionIcon off={!noiseSuppression || !noiseSuppressionAvailable} />
-      </CallControl>
-      {isSpeechSupported() && (
-        <CallControl
-          label={
-            transcribing
-              ? 'Stop sharing my transcript'
-              : activeMeetingId
-                ? 'Share my transcript'
-                : 'Start meeting notes'
-          }
-          active={transcribing}
-          disabled={voiceStatus !== 'connected'}
-          onClick={toggleTranscription}
-        >
-          <CaptionsIcon />
-        </CallControl>
-      )}
-      <CallControl
-        label={handRaised ? 'Lower hand' : 'Raise hand'}
-        active={handRaised}
-        disabled={voiceStatus !== 'connected'}
-        onClick={toggleVoiceHand}
-      >
-        <HandIcon />
-      </CallControl>
-      <DeviceControl
-        label={cameraStatus === 'on' ? 'Turn camera off' : 'Turn camera on'}
-        menuLabel="Choose camera"
-        active={cameraStatus !== 'off'}
-        disabled={cameraStatus === 'starting'}
-        onClick={toggleVoiceCamera}
-        devices={cameras}
-        selectedDeviceId={videoDeviceId}
-        onSelectDevice={(deviceId) => void setVoiceVideoDevice(deviceId)}
-        menuPlacement="up"
-      >
-        <CameraIcon off={cameraStatus === 'off'} />
-      </DeviceControl>
-      <CallControl
-        label={blurEnabled ? 'Turn off background blur' : 'Blur my background'}
-        active={blurEnabled}
-        disabled={voiceStatus !== 'connected'}
-        onClick={toggleVoiceBlur}
-      >
-        <BlurIcon off={!blurEnabled} />
-      </CallControl>
-      <CallControl
-        label={
-          someoneElseSharing
-            ? `${otherSharerName} is sharing`
-            : screenStatus === 'on'
-              ? 'Stop sharing screen'
-              : 'Share screen'
-        }
-        active={screenStatus !== 'off'}
-        disabled={screenStatus === 'starting' || someoneElseSharing}
-        onClick={() => void toggleVoiceScreen()}
-      >
-        <ScreenShareIcon />
-      </CallControl>
-      <CallControl label="Leave call" danger onClick={leaveVoice}>
-        <LeaveIcon />
-      </CallControl>
-    </>
+    <StageControlsBar
+      mics={mics}
+      cameras={cameras}
+      someoneElseSharing={someoneElseSharing}
+      otherSharerName={otherSharerName}
+    />
   )
 
   if (stageMode === 'full') {
@@ -618,8 +517,8 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
             {channel?.is_member ? <VoiceDuckSuggest /> : null}
           </div>
 
-          <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center">
-            <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-ink)]/90 px-3 py-2 shadow-2xl backdrop-blur">
+          <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center px-3">
+            <div className="pointer-events-auto voice-cmd-bar flex items-center justify-center gap-2 rounded-[1.35rem] border border-[var(--color-border)] bg-[var(--color-ink)]/92 px-2.5 py-2 shadow-2xl backdrop-blur-md sm:gap-2.5 sm:px-3">
               {stageControls}
             </div>
           </div>
@@ -639,7 +538,18 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
     )
   }
 
-  const size = STAGE_SIZE[stageMode]
+  const size = isMobile
+    ? {
+        ...STAGE_SIZE[stageMode],
+        width: 'min(920px, calc(100vw - 1rem))',
+        height:
+          stageMode === 'expanded'
+            ? 'min(640px, calc(100dvh - var(--mobile-tab-h) - 1.25rem))'
+            : 'min(320px, calc(100dvh - var(--mobile-tab-h) - 1.25rem))',
+        minWidth: 280,
+        minHeight: stageMode === 'expanded' ? 300 : 220,
+      }
+    : STAGE_SIZE[stageMode]
 
   const onHeaderPointerDown = (event: React.PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return
@@ -701,10 +611,12 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
         height: size.height,
         minWidth: size.minWidth,
         minHeight: size.minHeight,
-        resize: 'both',
+        resize: isMobile ? 'none' : 'both',
         ...(position
           ? { left: position.left, top: position.top }
-          : { right: 16, bottom: 16 }),
+          : isMobile
+            ? { left: '0.5rem', right: '0.5rem', bottom: 'calc(var(--mobile-tab-h) + 0.5rem)', width: 'auto' }
+            : { right: 16, bottom: 16 }),
       }}
     >
       <header
@@ -779,8 +691,10 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
         {channel?.is_member ? <VoiceDuckSuggest /> : null}
       </div>
 
-      <footer className="flex shrink-0 items-center justify-center gap-2 border-t border-[var(--color-border)] px-3 py-2.5">
-        {stageControls}
+      <footer className="flex shrink-0 items-center justify-center border-t border-[var(--color-border)] px-2 py-2.5 sm:px-3">
+        <div className="voice-cmd-bar flex w-full max-w-lg items-center justify-center gap-2 sm:w-auto sm:gap-2.5">
+          {stageControls}
+        </div>
       </footer>
     </section>
     {notesConsentPrompt}
@@ -1173,11 +1087,421 @@ function ScreenTile({
   )
 }
 
+function StageControlsBar({
+  mics,
+  cameras,
+  someoneElseSharing,
+  otherSharerName,
+}: {
+  mics: MediaDeviceOption[]
+  cameras: MediaDeviceOption[]
+  someoneElseSharing: boolean
+  otherSharerName: string
+}) {
+  const isMobile = useIsMobile()
+  const [moreOpen, setMoreOpen] = useState(false)
+  const muted = useStore((s) => s.voice.muted)
+  const noiseSuppression = useStore((s) => s.voice.noiseSuppression)
+  const noiseSuppressionAvailable = useStore((s) => s.voice.noiseSuppressionAvailable)
+  const handRaised = useStore((s) => s.voice.handRaised)
+  const transcribing = useStore((s) => s.voice.transcribing)
+  const voiceStatus = useStore((s) => s.voice.status)
+  const cameraStatus = useStore((s) => s.voice.cameraStatus)
+  const blurEnabled = useStore((s) => s.voice.blurEnabled)
+  const screenStatus = useStore((s) => s.voice.screenStatus)
+  const audioDeviceId = useStore((s) => s.voice.audioDeviceId)
+  const videoDeviceId = useStore((s) => s.voice.videoDeviceId)
+  const channelId = useStore((s) => s.voice.channelId)
+  const activeMeetingId = useStore((s) =>
+    channelId ? s.activeMeetings[channelId] ?? null : null,
+  )
+  const toggleVoiceMute = useStore((s) => s.toggleVoiceMute)
+  const toggleNoiseSuppression = useStore((s) => s.toggleNoiseSuppression)
+  const toggleVoiceHand = useStore((s) => s.toggleVoiceHand)
+  const toggleTranscription = useStore((s) => s.toggleTranscription)
+  const toggleVoiceCamera = useStore((s) => s.toggleVoiceCamera)
+  const toggleVoiceBlur = useStore((s) => s.toggleVoiceBlur)
+  const toggleVoiceScreen = useStore((s) => s.toggleVoiceScreen)
+  const setVoiceAudioDevice = useStore((s) => s.setVoiceAudioDevice)
+  const setVoiceVideoDevice = useStore((s) => s.setVoiceVideoDevice)
+  const leaveVoice = useStore((s) => s.leaveVoice)
+
+  const secondaryActive =
+    (noiseSuppression && noiseSuppressionAvailable) ||
+    handRaised ||
+    transcribing ||
+    blurEnabled ||
+    screenStatus !== 'off'
+
+  if (isMobile) {
+    return (
+      <>
+        <CallControl
+          label={muted ? 'Unmute microphone' : 'Mute microphone'}
+          active={!muted}
+          size="lg"
+          onClick={toggleVoiceMute}
+        >
+          <MicActivityIcon muted={muted} />
+        </CallControl>
+        <CallControl
+          label={cameraStatus === 'on' ? 'Turn camera off' : 'Turn camera on'}
+          active={cameraStatus !== 'off'}
+          disabled={cameraStatus === 'starting'}
+          size="lg"
+          onClick={toggleVoiceCamera}
+        >
+          <CameraIcon off={cameraStatus === 'off'} />
+        </CallControl>
+        <CallControl
+          label="More call controls"
+          active={moreOpen || secondaryActive}
+          size="lg"
+          onClick={() => setMoreOpen((open) => !open)}
+        >
+          <MoreCallIcon />
+        </CallControl>
+        <CallControl label="Leave call" danger size="lg" onClick={leaveVoice}>
+          <LeaveIcon />
+        </CallControl>
+        {moreOpen && (
+          <MobileCallMoreSheet
+            mics={mics}
+            cameras={cameras}
+            someoneElseSharing={someoneElseSharing}
+            otherSharerName={otherSharerName}
+            onClose={() => setMoreOpen(false)}
+          />
+        )}
+      </>
+    )
+  }
+
+  return (
+    <>
+      <DeviceControl
+        label={muted ? 'Unmute microphone' : 'Mute microphone'}
+        menuLabel="Choose microphone"
+        active={!muted}
+        onClick={toggleVoiceMute}
+        devices={mics}
+        selectedDeviceId={audioDeviceId}
+        onSelectDevice={(deviceId) => void setVoiceAudioDevice(deviceId)}
+        menuPlacement="up"
+      >
+        <MicActivityIcon muted={muted} />
+      </DeviceControl>
+      <CallControl
+        label={
+          !noiseSuppressionAvailable
+            ? 'Noise suppression unavailable'
+            : noiseSuppression
+              ? 'Turn off noise suppression'
+              : 'Turn on noise suppression'
+        }
+        active={noiseSuppression && noiseSuppressionAvailable}
+        disabled={voiceStatus !== 'connected' || !noiseSuppressionAvailable}
+        onClick={() => void toggleNoiseSuppression()}
+      >
+        <NoiseSuppressionIcon off={!noiseSuppression || !noiseSuppressionAvailable} />
+      </CallControl>
+      {isSpeechSupported() && (
+        <CallControl
+          label={
+            transcribing
+              ? 'Stop sharing my transcript'
+              : activeMeetingId
+                ? 'Share my transcript'
+                : 'Start meeting notes'
+          }
+          active={transcribing}
+          disabled={voiceStatus !== 'connected'}
+          onClick={toggleTranscription}
+        >
+          <CaptionsIcon />
+        </CallControl>
+      )}
+      <CallControl
+        label={handRaised ? 'Lower hand' : 'Raise hand'}
+        active={handRaised}
+        disabled={voiceStatus !== 'connected'}
+        onClick={toggleVoiceHand}
+      >
+        <HandIcon />
+      </CallControl>
+      <DeviceControl
+        label={cameraStatus === 'on' ? 'Turn camera off' : 'Turn camera on'}
+        menuLabel="Choose camera"
+        active={cameraStatus !== 'off'}
+        disabled={cameraStatus === 'starting'}
+        onClick={toggleVoiceCamera}
+        devices={cameras}
+        selectedDeviceId={videoDeviceId}
+        onSelectDevice={(deviceId) => void setVoiceVideoDevice(deviceId)}
+        menuPlacement="up"
+      >
+        <CameraIcon off={cameraStatus === 'off'} />
+      </DeviceControl>
+      <CallControl
+        label={blurEnabled ? 'Turn off background blur' : 'Blur my background'}
+        active={blurEnabled}
+        disabled={voiceStatus !== 'connected'}
+        onClick={toggleVoiceBlur}
+      >
+        <BlurIcon off={!blurEnabled} />
+      </CallControl>
+      <CallControl
+        label={
+          someoneElseSharing
+            ? `${otherSharerName} is sharing`
+            : screenStatus === 'on'
+              ? 'Stop sharing screen'
+              : 'Share screen'
+        }
+        active={screenStatus !== 'off'}
+        disabled={screenStatus === 'starting' || someoneElseSharing}
+        onClick={() => void toggleVoiceScreen()}
+      >
+        <ScreenShareIcon />
+      </CallControl>
+      <CallControl label="Leave call" danger onClick={leaveVoice}>
+        <LeaveIcon />
+      </CallControl>
+    </>
+  )
+}
+
+function MobileCallMoreSheet({
+  mics,
+  cameras,
+  someoneElseSharing,
+  otherSharerName,
+  onClose,
+}: {
+  mics: MediaDeviceOption[]
+  cameras: MediaDeviceOption[]
+  someoneElseSharing: boolean
+  otherSharerName: string
+  onClose: () => void
+}) {
+  const noiseSuppression = useStore((s) => s.voice.noiseSuppression)
+  const noiseSuppressionAvailable = useStore((s) => s.voice.noiseSuppressionAvailable)
+  const handRaised = useStore((s) => s.voice.handRaised)
+  const transcribing = useStore((s) => s.voice.transcribing)
+  const voiceStatus = useStore((s) => s.voice.status)
+  const blurEnabled = useStore((s) => s.voice.blurEnabled)
+  const screenStatus = useStore((s) => s.voice.screenStatus)
+  const audioDeviceId = useStore((s) => s.voice.audioDeviceId)
+  const videoDeviceId = useStore((s) => s.voice.videoDeviceId)
+  const channelId = useStore((s) => s.voice.channelId)
+  const activeMeetingId = useStore((s) =>
+    channelId ? s.activeMeetings[channelId] ?? null : null,
+  )
+  const toggleNoiseSuppression = useStore((s) => s.toggleNoiseSuppression)
+  const toggleVoiceHand = useStore((s) => s.toggleVoiceHand)
+  const toggleTranscription = useStore((s) => s.toggleTranscription)
+  const toggleVoiceBlur = useStore((s) => s.toggleVoiceBlur)
+  const toggleVoiceScreen = useStore((s) => s.toggleVoiceScreen)
+  const setVoiceAudioDevice = useStore((s) => s.setVoiceAudioDevice)
+  const setVoiceVideoDevice = useStore((s) => s.setVoiceVideoDevice)
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return (
+    <div className="fixed inset-0 z-[80]" role="dialog" aria-modal="true" aria-label="Call controls">
+      <button
+        type="button"
+        aria-label="Close"
+        className="absolute inset-0 cursor-default bg-black/55"
+        onClick={onClose}
+      />
+      <div className="absolute inset-x-0 bottom-[var(--mobile-tab-h)] z-[81] max-h-[min(70dvh,32rem)] overflow-y-auto rounded-t-2xl border border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl">
+        <div className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-panel)] px-4 pb-3 pt-3">
+          <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-[var(--color-border)]" />
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold tracking-tight">Call controls</h2>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-10 w-10 items-center justify-center rounded-xl text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-1 px-2 py-2">
+          <SheetAction
+            label={
+              !noiseSuppressionAvailable
+                ? 'Noise suppression unavailable'
+                : noiseSuppression
+                  ? 'Noise suppression on'
+                  : 'Noise suppression off'
+            }
+            active={noiseSuppression && noiseSuppressionAvailable}
+            disabled={voiceStatus !== 'connected' || !noiseSuppressionAvailable}
+            icon={<NoiseSuppressionIcon off={!noiseSuppression || !noiseSuppressionAvailable} />}
+            onClick={() => void toggleNoiseSuppression()}
+          />
+          {isSpeechSupported() && (
+            <SheetAction
+              label={
+                transcribing
+                  ? 'Stop sharing transcript'
+                  : activeMeetingId
+                    ? 'Share my transcript'
+                    : 'Start meeting notes'
+              }
+              active={transcribing}
+              disabled={voiceStatus !== 'connected'}
+              icon={<CaptionsIcon />}
+              onClick={toggleTranscription}
+            />
+          )}
+          <SheetAction
+            label={handRaised ? 'Lower hand' : 'Raise hand'}
+            active={handRaised}
+            disabled={voiceStatus !== 'connected'}
+            icon={<HandIcon />}
+            onClick={toggleVoiceHand}
+          />
+          <SheetAction
+            label={blurEnabled ? 'Background blur on' : 'Blur background'}
+            active={blurEnabled}
+            disabled={voiceStatus !== 'connected'}
+            icon={<BlurIcon off={!blurEnabled} />}
+            onClick={toggleVoiceBlur}
+          />
+          <SheetAction
+            label={
+              someoneElseSharing
+                ? `${otherSharerName} is sharing`
+                : screenStatus === 'on'
+                  ? 'Stop screen share'
+                  : 'Share screen'
+            }
+            active={screenStatus !== 'off'}
+            disabled={screenStatus === 'starting' || someoneElseSharing}
+            icon={<ScreenShareIcon />}
+            onClick={() => void toggleVoiceScreen()}
+          />
+        </div>
+
+        {mics.length > 0 && (
+          <DevicePickerSection
+            title="Microphone"
+            devices={mics}
+            selectedDeviceId={audioDeviceId}
+            onSelect={(deviceId) => {
+              void setVoiceAudioDevice(deviceId)
+            }}
+          />
+        )}
+        {cameras.length > 0 && (
+          <DevicePickerSection
+            title="Camera"
+            devices={cameras}
+            selectedDeviceId={videoDeviceId}
+            onSelect={(deviceId) => {
+              void setVoiceVideoDevice(deviceId)
+            }}
+          />
+        )}
+        <div className="h-[max(0.75rem,env(safe-area-inset-bottom,0px))]" />
+      </div>
+    </div>
+  )
+}
+
+function SheetAction({
+  label,
+  active,
+  disabled,
+  icon,
+  onClick,
+}: {
+  label: string
+  active?: boolean
+  disabled?: boolean
+  icon: React.ReactNode
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`flex min-h-12 w-full cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-45 ${
+        active
+          ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]'
+          : 'text-[var(--color-text)] hover:bg-[var(--color-panel-2)]'
+      }`}
+    >
+      <span
+        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
+          active ? 'bg-[var(--color-accent)] text-white' : 'bg-[var(--color-panel-2)]'
+        }`}
+      >
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1 text-sm font-medium">{label}</span>
+      {active && <span className="text-[10px] font-semibold uppercase tracking-wider opacity-70">On</span>}
+    </button>
+  )
+}
+
+function DevicePickerSection({
+  title,
+  devices,
+  selectedDeviceId,
+  onSelect,
+}: {
+  title: string
+  devices: MediaDeviceOption[]
+  selectedDeviceId: string | null
+  onSelect: (deviceId: string) => void
+}) {
+  return (
+    <div className="border-t border-[var(--color-border)] px-2 py-3">
+      <div className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+        {title}
+      </div>
+      <div className="space-y-0.5">
+        {devices.map((device) => {
+          const selected = device.deviceId === selectedDeviceId
+          return (
+            <button
+              key={device.deviceId}
+              type="button"
+              onClick={() => onSelect(device.deviceId)}
+              className={`flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-left text-sm outline-none hover:bg-[var(--color-panel-2)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] ${
+                selected ? 'text-[var(--color-accent-hover)]' : 'text-[var(--color-text)]'
+              }`}
+            >
+              <span className="min-w-0 flex-1 truncate">{device.label}</span>
+              {selected && <CheckIcon />}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function CallControl({
   label,
   active = false,
   danger = false,
   disabled = false,
+  size = 'md',
   onClick,
   children,
 }: {
@@ -1185,9 +1509,11 @@ function CallControl({
   active?: boolean
   danger?: boolean
   disabled?: boolean
+  size?: 'md' | 'lg'
   onClick: () => void
   children: React.ReactNode
 }) {
+  const dim = size === 'lg' ? 'h-12 w-12' : 'h-11 w-11'
   return (
     <button
       type="button"
@@ -1196,9 +1522,9 @@ function CallControl({
       aria-pressed={active}
       disabled={disabled}
       onClick={onClick}
-      className={`flex h-11 w-11 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50 ${
+      className={`flex ${dim} shrink-0 cursor-pointer items-center justify-center rounded-full outline-none transition-[transform,background-color] duration-150 ease-out active:scale-95 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:active:scale-100 ${
         danger
-          ? 'bg-red-500/20 text-red-300 hover:bg-red-500/30'
+          ? 'bg-red-500/25 text-red-300 hover:bg-red-500/35'
           : active
             ? 'bg-[var(--color-accent)] text-white'
             : 'bg-[var(--color-panel-2)] text-[var(--color-text)] hover:bg-[var(--color-border)]'
@@ -1317,6 +1643,16 @@ function DeviceControl({
         </div>
       )}
     </div>
+  )
+}
+
+function MoreCallIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
   )
 }
 
