@@ -133,6 +133,12 @@ export function Composer({
     autosize()
   }, [value, autosize])
 
+  // Autofocus on mount and whenever the composer moves to a different chat
+  // (channel switch or thread open) so the user can type immediately.
+  useEffect(() => {
+    ref.current?.focus()
+  }, [draftKey])
+
   // Focus the composer when the user picks a message to quote-reply to.
   useEffect(() => {
     if (activeReply) ref.current?.focus()
