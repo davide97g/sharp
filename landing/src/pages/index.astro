@@ -12,7 +12,7 @@ const siteUrl = "https://sharp.davideghiotto.it";
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang="en" class="lenis">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -22,7 +22,6 @@ const siteUrl = "https://sharp.davideghiotto.it";
     <link rel="canonical" href={siteUrl} />
     <meta name="theme-color" content="#0e0e11" />
 
-    <!-- Open Graph / Twitter -->
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
@@ -36,14 +35,23 @@ const siteUrl = "https://sharp.davideghiotto.it";
     <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
   </head>
   <body>
+    <!-- Animated gradient orbs -->
+    <div class="gradient-orb orb-1" aria-hidden="true"></div>
+    <div class="gradient-orb orb-2" aria-hidden="true"></div>
+    <div class="gradient-orb orb-3" aria-hidden="true"></div>
+
+    <!-- Floating particles -->
+    <div class="particles" id="particles" aria-hidden="true"></div>
+
     <!-- ===== Nav ===== -->
-    <nav class="nav">
+    <nav class="nav" id="nav">
       <div class="container nav-inner">
         <a class="brand" href="/">
           <span class="hash">#</span> sharp
         </a>
         <div class="nav-links">
           <a class="hide-sm" href="#features">Features</a>
+          <a class="hide-sm" href="#stats">Stats</a>
           <a class="hide-sm" href="#selfhost">Self-host</a>
           <a class="hide-sm" href="#download">Download</a>
           <a class="gh" href={repo} rel="noopener">
@@ -55,36 +63,38 @@ const siteUrl = "https://sharp.davideghiotto.it";
     </nav>
 
     <!-- ===== Hero ===== -->
-    <header class="hero">
+    <header class="hero" id="hero">
+      <div class="hero-glow" id="heroGlow" aria-hidden="true"></div>
       <div class="container">
-        <div class="mark"><span>#</span></div>
-        <div>
+        <div class="mark reveal"><span>#</span></div>
+        <div class="reveal" style="transition-delay:0.1s">
           <span class="pill"><span class="dot"></span> Open source · AGPL-3.0 · self-hosted</span>
         </div>
-        <h1 class="headline">Chat, docs, canvas &amp; calls. Your server.</h1>
-        <p class="subline">
+        <h1 class="headline reveal" style="transition-delay:0.2s">
+          <span id="headlineText">Chat, docs, canvas &amp; calls. Your server.</span><span class="typing-cursor"></span>
+        </h1>
+        <p class="subline reveal" style="transition-delay:0.3s">
           sharp is an open-source Slack replacement — channels, threads and DMs,
           real-time collaborative docs and canvas, voice/video calls with screen
           sharing, file uploads and full-text search — self-hosted in a single
           container. Your data never leaves your infrastructure.
         </p>
-        <div class="cta-row">
+        <div class="cta-row reveal" style="transition-delay:0.4s">
           <a id="downloadCta" class="btn btn-primary" href={releases} rel="noopener">
             Download for macOS
           </a>
           <a class="btn btn-ghost" href="#selfhost">Self-host in 5 minutes</a>
         </div>
-        <p class="cta-note">No account. No telemetry. No SaaS lock-in.</p>
+        <p class="cta-note reveal" style="transition-delay:0.45s">No account. No telemetry. No SaaS lock-in.</p>
 
-        <!-- ===== App mock ===== -->
-        <div class="mock-wrap">
-          <div class="mock">
+        <!-- ===== App mock with 3D tilt ===== -->
+        <div class="mock-wrap reveal" style="transition-delay:0.5s">
+          <div class="mock" id="mockTilt">
             <div class="mock-bar">
               <span class="tl"></span><span class="tl"></span><span class="tl"></span>
               <span class="title">sharp — #general</span>
             </div>
             <div class="mock-body">
-              <!-- sidebar -->
               <aside class="mock-side">
                 <div class="side-ws"><span class="hash">#</span> Acme Inc</div>
                 <div class="side-label">Channels</div>
@@ -99,7 +109,6 @@ const siteUrl = "https://sharp.davideghiotto.it";
                 <div class="side-item">Jordan Lee <span class="pdot"></span></div>
                 <div class="side-item">Priya Shah <span class="pdot"></span></div>
               </aside>
-              <!-- main -->
               <main class="mock-main">
                 <div class="chan-head">
                   # general
@@ -135,7 +144,6 @@ const siteUrl = "https://sharp.davideghiotto.it";
                 </div>
                 <div class="composer">Message #general — Enter to send, Shift+Enter for newline</div>
               </main>
-              <!-- thread -->
               <aside class="mock-thread">
                 <div class="thread-head">Thread <span>· 3 replies</span></div>
                 <div class="msg" style="margin-bottom:14px">
@@ -159,15 +167,39 @@ const siteUrl = "https://sharp.davideghiotto.it";
       </div>
     </header>
 
+    <!-- ===== Stats ===== -->
+    <section id="stats">
+      <div class="container">
+        <div class="stats-grid">
+          <div class="stat-item reveal" style="transition-delay:0s">
+            <div class="stat-number"><span class="count-up" data-target="100">0</span>%</div>
+            <div class="stat-label">Open source · AGPL-3.0</div>
+          </div>
+          <div class="stat-item reveal" style="transition-delay:0.1s">
+            <div class="stat-number"><span class="count-up" data-target="1">0</span></div>
+            <div class="stat-label">Container to deploy</div>
+          </div>
+          <div class="stat-item reveal" style="transition-delay:0.2s">
+            <div class="stat-number"><span class="count-up" data-target="0">0</span></div>
+            <div class="stat-label">Telemetry · Zero tracking</div>
+          </div>
+          <div class="stat-item reveal" style="transition-delay:0.3s">
+            <div class="stat-number"><span class="count-up" data-target="3">0</span></div>
+            <div class="stat-label">Desktop platforms</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ===== Features ===== -->
     <section id="features">
       <div class="container">
-        <div class="section-head">
+        <div class="section-head reveal">
           <div class="eyebrow">Why sharp</div>
           <h2>One workspace. Chat, docs, canvas &amp; calls.</h2>
           <p>Everything a team needs to talk, write, draw and meet together — and nothing that phones home.</p>
         </div>
-        <div class="features">
+        <div class="features stagger" id="featuresGrid">
           <div class="card">
             <div class="icon">#</div>
             <h3>Sharp chat</h3>
@@ -245,12 +277,12 @@ const siteUrl = "https://sharp.davideghiotto.it";
     <!-- ===== Self-host ===== -->
     <section id="selfhost" class="selfhost">
       <div class="container">
-        <div class="section-head">
+        <div class="section-head reveal">
           <div class="eyebrow">Self-host</div>
           <h2>Up and running in 5 minutes</h2>
           <p>One container plus Postgres. Copy, paste, and you own your team's chat.</p>
         </div>
-        <div class="code-block">
+        <div class="code-block reveal-scale">
           <div class="code-top">
             <span class="label">bash</span>
             <button id="copyBtn" class="copy-btn" type="button">Copy</button>
@@ -261,9 +293,9 @@ const siteUrl = "https://sharp.davideghiotto.it";
   && <span class="cmd">docker compose</span> up -d</code></pre>
         </div>
         <div class="steps">
-          <div class="step"><span class="n">1</span> Point DNS at your box</div>
-          <div class="step"><span class="n">2</span> Set secrets in <code>.env</code></div>
-          <div class="step"><span class="n">3</span> Register the first account</div>
+          <div class="step reveal" style="transition-delay:0.1s"><span class="n">1</span> Point DNS at your box</div>
+          <div class="step reveal" style="transition-delay:0.2s"><span class="n">2</span> Set secrets in <code>.env</code></div>
+          <div class="step reveal" style="transition-delay:0.3s"><span class="n">3</span> Register the first account</div>
         </div>
       </div>
     </section>
@@ -271,12 +303,12 @@ const siteUrl = "https://sharp.davideghiotto.it";
     <!-- ===== Download ===== -->
     <section id="download">
       <div class="container">
-        <div class="section-head">
+        <div class="section-head reveal">
           <div class="eyebrow">Download</div>
           <h2>Get the desktop app</h2>
           <p>Native builds for every platform. Point it at your server URL and sign in.</p>
         </div>
-        <div class="dl-grid">
+        <div class="dl-grid stagger" id="dlGrid">
           <div class="dl-card">
             <div class="os">🍎</div>
             <h3>macOS</h3>
@@ -313,34 +345,250 @@ const siteUrl = "https://sharp.davideghiotto.it";
       </div>
     </footer>
 
-    <!-- Tiny inline JS: OS detect for the primary CTA + copy button -->
+    <!-- ===== Master JS: Smooth scroll, reveals, tilt, particles, count-up, glow, cursor ===== -->
     <script is:inline>
       (function () {
-        var cta = document.getElementById("downloadCta");
-        if (cta) {
-          var ua = navigator.userAgent || "";
-          var os = "macOS";
-          if (/Windows/i.test(ua)) os = "Windows";
-          else if (/Linux|X11/i.test(ua) && !/Android/i.test(ua)) os = "Linux";
-          else if (/Mac/i.test(ua)) os = "macOS";
-          cta.textContent = "Download for " + os;
-        }
+        "use strict";
 
-        var btn = document.getElementById("copyBtn");
-        var code = document.getElementById("codeText");
-        if (btn && code) {
-          btn.addEventListener("click", function () {
-            var text = code.innerText.replace(/\s+\\\s+/g, " ").trim();
-            navigator.clipboard.writeText(text).then(function () {
-              btn.textContent = "Copied!";
-              btn.classList.add("copied");
-              setTimeout(function () {
-                btn.textContent = "Copy";
-                btn.classList.remove("copied");
-              }, 2000);
+        /* ── OS detect for CTA ── */
+        (function () {
+          var cta = document.getElementById("downloadCta");
+          if (cta) {
+            var ua = navigator.userAgent || "";
+            var os = "macOS";
+            if (/Windows/i.test(ua)) os = "Windows";
+            else if (/Linux|X11/i.test(ua) && !/Android/i.test(ua)) os = "Linux";
+            else if (/Mac/i.test(ua)) os = "macOS";
+            cta.textContent = "Download for " + os;
+          }
+        })();
+
+        /* ── Copy button ── */
+        (function () {
+          var btn = document.getElementById("copyBtn");
+          var code = document.getElementById("codeText");
+          if (btn && code) {
+            btn.addEventListener("click", function () {
+              var text = code.innerText.replace(/\s+\\\s+/g, " ").trim();
+              navigator.clipboard.writeText(text).then(function () {
+                btn.textContent = "Copied!";
+                btn.classList.add("copied");
+                setTimeout(function () {
+                  btn.textContent = "Copy";
+                  btn.classList.remove("copied");
+                }, 2000);
+              });
+            });
+          }
+        })();
+
+        /* ── Floating particles ── */
+        (function () {
+          var container = document.getElementById("particles");
+          if (!container) return;
+          var count = 30;
+          for (var i = 0; i < count; i++) {
+            var p = document.createElement("div");
+            p.className = "particle";
+            var size = 2 + Math.random() * 3;
+            p.style.width = size + "px";
+            p.style.height = size + "px";
+            p.style.left = Math.random() * 100 + "%";
+            p.style.animationDuration = (15 + Math.random() * 25) + "s";
+            p.style.animationDelay = (Math.random() * 20) + "s";
+            var colors = ["rgba(124,108,255,", "rgba(79,209,232,", "rgba(255,107,166,"];
+            var c = colors[Math.floor(Math.random() * colors.length)];
+            p.style.background = c + (0.2 + Math.random() * 0.4) + ")";
+            container.appendChild(p);
+          }
+        })();
+
+        /* ── Smooth scroll via Lenis-style virtual scroll ── */
+        (function () {
+          var html = document.documentElement;
+          var isSmooth = true;
+          var scrollY = window.scrollY;
+          var targetY = scrollY;
+          var raf = null;
+
+          function onWheel(e) {
+            if (!isSmooth) return;
+            e.preventDefault();
+            targetY += e.deltaY;
+            targetY = Math.max(0, Math.min(targetY, document.documentElement.scrollHeight - window.innerHeight));
+          }
+
+          function onScroll() {
+            if (isSmooth) {
+              targetY = window.scrollY;
+            } else {
+              scrollY = window.scrollY;
+              targetY = scrollY;
+            }
+          }
+
+          function lerp(a, b, t) { return a + (b - a) * t; }
+
+          function tick() {
+            var diff = targetY - scrollY;
+            if (Math.abs(diff) > 0.5) {
+              scrollY = lerp(scrollY, targetY, 0.1);
+              window.scrollTo(0, Math.round(scrollY));
+              raf = requestAnimationFrame(tick);
+            } else {
+              scrollY = targetY;
+              raf = null;
+            }
+          }
+
+          function startSmooth() {
+            html.classList.add("lenis-smooth");
+            isSmooth = true;
+            targetY = window.scrollY;
+            scrollY = targetY;
+            window.addEventListener("wheel", onWheel, { passive: false });
+            window.addEventListener("scroll", onScroll);
+          }
+
+          // Only enable on non-touch devices
+          if (!("ontouchstart" in window)) {
+            startSmooth();
+          }
+
+          // Expose for debugging
+          window.__smooth = { isSmooth: isSmooth };
+        })();
+
+        /* ── Scroll reveal via IntersectionObserver ── */
+        (function () {
+          var els = document.querySelectorAll(".reveal, .reveal-left, .reveal-right, .reveal-scale, .stagger");
+          if (!els.length) return;
+          var obs = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) {
+              if (entry.isIntersecting) {
+                entry.target.classList.add("visible");
+                obs.unobserve(entry.target);
+              }
+            });
+          }, { threshold: 0.1, rootMargin: "0px 0px -40px 0px" });
+          els.forEach(function (el) { obs.observe(el); });
+        })();
+
+        /* ── Nav scroll shadow ── */
+        (function () {
+          var nav = document.getElementById("nav");
+          if (!nav) return;
+          var obs = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) {
+              nav.classList.toggle("scrolled", !entry.isIntersecting);
+            });
+          }, { threshold: 0 });
+          var sentinel = document.createElement("div");
+          sentinel.style.position = "absolute";
+          sentinel.style.top = "0";
+          sentinel.style.left = "0";
+          sentinel.style.width = "1px";
+          sentinel.style.height = "1px";
+          sentinel.style.opacity = "0";
+          document.body.prepend(sentinel);
+          obs.observe(sentinel);
+        })();
+
+        /* ── 3D tilt on mock ── */
+        (function () {
+          var mock = document.getElementById("mockTilt");
+          if (!mock) return;
+          var wrap = mock.parentElement;
+          var isMobile = window.innerWidth < 860;
+          if (isMobile) return;
+
+          wrap.addEventListener("mousemove", function (e) {
+            var rect = wrap.getBoundingClientRect();
+            var x = (e.clientX - rect.left) / rect.width;
+            var y = (e.clientY - rect.top) / rect.height;
+            var tiltX = (y - 0.5) * -6;
+            var tiltY = (x - 0.5) * 6;
+            mock.style.transform =
+              "perspective(1200px) rotateX(" + tiltX + "deg) rotateY(" + tiltY + "deg) scale3d(1.02,1.02,1.02)";
+          });
+
+          wrap.addEventListener("mouseleave", function () {
+            mock.style.transform =
+              "perspective(1200px) rotateX(0deg) rotateY(0deg) scale3d(1,1,1)";
+          });
+        })();
+
+        /* ── Mouse-tracking hero glow ── */
+        (function () {
+          var glow = document.getElementById("heroGlow");
+          var hero = document.getElementById("hero");
+          if (!glow || !hero) return;
+
+          hero.addEventListener("mousemove", function (e) {
+            var rect = hero.getBoundingClientRect();
+            var x = e.clientX - rect.left;
+            var y = e.clientY - rect.top;
+            glow.style.left = x + "px";
+            glow.style.top = y + "px";
+          });
+        })();
+
+        /* ── Count-up animation ── */
+        (function () {
+          var counters = document.querySelectorAll(".count-up");
+          if (!counters.length) return;
+
+          function animateCounter(el) {
+            var target = parseInt(el.getAttribute("data-target"), 10);
+            var current = 0;
+            var duration = 2000;
+            var startTime = null;
+
+            function step(timestamp) {
+              if (!startTime) startTime = timestamp;
+              var progress = Math.min((timestamp - startTime) / duration, 1);
+              var eased = 1 - Math.pow(1 - progress, 3);
+              current = Math.floor(eased * target);
+              el.textContent = current;
+              if (progress < 1) {
+                requestAnimationFrame(step);
+              } else {
+                el.textContent = target;
+              }
+            }
+
+            requestAnimationFrame(step);
+          }
+
+          var obs = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) {
+              if (entry.isIntersecting) {
+                animateCounter(entry.target);
+                obs.unobserve(entry.target);
+              }
+            });
+          }, { threshold: 0.5 });
+
+          counters.forEach(function (el) { obs.observe(el); });
+        })();
+
+        /* ── Typing cursor blink (CSS already handles this) ── */
+
+        /* ── Smooth anchor scroll ── */
+        (function () {
+          document.querySelectorAll('a[href^="#"]').forEach(function (a) {
+            a.addEventListener("click", function (e) {
+              var id = this.getAttribute("href").slice(1);
+              var target = document.getElementById(id);
+              if (target) {
+                e.preventDefault();
+                target.scrollIntoView({ behavior: "smooth" });
+              }
             });
           });
-        }
+        })();
+
+        console.log("sharp landing · crafted with ✦");
       })();
     </script>
   </body>
