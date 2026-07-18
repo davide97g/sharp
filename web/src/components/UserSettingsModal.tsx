@@ -17,7 +17,7 @@ import { AvatarCropper } from './AvatarCropper'
 import { ChatLayoutPicker } from './ChatLayoutChooser'
 import { VoiceTriggerEditor } from './VoiceTriggerEditor'
 
-type Tab = 'profile' | 'chat' | 'workspace' | 'accounts'
+type Tab = 'profile' | 'chat' | 'workspace' | 'accounts' | 'about'
 
 export function UserSettingsModal({
   onClose,
@@ -228,6 +228,9 @@ export function UserSettingsModal({
         <TabBtn active={tab === 'workspace'} onClick={() => setTab('workspace')}>
           Workspace
         </TabBtn>
+        <TabBtn active={tab === 'about'} onClick={() => setTab('about')}>
+          About
+        </TabBtn>
       </div>
 
       {tab === 'profile' ? (
@@ -319,6 +322,8 @@ export function UserSettingsModal({
         </div>
       ) : tab === 'accounts' ? (
         <AccountsTab />
+      ) : tab === 'about' ? (
+        <AboutTab />
       ) : !gifLoadAttempted || gifLoading ? (
         <div
           className="flex min-h-48 items-center justify-center text-[var(--color-text-faint)]"
@@ -501,6 +506,37 @@ export function UserSettingsModal({
         </div>
       )}
     </Modal>
+  )
+}
+
+function AboutTab() {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-panel-2)] p-4">
+        <div className="flex items-center gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-accent)] text-lg font-extrabold text-white">
+            #
+          </span>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold">sharp</div>
+            <div className="text-[11px] text-[var(--color-text-faint)]">
+              Self-hosted team chat, docs, canvas, and calls.
+            </div>
+          </div>
+        </div>
+        <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
+          <dt className="text-[var(--color-text-faint)]">Version</dt>
+          <dd className="font-mono text-[13px] tabular-nums">{__APP_VERSION__}</dd>
+          <dt className="text-[var(--color-text-faint)]">Build</dt>
+          <dd className="break-all font-mono text-[13px]">{__BUILD_ID__}</dd>
+        </dl>
+      </div>
+      <p className="text-[11px] leading-5 text-[var(--color-text-faint)]">
+        The build id changes on every deploy. If it matches your latest deploy, this
+        device is running the newest version — updates are picked up automatically
+        within moments of reopening the app.
+      </p>
+    </div>
   )
 }
 

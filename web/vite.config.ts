@@ -26,6 +26,9 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), stampServiceWorker()],
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
+    // Same id stamped into sw.js — the Settings → About tab shows it, so you
+    // can verify a deploy actually reached the client you're looking at.
+    __BUILD_ID__: JSON.stringify(buildId),
   },
   optimizeDeps: {
     // `@tldraw/assets/imports.vite` resolves fonts/icons via Vite `?url` imports.
