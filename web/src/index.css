@@ -53,6 +53,17 @@ body,
   }
 }
 
+/* Installed PWA: no dynamic browser chrome exists, so 100vh IS the window —
+   and iOS standalone has known bugs where dvh resolves short (as if Safari's
+   toolbars were present), leaving dead space at the bottom. */
+@media (display-mode: standalone) {
+  html,
+  body,
+  #root {
+    height: 100vh;
+  }
+}
+
 #root {
   /* Tauri traffic lights + iOS status-bar / notch when installed as PWA. */
   padding-top: calc(var(--titlebar-h) + var(--safe-top));

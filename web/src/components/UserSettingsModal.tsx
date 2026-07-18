@@ -509,7 +509,34 @@ export function UserSettingsModal({
   )
 }
 
+function readSafeInset(side: 'top' | 'right' | 'bottom' | 'left'): string {
+  const el = document.createElement('div')
+  el.style.cssText = `position:fixed;top:0;left:0;width:0;visibility:hidden;pointer-events:none;height:env(safe-area-inset-${side},0px)`
+  document.body.appendChild(el)
+  const value = getComputedStyle(el).height
+  el.remove()
+  return value
+}
+
+function viewportDiagnostics() {
+  const standalone =
+    window.matchMedia('(display-mode: standalone)').matches ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true
+  return {
+    window: `${window.innerWidth} × ${window.innerHeight}`,
+    screen: `${screen.width} × ${screen.height}`,
+    insets: `${readSafeInset('top')} / ${readSafeInset('right')} / ${readSafeInset('bottom')} / ${readSafeInset('left')}`,
+    mode: standalone ? 'standalone (installed)' : 'browser tab',
+  }
+}
+
 function AboutTab() {
+  const [diag, setDiag] = useState(viewportDiagnostics)
+  useEffect(() => {
+    const update = () => setDiag(viewportDiagnostics())
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [])
   return (
     <div className="flex flex-col gap-3">
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-panel-2)] p-4">
@@ -536,6 +563,27 @@ function AboutTab() {
         device is running the newest version — updates are picked up automatically
         within moments of reopening the app.
       </p>
+      <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-panel-2)] p-4">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+          Display diagnostics
+        </div>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
+          <dt className="text-[var(--color-text-faint)]">Window</dt>
+          <dd className="font-mono text-[13px] tabular-nums">{diag.window}</dd>
+          <dt className="text-[var(--color-text-faint)]">Screen</dt>
+          <dd className="font-mono text-[13px] tabular-nums">{diag.screen}</dd>
+          <dt className="text-[var(--color-text-faint)]">Safe insets</dt>
+          <dd className="font-mono text-[13px] tabular-nums">{diag.insets}</dd>
+          <dt className="text-[var(--color-text-faint)]">Mode</dt>
+          <dd className="font-mono text-[13px]">{diag.mode}</dd>
+        </dl>
+        <p className="mt-3 text-[11px] leading-5 text-[var(--color-text-faint)]">
+          When installed on iOS, window height should match screen height and the
+          top/bottom safe insets should be non-zero. A shorter window means iOS
+          launched the app with a stale viewport — the app self-corrects; rotating
+          the device once also forces it.
+        </p>
+      </div>
     </div>
   )
 }

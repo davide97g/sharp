@@ -22,18 +22,51 @@ export function installIosViewportFix() {
   const meta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]')
   let lastAttempt = ''
 
+  const portrait = () => window.matchMedia('(orientation: portrait)').matches
+
+  // Best window height seen per orientation. WebKit's launch bug can be
+  // height-only (full width, but room reserved for nonexistent Safari
+  // chrome at the bottom) and legit heights vary per device/status-bar
+  // style, so we compare against what this device actually achieved on
+  // healthy launches instead of guessing an absolute number.
+  const maxHeightKey = () => `sharp.maxViewportH.${portrait() ? 'p' : 'l'}`
+  const recordedMaxHeight = () => {
+    try {
+      return Number(window.localStorage.getItem(maxHeightKey())) || 0
+    } catch {
+      return 0
+    }
+  }
+  const recordHealthyHeight = () => {
+    try {
+      if (window.innerHeight > recordedMaxHeight()) {
+        window.localStorage.setItem(maxHeightKey(), String(window.innerHeight))
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   const viewportLooksStale = () => {
     // On iPhone the standalone viewport spans the full screen; iPad
     // multitasking never applies (Split View apps aren't standalone PWAs).
     const short = Math.min(screen.width, screen.height)
     const long = Math.max(screen.width, screen.height)
-    const portrait = window.matchMedia('(orientation: portrait)').matches
-    const expected = portrait ? short : long
-    return Math.abs(window.innerWidth - expected) > 2
+    const expectedW = portrait() ? short : long
+    if (Math.abs(window.innerWidth - expectedW) > 2) return true
+    // Height-only staleness: shorter than a healthy launch on this device,
+    // or short of the screen by more than status bar + home indicator.
+    const expectedH = portrait() ? long : short
+    if (expectedH - window.innerHeight > 120) return true
+    return recordedMaxHeight() - window.innerHeight > 40
   }
 
   const heal = () => {
-    if (!meta || !viewportLooksStale()) return
+    if (!meta) return
+    if (!viewportLooksStale()) {
+      recordHealthyHeight()
+      return
+    }
     const key = `${window.innerWidth}x${window.innerHeight}`
     if (key === lastAttempt) return
     lastAttempt = key
@@ -51,6 +84,9 @@ export function installIosViewportFix() {
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) window.setTimeout(heal, 250)
   })
+  // When WebKit corrects itself (or a heal lands), the window resizes:
+  // record the healthy size, or retry if it's still off.
+  window.addEventListener('resize', () => window.setTimeout(heal, 50))
 
   // After the keyboard goes away, snap the layout viewport back to origin so
   // fixed chrome realigns with the visual viewport.
