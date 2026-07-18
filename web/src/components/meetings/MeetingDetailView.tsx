@@ -3,6 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { toastError, toastSuccess } from '../../lib/toast'
 import type { MeetingAction, MeetingAttendance, MeetingDetail, MeetingTranscriptPhrase } from '../../lib/types'
+import { meetingChannelLabel, meetingDisplayTitle } from '../../lib/meetingLabels'
+import { useStore } from '../../store'
 import { Avatar } from '../Avatar'
 import { Markdown } from '../Markdown'
 
@@ -17,6 +19,7 @@ export function MeetingDetailView() {
   const [meeting, setMeeting] = useState<MeetingDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const navigate = useNavigate()
+  const channels = useStore((s) => s.channels)
 
   const load = async (quiet = false) => {
     if (!meetingId) return
@@ -92,9 +95,9 @@ export function MeetingDetailView() {
       <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-3 py-2 sm:flex-nowrap sm:gap-3 sm:px-5 sm:py-0">
         <button onClick={() => navigate('/meetings')} className="flex h-11 w-11 items-center justify-center rounded-lg text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]" aria-label="Back to meetings">←</button>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold">{meeting.title}</div>
-          <div className="text-[10px] text-[var(--color-text-faint)]">
-            {meeting.channel_kind === 'standalone' ? 'Standalone meet' : meeting.channel_kind === 'dm' ? meeting.channel_name : `#${meeting.channel_name}`}
+          <div className="truncate text-sm font-semibold">{meetingDisplayTitle(meeting, channels)}</div>
+          <div className="truncate text-[10px] text-[var(--color-text-faint)]">
+            {meetingChannelLabel(meeting, channels)}
           </div>
         </div>
         <StatusChip meeting={meeting} />
@@ -104,7 +107,11 @@ export function MeetingDetailView() {
 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl px-4 py-7 sm:px-7 lg:py-10">
-          <MeetingHeader meeting={meeting} onSave={(title) => void saveFields({ title })} />
+          <MeetingHeader
+            meeting={meeting}
+            displayTitle={meetingDisplayTitle(meeting, channels)}
+            onSave={(title) => void saveFields({ title })}
+          />
 
           <div className="mt-9 grid gap-8 xl:grid-cols-[minmax(0,1fr)_23rem]">
             <div className="min-w-0 space-y-8">
@@ -123,9 +130,9 @@ export function MeetingDetailView() {
   )
 }
 
-function MeetingHeader({ meeting, onSave }: { meeting: MeetingDetail; onSave: (title: string) => void }) {
-  const [title, setTitle] = useState(meeting.title)
-  useEffect(() => setTitle(meeting.title), [meeting.title])
+function MeetingHeader({ meeting, displayTitle, onSave }: { meeting: MeetingDetail; displayTitle: string; onSave: (title: string) => void }) {
+  const [title, setTitle] = useState(displayTitle)
+  useEffect(() => setTitle(displayTitle), [displayTitle])
   const duration = meeting.ended_at
     ? Math.max(0, new Date(meeting.ended_at).getTime() - new Date(meeting.started_at).getTime())
     : Math.max(0, Date.now() - new Date(meeting.started_at).getTime())
@@ -135,7 +142,7 @@ function MeetingHeader({ meeting, onSave }: { meeting: MeetingDetail; onSave: (t
       <input
         value={title}
         onChange={(event) => setTitle(event.target.value)}
-        onBlur={() => title.trim() && title.trim() !== meeting.title && onSave(title.trim())}
+        onBlur={() => title.trim() && title.trim() !== displayTitle && onSave(title.trim())}
         aria-label="Meeting title"
         className="mt-3 w-full bg-transparent text-3xl font-semibold tracking-[-0.04em] outline-none placeholder:text-[var(--color-text-faint)] sm:text-4xl"
       />

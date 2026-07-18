@@ -3,7 +3,10 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { App } from './App'
 import { registerServiceWorker } from './lib/notify'
+import { installIosViewportFix } from './lib/iosViewport'
 import './index.css'
+
+installIosViewportFix()
 
 // Tauri on macOS uses titleBarStyle: Overlay — the traffic lights float over
 // the content. Reserve a top inset (via --titlebar-h) and add a draggable

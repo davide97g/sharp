@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../lib/api'
+import { meetingChannelLabel, meetingDisplayTitle } from '../../lib/meetingLabels'
 import type { MeetingListItem } from '../../lib/types'
 import { useStore } from '../../store'
 import { NewMeetDialog } from './NewMeetDialog'
@@ -114,6 +115,7 @@ function Metric({ value, label }: { value: string; label: string }) {
 }
 
 function MeetingCard({ meeting, onOpen, live }: { meeting: MeetingListItem; onOpen: () => void; live?: boolean }) {
+  const channels = useStore((state) => state.channels)
   return (
     <button onClick={onOpen} className="group rounded-2xl border border-[#ff6b5f]/25 bg-[#ff6b5f]/5 p-5 text-left hover:border-[#ff6b5f]/55">
       <div className="mb-5 flex items-center justify-between">
@@ -123,13 +125,14 @@ function MeetingCard({ meeting, onOpen, live }: { meeting: MeetingListItem; onOp
         </span>
         <span className="font-mono text-[11px] text-[var(--color-text-faint)]">{timeOf(meeting.started_at)}</span>
       </div>
-      <div className="font-semibold group-hover:text-white">{meeting.title}</div>
-      <div className="mt-2 text-xs text-[var(--color-text-faint)]">{meetingContext(meeting)} · {meeting.participant_count} participants</div>
+      <div className="truncate font-semibold group-hover:text-white">{meetingDisplayTitle(meeting, channels)}</div>
+      <div className="mt-2 truncate text-xs text-[var(--color-text-faint)]">{meetingChannelLabel(meeting, channels)} · {meeting.participant_count} participants</div>
     </button>
   )
 }
 
 function MeetingRow({ meeting, onOpen }: { meeting: MeetingListItem; onOpen: () => void }) {
+  const channels = useStore((state) => state.channels)
   return (
     <button onClick={onOpen} className="group grid min-h-11 w-full grid-cols-[4rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2 py-4 text-left hover:bg-[var(--color-panel)] sm:grid-cols-[7rem_minmax(0,1fr)_auto] sm:gap-4 sm:px-3">
       <div>
@@ -137,8 +140,8 @@ function MeetingRow({ meeting, onOpen }: { meeting: MeetingListItem; onOpen: () 
         <div className="mt-1 font-mono text-[10px] tabular-nums text-[var(--color-text-faint)]">{timeOf(meeting.started_at)}</div>
       </div>
       <div className="min-w-0">
-        <div className="truncate text-sm font-medium group-hover:text-white">{meeting.title}</div>
-        <div className="mt-1 truncate text-xs text-[var(--color-text-faint)]">{meetingContext(meeting)} · {meeting.participant_count} participants · {meeting.transcript_count} phrases</div>
+        <div className="truncate text-sm font-medium group-hover:text-white">{meetingDisplayTitle(meeting, channels)}</div>
+        <div className="mt-1 truncate text-xs text-[var(--color-text-faint)]">{meetingChannelLabel(meeting, channels)} · {meeting.participant_count} participants · {meeting.transcript_count} phrases</div>
       </div>
       <div className="col-span-2 flex items-center justify-end gap-2 text-right sm:col-span-1 sm:block">
         <div className="font-mono text-xs tabular-nums text-[var(--color-text-dim)]">{formatMinutes(durationMinutes(meeting))}</div>
@@ -162,10 +165,6 @@ function formatMinutes(value: number) {
 
 const dayOf = (value: string) => new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(value))
 const timeOf = (value: string) => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(value))
-
-function meetingContext(meeting: MeetingListItem) {
-  return meeting.channel_kind === 'standalone' ? 'Standalone meet' : meeting.channel_kind === 'dm' ? meeting.channel_name : `#${meeting.channel_name}`
-}
 
 function PlusIcon() {
   return (

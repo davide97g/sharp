@@ -31,6 +31,21 @@ pub(crate) async fn start_live_meeting(
     let context = load_room_context(state, room_id).await?;
     let title = if context.kind == "standalone" {
         context.name.clone()
+    } else if context.kind == "dm" {
+        // The stored DM channel name is a hidden `dm:<uuid>:<uuid>` key —
+        // never show it to humans; use the participants' names instead.
+        let mut names: Vec<&str> = attendees
+            .iter()
+            .map(|attendee| attendee.display_name.as_str())
+            .collect();
+        names.sort_unstable();
+        names.dedup();
+        let label = if names.is_empty() {
+            "Direct message".to_string()
+        } else {
+            format!("DM · {}", names.join(" & "))
+        };
+        format!("{} · {}", label, now.format("%b %-d, %Y · %H:%M"))
     } else {
         format!("{} · {}", context.name, now.format("%b %-d, %Y · %H:%M"))
     };

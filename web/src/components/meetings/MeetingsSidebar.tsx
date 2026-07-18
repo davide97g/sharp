@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { channelLabel } from '../../lib/util'
+import { meetingChannelLabel, meetingDisplayTitle } from '../../lib/meetingLabels'
 import type { MeetingListItem } from '../../lib/types'
 import { useStore } from '../../store'
 
@@ -94,14 +95,10 @@ export function MeetingsSidebar() {
                 >
                   <div className="flex items-center gap-2">
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${meeting.status === 'active' ? 'bg-[#ff6b5f]' : 'bg-[var(--color-text-faint)]'}`} />
-                    <span className="min-w-0 flex-1 truncate text-xs font-medium">{meeting.title}</span>
+                    <span className="min-w-0 flex-1 truncate text-xs font-medium">{meetingDisplayTitle(meeting, channels)}</span>
                   </div>
                   <div className="mt-1 truncate pl-3.5 text-[10px] text-[var(--color-text-faint)]">
-                    {meeting.channel_kind === 'standalone'
-                      ? 'Standalone meet'
-                      : meeting.channel_kind === 'dm'
-                        ? meeting.channel_name
-                        : `#${meeting.channel_name}`}
+                    {meetingChannelLabel(meeting, channels)}
                     {' · '}{shortTime(meeting.started_at)}
                   </div>
                 </NavLink>
