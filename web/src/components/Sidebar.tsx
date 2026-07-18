@@ -7,6 +7,7 @@ import { BrowseChannelsModal } from './BrowseChannelsModal'
 import { ChannelSettingsModal } from './ChannelSettingsModal'
 import { UserSettingsModal } from './UserSettingsModal'
 import { Avatar } from './Avatar'
+import { GearIcon, LockIcon } from './icons'
 import type { Channel } from '../lib/types'
 
 export function Sidebar({ variant = 'desktop' }: { variant?: 'desktop' | 'mobile' }) {
@@ -238,8 +239,14 @@ function ChannelRow({
       <span className={`min-w-0 flex-1 truncate ${unread && !active ? 'font-semibold' : ''}`}>
         {channel.name}
       </span>
-      {channel.kind === 'private' && <span className="text-xs opacity-60">🔒</span>}
+      {channel.kind === 'private' && (
+        <span className="shrink-0 text-[var(--color-text-faint)]" title="Private">
+          <LockIcon />
+        </span>
+      )}
       <VoiceRoomIndicator room={voiceRoom} />
+      {/* Hover-revealed on desktop; hidden on mobile — the list stays a clean
+          tap target and settings live in the channel header there. */}
       <button
         onClick={(e) => {
           e.preventDefault()
@@ -247,9 +254,9 @@ function ChannelRow({
           onSettings()
         }}
         title="Channel settings"
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded text-[var(--color-text-faint)] hover:text-[var(--color-text)] max-md:opacity-100 md:opacity-0 md:group-hover:opacity-100"
+        className="hidden h-8 w-8 shrink-0 items-center justify-center rounded text-[var(--color-text-faint)] opacity-0 hover:text-[var(--color-text)] group-hover:opacity-100 md:flex"
       >
-        ⚙
+        <GearIcon />
       </button>
       {unread && !active && (
         <span className="rounded-full bg-[var(--color-accent)] px-1.5 py-0.5 text-[10px] font-bold text-white">

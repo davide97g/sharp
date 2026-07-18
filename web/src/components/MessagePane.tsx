@@ -10,6 +10,7 @@ import { ChatLayoutChooser } from './ChatLayoutChooser'
 import { InboxTrigger } from './NotificationCenter'
 import { ChannelTabs } from './ChannelTabs'
 import { Avatar } from './Avatar'
+import { GearIcon, LockIcon } from './icons'
 import { DuckSuggest } from './DuckSuggest'
 import { ScheduleMeetingModal } from './calendar/ScheduleMeetingModal'
 import { useIsMobile } from '../lib/useMediaQuery'
@@ -361,7 +362,7 @@ export function MessagePane() {
             type="button"
             onClick={() => navigate('/')}
             aria-label="Back to channels"
-            className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-dim)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+            className="-ml-1 flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-dim)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
           >
             <BackIcon />
           </button>
@@ -388,8 +389,8 @@ export function MessagePane() {
               <span className="text-[var(--color-text-faint)]">#</span>
               <span className="truncate">{channel.name}</span>
               {channel.kind === 'private' && (
-                <span className="text-[var(--color-text-faint)]" title="Private">
-                  🔒
+                <span className="shrink-0 text-[var(--color-text-faint)]" title="Private">
+                  <LockIcon />
                 </span>
               )}
             </button>
@@ -442,9 +443,9 @@ export function MessagePane() {
             onClick={() => setShowSettings(true)}
             aria-label={isDm ? 'Conversation settings' : 'Channel settings'}
             title={isDm ? 'Conversation settings' : 'Channel settings'}
-            className="flex h-11 w-11 items-center justify-center rounded-md text-sm text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] sm:h-8 sm:w-auto sm:px-2 sm:py-1"
+            className="flex h-10 w-10 items-center justify-center rounded-md text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] sm:h-8 sm:w-8"
           >
-            ⚙
+            <GearIcon />
           </button>
           <InboxTrigger variant="header" />
         </div>

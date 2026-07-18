@@ -16,7 +16,7 @@ export function ChannelTabs({ channelId, active }: { channelId: string; active: 
   ]
 
   return (
-    <div className="flex items-center gap-1 border-b border-[var(--color-border)] px-3">
+    <div className="flex items-center gap-1 border-b border-[var(--color-border)] px-3 max-sm:px-2">
       {tabs.map((t) => {
         const on = t.key === active
         return (
@@ -24,13 +24,14 @@ export function ChannelTabs({ channelId, active }: { channelId: string; active: 
             key={t.key}
             onClick={() => navigate(t.to)}
             aria-current={on ? 'page' : undefined}
-            className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition ${
+            className={`-mb-px flex items-center justify-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition max-sm:min-h-10 max-sm:flex-1 max-sm:px-1 ${
               on
                 ? 'border-[var(--color-accent)] text-[var(--color-text)]'
                 : 'border-transparent text-[var(--color-text-faint)] hover:text-[var(--color-text)]'
             }`}
           >
-            {t.icon}
+            {/* Icons add noise at phone width — the labels carry the tabs. */}
+            <span className="max-sm:hidden">{t.icon}</span>
             {t.label}
           </button>
         )

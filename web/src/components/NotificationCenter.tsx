@@ -46,7 +46,7 @@ export function InboxTrigger({ variant }: { variant: 'row' | 'icon' | 'header' }
         aria-label={unread > 0 ? `Inbox, ${unread} unread` : 'Inbox'}
         aria-expanded={open}
         title="Inbox"
-        className={`relative flex h-11 cursor-pointer items-center gap-1.5 rounded-md px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] sm:h-8 ${
+        className={`relative flex h-10 cursor-pointer items-center gap-1.5 rounded-md px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] sm:h-8 ${
           open
             ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)] ring-1 ring-inset ring-[var(--color-accent)]'
             : 'text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]'

@@ -5,6 +5,7 @@ import { resolveEmojiShortcode, searchEmojis } from '../lib/emoji'
 import { buildGifToken, gifPreviewText } from '../lib/gif'
 import { toastError } from '../lib/toast'
 import { fmtBytes } from '../lib/util'
+import { useCoarsePointer } from '../lib/useMediaQuery'
 import { Avatar } from './Avatar'
 import { GifPicker, type GifPickerHandle } from './GifPicker'
 import { DuckStreakBar } from './DuckStreakBar'
@@ -135,9 +136,12 @@ export function Composer({
 
   // Autofocus on mount and whenever the composer moves to a different chat
   // (channel switch or thread open) so the user can type immediately.
+  // Touch devices skip this: focusing summons the keyboard over the messages
+  // you just navigated to — there, typing starts with an explicit tap.
+  const coarsePointer = useCoarsePointer()
   useEffect(() => {
-    ref.current?.focus()
-  }, [draftKey])
+    if (!coarsePointer) ref.current?.focus()
+  }, [draftKey, coarsePointer])
 
   // Focus the composer when the user picks a message to quote-reply to.
   useEffect(() => {

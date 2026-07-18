@@ -1,6 +1,7 @@
 import { useStore } from '../store'
 import { channelLabel } from '../lib/util'
 import { Avatar } from './Avatar'
+import { LockIcon } from './icons'
 import type { Channel } from '../lib/types'
 
 // The channel identity row (DM avatar+name or #channel) reused by the docs /
@@ -37,8 +38,8 @@ export function ChannelPaneHeader({
             <span className="text-[var(--color-text-faint)]">#</span>
             {channel.name}
             {channel.kind === 'private' && (
-              <span className="text-[var(--color-text-faint)]" title="Private">
-                🔒
+              <span className="shrink-0 text-[var(--color-text-faint)]" title="Private">
+                <LockIcon />
               </span>
             )}
           </span>
