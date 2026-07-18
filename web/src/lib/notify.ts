@@ -157,17 +157,72 @@ function urlBase64ToUint8Array(base64: string): Uint8Array {
 }
 
 /** Register the service worker (PWA installability + push). Safe to call often. */
-export async function registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {
-  if (isTauri) return null
-  if (!('serviceWorker' in navigator)) return null
+export function registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {
+  if (isTauri) return Promise.resolve(null)
+  if (!('serviceWorker' in navigator)) return Promise.resolve(null)
   // Skip in Vite dev — a caching SW breaks HMR; push still works on prod builds.
-  if (import.meta.env.DEV) return null
-  try {
-    return await navigator.serviceWorker.register('/sw.js')
-  } catch (e) {
-    console.warn('service worker registration failed', e)
-    return null
+  if (import.meta.env.DEV) return Promise.resolve(null)
+  if (!swRegistration) {
+    swRegistration = navigator.serviceWorker
+      // updateViaCache 'none': update checks always refetch sw.js from the
+      // server, so a deploy is noticed on the first check after it lands.
+      .register('/sw.js', { updateViaCache: 'none' })
+      .then((reg) => {
+        watchForAppUpdates(reg)
+        return reg
+      })
+      .catch((e) => {
+        console.warn('service worker registration failed', e)
+        swRegistration = null
+        return null
+      })
   }
+  return swRegistration
+}
+
+let swRegistration: Promise<ServiceWorkerRegistration | null> | null = null
+
+/**
+ * Keep long-lived sessions (installed PWAs especially) on the latest deploy.
+ * sw.js carries a per-build id and skipWaiting()s, so: check → new worker
+ * installs → takes control → we reload once onto the new version. The reload
+ * is deferred while the user is mid-typing so a deploy never eats a draft.
+ */
+function watchForAppUpdates(reg: ServiceWorkerRegistration) {
+  let lastCheck = Date.now()
+  const check = () => {
+    if (Date.now() - lastCheck < 60_000) return
+    lastCheck = Date.now()
+    reg.update().catch(() => {})
+  }
+  window.setInterval(check, 15 * 60_000)
+  window.addEventListener('focus', check)
+  window.addEventListener('online', check)
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) check()
+  })
+
+  let hadController = !!navigator.serviceWorker.controller
+  let reloading = false
+  const reload = () => {
+    if (reloading) return
+    reloading = true
+    window.location.reload()
+  }
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    // First-ever install claiming the page is not an update — don't reload.
+    if (!hadController) {
+      hadController = true
+      return
+    }
+    const active = document.activeElement
+    const typing =
+      active instanceof HTMLElement &&
+      active.matches('input, textarea, [contenteditable="true"]')
+    if (!typing) return reload()
+    active.addEventListener('blur', reload, { once: true })
+    document.addEventListener('visibilitychange', reload, { once: true })
+  })
 }
 
 /** Register the service worker and subscribe this browser to web push. */

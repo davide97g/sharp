@@ -38,6 +38,33 @@ async fn healthz() -> Json<serde_json::Value> {
     }))
 }
 
+/// Cache policy for the built-in SPA (mirrors deploy/nginx.web.conf in the
+/// split deploy): hashed `/assets/*` are immutable and cached hard; everything
+/// else (index.html, sw.js, manifest, icons) must revalidate so a fresh deploy
+/// is picked up immediately instead of a browser-cached previous version.
+/// API responses are left untouched.
+async fn spa_cache_control(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::http::{header::CACHE_CONTROL, HeaderValue};
+    let path = req.uri().path();
+    let skip = path.starts_with("/api/");
+    let immutable = path.starts_with("/assets/");
+    let mut res = next.run(req).await;
+    if !skip && !res.headers().contains_key(CACHE_CONTROL) {
+        res.headers_mut().insert(
+            CACHE_CONTROL,
+            HeaderValue::from_static(if immutable {
+                "public, max-age=31536000, immutable"
+            } else {
+                "no-cache"
+            }),
+        );
+    }
+    res
+}
+
 /// Self-contained desktop browser-login bridge page. Served by the API host
 /// itself (not the SPA) so it works in every deploy topology — including the
 /// split deploy where the SPA lives on a different subdomain. The desktop app
@@ -401,6 +428,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let app = app
+        .layer(axum::middleware::from_fn(spa_cache_control))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(app_state);

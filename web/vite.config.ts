@@ -1,11 +1,29 @@
-import { defineConfig } from 'vite'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import pkg from './package.json'
 
+// Unique per build. Stamped into sw.js so every deploy changes its bytes —
+// that's what makes browsers install the update and swap the app immediately.
+const buildId = `${pkg.version}-${Date.now().toString(36)}`
+
+function stampServiceWorker(): Plugin {
+  return {
+    name: 'sharp-stamp-sw',
+    apply: 'build',
+    closeBundle() {
+      const swPath = fileURLToPath(new URL('./dist/sw.js', import.meta.url))
+      const source = readFileSync(swPath, 'utf8')
+      writeFileSync(swPath, source.replaceAll('__BUILD_ID__', buildId))
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), stampServiceWorker()],
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },

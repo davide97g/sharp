@@ -248,6 +248,20 @@ Env: `DATABASE_URL` (required) · `JWT_SECRET` (required) · `PORT` (default 300
 Layout: `main.rs`, `config.rs`, `error.rs` (AppError → JSON), `auth.rs` (extractor),
 `ws/` (hub, session), `routes/` (auth, users, channels, messages, search), `models.rs`.
 
+SPA cache policy (`spa_cache_control` middleware in `main.rs`, mirrored by
+`deploy/nginx.web.conf` in the split deploy): hashed `/assets/*` →
+`public, max-age=31536000, immutable`; every other static file (index.html, sw.js,
+manifest, icons) → `no-cache` (revalidate; 304s keep it cheap). `/api/*` untouched.
+
+**Instant updates after deploy**: the Vite build stamps a per-build id into `sw.js`
+(cache name + comment), so every deploy ships a byte-different worker. The client
+registers with `updateViaCache: 'none'` and calls `registration.update()` on
+focus/visible/online and every 15 min; the new worker `skipWaiting()`s +
+`clients.claim()`s, and on `controllerchange` the page reloads once onto the new
+version (deferred while an input is focused so a deploy never eats a draft).
+Navigations are fetched with `cache: 'no-store'` (network-first, cache fallback
+offline), so a fresh launch always gets the newest index.html.
+
 ## Web (React)
 
 Vite + React 18 + TypeScript. Router: react-router. State: zustand. Styling: Tailwind CSS v4

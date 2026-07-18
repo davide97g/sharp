@@ -2,7 +2,11 @@
 // Keep this file hand-rolled (no workbox): push handlers must stay simple and
 // the installability fetch handler is intentionally minimal.
 
-const CACHE = 'sharp-shell-v1'
+// __BUILD_ID__ is stamped by the Vite build (see vite.config.ts) so every
+// deploy ships a byte-different sw.js: the browser installs it as an update,
+// skipWaiting/clients.claim activate it immediately, and the page reloads
+// onto the new version (see registerServiceWorker in web/src/lib/notify.ts).
+const CACHE = 'sharp-shell-__BUILD_ID__'
 const PRECACHE = ['/', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png']
 
 self.addEventListener('install', (event) => {
@@ -37,7 +41,9 @@ self.addEventListener('fetch', (event) => {
 
   if (req.mode === 'navigate') {
     event.respondWith(
-      fetch(req)
+      // no-store: skip the HTTP cache so a fresh deploy's index.html (and its
+      // new hashed asset URLs) is picked up on the very next launch.
+      fetch(req, { cache: 'no-store' })
         .then((res) => {
           const copy = res.clone()
           caches.open(CACHE).then((cache) => cache.put('/', copy)).catch(() => {})
