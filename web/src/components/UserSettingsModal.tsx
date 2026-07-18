@@ -215,7 +215,7 @@ export function UserSettingsModal({
 
   return (
     <Modal title="Settings" onClose={onClose} wide>
-      <div className="mb-4 flex gap-1 border-b border-[var(--color-border)]">
+      <div className="mb-4 flex gap-1 overflow-x-auto border-b border-[var(--color-border)]">
         <TabBtn active={tab === 'profile'} onClick={() => setTab('profile')}>
           Profile
         </TabBtn>

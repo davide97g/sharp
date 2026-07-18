@@ -9,6 +9,7 @@ import {
   type ThemeChoice,
 } from '../lib/onboarding'
 import { ChatLayoutPicker } from './ChatLayoutChooser'
+import { NotificationSetup } from './NotificationSetup'
 
 const STEPS = ['Chat style', 'Notifications', 'Appearance'] as const
 
@@ -25,13 +26,8 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
   const [layout, setLayout] = useState<ChatLayout>('bubble')
 
   // step 2 — notifications
-  const notifyEnabled = useStore((s) => s.notifyEnabled)
-  const enableDesktopNotifications = useStore((s) => s.enableDesktopNotifications)
   const dnd = useStore((s) => s.dnd)
   const setDnd = useStore((s) => s.setDnd)
-  const [enabling, setEnabling] = useState(false)
-  const denied =
-    typeof Notification !== 'undefined' && Notification.permission === 'denied'
 
   // step 3 — theme (persisted, applied later)
   const [theme, setTheme] = useState<ThemeChoice>(() => getThemeChoice())
@@ -46,12 +42,6 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  async function enableNotifications() {
-    setEnabling(true)
-    await enableDesktopNotifications()
-    setEnabling(false)
-  }
 
   // Skip: leave every choice at its current/default state, just don't ask again.
   function skip() {
@@ -81,7 +71,7 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-[var(--color-ink)] safe-pad">
       {/* header: brand + skip + step progress */}
-      <div className="flex items-center justify-between px-6 pt-[max(1.5rem,var(--titlebar-h))] pb-2">
+      <div className="flex items-center justify-between px-4 pt-[max(1rem,var(--titlebar-h))] pb-2 sm:px-6 sm:pt-[max(1.5rem,var(--titlebar-h))]">
         <div className="flex items-center gap-2">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--color-panel)] text-lg font-extrabold text-[var(--color-accent)]">
             #
@@ -92,18 +82,18 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
         </div>
         <button
           onClick={skip}
-          className="rounded-md px-3 py-1.5 text-sm text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
+          className="min-h-11 rounded-md px-3 text-sm text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
         >
           Skip for now
         </button>
       </div>
 
       {/* step indicator */}
-      <div className="flex items-center justify-center gap-2 px-6 py-4">
+      <div className="flex items-center justify-center gap-1 overflow-x-auto px-4 py-3 sm:gap-2 sm:px-6 sm:py-4">
         {STEPS.map((label, i) => (
           <div key={label} className="flex items-center gap-2">
             <div
-              className={`flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium transition ${
+              className={`flex min-h-9 items-center gap-2 rounded-full px-2 py-1 text-xs font-medium transition sm:px-3 ${
                 i === step
                   ? 'bg-[var(--color-accent-soft)] text-[var(--color-text)]'
                   : i < step
@@ -120,17 +110,17 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
               >
                 {i < step ? '✓' : i + 1}
               </span>
-              {label}
+              <span className="hidden sm:inline">{label}</span>
             </div>
             {i < STEPS.length - 1 && (
-              <span className="h-px w-6 bg-[var(--color-border)]" />
+              <span className="h-px w-4 bg-[var(--color-border)] sm:w-6" />
             )}
           </div>
         ))}
       </div>
 
       {/* step body */}
-      <div className="flex flex-1 items-center justify-center overflow-y-auto px-6">
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-4 sm:px-6">
         <div className="w-full max-w-xl animate-in pb-6">
           {step === 0 && (
             <StepShell
@@ -146,36 +136,9 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
               title="Stay in the loop"
               subtitle="Get notified about direct messages, mentions, and replies — even when sharp isn't focused."
             >
-              <div className="flex flex-col gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-[var(--color-text)]">
-                      Desktop notifications
-                    </div>
-                    <div className="text-[11px] text-[var(--color-text-faint)]">
-                      {notifyEnabled
-                        ? 'Enabled — you’re all set.'
-                        : denied
-                          ? 'Blocked in your browser settings. Allow notifications for this site to enable.'
-                          : 'We’ll ask your browser for permission.'}
-                    </div>
-                  </div>
-                  {notifyEnabled ? (
-                    <span className="shrink-0 rounded-md bg-[var(--color-accent-soft)] px-3 py-1.5 text-xs font-semibold text-[var(--color-accent-hover)]">
-                      ✓ On
-                    </span>
-                  ) : (
-                    <button
-                      onClick={enableNotifications}
-                      disabled={enabling || denied}
-                      className="shrink-0 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
-                    >
-                      {enabling ? 'Enabling…' : 'Enable'}
-                    </button>
-                  )}
-                </div>
-
-                <label className="flex items-center justify-between gap-4 border-t border-[var(--color-border)] pt-3">
+              <div className="flex flex-col gap-3">
+                <NotificationSetup />
+                <label className="flex min-h-14 items-center justify-between gap-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-4">
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-[var(--color-text)]">
                       Do not disturb
@@ -188,7 +151,7 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
                     type="checkbox"
                     checked={dnd}
                     onChange={(e) => void setDnd(e.target.checked)}
-                    className="h-4 w-4 shrink-0 accent-[var(--color-accent)]"
+                    className="h-5 w-5 shrink-0 accent-[var(--color-accent)]"
                   />
                 </label>
               </div>
@@ -225,18 +188,18 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
       </div>
 
       {/* footer nav */}
-      <div className="flex items-center justify-between border-t border-[var(--color-border)] px-6 py-4">
+      <div className="flex items-center justify-between border-t border-[var(--color-border)] px-4 py-3 sm:px-6 sm:py-4">
         <button
           onClick={back}
           disabled={step === 0}
-          className="rounded-md px-4 py-2 text-sm text-[var(--color-text-dim)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] disabled:invisible"
+          className="min-h-11 rounded-md px-4 text-sm text-[var(--color-text-dim)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] disabled:invisible"
         >
           Back
         </button>
         <button
           onClick={next}
           disabled={finishing}
-          className="rounded-md bg-[var(--color-accent)] px-5 py-2 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
+          className="min-h-11 rounded-md bg-[var(--color-accent)] px-5 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
         >
           {isLast ? (finishing ? 'Finishing…' : 'Get started') : 'Continue'}
         </button>

@@ -188,7 +188,7 @@ export function CanvasEditor() {
             navigate(doc.channel_id ? `/canvas/c/${doc.channel_id}` : '/canvas')
           }
           aria-label="Back to canvas"
-          className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] md:hidden"
+          className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] md:hidden"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="m15 18-6-6 6-6" />
@@ -203,10 +203,13 @@ export function CanvasEditor() {
         <div className="relative">
           <button
             onClick={() => setMenuOpen((o) => !o)}
-            className="rounded-md border border-[var(--color-border)] px-2 py-1 text-sm text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
+            className="flex h-11 w-11 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] sm:h-9 sm:w-9"
             title="Actions"
+            aria-label="Canvas actions"
           >
-            •••
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" />
+            </svg>
           </button>
           {menuOpen && (
             <>
@@ -242,7 +245,7 @@ export function CanvasEditor() {
       </header>
 
       {/* banners + icon/title */}
-      <div className="shrink-0 px-6 pt-4 pb-3">
+      <div className="shrink-0 px-4 pt-4 pb-3 sm:px-6">
         {trashed && (
           <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-[#e0913a]/40 bg-[#e0913a]/10 px-4 py-2.5 text-sm">
             <span className="text-[#e0b06a]">This canvas is in the trash.</span>
@@ -344,7 +347,7 @@ function MenuItem({
   return (
     <button
       onClick={onClick}
-      className={`block w-full rounded-md px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-2)] ${
+      className={`block min-h-11 w-full rounded-md px-3 py-2 text-left text-sm hover:bg-[var(--color-panel-2)] ${
         danger ? 'text-[#e05a7d]' : 'text-[var(--color-text)]'
       }`}
     >

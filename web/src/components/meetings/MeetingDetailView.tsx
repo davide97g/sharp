@@ -89,8 +89,8 @@ export function MeetingDetailView() {
 
   return (
     <main className="flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
-      <header className="flex min-h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border)] px-4 sm:px-5">
-        <button onClick={() => navigate('/meetings')} className="rounded-lg p-2 text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]" aria-label="Back to meetings">←</button>
+      <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-3 py-2 sm:flex-nowrap sm:gap-3 sm:px-5 sm:py-0">
+        <button onClick={() => navigate('/meetings')} className="flex h-11 w-11 items-center justify-center rounded-lg text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]" aria-label="Back to meetings">←</button>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold">{meeting.title}</div>
           <div className="text-[10px] text-[var(--color-text-faint)]">
@@ -98,8 +98,8 @@ export function MeetingDetailView() {
           </div>
         </div>
         <StatusChip meeting={meeting} />
-        <button onClick={() => void regenerate()} disabled={meeting.status === 'active'} className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-40">Regenerate</button>
-        <button onClick={() => void remove()} disabled={meeting.status === 'active'} className="rounded-lg px-2 py-1.5 text-xs text-[var(--color-text-faint)] hover:bg-red-500/10 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40">Delete</button>
+        <button onClick={() => void regenerate()} disabled={meeting.status === 'active'} className="min-h-11 rounded-lg border border-[var(--color-border)] px-3 text-xs text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-40 max-sm:order-3 max-sm:ml-auto">Regenerate</button>
+        <button onClick={() => void remove()} disabled={meeting.status === 'active'} className="min-h-11 rounded-lg px-3 text-xs text-[var(--color-text-faint)] hover:bg-red-500/10 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40 max-sm:order-3">Delete</button>
       </header>
 
       <div className="flex-1 overflow-y-auto">
@@ -196,10 +196,10 @@ function ActionEditor({ meeting, onChange }: { meeting: MeetingDetail; onChange:
       <SectionHeading label="Action items" action={<button onClick={() => { setActions([...actions, { id: crypto.randomUUID(), text: '', assignee_user_id: null, assignee_name: null, completed: false, position: actions.length }]); setDirty(true) }}>Add item</button>} />
       <div className="meeting-surface p-0">
         {actions.length === 0 ? <div className="px-5 py-8"><EmptyText text="No action items captured." /></div> : actions.map((action, index) => (
-          <div key={action.id} className="grid grid-cols-[auto_1fr_auto] items-center gap-3 border-b border-[var(--color-border)] px-4 py-3 last:border-0">
+          <div key={action.id} className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 border-b border-[var(--color-border)] px-4 py-3 last:border-0 sm:grid-cols-[auto_1fr_auto]">
             <input type="checkbox" checked={action.completed} onChange={(event) => update(index, { completed: event.target.checked })} className="h-4 w-4 accent-[var(--color-accent)]" aria-label={`Complete ${action.text || 'action item'}`} />
             <input value={action.text} onChange={(event) => update(index, { text: event.target.value })} placeholder="Describe next step" className={`min-w-0 bg-transparent text-sm outline-none ${action.completed ? 'text-[var(--color-text-faint)] line-through' : ''}`} />
-            <div className="flex items-center gap-2">
+            <div className="col-span-2 flex items-center justify-end gap-2 sm:col-span-1">
               <select value={action.assignee_user_id ?? ''} onChange={(event) => update(index, { assignee_user_id: event.target.value || null })} className="max-w-32 rounded-md border border-[var(--color-border)] bg-[var(--color-panel-2)] px-2 py-1 text-[11px] text-[var(--color-text-dim)] outline-none">
                 <option value="">Unassigned</option>{attendees.map((attendee) => <option key={attendee.user_id!} value={attendee.user_id!}>{attendee.display_name}</option>)}
               </select>

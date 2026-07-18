@@ -8,11 +8,14 @@ import { gifPreviewText } from './lib/gif'
 import { toastError, toastInfo, toastNotify } from './lib/toast'
 import { navigateTo } from './lib/nav'
 import {
+  disablePush,
+  enableNotifications,
+  getNotificationState,
   initPush,
-  isWebNotifyGranted,
+  initialNotificationState,
   navigateToChannel,
-  requestNotifyPermission,
   showOsNotification,
+  type NotificationSetupState,
 } from './lib/notify'
 import {
   playHuddleRingSound,
@@ -220,6 +223,7 @@ type State = {
   dnd: boolean
   mutedChannels: Set<string>
   notifyEnabled: boolean
+  notificationState: NotificationSetupState
   notifHasMore: boolean
 
   // chat layout preference: null until the user has chosen (triggers first-run chooser)
@@ -394,6 +398,7 @@ type State = {
   setDnd: (dnd: boolean) => Promise<void>
   toggleMute: (channelId: string) => Promise<void>
   enableDesktopNotifications: () => Promise<void>
+  disableDesktopNotifications: () => Promise<void>
 
   // profile + chat layout
   setChatLayout: (layout: ChatLayout) => Promise<void>
@@ -494,7 +499,8 @@ export const useStore = create<State>((set, get) => ({
   notifUnread: 0,
   dnd: false,
   mutedChannels: new Set(),
-  notifyEnabled: isWebNotifyGranted(),
+  notifyEnabled: false,
+  notificationState: initialNotificationState(),
   notifHasMore: false,
   chatLayout: null,
   voiceRooms: {},
@@ -537,8 +543,15 @@ export const useStore = create<State>((set, get) => ({
     await get().loadInboxAndPrefs()
     set({ ready: true })
 
-    // If notifications are already granted, (re)subscribe to web push silently.
-    if (isWebNotifyGranted()) void initPush()
+    // Refine permission/subscription state without prompting. Existing grants
+    // are re-subscribed after deployments or browser subscription rotation.
+    const notificationState = await getNotificationState()
+    if (notificationState === 'subscribed' || notificationState === 'prompt') {
+      const next = await initPush()
+      set({ notificationState: next, notifyEnabled: next === 'subscribed' })
+    } else {
+      set({ notificationState, notifyEnabled: false })
+    }
   },
 
   initGuestCall(guestToken, user, channelId) {
@@ -590,6 +603,10 @@ export const useStore = create<State>((set, get) => ({
     get().leaveVoice()
     const ws = get().ws
     if (ws) ws.close()
+    const pushToken = get().token
+    // Capture auth for server detachment, then clear the session immediately.
+    // Cleanup is best-effort and never blocks logout UI.
+    void disablePush(pushToken)
     clearToken()
     setSessionToken(null)
     set({
@@ -631,6 +648,8 @@ export const useStore = create<State>((set, get) => ({
       notifUnread: 0,
       dnd: false,
       mutedChannels: new Set(),
+      notifyEnabled: false,
+      notificationState: initialNotificationState(),
       chatLayout: null,
       notifHasMore: false,
       voiceRooms: {},
@@ -1753,13 +1772,17 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async enableDesktopNotifications() {
-    const granted = await requestNotifyPermission()
-    set({ notifyEnabled: granted })
-    if (granted) {
-      await initPush()
-    } else {
+    const notificationState = await enableNotifications()
+    const enabled = notificationState === 'subscribed'
+    set({ notificationState, notifyEnabled: enabled })
+    if (!enabled && notificationState !== 'install-required') {
       toastError('Notification permission was not granted.')
     }
+  },
+
+  async disableDesktopNotifications() {
+    const notificationState = await disablePush()
+    set({ notificationState, notifyEnabled: false })
   },
 
   applyWsEvent(env) {
@@ -2307,7 +2330,9 @@ export const useStore = create<State>((set, get) => ({
         const viewing =
           typeof window !== 'undefined' &&
           window.location.pathname === deepLink
-        if (!viewing && !get().dnd) {
+        const visibleHere =
+          typeof document === 'undefined' || document.visibilityState === 'visible'
+        if (!viewing && !get().dnd && visibleHere) {
           const docTitle = mention.doc.title || 'Untitled'
           const who = mention.from_user.display_name
           const isCanvas = mention.doc.kind === 'canvas'
@@ -2354,7 +2379,9 @@ export const useStore = create<State>((set, get) => ({
         // Alert (toast + OS notification) unless DND, or the message's channel is
         // already open in a focused window.
         const st = get()
-        if (!st.dnd && !focusedHere) {
+        const visibleHere =
+          typeof document === 'undefined' || document.visibilityState === 'visible'
+        if (!st.dnd && !focusedHere && visibleHere) {
           const title =
             notification.kind === 'dm'
               ? notification.actor.display_name
@@ -2409,7 +2436,10 @@ export const useStore = create<State>((set, get) => ({
       }
       case 'calendar.reminder': {
         const p = env.payload as CalendarReminderPayload
-        if (get().dnd) break
+        if (
+          get().dnd ||
+          (typeof document !== 'undefined' && document.visibilityState !== 'visible')
+        ) break
         const when = p.kind === 'lead' ? 'starts soon' : 'starting now'
         const title = p.title || 'Meeting'
         const deepLink = p.join_path ?? '/calendar'

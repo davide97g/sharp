@@ -18,7 +18,6 @@ export function Login() {
   const [server, setServer] = useState(getServerUrl() ?? '')
   const [busy, setBusy] = useState(false)
   const init = useStore((s) => s.init)
-  const enableDesktopNotifications = useStore((s) => s.enableDesktopNotifications)
   const navigate = useNavigate()
 
   async function browserLogin() {
@@ -57,11 +56,6 @@ export function Login() {
           : await api.register(email.trim().toLowerCase(), password, displayName.trim())
       await init(res.token, res.user)
       sound.loginSuccess()
-      // First sign-in: ask for notification permission once, while we still have
-      // the click gesture. Skip if the user already granted or denied it before.
-      if (typeof Notification === 'undefined' || Notification.permission === 'default') {
-        void enableDesktopNotifications()
-      }
       navigate('/', { replace: true })
     } catch (err) {
       if (err instanceof ApiRequestError) toastError(err.message)
@@ -73,7 +67,7 @@ export function Login() {
   }
 
   return (
-    <div className="login-screen flex min-h-full w-full flex-col md:flex-row">
+    <div className="login-screen flex h-full min-h-0 w-full flex-col overflow-hidden md:flex-row">
       {/* Branding panel — art + official lockup (splash FLIP target).
           Stacks as a top strip on small screens; half-width on md+. */}
       <aside className="login-brand relative h-44 w-full shrink-0 overflow-hidden md:h-auto md:min-h-full md:w-[48%]">
@@ -98,8 +92,8 @@ export function Login() {
       </aside>
 
       {/* Form panel */}
-      <main className="relative flex flex-1 flex-col justify-center bg-[var(--color-ink)] px-6 py-8 sm:px-10 md:py-10 lg:px-16">
-        <div className="mx-auto w-full max-w-sm animate-in">
+      <main className="relative flex min-h-0 flex-1 flex-col overflow-y-auto bg-[var(--color-ink)] px-6 py-8 sm:px-10 md:py-10 lg:px-16">
+        <div className="my-auto w-full max-w-sm animate-in self-center">
           <header className="login-intro mb-8">
             <h1 className="login-heading text-2xl font-bold tracking-tight text-[var(--color-text)]">
               {mode === 'login' ? 'Welcome back' : 'Create your account'}
@@ -153,7 +147,7 @@ export function Login() {
             <button
               type="submit"
               disabled={busy}
-              className="login-primary-action mt-2 rounded-lg bg-[var(--color-accent)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 focus:ring-offset-[var(--color-ink)] disabled:opacity-60"
+              className="login-primary-action mt-2 min-h-11 rounded-lg bg-[var(--color-accent)] px-4 py-2.5 text-base font-semibold text-white transition hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 focus:ring-offset-[var(--color-ink)] disabled:opacity-60 sm:text-sm"
             >
               {busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
             </button>
@@ -170,7 +164,7 @@ export function Login() {
                 type="button"
                 onClick={browserLogin}
                 disabled={busy}
-                className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-4 py-2.5 text-sm font-semibold text-[var(--color-text)] transition hover:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)] disabled:opacity-60"
+                className="min-h-11 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-4 py-2.5 text-base font-semibold text-[var(--color-text)] transition hover:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)] disabled:opacity-60 sm:text-sm"
               >
                 Log in with browser
               </button>
@@ -221,7 +215,7 @@ function Field({
         placeholder={placeholder}
         autoComplete={autoComplete}
         required={required}
-        className="login-field-input rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2.5 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
+        className="login-field-input min-h-11 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2.5 text-base text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)] sm:text-sm"
       />
     </label>
   )

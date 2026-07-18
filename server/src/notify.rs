@@ -378,8 +378,9 @@ async fn is_dnd(pool: &PgPool, user_id: Uuid) -> bool {
         .unwrap_or(false)
 }
 
-/// Best-effort web push for a non-message event (e.g. a doc/canvas mention).
-/// Skips users who are online (they get the realtime toast) or in DND.
+/// Best-effort push for a non-message event (e.g. a doc/canvas mention).
+/// Web push is suppressed only by a visible web session. Expo keeps its
+/// existing offline-only behavior and is otherwise outside the PWA lifecycle.
 pub async fn push_event(
     state: &SharedState,
     user_id: Uuid,
@@ -390,23 +391,33 @@ pub async fn push_event(
     channel_id: Option<Uuid>,
     kind: &str,
 ) {
-    if state.hub.is_online(user_id) || is_dnd(&state.pool, user_id).await {
+    if is_dnd(&state.pool, user_id).await {
         return;
     }
+    let web_allowed = !state.hub.has_visible_session(user_id).await;
+    let expo_allowed = !state.hub.is_online(user_id);
     let payload = serde_json::json!({
         "title": title,
         "body": body,
         "tag": tag,
         "path": path,
+        "timestamp": chrono::Utc::now().timestamp_millis(),
     })
     .to_string();
     // Events without a channel context (Google reminders, standalone calls) carry
     // a nil uuid to the native payload; the deep-link `path` is the real target.
     let expo_channel = channel_id.unwrap_or_else(Uuid::nil);
-    tokio::join!(
-        push::send_payload(state, user_id, &payload),
-        expo_push::send_to_user(state, user_id, title, body, expo_channel, kind),
-    );
+    let web = async {
+        if web_allowed {
+            push::send_payload(state, user_id, &payload).await;
+        }
+    };
+    let expo = async {
+        if expo_allowed {
+            expo_push::send_to_user(state, user_id, title, body, expo_channel, kind).await;
+        }
+    };
+    tokio::join!(web, expo);
 }
 
 /// Public entry point: best-effort, never fails message creation.
@@ -511,13 +522,31 @@ async fn dispatch_inner(
         let ev = envelope("notification.created", json!({ "notification": &notif }));
         state.hub.broadcast(ev, vec![uid]).await;
 
-        // Web push only to recipients who are not connected and not in DND.
-        if !state.hub.is_online(uid) && !is_dnd(pool, uid).await {
+        // Background/closed web sessions receive VAPID push even if their
+        // WebSocket remains connected. A visible session gets realtime UI only.
+        if !is_dnd(pool, uid).await {
+            let web_allowed = !state.hub.has_visible_session(uid).await;
+            let expo_allowed = !state.hub.is_online(uid);
             let (title, body) = push::title_and_body(&notif);
-            tokio::join!(
-                push::send_to_user(state, uid, &notif),
-                expo_push::send_to_user(state, uid, &title, &body, notif.channel_id, &notif.kind),
-            );
+            let web = async {
+                if web_allowed {
+                    push::send_to_user(state, uid, &notif).await;
+                }
+            };
+            let expo = async {
+                if expo_allowed {
+                    expo_push::send_to_user(
+                        state,
+                        uid,
+                        &title,
+                        &body,
+                        notif.channel_id,
+                        &notif.kind,
+                    )
+                    .await;
+                }
+            };
+            tokio::join!(web, expo);
         }
     }
 
@@ -551,9 +580,12 @@ mod push {
             "title": title,
             "body": body,
             "channel_id": notif.channel_id.to_string(),
+            "message_id": notif.message_id.map(|id| id.to_string()),
+            "notification_id": notif.id.to_string(),
             "kind": notif.kind,
             "tag": format!("sharp-{}", notif.channel_id),
             "path": format!("/c/{}", notif.channel_id),
+            "timestamp": notif.created_at.timestamp_millis(),
         })
         .to_string();
         send_payload(state, user_id, &payload).await;

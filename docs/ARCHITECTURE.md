@@ -906,6 +906,9 @@ attachments as blobs with the `Authorization` header.
 ## WebSocket event addition (existing `/api/v1/ws`)
 
 - `notification.created` `{notification: Notification}` — to the recipient only.
+- `app.visibility` `{visible: boolean}` — sent on connect, visibility changes, page show,
+  and page hide. Visible connection ids are refreshed in Redis (`sharp:visible:<user_id>`)
+  with an expiry, so every server replica shares the foreground-delivery decision.
 
 ## Notification semantics
 
@@ -929,14 +932,18 @@ Controls:
 Delivery: in-app inbox (bell + dropdown) + arrival toast; OS notification when the app is
 open but unfocused (Web Notification API, or `tauri-plugin-notification` in the desktop
 shell); **web push** (service worker `web/public/sw.js`) when the tab is closed and the
-recipient has no live WS connection on this replica.
+recipient has no visible web session on any replica. A hidden tab may keep its WebSocket;
+the service worker still receives the VAPID push. iOS/iPadOS setup is offered only from an
+installed Home Screen PWA and notification permission is requested directly from the user's
+Enable action. Logout unregisters that device's subscription.
 
 ### Mobile push (Expo)
 
 Expo tokens from the native app are stored in `expo_push_tokens` and delivered through the
 Expo Push API alongside web push. The same gate applies: muted channels create nothing;
-the inbox row and WS event always happen; Expo/web push is only sent when the recipient is
-offline and not in DND. `DeviceNotRegistered` tickets prune their token. `EXPO_ACCESS_TOKEN`
+the inbox row and WS event always happen; Expo push is sent while the recipient is offline,
+web push while no web session is visible, and neither is sent in DND. `DeviceNotRegistered`
+tickets prune their token. `EXPO_ACCESS_TOKEN`
 is an optional bearer-token environment variable for Expo projects that require it. The mobile
 wire types in `mobile/src/lib/types.ts` are a copy of `web/src/lib/types.ts` and must be kept
 in sync.
@@ -1174,8 +1181,8 @@ stores its id in `card_message_id`. `notify::strip_resource_tokens` humanizes th
   just passed) over both `scheduled_meetings` (status `scheduled`) and `calendar_events`
   (join to account for the owner; only `selected` calendars, `active` accounts, `confirmed`
   events). Native rows fan out to attendees; Google rows go to the account owner. Each claimed
-  row → WS `calendar.reminder` + `notify::push_event` (offline web push, self-guards
-  online/DND). The "start" claims carry a lower time bound (`> now() - 10 min`) so the Google
+  row → WS `calendar.reminder` + `notify::push_event` (web push when no web session is
+  visible; self-guards DND). The "start" claims carry a lower time bound (`> now() - 10 min`) so the Google
   −30d sync window can't back-fill a blast of stale reminders. Reminders do **not** write
   `notifications` inbox rows (the schema needs actor/message ids Google events lack).
 - **Google sync poller** (5-min tick, `calendar_sync::poll_active_accounts`): iterate

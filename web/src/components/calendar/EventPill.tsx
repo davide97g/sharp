@@ -42,63 +42,60 @@ export function EventPill({ item }: { item: CalendarItem }) {
 
   return (
     <div ref={rootRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className={`group flex w-full items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-2.5 py-2 text-left transition hover:border-[var(--color-accent)] hover:bg-[var(--color-panel-2)] ${
+      <div
+        className={`group flex min-h-11 w-full items-stretch rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] transition hover:border-[var(--color-accent)] hover:bg-[var(--color-panel-2)] ${
           cancelled ? 'opacity-60' : ''
         }`}
       >
-        <span
-          aria-hidden
-          className="h-8 w-1 shrink-0 rounded-full"
-          style={{ background: accent }}
-        />
-        <span className="min-w-0 flex-1">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
+        >
           <span
-            className={`block truncate text-sm font-medium text-[var(--color-text)] ${
-              cancelled ? 'line-through' : ''
-            }`}
-          >
-            {item.title || 'Untitled'}
-          </span>
-          <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[var(--color-text-faint)]">
-            <span className="tabular-nums">
-              {timeRange(item.start_at, item.end_at, item.all_day)}
+            aria-hidden
+            className="h-8 w-1 shrink-0 rounded-full"
+            style={{ background: accent }}
+          />
+          <span className="min-w-0 flex-1">
+            <span
+              className={`block truncate text-sm font-medium text-[var(--color-text)] ${
+                cancelled ? 'line-through' : ''
+              }`}
+            >
+              {item.title || 'Untitled'}
             </span>
-            {channel && (
-              <span className="truncate rounded bg-[var(--color-panel-2)] px-1 text-[10px] text-[var(--color-text-dim)]">
-                {channelLabel(channel)}
+            <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[var(--color-text-faint)]">
+              <span className="tabular-nums">
+                {timeRange(item.start_at, item.end_at, item.all_day)}
               </span>
-            )}
-            {isNative && !channel && item.meeting.standalone_call_id && (
-              <span className="rounded bg-[var(--color-panel-2)] px-1 text-[10px] text-[var(--color-text-dim)]">
-                call
-              </span>
-            )}
+              {channel && (
+                <span className="truncate rounded bg-[var(--color-panel-2)] px-1 text-[10px] text-[var(--color-text-dim)]">
+                  {channelLabel(channel)}
+                </span>
+              )}
+              {isNative && !channel && item.meeting.standalone_call_id && (
+                <span className="rounded bg-[var(--color-panel-2)] px-1 text-[10px] text-[var(--color-text-dim)]">
+                  call
+                </span>
+              )}
+            </span>
           </span>
-        </span>
+        </button>
         {canJoin && (
-          <span
-            role="button"
-            tabIndex={0}
+          <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation()
               joinScheduledMeeting(item.source === 'native' ? item.join_path : null)
             }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.stopPropagation()
-                joinScheduledMeeting(item.source === 'native' ? item.join_path : null)
-              }
-            }}
-            className="shrink-0 rounded-md bg-[var(--color-accent)] px-2 py-1 text-[11px] font-semibold text-white hover:bg-[var(--color-accent-hover)]"
+            className="m-1 min-h-11 shrink-0 rounded-md bg-[var(--color-accent)] px-3 text-[11px] font-semibold text-white hover:bg-[var(--color-accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-hover)]"
           >
             Join
-          </span>
+          </button>
         )}
-      </button>
+      </div>
 
       {open && (
         <div className="absolute left-0 top-full z-30 mt-1 w-72 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-3 shadow-2xl">

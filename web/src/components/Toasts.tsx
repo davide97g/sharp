@@ -9,7 +9,7 @@ export function Toasts() {
       className="pointer-events-none fixed z-[100] flex flex-col gap-2"
       style={{
         right: 'max(1rem, env(safe-area-inset-right, 0px))',
-        bottom: 'max(1rem, calc(var(--mobile-tab-h, 0px) + env(safe-area-inset-bottom, 0px)))',
+        bottom: 'max(1rem, calc(var(--mobile-tab-h, 0px) + 0.5rem))',
       }}
     >
       {toasts.map((t) => {

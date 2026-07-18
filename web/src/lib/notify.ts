@@ -8,10 +8,64 @@
 // Inside the Tauri desktop shell we use the native notification plugin and skip
 // web push (the OS handles background delivery).
 
-import { api } from './api'
+import { api, apiBase } from './api'
 
 export const isTauri =
   typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+
+export type NotificationSetupState =
+  | 'unsupported'
+  | 'install-required'
+  | 'prompt'
+  | 'subscribed'
+  | 'denied'
+  | 'error'
+
+function isIos(): boolean {
+  if (typeof navigator === 'undefined') return false
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
+  )
+}
+
+export function isStandalonePwa(): boolean {
+  if (typeof window === 'undefined') return false
+  const iosStandalone = (navigator as Navigator & { standalone?: boolean }).standalone === true
+  return iosStandalone || window.matchMedia('(display-mode: standalone)').matches
+}
+
+/** Synchronous capability state for initial render; subscription state is refined asynchronously. */
+export function initialNotificationState(): NotificationSetupState {
+  if (isTauri) return 'prompt'
+  if (isIos() && !isStandalonePwa()) return 'install-required'
+  if (
+    typeof Notification === 'undefined' ||
+    !('serviceWorker' in navigator) ||
+    !('PushManager' in window)
+  ) {
+    return 'unsupported'
+  }
+  if (Notification.permission === 'denied') return 'denied'
+  if (Notification.permission === 'granted') return 'prompt'
+  return 'prompt'
+}
+
+/** Current browser permission + push subscription state. Never prompts. */
+export async function getNotificationState(): Promise<NotificationSetupState> {
+  const initial = initialNotificationState()
+  if (isTauri || initial === 'install-required' || initial === 'unsupported' || initial === 'denied') {
+    return initial
+  }
+  if (Notification.permission !== 'granted') return 'prompt'
+  try {
+    const reg = await navigator.serviceWorker.getRegistration('/sw.js')
+    const sub = await reg?.pushManager.getSubscription()
+    return sub ? 'subscribed' : 'prompt'
+  } catch {
+    return 'error'
+  }
+}
 
 let navigateFn: ((path: string) => void) | null = null
 /** App registers its router navigate so notification clicks can deep-link. */
@@ -72,7 +126,14 @@ export async function showOsNotification(
       /* fall through */
     }
   }
-  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+  // Hidden browser/PWA pages receive the service-worker push. Page-created
+  // notifications here would duplicate it. Keep this path for a visible but
+  // unfocused desktop tab; Tauri already returned above.
+  if (
+    typeof Notification !== 'undefined' &&
+    Notification.permission === 'granted' &&
+    document.visibilityState === 'visible'
+  ) {
     try {
       const n = new Notification(title, { body, tag })
       n.onclick = () => {
@@ -110,14 +171,18 @@ export async function registerServiceWorker(): Promise<ServiceWorkerRegistration
 }
 
 /** Register the service worker and subscribe this browser to web push. */
-export async function initPush(): Promise<void> {
-  if (isTauri) return // desktop relies on native notifications
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
+export async function initPush(): Promise<NotificationSetupState> {
+  if (isTauri) return 'subscribed' // desktop relies on native notifications
+  const initial = initialNotificationState()
+  if (initial === 'install-required' || initial === 'unsupported' || initial === 'denied') {
+    return initial
+  }
+  if (Notification.permission !== 'granted') return 'prompt'
   try {
     const { public_key } = await api.vapidPublicKey()
-    if (!public_key) return // server has web push disabled
+    if (!public_key) return 'unsupported' // server has web push disabled
     const reg = await registerServiceWorker()
-    if (!reg) return
+    if (!reg) return 'error'
     await navigator.serviceWorker.ready
     let sub = await reg.pushManager.getSubscription()
     if (!sub) {
@@ -135,8 +200,60 @@ export async function initPush(): Promise<void> {
         endpoint: json.endpoint,
         keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
       })
+      return 'subscribed'
     }
+    return 'error'
   } catch (e) {
     console.warn('web push init failed', e)
+    return 'error'
   }
+}
+
+/** User-initiated notification setup. Permission request stays inside click task. */
+export async function enableNotifications(): Promise<NotificationSetupState> {
+  const initial = initialNotificationState()
+  if (initial === 'install-required' || initial === 'unsupported' || initial === 'denied') {
+    return initial
+  }
+  const granted = await requestNotifyPermission()
+  if (!granted) {
+    return typeof Notification !== 'undefined' && Notification.permission === 'denied'
+      ? 'denied'
+      : 'prompt'
+  }
+  return initPush()
+}
+
+/**
+ * Remove local subscription and its server mapping. `tokenOverride` lets logout
+ * clear local auth immediately without racing the authenticated cleanup fetch.
+ */
+export async function disablePush(tokenOverride?: string | null): Promise<NotificationSetupState> {
+  if (isTauri || !('serviceWorker' in navigator)) return initialNotificationState()
+  try {
+    const reg = await navigator.serviceWorker.getRegistration('/sw.js')
+    const sub = await reg?.pushManager.getSubscription()
+    if (sub) {
+      if (tokenOverride !== undefined) {
+        if (tokenOverride) {
+          await fetch(`${apiBase()}/push/unsubscribe`, {
+            method: 'POST',
+            keepalive: true,
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${tokenOverride}`,
+            },
+            body: JSON.stringify({ endpoint: sub.endpoint }),
+          })
+        }
+      } else {
+        await api.unsubscribePush(sub.endpoint)
+      }
+      await sub.unsubscribe()
+    }
+  } catch (e) {
+    console.warn('web push unsubscribe failed', e)
+    return 'error'
+  }
+  return initialNotificationState()
 }

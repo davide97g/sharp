@@ -433,7 +433,7 @@ export function MessagePane() {
               onClick={() => setShowSchedule(true)}
               aria-label="Schedule a meeting"
               title="Schedule a meeting"
-              className="flex h-8 cursor-pointer items-center rounded-md px-2 text-sm text-[var(--color-text-faint)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+              className="flex h-10 min-w-10 cursor-pointer items-center justify-center rounded-md px-2 text-sm text-[var(--color-text-faint)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] sm:h-8 sm:min-w-0"
             >
               <ScheduleIcon />
             </button>
@@ -442,7 +442,7 @@ export function MessagePane() {
             onClick={() => setShowSettings(true)}
             aria-label={isDm ? 'Conversation settings' : 'Channel settings'}
             title={isDm ? 'Conversation settings' : 'Channel settings'}
-            className="flex h-10 w-10 items-center justify-center rounded-md text-sm text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] sm:h-8 sm:w-auto sm:px-2 sm:py-1"
+            className="flex h-11 w-11 items-center justify-center rounded-md text-sm text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] sm:h-8 sm:w-auto sm:px-2 sm:py-1"
           >
             ⚙
           </button>

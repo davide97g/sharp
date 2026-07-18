@@ -7,6 +7,7 @@ import { fmtDayDivider, fmtRelative, sameDay } from '../lib/util'
 import { isTauri } from '../lib/notify'
 import { gifPreviewText } from '../lib/gif'
 import type { Notification, NotificationKind } from '../lib/types'
+import { NotificationSetup } from './NotificationSetup'
 
 type Filter = 'all' | NotificationKind
 
@@ -45,7 +46,7 @@ export function InboxTrigger({ variant }: { variant: 'row' | 'icon' | 'header' }
         aria-label={unread > 0 ? `Inbox, ${unread} unread` : 'Inbox'}
         aria-expanded={open}
         title="Inbox"
-        className={`relative flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+        className={`relative flex h-11 cursor-pointer items-center gap-1.5 rounded-md px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] sm:h-8 ${
           open
             ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)] ring-1 ring-inset ring-[var(--color-accent)]'
             : 'text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]'
@@ -86,7 +87,7 @@ export function InboxTrigger({ variant }: { variant: 'row' | 'icon' | 'header' }
       type="button"
       onClick={() => setInboxOpen(!open)}
       aria-expanded={open}
-      className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
+      className={`flex min-h-11 w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
         open
           ? 'bg-[var(--color-accent-soft)] text-white'
           : 'text-[var(--color-text)] hover:bg-[var(--color-panel-2)]'
@@ -122,13 +123,11 @@ export function InboxPanel() {
   const notifications = useStore((s) => s.notifications)
   const unread = useStore((s) => s.notifUnread)
   const dnd = useStore((s) => s.dnd)
-  const notifyEnabled = useStore((s) => s.notifyEnabled)
   const notifHasMore = useStore((s) => s.notifHasMore)
   const markNotifRead = useStore((s) => s.markNotifRead)
   const markAllNotifRead = useStore((s) => s.markAllNotifRead)
   const setDnd = useStore((s) => s.setDnd)
   const loadMore = useStore((s) => s.loadMoreNotifications)
-  const enableDesktop = useStore((s) => s.enableDesktopNotifications)
   const navigate = useNavigate()
   const [filter, setFilter] = useState<Filter>('all')
 
@@ -209,7 +208,7 @@ export function InboxPanel() {
               type="button"
               onClick={markAllNotifRead}
               disabled={unread === 0}
-              className="rounded-md px-2 py-1 text-[11px] font-medium text-[var(--color-accent-hover)] transition-colors hover:bg-[var(--color-accent-soft)] disabled:pointer-events-none disabled:opacity-35"
+              className="min-h-11 rounded-md px-2 text-[11px] font-medium text-[var(--color-accent-hover)] transition-colors hover:bg-[var(--color-accent-soft)] disabled:pointer-events-none disabled:opacity-35"
             >
               Mark all read
             </button>
@@ -217,7 +216,7 @@ export function InboxPanel() {
               type="button"
               onClick={() => setInboxOpen(false)}
               aria-label="Close"
-              className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
+              className="flex h-11 w-11 items-center justify-center rounded-md text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
             >
               <CloseIcon />
             </button>
@@ -235,14 +234,10 @@ export function InboxPanel() {
           <Toggle checked={dnd} onChange={setDnd} label="Do not disturb" />
         </div>
 
-        {!notifyEnabled && !isTauri && (
-          <button
-            type="button"
-            onClick={enableDesktop}
-            className="mx-4 mt-3 flex items-center justify-center gap-2 rounded-lg border border-dashed border-[var(--color-border)] px-3 py-2 text-[11px] font-medium text-[var(--color-text-dim)] transition-colors hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
-          >
-            Enable desktop notifications
-          </button>
+        {!isTauri && (
+          <div className="mx-4 mt-3">
+            <NotificationSetup compact />
+          </div>
         )}
 
         {/* filters */}
@@ -390,7 +385,7 @@ function FilterChip({
     <button
       type="button"
       onClick={onClick}
-      className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
+      className={`flex min-h-11 shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
         active
           ? 'bg-[var(--color-accent)] text-white'
           : 'bg-[var(--color-panel-2)] text-[var(--color-text-dim)] hover:text-[var(--color-text)]'
@@ -437,15 +432,19 @@ function Toggle({
       aria-checked={checked}
       aria-label={label}
       onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
-        checked ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-border)]'
-      }`}
+      className="relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
     >
       <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
-          checked ? 'translate-x-[18px]' : 'translate-x-0.5'
+        className={`relative h-5 w-9 rounded-full transition-colors ${
+          checked ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-border)]'
         }`}
-      />
+      >
+        <span
+          className={`absolute top-0.5 inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+            checked ? 'translate-x-[18px]' : 'translate-x-0.5'
+          }`}
+        />
+      </span>
     </button>
   )
 }

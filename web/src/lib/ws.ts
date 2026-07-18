@@ -20,6 +20,7 @@ export class WsClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private pingTimer: ReturnType<typeof setInterval> | null = null
   private hasConnectedOnce = false
+  private visibilityListenersAttached = false
 
   constructor(opts: {
     handler: Handler
@@ -40,6 +41,7 @@ export class WsClient {
 
   connect() {
     this.closedByUser = false
+    this.attachVisibilityListeners()
     this.open()
   }
 
@@ -60,6 +62,7 @@ export class WsClient {
     ws.onopen = () => {
       this.attempt = 0
       this.startPing()
+      this.sendVisibility()
       this.onOpen()
       if (this.hasConnectedOnce) {
         this.onReconnect()
@@ -107,6 +110,7 @@ export class WsClient {
     this.stopPing()
     this.pingTimer = setInterval(() => {
       this.send('ping', {})
+      this.sendVisibility()
     }, 25000)
   }
 
@@ -127,9 +131,34 @@ export class WsClient {
     this.send('typing', { channel_id: channelId })
   }
 
+  private sendVisibility = () => {
+    this.send('app.visibility', { visible: document.visibilityState === 'visible' })
+  }
+
+  private sendHidden = () => {
+    this.send('app.visibility', { visible: false })
+  }
+
+  private attachVisibilityListeners() {
+    if (this.visibilityListenersAttached) return
+    document.addEventListener('visibilitychange', this.sendVisibility)
+    window.addEventListener('pageshow', this.sendVisibility)
+    window.addEventListener('pagehide', this.sendHidden)
+    this.visibilityListenersAttached = true
+  }
+
+  private detachVisibilityListeners() {
+    if (!this.visibilityListenersAttached) return
+    document.removeEventListener('visibilitychange', this.sendVisibility)
+    window.removeEventListener('pageshow', this.sendVisibility)
+    window.removeEventListener('pagehide', this.sendHidden)
+    this.visibilityListenersAttached = false
+  }
+
   close() {
     this.closedByUser = true
     this.stopPing()
+    this.detachVisibilityListeners()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null

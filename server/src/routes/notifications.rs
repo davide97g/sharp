@@ -284,6 +284,33 @@ pub async fn subscribe(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[cfg(test)]
+mod push_endpoint_tests {
+    use super::endpoint_allowed;
+
+    #[test]
+    fn accepts_public_https_push_endpoints() {
+        assert!(endpoint_allowed("https://fcm.googleapis.com/fcm/send/example"));
+        assert!(endpoint_allowed("https://updates.push.services.mozilla.com/wpush/v2/example"));
+    }
+
+    #[test]
+    fn rejects_non_https_and_private_push_endpoints() {
+        for endpoint in [
+            "http://push.example.com/send",
+            "https://localhost/send",
+            "https://127.0.0.1/send",
+            "https://10.0.0.1/send",
+            "https://172.16.0.1/send",
+            "https://192.168.1.10/send",
+            "https://169.254.169.254/latest/meta-data",
+            "https://service.internal/send",
+        ] {
+            assert!(!endpoint_allowed(endpoint), "accepted {endpoint}");
+        }
+    }
+}
+
 #[derive(Deserialize)]
 pub struct UnsubscribeRequest {
     pub endpoint: String,

@@ -717,7 +717,7 @@ export function Composer({
           <button
             onClick={() => fileRef.current?.click()}
             title="Attach files"
-            className="mb-0.5 rounded-md px-2 py-1.5 text-lg leading-none text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
+            className="mb-0.5 flex h-11 w-11 items-center justify-center rounded-md text-lg leading-none text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] md:h-auto md:w-auto md:px-2 md:py-1.5"
           >
             📎
           </button>
@@ -740,7 +740,7 @@ export function Composer({
                 setManualGifOpen((open) => !open)
               }}
               title="Send a GIF"
-              className="mb-0.5 rounded-md px-2 py-1.5 text-xs font-bold leading-none text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
+              className="mb-0.5 flex h-11 w-11 items-center justify-center rounded-md text-xs font-bold leading-none text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] md:h-auto md:w-auto md:px-2 md:py-1.5"
             >
               GIF
             </button>
@@ -761,7 +761,7 @@ export function Composer({
             onClick={doSend}
             disabled={!canSend}
             title={uploading ? 'Waiting for uploads…' : 'Send (Enter)'}
-            className="composer-send mb-0.5 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-[var(--color-accent-hover)] disabled:opacity-40"
+            className="composer-send mb-0.5 min-h-11 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-[var(--color-accent-hover)] disabled:opacity-40 md:min-h-0"
           >
             Send
           </button>

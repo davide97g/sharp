@@ -131,7 +131,7 @@ function MeetingCard({ meeting, onOpen, live }: { meeting: MeetingListItem; onOp
 
 function MeetingRow({ meeting, onOpen }: { meeting: MeetingListItem; onOpen: () => void }) {
   return (
-    <button onClick={onOpen} className="group grid w-full grid-cols-[5rem_1fr_auto] items-center gap-4 py-4 text-left hover:bg-[var(--color-panel)] sm:grid-cols-[7rem_1fr_auto] sm:px-3">
+    <button onClick={onOpen} className="group grid min-h-11 w-full grid-cols-[4rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2 py-4 text-left hover:bg-[var(--color-panel)] sm:grid-cols-[7rem_minmax(0,1fr)_auto] sm:gap-4 sm:px-3">
       <div>
         <div className="font-mono text-xs tabular-nums text-[var(--color-text-dim)]">{dayOf(meeting.started_at)}</div>
         <div className="mt-1 font-mono text-[10px] tabular-nums text-[var(--color-text-faint)]">{timeOf(meeting.started_at)}</div>
@@ -140,9 +140,9 @@ function MeetingRow({ meeting, onOpen }: { meeting: MeetingListItem; onOpen: () 
         <div className="truncate text-sm font-medium group-hover:text-white">{meeting.title}</div>
         <div className="mt-1 truncate text-xs text-[var(--color-text-faint)]">{meetingContext(meeting)} · {meeting.participant_count} participants · {meeting.transcript_count} phrases</div>
       </div>
-      <div className="text-right">
+      <div className="col-span-2 flex items-center justify-end gap-2 text-right sm:col-span-1 sm:block">
         <div className="font-mono text-xs tabular-nums text-[var(--color-text-dim)]">{formatMinutes(durationMinutes(meeting))}</div>
-        <div className={`mt-1 text-[10px] ${meeting.summary_status === 'ready' ? 'text-[#66c7aa]' : 'text-[var(--color-text-faint)]'}`}>
+        <div className={`text-[10px] sm:mt-1 ${meeting.summary_status === 'ready' ? 'text-[#66c7aa]' : 'text-[var(--color-text-faint)]'}`}>
           {meeting.summary_status === 'ready' ? 'Notes ready' : meeting.summary_status}
         </div>
       </div>

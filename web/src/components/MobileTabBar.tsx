@@ -75,7 +75,7 @@ export function MobileTabBar() {
           />
           <div
             className="absolute inset-x-0 bottom-[var(--mobile-tab-h)] z-[56] rounded-t-2xl border border-[var(--color-border)] bg-[var(--color-panel)] p-3 shadow-2xl"
-            style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px))' }}
+            style={{ paddingBottom: '0.75rem' }}
           >
             <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-[var(--color-border)]" />
             <MoreLink
@@ -167,7 +167,7 @@ function TabButton({
       type="button"
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
-      className={`relative flex min-h-11 flex-1 cursor-pointer flex-col items-center justify-center gap-0.5 px-1 pt-1.5 text-[10px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] ${
+      className={`relative flex min-h-12 flex-1 cursor-pointer flex-col items-center justify-center gap-0.5 px-1 pt-1.5 text-[10px] font-medium outline-none transition-colors active:bg-[var(--color-panel)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] ${
         active ? 'text-[var(--color-accent-hover)]' : 'text-[var(--color-text-faint)]'
       }`}
     >
@@ -197,7 +197,7 @@ function MoreLink({
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full cursor-pointer items-center justify-between rounded-xl px-3 py-3.5 text-left text-sm font-medium text-[var(--color-text)] hover:bg-[var(--color-panel-2)]"
+      className="flex min-h-12 w-full cursor-pointer items-center justify-between rounded-xl px-3 py-3 text-left text-sm font-medium text-[var(--color-text)] hover:bg-[var(--color-panel-2)] active:bg-[var(--color-panel-2)]"
     >
       <span>{label}</span>
       {badge && <span className="h-2 w-2 rounded-full bg-[var(--color-accent)]" aria-hidden />}

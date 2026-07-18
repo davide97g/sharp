@@ -41,6 +41,8 @@ html,
 body,
 #root {
   height: 100%;
+  width: 100%;
+  max-width: 100%;
 }
 
 @supports (height: 100dvh) {
@@ -67,6 +69,19 @@ body,
 
   html {
     touch-action: manipulation;
+  }
+
+  /* Prevent iOS form focus zoom while preserving page pinch-zoom. */
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
+  button,
+  [role="button"],
+  a {
+    -webkit-tap-highlight-color: transparent;
   }
 }
 
@@ -102,6 +117,8 @@ body,
 
 body {
   margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
   background: var(--color-ink);
   color: var(--color-text);
   font-family: var(--font-sans);

@@ -20,6 +20,7 @@ type ViewMode = 'day' | 'week'
 const VIEW_KEY = 'sharp.calendarView'
 
 function initialView(): ViewMode {
+  if (window.matchMedia('(max-width: 800px)').matches) return 'day'
   return localStorage.getItem(VIEW_KEY) === 'week' ? 'week' : 'day'
 }
 
@@ -90,7 +91,7 @@ export function CalendarView() {
 
   return (
     <main className="flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
-      <header className="flex min-h-14 items-center gap-3 border-b border-[var(--color-border)] px-5 py-2">
+      <header className="flex min-h-14 flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-3 py-2 sm:flex-nowrap sm:gap-3 sm:px-5">
         <div className="min-w-0 flex-1">
           <span className="font-semibold">{title}</span>
           {subtitle && (
@@ -99,28 +100,28 @@ export function CalendarView() {
             </span>
           )}
         </div>
-        <div className="flex items-center rounded-md border border-[var(--color-border)] p-0.5">
-          {(['day', 'week'] as ViewMode[]).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => changeView(mode)}
-              className={`rounded px-3 py-1 text-sm capitalize transition ${
-                view === mode
-                  ? 'bg-[var(--color-panel)] font-medium text-[var(--color-text)]'
-                  : 'text-[var(--color-text-dim)] hover:text-[var(--color-text)]'
-              }`}
-            >
-              {mode}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-1">
+        <div className="order-3 flex w-full items-center gap-1.5 sm:order-none sm:w-auto">
+          <div className="flex items-center rounded-md border border-[var(--color-border)] p-0.5">
+            {(['day', 'week'] as ViewMode[]).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => changeView(mode)}
+                className={`min-h-10 rounded px-3 py-1 text-sm capitalize transition sm:min-h-0 ${
+                  view === mode
+                    ? 'bg-[var(--color-panel)] font-medium text-[var(--color-text)]'
+                    : 'text-[var(--color-text-dim)] hover:text-[var(--color-text)]'
+                }`}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             onClick={() => step(-1)}
             aria-label={view === 'week' ? 'Previous week' : 'Previous day'}
-            className="flex h-9 w-9 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-text-dim)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
+            className="flex h-11 w-11 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-text-dim)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] sm:h-9 sm:w-9"
           >
             <ChevronIcon direction="left" />
           </button>
@@ -128,32 +129,32 @@ export function CalendarView() {
             type="button"
             onClick={() => step(1)}
             aria-label={view === 'week' ? 'Next week' : 'Next day'}
-            className="flex h-9 w-9 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-text-dim)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
+            className="flex h-11 w-11 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-text-dim)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] sm:h-9 sm:w-9"
           >
             <ChevronIcon direction="right" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedDate(dayKey(dayjs()))}
+            className="min-h-11 rounded-md border border-[var(--color-border)] px-3 text-sm text-[var(--color-text-dim)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] sm:min-h-9"
+          >
+            Today
+          </button>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            disabled={refreshing}
+            aria-label="Refresh calendars"
+            title="Refresh calendars"
+            className="flex h-11 w-11 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-text-dim)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] disabled:opacity-50 sm:h-9 sm:w-9"
+          >
+            <RefreshIcon spinning={refreshing} />
           </button>
         </div>
         <button
           type="button"
-          onClick={() => setSelectedDate(dayKey(dayjs()))}
-          className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text-dim)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
-        >
-          Today
-        </button>
-        <button
-          type="button"
-          onClick={() => void refresh()}
-          disabled={refreshing}
-          aria-label="Refresh calendars"
-          title="Refresh calendars"
-          className="flex h-9 w-9 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-text-dim)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] disabled:opacity-50"
-        >
-          <RefreshIcon spinning={refreshing} />
-        </button>
-        <button
-          type="button"
           onClick={() => setScheduling(true)}
-          className="meeting-button-primary flex h-9 items-center gap-2 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+          className="meeting-button-primary order-2 flex min-h-11 items-center gap-2 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] sm:order-none sm:min-h-9"
         >
           <PlusIcon /> New meeting
         </button>

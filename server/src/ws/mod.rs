@@ -22,6 +22,7 @@ pub type WsSender = UnboundedSender<Message>;
 pub struct Conn {
     pub conn_id: Uuid,
     pub tx: WsSender,
+    pub visible: bool,
 }
 
 pub struct Hub {
@@ -52,8 +53,126 @@ impl Hub {
         let mut guard = self.sessions.lock().unwrap();
         let entry = guard.entry(user_id).or_default();
         let first = entry.is_empty();
-        entry.push(Conn { conn_id, tx });
+        // Treat a fresh connection as visible until the client reports its
+        // actual Page Visibility state. This avoids a push during handshake.
+        entry.push(Conn {
+            conn_id,
+            tx,
+            visible: true,
+        });
         first
+    }
+
+    fn set_visible_local(&self, user_id: Uuid, conn_id: Uuid, visible: bool) {
+        let mut guard = self.sessions.lock().unwrap();
+        if let Some(conns) = guard.get_mut(&user_id) {
+            if let Some(conn) = conns.iter_mut().find(|conn| conn.conn_id == conn_id) {
+                conn.visible = visible;
+            }
+        }
+    }
+
+    fn is_visible_local(&self, user_id: Uuid) -> bool {
+        self.sessions
+            .lock()
+            .unwrap()
+            .get(&user_id)
+            .map(|conns| conns.iter().any(|conn| conn.visible))
+            .unwrap_or(false)
+    }
+
+    fn visibility_key(user_id: Uuid) -> String {
+        format!("sharp:visible:{user_id}")
+    }
+
+    fn unix_seconds() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    }
+
+    /// Update page visibility locally and in Redis. Redis scores are expiry
+    /// timestamps, refreshed by normal client heartbeats.
+    pub async fn set_visibility(&self, user_id: Uuid, conn_id: Uuid, visible: bool) {
+        self.set_visible_local(user_id, conn_id, visible);
+        let Some(client) = &self.redis else { return };
+        let Ok(mut conn) = client.get_multiplexed_async_connection().await else {
+            return;
+        };
+        let key = Self::visibility_key(user_id);
+        if visible {
+            let expires_at = Self::unix_seconds() + 60;
+            let _: Result<i64, redis::RedisError> = redis::cmd("ZADD")
+                .arg(&key)
+                .arg(expires_at)
+                .arg(conn_id.to_string())
+                .query_async(&mut conn)
+                .await;
+            let _: Result<bool, redis::RedisError> = redis::cmd("EXPIRE")
+                .arg(&key)
+                .arg(120)
+                .query_async(&mut conn)
+                .await;
+        } else {
+            let _: Result<i64, redis::RedisError> = redis::cmd("ZREM")
+                .arg(&key)
+                .arg(conn_id.to_string())
+                .query_async(&mut conn)
+                .await;
+        }
+    }
+
+    /// Refresh Redis TTL only when this connection remains visible locally.
+    pub async fn refresh_visibility(&self, user_id: Uuid, conn_id: Uuid) {
+        let visible = self
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&user_id)
+            .and_then(|conns| conns.iter().find(|conn| conn.conn_id == conn_id))
+            .map(|conn| conn.visible)
+            .unwrap_or(false);
+        if visible {
+            self.set_visibility(user_id, conn_id, true).await;
+        }
+    }
+
+    pub async fn remove_visibility(&self, user_id: Uuid, conn_id: Uuid) {
+        let Some(client) = &self.redis else { return };
+        let Ok(mut conn) = client.get_multiplexed_async_connection().await else {
+            return;
+        };
+        let _: Result<i64, redis::RedisError> = redis::cmd("ZREM")
+            .arg(Self::visibility_key(user_id))
+            .arg(conn_id.to_string())
+            .query_async(&mut conn)
+            .await;
+    }
+
+    /// True when any live browser session is visible on any replica.
+    pub async fn has_visible_session(&self, user_id: Uuid) -> bool {
+        if self.is_visible_local(user_id) {
+            return true;
+        }
+        let Some(client) = &self.redis else { return false };
+        let Ok(mut conn) = client.get_multiplexed_async_connection().await else {
+            return false;
+        };
+        let key = Self::visibility_key(user_id);
+        let now = Self::unix_seconds();
+        let _: Result<i64, redis::RedisError> = redis::cmd("ZREMRANGEBYSCORE")
+            .arg(&key)
+            .arg(0)
+            .arg(now)
+            .query_async(&mut conn)
+            .await;
+        redis::cmd("ZCARD")
+            .arg(&key)
+            .query_async::<i64>(&mut conn)
+            .await
+            .map(|count| count > 0)
+            .unwrap_or(false)
     }
 
     /// Remove a connection. Returns true if it was the user's last connection.
@@ -110,6 +229,35 @@ impl Hub {
                     .await;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Hub;
+    use tokio::sync::mpsc;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn visibility_tracks_each_connection() {
+        let hub = Hub::new(None);
+        let user_id = Uuid::new_v4();
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        let (first_tx, _) = mpsc::unbounded_channel();
+        let (second_tx, _) = mpsc::unbounded_channel();
+        hub.add(user_id, first, first_tx);
+        hub.add(user_id, second, second_tx);
+
+        assert!(hub.has_visible_session(user_id).await);
+        hub.set_visibility(user_id, first, false).await;
+        assert!(hub.has_visible_session(user_id).await);
+        hub.set_visibility(user_id, second, false).await;
+        assert!(!hub.has_visible_session(user_id).await);
+        hub.set_visibility(user_id, first, true).await;
+        assert!(hub.has_visible_session(user_id).await);
+        hub.remove(user_id, first);
+        assert!(!hub.has_visible_session(user_id).await);
     }
 }
 

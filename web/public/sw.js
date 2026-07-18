@@ -83,11 +83,14 @@ self.addEventListener('push', (event) => {
   const options = {
     body: data.body || '',
     icon: '/icons/icon-192.png',
-    badge: '/icons/icon-192.png',
+    badge: '/icons/icon-32.png',
     tag: data.tag,
     renotify: !!data.tag,
+    timestamp: data.timestamp || Date.now(),
     data: {
       channel_id: data.channel_id || null,
+      message_id: data.message_id || null,
+      notification_id: data.notification_id || null,
       path: data.path || null,
     },
   }

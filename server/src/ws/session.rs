@@ -30,6 +30,9 @@ pub async fn handle_socket(
     let conn_id = Uuid::new_v4();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
     let first = state.hub.add(user_id, conn_id, tx.clone());
+    if guest.is_none() {
+        state.hub.set_visibility(user_id, conn_id, true).await;
+    }
 
     let (mut sink, mut stream) = socket.split();
 
@@ -98,6 +101,9 @@ pub async fn handle_socket(
 
     // Cleanup.
     voice::cleanup_conn(&state, user_id, conn_id).await;
+    if guest.is_none() {
+        state.hub.remove_visibility(user_id, conn_id).await;
+    }
     let last = state.hub.remove(user_id, conn_id);
     if last && guest.is_none() {
         let targets = state.hub.online_user_ids();
@@ -147,7 +153,17 @@ async fn handle_client_event(
 
     match event_type {
         "ping" => {
+            if guest.is_none() {
+                state.hub.refresh_visibility(user_id, conn_id).await;
+            }
             let _ = tx.send(Message::Text(envelope("pong", json!({})).to_string()));
+        }
+        "app.visibility" => {
+            if guest.is_none() {
+                if let Some(visible) = payload.get("visible").and_then(|value| value.as_bool()) {
+                    state.hub.set_visibility(user_id, conn_id, visible).await;
+                }
+            }
         }
         "typing" => {
             let channel_id = payload

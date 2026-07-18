@@ -1,6 +1,7 @@
 {
   "name": "sharp",
   "short_name": "sharp",
+  "id": "/",
   "description": "Self-hosted team chat, docs, canvas, and calls.",
   "start_url": "/",
   "scope": "/",

@@ -27,16 +27,14 @@ Tracking what was intentionally skipped while shipping **file uploads** + **noti
 - **`@here` / `@channel`** — only per-user `@Display Name` mentions notify today.
 - **Per-channel notification *level*** — currently mute (on/off) + global DND. A Slack-style
   level (all / mentions-only / nothing) per channel is a natural extension of `channel_prefs`.
-- **Cross-replica offline detection for web push** — `Hub::is_online` is per-replica.
-  With multiple replicas + Redis, a user online on another replica would still get a push.
-  Use the Redis presence keys (`sharp:presence:<uid>`) to make this global.
 - **Notification read-on-view** — the bell dropdown marks read on click / "mark all";
   it does not auto-mark-read on open. Decide desired behavior.
 - **Verification gaps needing a real browser**: the live `notification.created` WS event
   and end-to-end **web-push delivery** (VAPID sign → encrypted payload → browser SW) were
-  validated by construction + the REST/inbox path (13/13 smoke tests), but not against a
-  live browser push service. Do a manual pass: grant permission, close the tab, trigger a
-  DM, confirm the OS notification. VAPID keys auto-generate on first server start.
+  validated by construction + automated server/web checks, but not against physical iOS and
+  Android devices and their live browser push services. Do a manual pass on each: install the
+  PWA, grant permission, close it, trigger a DM, and confirm the OS notification. VAPID keys
+  auto-generate on first server start.
 
 ## File uploads — follow-ups
 
