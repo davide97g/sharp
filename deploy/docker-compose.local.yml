@@ -58,6 +58,9 @@ services:
       REDIS_URL: redis://redis:6379
       JWT_SECRET: local-dev-secret
       SHARP_DISABLE_SIGNUP: "false"
+      WEBAUTHN_RP_ID: "localhost"
+      WEBAUTHN_ORIGINS: "http://localhost:5173,http://localhost:3000"
+      WEBAUTHN_RP_NAME: "Sharp"
       RUST_LOG: info
       S3_ENDPOINT: http://minio:9000
       S3_BUCKET: sharp

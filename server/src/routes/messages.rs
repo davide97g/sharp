@@ -20,8 +20,9 @@ const MESSAGE_SELECT: &str = "
     SELECT
         m.id, m.channel_id, m.parent_id, m.user_id, u.display_name AS author_name,
         u.avatar_url AS author_avatar,
-        m.content, m.created_at, m.edited_at, m.deleted_at,
-        rm.id AS reply_id, rm.content AS reply_content, rm.deleted_at AS reply_deleted_at,
+        m.content, m.encrypted, m.created_at, m.edited_at, m.deleted_at,
+        rm.id AS reply_id, rm.content AS reply_content, rm.encrypted AS reply_encrypted,
+        rm.deleted_at AS reply_deleted_at,
         ru.id AS reply_user_id, ru.display_name AS reply_user_name, ru.avatar_url AS reply_user_avatar,
         (SELECT count(*) FROM messages r WHERE r.parent_id = m.id AND r.deleted_at IS NULL) AS reply_count,
         (SELECT max(r.created_at) FROM messages r WHERE r.parent_id = m.id AND r.deleted_at IS NULL) AS last_reply_at
@@ -55,6 +56,7 @@ pub(crate) fn map_message_row(row: &PgRow) -> AppResult<Message> {
         Some(rid) => {
             let rdel: Option<chrono::DateTime<chrono::Utc>> = row.try_get("reply_deleted_at")?;
             let rcontent: String = row.try_get("reply_content")?;
+            let encrypted: bool = row.try_get("reply_encrypted")?;
             Some(ReplyPreview {
                 id: rid,
                 user: MessageUser {
@@ -62,12 +64,13 @@ pub(crate) fn map_message_row(row: &PgRow) -> AppResult<Message> {
                     display_name: row.try_get("reply_user_name")?,
                     avatar_url: row.try_get("reply_user_avatar")?,
                 },
-                content: if rdel.is_some() {
+                content: if rdel.is_some() || encrypted {
                     String::new()
                 } else {
                     preview_text(&rcontent)
                 },
                 deleted: rdel.is_some(),
+                encrypted,
             })
         }
         None => None,
@@ -83,6 +86,7 @@ pub(crate) fn map_message_row(row: &PgRow) -> AppResult<Message> {
             avatar_url: row.try_get("author_avatar")?,
         },
         content,
+        encrypted: row.try_get("encrypted")?,
         created_at: row.try_get("created_at")?,
         edited_at: row.try_get("edited_at")?,
         deleted_at,
@@ -136,7 +140,7 @@ pub(crate) async fn fetch_attachments_map(
         return Ok(map);
     }
     let rows = sqlx::query(
-        "SELECT id, message_id, filename, content_type, size FROM files
+        "SELECT id, message_id, filename, content_type, size, encrypted FROM files
          WHERE message_id = ANY($1)
          ORDER BY message_id, created_at, id",
     )
@@ -153,6 +157,7 @@ pub(crate) async fn fetch_attachments_map(
             content_type: row.try_get("content_type")?,
             size: row.try_get("size")?,
             url: format!("/api/v1/files/{id}"),
+            encrypted: row.try_get("encrypted")?,
         };
         map.entry(message_id).or_default().push(attachment);
     }
@@ -196,11 +201,12 @@ struct MessageMeta {
     parent_id: Option<i64>,
     user_id: Uuid,
     deleted: bool,
+    encrypted: bool,
 }
 
 async fn message_meta(pool: &PgPool, id: i64) -> AppResult<MessageMeta> {
     let row = sqlx::query(
-        "SELECT channel_id, parent_id, user_id, deleted_at FROM messages WHERE id = $1",
+        "SELECT channel_id, parent_id, user_id, deleted_at, encrypted FROM messages WHERE id = $1",
     )
     .bind(id)
     .fetch_optional(pool)
@@ -212,6 +218,7 @@ async fn message_meta(pool: &PgPool, id: i64) -> AppResult<MessageMeta> {
         parent_id: row.try_get("parent_id")?,
         user_id: row.try_get("user_id")?,
         deleted: deleted_at.is_some(),
+        encrypted: row.try_get("encrypted")?,
     })
 }
 
@@ -220,7 +227,9 @@ async fn require_member(state: &SharedState, channel_id: Uuid, user_id: Uuid) ->
         return Err(AppError::NotFound("channel not found".to_string()));
     }
     if !is_member(&state.pool, channel_id, user_id).await? {
-        return Err(AppError::Forbidden("not a member of this channel".to_string()));
+        return Err(AppError::Forbidden(
+            "not a member of this channel".to_string(),
+        ));
     }
     Ok(())
 }
@@ -240,15 +249,18 @@ async fn require_can_post(state: &SharedState, channel_id: Uuid, user_id: Uuid) 
     Ok(())
 }
 
-fn validate_content(content: &str) -> AppResult<()> {
+fn validate_content(content: &str, encrypted: bool) -> AppResult<()> {
     let len = content.chars().count();
     if content.trim().is_empty() {
-        return Err(AppError::Validation("content must not be empty".to_string()));
-    }
-    if len > 8000 {
         return Err(AppError::Validation(
-            "content must be at most 8000 characters".to_string(),
+            "content must not be empty".to_string(),
         ));
+    }
+    let max = if encrypted { 65_536 } else { 8_000 };
+    if len > max {
+        return Err(AppError::Validation(format!(
+            "content must be at most {max} characters"
+        )));
     }
     Ok(())
 }
@@ -260,16 +272,18 @@ async fn insert_message(
     parent_id: Option<i64>,
     content: &str,
     reply_to_id: Option<i64>,
+    encrypted: bool,
 ) -> AppResult<i64> {
     let row = sqlx::query(
-        "INSERT INTO messages (channel_id, user_id, parent_id, content, reply_to_id)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id",
+        "INSERT INTO messages (channel_id, user_id, parent_id, content, reply_to_id, encrypted)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
     )
     .bind(channel_id)
     .bind(user_id)
     .bind(parent_id)
     .bind(content)
     .bind(reply_to_id)
+    .bind(encrypted)
     .fetch_one(&state.pool)
     .await?;
     Ok(row.try_get("id")?)
@@ -282,7 +296,10 @@ async fn publish_message(
     message: &Message,
 ) -> AppResult<()> {
     let targets = channel_member_ids(&state.pool, channel_id).await?;
-    let duck_streak = if message.parent_id.is_none() && !gif::is_standalone_gif(&message.content) {
+    let duck_streak = if !message.encrypted
+        && message.parent_id.is_none()
+        && !gif::is_standalone_gif(&message.content)
+    {
         Some(gif::bump_streak(&state.duck_streaks, channel_id))
     } else {
         None
@@ -301,9 +318,13 @@ async fn publish_message(
         .unwrap_or_default();
     let notify_state = state.clone();
     let content = message.content.clone();
-    let first_attachment = message.attachments.first().map(|attachment| attachment.filename.clone());
+    let first_attachment = message
+        .attachments
+        .first()
+        .map(|attachment| attachment.filename.clone());
     let message_id = message.id;
     let parent_id = message.parent_id;
+    let encrypted = message.encrypted;
     tokio::spawn(async move {
         notify::dispatch_message(
             &notify_state,
@@ -314,6 +335,7 @@ async fn publish_message(
             author,
             &content,
             first_attachment.as_deref(),
+            encrypted,
         )
         .await;
     });
@@ -329,8 +351,8 @@ pub(crate) async fn post_message_as(
     user_id: Uuid,
     content: &str,
 ) -> AppResult<Message> {
-    validate_content(content)?;
-    let id = insert_message(state, channel_id, user_id, None, content, None).await?;
+    validate_content(content, false)?;
+    let id = insert_message(state, channel_id, user_id, None, content, None, false).await?;
     let message = load_message(&state.pool, id, user_id).await?;
     publish_message(state, channel_id, user_id, &message).await?;
     Ok(message)
@@ -381,6 +403,7 @@ pub async fn list_messages(
 #[derive(Deserialize)]
 pub struct CreateMessageRequest {
     pub content: String,
+    pub encrypted: Option<bool>,
     pub parent_id: Option<String>,
     /// Id of a message in the same channel this one quote-replies to (WhatsApp-style).
     pub reply_to_id: Option<String>,
@@ -395,18 +418,29 @@ pub async fn create_message(
     Json(body): Json<CreateMessageRequest>,
 ) -> AppResult<(StatusCode, Json<Message>)> {
     require_can_post(&state, channel_id, auth.id).await?;
+    let encrypted = body.encrypted.unwrap_or(false);
+    if encrypted && channel_kind(&state.pool, channel_id).await?.as_deref() != Some("dm") {
+        return Err(AppError::BadRequest(
+            "encrypted messages are only allowed in DMs".to_string(),
+        ));
+    }
 
     let attachment_ids: Vec<Uuid> = body.attachment_ids.clone().unwrap_or_default();
     // Content may be empty only when the message carries at least one attachment —
     // and only if the ids actually resolve to the caller's own unattached uploads in
     // this channel (otherwise bogus ids would persist a permanently blank message).
-    if body.content.trim().is_empty() {
+    if encrypted {
+        validate_content(&body.content, true)?;
+    } else if body.content.trim().is_empty() {
         if attachment_ids.is_empty() {
-            return Err(AppError::Validation("content must not be empty".to_string()));
+            return Err(AppError::Validation(
+                "content must not be empty".to_string(),
+            ));
         }
         let row = sqlx::query(
             "SELECT count(*) AS c FROM files
-             WHERE id = ANY($1) AND channel_id = $2 AND user_id = $3 AND message_id IS NULL",
+             WHERE id = ANY($1) AND channel_id = $2 AND user_id = $3
+               AND message_id IS NULL AND doc_id IS NULL",
         )
         .bind(&attachment_ids)
         .bind(channel_id)
@@ -414,12 +448,12 @@ pub async fn create_message(
         .fetch_one(&state.pool)
         .await?;
         if row.try_get::<i64, _>("c")? == 0 {
-            return Err(AppError::Validation("content must not be empty".to_string()));
+            return Err(AppError::Validation(
+                "content must not be empty".to_string(),
+            ));
         }
-    } else if body.content.chars().count() > 8000 {
-        return Err(AppError::Validation(
-            "content must be at most 8000 characters".to_string(),
-        ));
+    } else {
+        validate_content(&body.content, false)?;
     }
 
     let parent_id: Option<i64> = match body.parent_id {
@@ -434,9 +468,7 @@ pub async fn create_message(
                 ));
             }
             if meta.parent_id.is_some() {
-                return Err(AppError::BadRequest(
-                    "cannot reply to a reply".to_string(),
-                ));
+                return Err(AppError::BadRequest("cannot reply to a reply".to_string()));
             }
             Some(pid)
         }
@@ -472,6 +504,7 @@ pub async fn create_message(
         parent_id,
         &body.content,
         reply_to_id,
+        encrypted,
     )
     .await?;
 
@@ -479,7 +512,8 @@ pub async fn create_message(
     if !attachment_ids.is_empty() {
         sqlx::query(
             "UPDATE files SET message_id = $1
-             WHERE id = ANY($2) AND channel_id = $3 AND user_id = $4 AND message_id IS NULL",
+             WHERE id = ANY($2) AND channel_id = $3 AND user_id = $4
+               AND message_id IS NULL AND doc_id IS NULL",
         )
         .bind(new_id)
         .bind(&attachment_ids)
@@ -523,6 +557,7 @@ pub async fn get_thread(
 #[derive(Deserialize)]
 pub struct EditMessageRequest {
     pub content: String,
+    pub encrypted: Option<bool>,
 }
 
 pub async fn edit_message(
@@ -541,13 +576,27 @@ pub async fn edit_message(
             "cannot edit a deleted message".to_string(),
         ));
     }
-    validate_content(&body.content)?;
+    let encrypted = body.encrypted.unwrap_or(false);
+    if encrypted != meta.encrypted {
+        return Err(AppError::BadRequest(
+            "message encryption flag cannot be changed".to_string(),
+        ));
+    }
+    if encrypted && channel_kind(&state.pool, meta.channel_id).await?.as_deref() != Some("dm") {
+        return Err(AppError::BadRequest(
+            "encrypted messages are only allowed in DMs".to_string(),
+        ));
+    }
+    validate_content(&body.content, encrypted)?;
 
-    sqlx::query("UPDATE messages SET content = $1, edited_at = now() WHERE id = $2")
-        .bind(&body.content)
-        .bind(id)
-        .execute(&state.pool)
-        .await?;
+    sqlx::query(
+        "UPDATE messages SET content = $1, encrypted = $2, edited_at = now() WHERE id = $3",
+    )
+    .bind(&body.content)
+    .bind(encrypted)
+    .bind(id)
+    .execute(&state.pool)
+    .await?;
 
     let message = load_message(&state.pool, id, auth.id).await?;
 
@@ -588,6 +637,31 @@ pub async fn delete_message(
     state.hub.broadcast(ev, targets).await;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Soft-delete an internal card message and publish its full updated shape.
+pub(crate) async fn soft_delete_card_message(
+    state: &SharedState,
+    id: i64,
+    viewer: Uuid,
+) -> AppResult<()> {
+    let meta = message_meta(&state.pool, id).await?;
+    if !meta.deleted {
+        sqlx::query("UPDATE messages SET deleted_at = now(), content = '' WHERE id = $1")
+            .bind(id)
+            .execute(&state.pool)
+            .await?;
+    }
+    let message = load_message(&state.pool, id, viewer).await?;
+    let targets = channel_member_ids(&state.pool, meta.channel_id).await?;
+    state
+        .hub
+        .broadcast(
+            envelope("message.updated", json!({ "message": message })),
+            targets,
+        )
+        .await;
+    Ok(())
 }
 
 pub async fn add_reaction(

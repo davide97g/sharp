@@ -41,6 +41,8 @@ pub struct AppState {
     pub duck_streaks: crate::gif::DuckStreaks,
     /// Sliding-hour GIPHY search usage (self-enforced 100/h). Per-replica.
     pub giphy_usage: crate::gif::GiphyUsageTracker,
+    /// WebAuthn verifier; absent when passkeys are not configured.
+    pub webauthn: Option<Arc<webauthn_rs::Webauthn>>,
 }
 
 pub type SharedState = Arc<AppState>;

@@ -10,6 +10,10 @@ import type {
   DocRolesResponse,
   DocSearchResponse,
   DocsResponse,
+  E2eeBackup,
+  E2eeBackupInput,
+  E2eeDevice,
+  E2eeDevicesResponse,
   GifConfig,
   GifResult,
   GifSettings,
@@ -20,6 +24,11 @@ import type {
   MessagesResponse,
   NotificationsResponse,
   Prefs,
+  PasskeyChallenge,
+  PasskeyConfig,
+  PasskeyList,
+  PasskeyManageStart,
+  PasskeyRecord,
   SearchResponse,
   ThreadResponse,
   User,
@@ -39,6 +48,7 @@ import type {
   CalendarConnectUrlResponse,
   CalendarEventsResponse,
   ScheduledMeeting,
+  Poll,
 } from './types'
 
 const TOKEN_KEY = 'sharp.token'
@@ -151,7 +161,85 @@ async function request<T>(path: string, opts: ReqOpts = {}): Promise<T> {
   return data as T
 }
 
+function uploadAttachment(
+  path: string,
+  file: File,
+  onProgress?: (fraction: number) => void,
+  encrypted = false,
+): Promise<Attachment> {
+  return new Promise((resolve, reject) => {
+    const form = new FormData()
+    form.append('file', file, file.name)
+    if (encrypted) form.append('encrypted', 'true')
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${apiBase()}${path}`)
+    const token = getToken()
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    xhr.upload.onprogress = (event) => {
+      if (onProgress && event.lengthComputable) onProgress(event.loaded / event.total)
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText) as Attachment)
+        } catch {
+          reject(new ApiRequestError('bad upload response', 'error', xhr.status))
+        }
+        return
+      }
+      if (xhr.status === 401) {
+        clearToken()
+        onUnauthorized?.()
+      }
+      let message = `Upload failed (${xhr.status})`
+      try {
+        message = JSON.parse(xhr.responseText)?.error?.message ?? message
+      } catch {
+        /* ignore */
+      }
+      reject(new ApiRequestError(message, 'error', xhr.status))
+    }
+    xhr.onerror = () => reject(new ApiRequestError('network error', 'error', 0))
+    xhr.send(form)
+  })
+}
+
 export const api = {
+  polls: {
+    create: (
+      channelId: string,
+      input: {
+        question: string
+        options: string[]
+        multi: boolean
+        pinned: boolean
+        expires_at?: string
+      },
+    ) =>
+      request<Poll>(`/channels/${channelId}/polls`, {
+        method: 'POST',
+        body: input,
+      }),
+    get: (id: string) => request<Poll>(`/polls/${id}`),
+    vote: (id: string, optionIds: string[]) =>
+      request<Poll>(`/polls/${id}/vote`, {
+        method: 'POST',
+        body: { option_ids: optionIds },
+      }),
+    retract: (id: string) =>
+      request<Poll>(`/polls/${id}/vote`, { method: 'DELETE' }),
+    close: (id: string) =>
+      request<Poll>(`/polls/${id}/close`, { method: 'POST' }),
+    pin: (id: string, pinned: boolean) =>
+      request<Poll>(`/polls/${id}/pin`, {
+        method: 'POST',
+        body: { pinned },
+      }),
+    delete: (id: string) =>
+      request<void>(`/polls/${id}`, { method: 'DELETE' }),
+    listActive: (channelId: string) =>
+      request<{ polls: Poll[] }>(`/channels/${channelId}/polls?active=1`),
+  },
   calls: {
     create: (title: string) =>
       request<StandaloneCallCreateResponse>('/calls', { method: 'POST', body: { title } }),
@@ -227,6 +315,55 @@ export const api = {
   },
 
   // --- auth ---
+  passkeyConfig() {
+    return request<PasskeyConfig>('/auth/passkeys/config', { auth: false })
+  },
+  passkeyLoginStart() {
+    return request<PasskeyChallenge>('/auth/passkeys/login/start', {
+      method: 'POST',
+      auth: false,
+    })
+  },
+  passkeyLoginFinish(ceremony_id: string, credential: unknown) {
+    return request<AuthResponse>('/auth/passkeys/login/finish', {
+      method: 'POST',
+      body: { ceremony_id, credential },
+      auth: false,
+    })
+  },
+  passkeys() {
+    return request<PasskeyList>('/auth/passkeys')
+  },
+  passkeyRegisterStart(name: string, password: string) {
+    return request<PasskeyChallenge>('/auth/passkeys', {
+      method: 'POST',
+      body: { name, password },
+    })
+  },
+  passkeyRegisterFinish(ceremony_id: string, credential: unknown) {
+    return request<PasskeyRecord>('/auth/passkeys/register/finish', {
+      method: 'POST',
+      body: { ceremony_id, credential },
+    })
+  },
+  renamePasskey(id: string, name: string) {
+    return request<PasskeyRecord>(`/auth/passkeys/${id}`, {
+      method: 'PATCH',
+      body: { name },
+    })
+  },
+  removePasskey(id: string, password: string) {
+    return request<void>(`/auth/passkeys/${id}`, {
+      method: 'DELETE',
+      body: { password },
+    })
+  },
+  dismissPasskeyPrompt() {
+    return request<void>('/auth/passkeys/prompt/dismiss', { method: 'POST' })
+  },
+  startPasskeyManagement() {
+    return request<PasskeyManageStart>('/auth/passkeys/manage/start', { method: 'POST' })
+  },
   register(email: string, password: string, display_name: string) {
     return request<AuthResponse>('/auth/register', {
       method: 'POST',
@@ -377,11 +514,13 @@ export const api = {
     parent_id?: string,
     attachment_ids?: string[],
     reply_to_id?: string,
+    encrypted?: boolean,
   ) {
     const body: Record<string, unknown> = { content }
     if (parent_id) body.parent_id = parent_id
     if (attachment_ids && attachment_ids.length) body.attachment_ids = attachment_ids
     if (reply_to_id) body.reply_to_id = reply_to_id
+    if (encrypted !== undefined) body.encrypted = encrypted
     return request<Message>(`/channels/${channelId}/messages`, {
       method: 'POST',
       body,
@@ -390,10 +529,10 @@ export const api = {
   thread(messageId: string) {
     return request<ThreadResponse>(`/messages/${messageId}/thread`)
   },
-  editMessage(messageId: string, content: string) {
+  editMessage(messageId: string, content: string, encrypted?: boolean) {
     return request<Message>(`/messages/${messageId}`, {
       method: 'PATCH',
-      body: { content },
+      body: { content, ...(encrypted !== undefined ? { encrypted } : {}) },
     })
   },
   deleteMessage(messageId: string) {
@@ -412,46 +551,35 @@ export const api = {
     )
   },
 
+  // --- end-to-end encryption ---
+  e2eeDevices(userId: string) {
+    const params = new URLSearchParams({ user_id: userId })
+    return request<E2eeDevicesResponse>(`/e2ee/devices?${params.toString()}`)
+  },
+  registerDevice(device: Pick<E2eeDevice, 'id' | 'name' | 'x25519_pub' | 'ed25519_pub'>) {
+    return request<void>('/e2ee/devices', { method: 'POST', body: device })
+  },
+  deleteDevice(id: string) {
+    return request<void>(`/e2ee/devices/${id}`, { method: 'DELETE' })
+  },
+  getBackup() {
+    return request<E2eeBackup>('/e2ee/backup')
+  },
+  putBackup(backup: E2eeBackupInput) {
+    return request<void>('/e2ee/backup', { method: 'PUT', body: backup })
+  },
+
   // --- files ---
   uploadFile(
     channelId: string,
     file: File,
     onProgress?: (fraction: number) => void,
+    encrypted = false,
   ): Promise<Attachment> {
-    return new Promise((resolve, reject) => {
-      const form = new FormData()
-      form.append('file', file, file.name)
-      const xhr = new XMLHttpRequest()
-      xhr.open('POST', `${apiBase()}/channels/${channelId}/uploads`)
-      const token = getToken()
-      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
-      xhr.upload.onprogress = (e) => {
-        if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total)
-      }
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            resolve(JSON.parse(xhr.responseText) as Attachment)
-          } catch {
-            reject(new ApiRequestError('bad upload response', 'error', xhr.status))
-          }
-        } else {
-          if (xhr.status === 401) {
-            clearToken()
-            onUnauthorized?.()
-          }
-          let message = `Upload failed (${xhr.status})`
-          try {
-            message = JSON.parse(xhr.responseText)?.error?.message ?? message
-          } catch {
-            /* ignore */
-          }
-          reject(new ApiRequestError(message, 'error', xhr.status))
-        }
-      }
-      xhr.onerror = () => reject(new ApiRequestError('network error', 'error', 0))
-      xhr.send(form)
-    })
+    return uploadAttachment(`/channels/${channelId}/uploads`, file, onProgress, encrypted)
+  },
+  uploadDocImage(docId: string, file: File): Promise<Attachment> {
+    return uploadAttachment(`/docs/${docId}/uploads`, file)
   },
 
   // --- notifications ---

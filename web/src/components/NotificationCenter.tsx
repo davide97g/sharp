@@ -30,6 +30,11 @@ const KIND_META: Record<
     verb: 'replied to your thread',
     accent: 'bg-amber-500/15 text-amber-300',
   },
+  poll_ended: {
+    label: 'Polls',
+    verb: 'closed a poll',
+    accent: 'bg-violet-500/15 text-violet-300',
+  },
 }
 
 export function InboxTrigger({ variant }: { variant: 'row' | 'icon' | 'header' }) {
@@ -128,6 +133,7 @@ export function InboxPanel() {
   const markAllNotifRead = useStore((s) => s.markAllNotifRead)
   const setDnd = useStore((s) => s.setDnd)
   const loadMore = useStore((s) => s.loadMoreNotifications)
+  const setFocus = useStore((s) => s.setFocus)
   const navigate = useNavigate()
   const [filter, setFilter] = useState<Filter>('all')
 
@@ -152,7 +158,13 @@ export function InboxPanel() {
   const groups = useMemo(() => groupByDay(filtered), [filtered])
 
   const counts = useMemo(() => {
-    const c = { mention: 0, dm: 0, reply: 0, unread: 0 }
+    const c: Record<NotificationKind | 'unread', number> = {
+      mention: 0,
+      dm: 0,
+      reply: 0,
+      poll_ended: 0,
+      unread: 0,
+    }
     for (const n of notifications) {
       if (!n.read_at) {
         c.unread++
@@ -165,6 +177,9 @@ export function InboxPanel() {
   function openNotification(n: Notification) {
     markNotifRead(n.id)
     setInboxOpen(false)
+    if (n.message_id) {
+      setFocus({ channelId: n.channel_id, messageId: n.message_id, query: '' })
+    }
     navigate(`/c/${n.channel_id}`)
   }
 
@@ -200,7 +215,7 @@ export function InboxPanel() {
               )}
             </div>
             <p className="mt-0.5 text-xs text-[var(--color-text-faint)]">
-              Mentions, DMs, and thread replies
+              Mentions, DMs, replies, and poll results
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
@@ -248,7 +263,7 @@ export function InboxPanel() {
             label="All"
             count={counts.unread}
           />
-          {(['mention', 'dm', 'reply'] as const).map((kind) => (
+          {(['mention', 'dm', 'reply', 'poll_ended'] as const).map((kind) => (
             <FilterChip
               key={kind}
               active={filter === kind}
@@ -357,7 +372,9 @@ function EmptyState({ filter }: { filter: Filter }) {
         ? { title: 'No mentions', sub: 'When someone @you, it shows up here.' }
         : filter === 'dm'
           ? { title: 'No direct messages', sub: 'New DMs will appear in this filter.' }
-          : { title: 'No thread replies', sub: 'Replies to your threads show up here.' }
+          : filter === 'reply'
+            ? { title: 'No thread replies', sub: 'Replies to your threads show up here.' }
+            : { title: 'No poll results', sub: 'Polls you created or voted in show up here.' }
 
   return (
     <div className="flex flex-col items-center px-6 py-16 text-center">
@@ -498,6 +515,12 @@ function KindGlyph({ kind }: { kind: NotificationKind }) {
         <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <polyline points="9 17 4 12 9 7" />
           <path d="M20 18v-2a4 4 0 0 0-4-4H4" />
+        </svg>
+      )
+    case 'poll_ended':
+      return (
+        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M5 20V10M12 20V4M19 20v-7" />
         </svg>
       )
     default: {

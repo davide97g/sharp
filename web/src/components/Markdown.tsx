@@ -6,9 +6,11 @@ import { navigateTo } from '../lib/nav'
 import { useStore } from '../store'
 import { ImageLightbox } from './ImageLightbox'
 import { MeetingCard } from './calendar/MeetingCard'
+import { PollCard } from './PollCard'
 
 // Chat card token for a scheduled meeting: [[meet:<uuid>|<title>|<start_iso>]].
 const MEET_TOKEN = /\[\[meet:([0-9a-f-]{36})\|([^|\]]*)\|([^\]]*)\]\]/g
+const POLL_TOKEN = /\[\[poll:([0-9a-f-]{36})(?:\|([^\]]*))?\]\]/g
 
 // Resource-chip matcher: [[doc:<uuid>|<title>]] or [[canvas:<uuid>|<title>]].
 const RESOURCE_TOKEN = /\[\[(doc|canvas):([0-9a-f-]{36})\|([^\]]*)\]\]/g
@@ -314,6 +316,7 @@ export function Markdown({
   type Tok =
     | { index: number; length: number; kind: 'gif'; url: string; alt: string; query?: string }
     | { index: number; length: number; kind: 'meet'; id: string; title: string; iso: string }
+    | { index: number; length: number; kind: 'poll'; id: string; question: string }
   const toks: Tok[] = []
   let m: RegExpExecArray | null
   GIF_TOKEN.lastIndex = 0
@@ -339,12 +342,23 @@ export function Markdown({
       iso: m[3],
     })
   }
+  POLL_TOKEN.lastIndex = 0
+  while ((m = POLL_TOKEN.exec(content)) !== null) {
+    toks.push({
+      index: m.index,
+      length: m[0].length,
+      kind: 'poll',
+      id: m[1],
+      question: m[2] ?? '',
+    })
+  }
   toks.sort((a, b) => a.index - b.index)
 
   const parts: Array<
     | { kind: 'text'; content: string }
     | { kind: 'gif'; url: string; alt: string; query?: string }
     | { kind: 'meet'; id: string; title: string; iso: string }
+    | { kind: 'poll'; id: string; question: string }
   > = []
   let last = 0
   for (const tok of toks) {
@@ -354,8 +368,10 @@ export function Markdown({
     }
     if (tok.kind === 'gif') {
       parts.push({ kind: 'gif', url: tok.url, alt: tok.alt, query: tok.query })
-    } else {
+    } else if (tok.kind === 'meet') {
       parts.push({ kind: 'meet', id: tok.id, title: tok.title, iso: tok.iso })
+    } else {
+      parts.push({ kind: 'poll', id: tok.id, question: tok.question })
     }
     last = tok.index + tok.length
   }
@@ -378,6 +394,8 @@ export function Markdown({
           <GifImage key={index} url={part.url} alt={part.alt} query={part.query} />
         ) : part.kind === 'meet' ? (
           <MeetingCard key={index} id={part.id} title={part.title} iso={part.iso} />
+        ) : part.kind === 'poll' ? (
+          <PollCard key={index} id={part.id} fallbackQuestion={part.question} />
         ) : (
           <ReactMarkdown
             key={index}

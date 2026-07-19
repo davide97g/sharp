@@ -2,11 +2,13 @@ pub mod calendar;
 pub mod call_links;
 pub mod channels;
 pub mod docs;
+pub mod e2ee;
 pub mod files;
 pub mod gifs;
-pub mod messages;
 pub mod meetings;
+pub mod messages;
 pub mod notifications;
+pub mod polls;
 pub mod search;
 pub mod users;
 pub mod voice;
@@ -77,15 +79,16 @@ pub async fn member_role(
     channel_id: Uuid,
     user_id: Uuid,
 ) -> AppResult<Option<ChannelRole>> {
-    let row = sqlx::query(
-        "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
-    )
-    .bind(channel_id)
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await?;
+    let row =
+        sqlx::query("SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2")
+            .bind(channel_id)
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await?;
     match row {
-        Some(row) => Ok(Some(ChannelRole::from_str(row.try_get::<String, _>("role")?.as_str()))),
+        Some(row) => Ok(Some(ChannelRole::from_str(
+            row.try_get::<String, _>("role")?.as_str(),
+        ))),
         None => Ok(None),
     }
 }

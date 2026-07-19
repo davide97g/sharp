@@ -87,6 +87,7 @@ pub struct Attachment {
     pub content_type: String,
     pub size: i64,
     pub url: String,
+    pub encrypted: bool,
 }
 
 /// Compact snapshot of the message a quote-reply points at (rendered inline).
@@ -97,6 +98,7 @@ pub struct ReplyPreview {
     pub user: MessageUser,
     pub content: String, // truncated preview; '' when the target was deleted
     pub deleted: bool,
+    pub encrypted: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -108,6 +110,7 @@ pub struct Message {
     pub parent_id: Option<i64>,
     pub user: MessageUser,
     pub content: String,
+    pub encrypted: bool,
     pub created_at: DateTime<Utc>,
     pub edited_at: Option<DateTime<Utc>>,
     pub deleted_at: Option<DateTime<Utc>>,

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchAttachmentBlob } from '../lib/api'
+import { decryptAttachmentBlob } from '../lib/e2ee/attachments'
 import { toastError } from '../lib/toast'
 import { fmtBytes } from '../lib/util'
 import type { Attachment } from '../lib/types'
@@ -9,6 +10,11 @@ import { ImageLightbox } from './ImageLightbox'
 // download instead (matches the server, which serves non-safe types as downloads).
 function isInlineImage(contentType: string): boolean {
   return contentType.startsWith('image/') && contentType !== 'image/svg+xml'
+}
+
+async function attachmentBlob(att: Attachment, download = false): Promise<Blob> {
+  const ciphertext = await fetchAttachmentBlob(`${att.url}${download ? '?download=1' : ''}`)
+  return att.encrypted ? decryptAttachmentBlob(ciphertext, att) : ciphertext
 }
 
 export function AttachmentList({ attachments }: { attachments: Attachment[] }) {
@@ -34,7 +40,7 @@ function AuthedImage({ att }: { att: Attachment }) {
   useEffect(() => {
     let cancelled = false
     let obj: string | null = null
-    fetchAttachmentBlob(att.url)
+    attachmentBlob(att)
       .then((blob) => {
         if (cancelled) return
         obj = URL.createObjectURL(blob)
@@ -45,7 +51,7 @@ function AuthedImage({ att }: { att: Attachment }) {
       cancelled = true
       if (obj) URL.revokeObjectURL(obj)
     }
-  }, [att.url])
+  }, [att])
 
   if (failed) return <FileChip att={att} />
 
@@ -82,7 +88,7 @@ function FileChip({ att }: { att: Attachment }) {
     if (busy) return
     setBusy(true)
     try {
-      const blob = await fetchAttachmentBlob(`${att.url}?download=1`)
+      const blob = await attachmentBlob(att, true)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url

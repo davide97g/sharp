@@ -18,6 +18,7 @@ import { sound } from '../lib/sound'
 import { hasUnseenRelease } from '../lib/whatsNew'
 import { useIsMobile } from '../lib/useMediaQuery'
 import { useStore } from '../store'
+import { RestoreEncryptionModal } from './RestoreEncryptionModal'
 
 const SIDEBAR_OPEN_KEY = 'sharp.sidebarOpen'
 
@@ -168,6 +169,7 @@ export function AppShell() {
       <SearchPalette />
       {mode === 'chat' && <InboxPanel />}
       {onboarding && <Onboarding onClose={() => setOnboarding(false)} />}
+      <RestoreEncryptionModal />
     </div>
   )
 }

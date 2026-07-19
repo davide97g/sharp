@@ -7,9 +7,24 @@ import type {
   GifSettings,
   GiphyUsage,
   VoiceTrigger,
+  PasskeyRecord,
+  E2eeBackup,
+  E2eeDevice,
 } from '../lib/types'
-import { toastError } from '../lib/toast'
-import { isTauri } from '../lib/desktopAuth'
+import { toastError, toastSuccess } from '../lib/toast'
+import { ApiRequestError } from '../lib/api'
+import {
+  deleteLocalDevice,
+  ensureDevice,
+  fingerprint,
+  getDevices,
+  getLocalDevice,
+  invalidateDevices,
+  type LocalDevice,
+} from '../lib/e2ee'
+import { createBackup, restoreBackup } from '../lib/e2ee/backup'
+import { isTauri, openPasskeyManagement } from '../lib/desktopAuth'
+import { isPasskeyCancellation, registerPasskey, supportsPasskeys } from '../lib/passkeys'
 import { getSoundSettings, setSoundSettings, sound, subscribeSoundSettings } from '../lib/sound'
 import { Modal } from './Modal'
 import { Avatar } from './Avatar'
@@ -17,7 +32,7 @@ import { AvatarCropper } from './AvatarCropper'
 import { ChatLayoutPicker } from './ChatLayoutChooser'
 import { VoiceTriggerEditor } from './VoiceTriggerEditor'
 
-type Tab = 'profile' | 'chat' | 'workspace' | 'accounts' | 'about'
+type Tab = 'profile' | 'chat' | 'security' | 'encryption' | 'workspace' | 'accounts' | 'about'
 
 export function UserSettingsModal({
   onClose,
@@ -225,6 +240,12 @@ export function UserSettingsModal({
         <TabBtn active={tab === 'accounts'} onClick={() => setTab('accounts')}>
           Accounts
         </TabBtn>
+        <TabBtn active={tab === 'security'} onClick={() => setTab('security')}>
+          Security
+        </TabBtn>
+        <TabBtn active={tab === 'encryption'} onClick={() => setTab('encryption')}>
+          Encryption
+        </TabBtn>
         <TabBtn active={tab === 'workspace'} onClick={() => setTab('workspace')}>
           Workspace
         </TabBtn>
@@ -322,6 +343,10 @@ export function UserSettingsModal({
         </div>
       ) : tab === 'accounts' ? (
         <AccountsTab />
+      ) : tab === 'security' ? (
+        <PasskeySecurityTab />
+      ) : tab === 'encryption' ? (
+        <EncryptionSettingsTab userId={me.id} />
       ) : tab === 'about' ? (
         <AboutTab />
       ) : !gifLoadAttempted || gifLoading ? (
@@ -506,6 +531,254 @@ export function UserSettingsModal({
         </div>
       )}
     </Modal>
+  )
+}
+
+function EncryptionSettingsTab({ userId }: { userId: string }) {
+  const [local, setLocal] = useState<LocalDevice | null>(null)
+  const [devices, setDevices] = useState<E2eeDevice[]>([])
+  const [backup, setBackup] = useState<E2eeBackup | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [passphrase, setPassphrase] = useState('')
+  const [confirmPassphrase, setConfirmPassphrase] = useState('')
+  const [restoreOpen, setRestoreOpen] = useState(false)
+  const [restorePassphrase, setRestorePassphrase] = useState('')
+
+  async function load() {
+    setLoading(true)
+    try {
+      const current = await getLocalDevice()
+      invalidateDevices(userId)
+      const own = await getDevices(userId)
+      let status: E2eeBackup | null = null
+      try {
+        status = await api.getBackup()
+      } catch (error) {
+        if (!(error instanceof ApiRequestError) || error.status !== 404) throw error
+      }
+      setLocal(current)
+      setDevices(own)
+      setBackup(status)
+    } catch (error) {
+      toastError(error instanceof Error ? error.message : 'Could not load encryption settings.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { void load() }, [userId])
+
+  async function revoke(device: E2eeDevice) {
+    if (!window.confirm(`Revoke “${device.name}”? That device will lose access to new encrypted messages.`)) return
+    setBusy(true)
+    try {
+      await api.deleteDevice(device.id)
+      if (device.id === local?.id) {
+        await deleteLocalDevice()
+        await ensureDevice()
+      }
+      invalidateDevices(userId)
+      await load()
+      toastSuccess('Device revoked.')
+    } catch (error) {
+      toastError(error instanceof Error ? error.message : 'Could not revoke device.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function saveBackup() {
+    if (passphrase.length < 8) return toastError('Backup passphrase must be at least 8 characters.')
+    if (passphrase !== confirmPassphrase) return toastError('Passphrases do not match.')
+    setBusy(true)
+    try {
+      await createBackup(passphrase)
+      setPassphrase('')
+      setConfirmPassphrase('')
+      await load()
+      toastSuccess('Encryption backup saved.')
+    } catch (error) {
+      toastError(error instanceof Error ? error.message : 'Could not save encryption backup.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function restore() {
+    if (!restorePassphrase) return
+    setBusy(true)
+    try {
+      await restoreBackup(restorePassphrase)
+      invalidateDevices(userId)
+      setRestorePassphrase('')
+      setRestoreOpen(false)
+      await load()
+      await useStore.getState().refreshDmEncryption(userId)
+      toastSuccess('Encryption keys restored.')
+    } catch (error) {
+      toastError(error instanceof Error ? error.message : 'Could not restore encryption backup.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (loading) return <div className="py-10 text-center text-sm text-[var(--color-text-faint)]">Loading encryption settings…</div>
+  const shortFingerprint = local
+    ? fingerprint(local.x25519_pub, local.ed25519_pub, local.x25519_pub, local.ed25519_pub)
+        .split(' ')
+        .slice(0, 4)
+        .join(' ')
+    : 'Unavailable'
+
+  return (
+    <div className="flex flex-col gap-6">
+      <section>
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">This device</div>
+        {local ? (
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] p-3 text-sm">
+            <dt className="text-[var(--color-text-faint)]">Name</dt><dd>{local.name}</dd>
+            <dt className="text-[var(--color-text-faint)]">Fingerprint</dt><dd className="tracking-wider">{shortFingerprint}</dd>
+            <dt className="text-[var(--color-text-faint)]">Device id</dt><dd className="truncate font-mono text-xs" title={local.id}>{local.id}</dd>
+          </dl>
+        ) : <p className="text-sm text-[var(--color-text-dim)]">No encryption identity on this browser.</p>}
+      </section>
+
+      <section>
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">My devices</div>
+        <div className="divide-y divide-[var(--color-border)] rounded-lg border border-[var(--color-border)]">
+          {devices.map((device) => (
+            <div key={device.id} className="flex items-center justify-between gap-3 p-3">
+              <div className="min-w-0"><div className="truncate text-sm font-medium">{device.name}{device.id === local?.id ? ' · Current' : ''}</div><div className="text-[11px] text-[var(--color-text-faint)]">Added {new Date(device.created_at).toLocaleDateString()}</div></div>
+              <button type="button" disabled={busy} onClick={() => void revoke(device)} className="shrink-0 text-xs text-red-400 disabled:opacity-50">Revoke</button>
+            </div>
+          ))}
+          {!devices.length ? <div className="p-3 text-sm text-[var(--color-text-faint)]">No registered devices.</div> : null}
+        </div>
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <div><div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">Backup</div><p className="mt-1 text-xs text-[var(--color-text-dim)]">{backup ? `Saved ${new Date(backup.updated_at).toLocaleString()}` : 'No backup saved'}</p></div>
+        <input type="password" autoComplete="new-password" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} placeholder={backup ? 'New passphrase' : 'Passphrase (8+ characters)'} className="rounded-md border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm" />
+        <input type="password" autoComplete="new-password" value={confirmPassphrase} onChange={(event) => setConfirmPassphrase(event.target.value)} placeholder="Confirm passphrase" className="rounded-md border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm" />
+        <div className="flex flex-wrap gap-2"><button type="button" disabled={busy || !passphrase || !confirmPassphrase} onClick={() => void saveBackup()} className="rounded-md bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? 'Working…' : backup ? 'Change passphrase' : 'Set passphrase'}</button><button type="button" disabled={busy || !backup} onClick={() => setRestoreOpen((open) => !open)} className="rounded-md border border-[var(--color-border)] px-3 py-2 text-sm disabled:opacity-50">Restore from backup</button></div>
+        {restoreOpen ? <div className="flex gap-2 rounded-lg border border-[var(--color-border)] p-3"><input type="password" autoComplete="current-password" value={restorePassphrase} onChange={(event) => setRestorePassphrase(event.target.value)} placeholder="Backup passphrase" className="min-w-0 flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm" /><button type="button" disabled={busy || !restorePassphrase} onClick={() => void restore()} className="rounded-md bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Restore</button></div> : null}
+      </section>
+    </div>
+  )
+}
+
+function PasskeySecurityTab() {
+  const [passkeys, setPasskeys] = useState<PasskeyRecord[]>([])
+  const [enabled, setEnabled] = useState<boolean | null>(null)
+  const [name, setName] = useState('My passkey')
+  const [password, setPassword] = useState('')
+  const [removeId, setRemoveId] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  async function load() {
+    try {
+      const result = await api.passkeys()
+      setEnabled(result.enabled)
+      setPasskeys(result.passkeys)
+    } catch (error) {
+      toastError(error instanceof Error ? error.message : 'Could not load passkeys.')
+    }
+  }
+
+  useEffect(() => { void load() }, [])
+
+  async function add() {
+    if (!name.trim() || !password || busy) return
+    setBusy(true)
+    try {
+      await registerPasskey(name.trim(), password)
+      setPassword('')
+      await load()
+    } catch (error) {
+      if (!isPasskeyCancellation(error)) toastError(error instanceof Error ? error.message : 'Could not add passkey.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function rename(passkey: PasskeyRecord) {
+    const next = window.prompt('Passkey name', passkey.name)?.trim()
+    if (!next || next === passkey.name) return
+    try {
+      await api.renamePasskey(passkey.id, next)
+      await load()
+    } catch (error) {
+      toastError(error instanceof Error ? error.message : 'Could not rename passkey.')
+    }
+  }
+
+  async function remove() {
+    if (!removeId || !password || busy) return
+    setBusy(true)
+    try {
+      await api.removePasskey(removeId, password)
+      setPassword('')
+      setRemoveId(null)
+      await load()
+    } catch (error) {
+      toastError(error instanceof Error ? error.message : 'Could not remove passkey.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (enabled === null) return <div className="py-10 text-center text-sm text-[var(--color-text-faint)]">Loading security settings…</div>
+  if (!enabled) return <div className="text-sm text-[var(--color-text-dim)]">Passkeys are not configured on this Sharp server.</div>
+  if (isTauri) {
+    return (
+      <div className="flex flex-col gap-3">
+        <p className="text-sm text-[var(--color-text-dim)]">Manage passkeys in your system browser so Face ID, Touch ID, Windows Hello, and security keys can verify the Sharp server.</p>
+        <button type="button" onClick={() => void openPasskeyManagement().catch((error) => toastError(error instanceof Error ? error.message : 'Could not open browser.'))} className="self-start rounded-md bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-white">Manage passkeys in browser</button>
+      </div>
+    )
+  }
+  if (!supportsPasskeys()) return <div className="text-sm text-[var(--color-text-dim)]">This browser cannot use passkeys. Open Sharp over HTTPS in a supported browser.</div>
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div>
+        <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">Your passkeys</div>
+        <p className="text-xs text-[var(--color-text-dim)]">Your password remains available for account recovery.</p>
+      </div>
+      {passkeys.length === 0 ? <div className="rounded-lg border border-dashed border-[var(--color-border)] p-4 text-sm text-[var(--color-text-faint)]">No passkeys enrolled.</div> : (
+        <div className="flex flex-col divide-y divide-[var(--color-border)] rounded-lg border border-[var(--color-border)]">
+          {passkeys.map((passkey) => (
+            <div key={passkey.id} className="flex items-center justify-between gap-3 p-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium text-[var(--color-text)]">{passkey.name}</div>
+                <div className="text-[11px] text-[var(--color-text-faint)]">Added {new Date(passkey.created_at).toLocaleDateString()}{passkey.last_used_at ? ` · Last used ${new Date(passkey.last_used_at).toLocaleDateString()}` : ''}</div>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <button type="button" onClick={() => void rename(passkey)} className="text-xs text-[var(--color-accent-hover)]">Rename</button>
+                <button type="button" onClick={() => { setRemoveId(passkey.id); setPassword('') }} className="text-xs text-red-400">Remove</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex flex-col gap-2 rounded-lg border border-[var(--color-border)] p-3">
+        <div className="text-sm font-semibold">Add passkey</div>
+        <input value={name} maxLength={80} onChange={(event) => setName(event.target.value)} placeholder="Passkey name" className="rounded-md border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm" />
+        <input type="password" autoComplete="current-password" value={removeId ? '' : password} onChange={(event) => setPassword(event.target.value)} placeholder="Confirm current password" disabled={removeId !== null} className="rounded-md border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm disabled:opacity-40" />
+        <button type="button" disabled={busy || !!removeId || !name.trim() || !password} onClick={() => void add()} className="self-start rounded-md bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? 'Working…' : 'Add passkey'}</button>
+      </div>
+      {removeId && (
+        <div className="flex flex-col gap-2 rounded-lg border border-red-500/40 bg-red-500/5 p-3">
+          <div className="text-sm font-semibold">Remove passkey?</div>
+          <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Confirm current password" className="rounded-md border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm" />
+          <div className="flex gap-2">
+            <button type="button" disabled={busy || !password} onClick={() => void remove()} className="rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Remove</button>
+            <button type="button" onClick={() => { setRemoveId(null); setPassword('') }} className="rounded-md border border-[var(--color-border)] px-3 py-2 text-sm">Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 

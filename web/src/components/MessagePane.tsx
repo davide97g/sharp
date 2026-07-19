@@ -13,6 +13,7 @@ import { Avatar } from './Avatar'
 import { GearIcon, LockIcon } from './icons'
 import { DuckSuggest } from './DuckSuggest'
 import { ScheduleMeetingModal } from './calendar/ScheduleMeetingModal'
+import { ActivePollBanner } from './ActivePollBanner'
 import { useIsMobile } from '../lib/useMediaQuery'
 import { channelLabel, sameDay, withinMinutes } from '../lib/util'
 
@@ -36,6 +37,8 @@ export function MessagePane() {
   const joinVoice = useStore((s) => s.joinVoice)
   const leaveVoice = useStore((s) => s.leaveVoice)
   const chatLayout = useStore((s) => s.chatLayout)
+  const dmEncryption = useStore((s) => (channelId ? s.dmEncryption[channelId] : undefined))
+  const dmPartnerReady = useStore((s) => (channelId ? s.dmPartnerReady[channelId] : undefined))
   const focus = useStore((s) => s.focus)
   const setFocus = useStore((s) => s.setFocus)
   const [showSettings, setShowSettings] = useState(false)
@@ -379,6 +382,11 @@ export function MessagePane() {
                 />
               )}
               <span className="truncate">{channelLabel(channel)}</span>
+              {dmEncryption === true && (
+                <span className="shrink-0 text-[var(--color-text-faint)]" title="End-to-end encrypted">
+                  <LockIcon />
+                </span>
+              )}
             </span>
           ) : (
             <button
@@ -452,6 +460,14 @@ export function MessagePane() {
       </header>
 
       <ChannelTabs channelId={channel.id} active="chat" />
+
+      {isDm && dmPartnerReady === false && (
+        <div className="border-b border-[var(--color-border)] bg-[var(--color-panel)]/60 px-4 py-1.5 text-center text-xs text-[var(--color-text-dim)]">
+          Messages here aren't end-to-end encrypted yet — {channel.dm_user?.display_name ?? 'this person'} hasn't signed in since encryption shipped.
+        </div>
+      )}
+
+      {!isDm ? <ActivePollBanner channel={channel} /> : null}
 
       {showSettings && (
         <ChannelSettingsModal channelId={channel.id} onClose={() => setShowSettings(false)} />

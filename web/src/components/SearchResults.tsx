@@ -6,6 +6,9 @@ import { Markdown } from './Markdown'
 import { Avatar } from './Avatar'
 import { fmtTime, fmtDayDivider } from '../lib/util'
 import { toastError } from '../lib/toast'
+import { channelLabel } from '../lib/util'
+import { localSearchResult, searchLocal } from '../lib/e2ee/search'
+import { useStore } from '../store'
 
 type Tab = 'messages' | 'docs'
 
@@ -18,6 +21,8 @@ export function SearchResults() {
   const [docs, setDocs] = useState<DocSearchResult[]>([])
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
+  const channels = useStore((s) => s.channels)
+  const setFocus = useStore((s) => s.setFocus)
 
   useEffect(() => {
     if (!q.trim()) {
@@ -27,7 +32,22 @@ export function SearchResults() {
     }
     let cancelled = false
     setLoading(true)
-    const req = tab === 'docs' ? api.docSearch(q, 20) : api.search(q, 20)
+    const req = tab === 'docs'
+      ? api.docSearch(q, 20)
+      : Promise.all([api.search(q, 20), searchLocal(q, 20)]).then(([server, local]) => {
+          const seen = new Set(server.results.map((result) => result.id))
+          return {
+            results: [
+              ...server.results,
+              ...local
+                .filter((row) => !seen.has(row.id))
+                .map((row) => {
+                  const channel = channels.find((item) => item.id === row.channelId)
+                  return localSearchResult(row, channel ? channelLabel(channel) : 'Direct message')
+                }),
+            ],
+          }
+        })
     req
       .then((res) => {
         if (cancelled) return
@@ -43,7 +63,7 @@ export function SearchResults() {
     return () => {
       cancelled = true
     }
-  }, [q, tab])
+  }, [q, tab, channels])
 
   function setTab(next: Tab) {
     const p = new URLSearchParams(params)
@@ -124,12 +144,15 @@ export function SearchResults() {
             {messages.map((r) => (
               <button
                 key={r.id}
-                onClick={() => navigate(`/c/${r.channel_id}`)}
+                onClick={() => {
+                  setFocus({ channelId: r.channel_id, messageId: r.id, query: q.trim() })
+                  navigate(`/c/${r.channel_id}`)
+                }}
                 className="block w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] p-3 text-left transition hover:border-[var(--color-text-faint)]"
               >
                 <div className="mb-1.5 flex items-center gap-2 text-xs text-[var(--color-text-faint)]">
                   <span className="font-medium text-[var(--color-accent-hover)]">
-                    #{r.channel_name}
+                    {r.local ? '🔒 ' : '#'}{r.channel_name}
                   </span>
                   <span>·</span>
                   <span>{fmtDayDivider(r.created_at)}</span>

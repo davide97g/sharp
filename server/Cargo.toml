@@ -41,3 +41,4 @@ base64 = "0.22"
 aes-gcm = "0.10"
 hkdf = "0.12"
 sha2 = "0.10"
+webauthn-rs = { version = "0.5.5", features = ["conditional-ui", "danger-allow-state-serialisation"] }

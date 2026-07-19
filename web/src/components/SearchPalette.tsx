@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 import { channelLabel, fmtTime, fmtDayDivider } from '../lib/util'
 import { toastError } from '../lib/toast'
 import { gifPreviewText } from '../lib/gif'
+import { localSearchResult, searchLocal } from '../lib/e2ee/search'
 import { Avatar } from './Avatar'
 import type { DocSearchResult, SearchResult } from '../lib/types'
 
@@ -75,6 +76,7 @@ export function SearchPalette() {
   const [scopedMsgs, setScopedMsgs] = useState<SearchResult[]>([])
   const [scopedDocs, setScopedDocs] = useState<DocSearchResult[]>([])
   const [globalMsgs, setGlobalMsgs] = useState<SearchResult[]>([])
+  const [localMsgs, setLocalMsgs] = useState<SearchResult[]>([])
   const [globalDocs, setGlobalDocs] = useState<DocSearchResult[]>([])
   const [loading, setLoading] = useState(false)
   const [sel, setSel] = useState(0)
@@ -119,6 +121,7 @@ export function SearchPalette() {
       setScopedMsgs([])
       setScopedDocs([])
       setGlobalMsgs([])
+      setLocalMsgs([])
       setGlobalDocs([])
       requestAnimationFrame(() => inputRef.current?.focus())
     }
@@ -131,6 +134,7 @@ export function SearchPalette() {
       setScopedMsgs([])
       setScopedDocs([])
       setGlobalMsgs([])
+      setLocalMsgs([])
       setGlobalDocs([])
       setLoading(false)
       return
@@ -154,6 +158,15 @@ export function SearchPalette() {
         api.search(query, 20).then((r) => {
           if (!cancelled) setGlobalMsgs(r.results)
         }),
+        searchLocal(query, 20).then((rows) => {
+          if (cancelled) return
+          setLocalMsgs(
+            rows.map((row) => {
+              const channel = channels.find((item) => item.id === row.channelId)
+              return localSearchResult(row, channel ? channelLabel(channel) : 'Direct message')
+            }),
+          )
+        }),
         api.docSearch(query, 20).then((r) => {
           if (!cancelled) setGlobalDocs(r.results)
         }),
@@ -169,7 +182,7 @@ export function SearchPalette() {
       cancelled = true
       clearTimeout(t)
     }
-  }, [q, scope])
+  }, [q, scope, channels])
 
   // Build a single flat, keyboard-navigable list: scoped group first, then the rest.
   const rows = useMemo<Row[]>(() => {
@@ -189,6 +202,12 @@ export function SearchPalette() {
     }
     for (const m of globalMsgs) {
       if (seenMsg.has(m.id)) continue
+      seenMsg.add(m.id)
+      out.push({ kind: 'message', group: 'global', key: `m-${m.id}`, data: m })
+    }
+    for (const m of localMsgs) {
+      if (seenMsg.has(m.id)) continue
+      seenMsg.add(m.id)
       out.push({ kind: 'message', group: 'global', key: `m-${m.id}`, data: m })
     }
     for (const d of globalDocs) {
@@ -196,7 +215,7 @@ export function SearchPalette() {
       out.push({ kind: 'doc', group: 'global', key: `d-${d.id}`, data: d })
     }
     return out
-  }, [scope, scopedMsgs, scopedDocs, globalMsgs, globalDocs])
+  }, [scope, scopedMsgs, scopedDocs, globalMsgs, globalDocs, localMsgs])
 
   useEffect(() => {
     setSel(0)
@@ -339,6 +358,9 @@ export function SearchPalette() {
                       <span className="truncate font-medium text-[var(--color-accent-hover)]">
                         {locationLabel(row)}
                       </span>
+                      {row.kind === 'message' && row.data.local ? (
+                        <span title="Local encrypted DM result">🔒</span>
+                      ) : null}
                       {row.kind === 'message' && (
                         <span className="shrink-0 text-[var(--color-text-faint)]">
                           {row.data.user.display_name} ·{' '}

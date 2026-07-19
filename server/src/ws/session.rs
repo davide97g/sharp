@@ -133,15 +133,29 @@ async fn handle_client_event(
     if let Some(g) = guest {
         let voice_event = matches!(
             event_type,
-            "voice.join" | "voice.leave" | "voice.mute" | "voice.camera" | "voice.screen"
-                | "voice.signal" | "voice.transcribe" | "voice.phrase" | "voice.hand"
+            "voice.join"
+                | "voice.leave"
+                | "voice.mute"
+                | "voice.camera"
+                | "voice.screen"
+                | "voice.signal"
+                | "voice.transcribe"
+                | "voice.phrase"
+                | "voice.hand"
+                | "voice.poll_create"
+                | "voice.poll_vote"
+                | "voice.poll_close"
         );
         if event_type != "ping" && !voice_event {
             return;
         }
         if voice_event {
             let bound = payload
-                .get("channel_id")
+                .get(if event_type.starts_with("voice.poll_") {
+                    "room_id"
+                } else {
+                    "channel_id"
+                })
                 .and_then(|c| c.as_str())
                 .and_then(|s| Uuid::parse_str(s).ok())
                 == Some(g.channel_id);
@@ -186,6 +200,19 @@ async fn handle_client_event(
         }
         "voice.join" | "voice.leave" | "voice.mute" | "voice.transcribe" | "voice.phrase"
         | "voice.camera" | "voice.screen" | "voice.signal" | "voice.hand" => {
+            voice::handle_voice_event(
+                state,
+                user_id,
+                conn_id,
+                display_name,
+                guest,
+                event_type,
+                payload,
+                tx,
+            )
+            .await;
+        }
+        "voice.poll_create" | "voice.poll_vote" | "voice.poll_close" => {
             voice::handle_voice_event(
                 state,
                 user_id,

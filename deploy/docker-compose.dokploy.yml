@@ -48,6 +48,9 @@ services:
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET}
       SHARP_DISABLE_SIGNUP: ${SHARP_DISABLE_SIGNUP:-false}
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-}
+      WEBAUTHN_ORIGINS: ${WEBAUTHN_ORIGINS:-}
+      WEBAUTHN_RP_NAME: ${WEBAUTHN_RP_NAME:-Sharp}
       RUST_LOG: ${RUST_LOG:-info}
       # File uploads — Cloudflare R2 (S3-compatible). The bucket stays private:
       # sharp proxies every upload/download through its own API with channel

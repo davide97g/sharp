@@ -2,6 +2,7 @@ use crate::gif;
 use crate::routes::gifs;
 use crate::routes::meetings::{self, LiveAttendee};
 use crate::routes::messages;
+use crate::routes::polls::{self, CreatePollRequest};
 use crate::state::SharedState;
 use crate::ws::{envelope, GuestInfo, WsSender};
 use axum::extract::ws::Message;
@@ -45,15 +46,67 @@ pub struct VoicePhrase {
     pub at: Instant,
 }
 
+#[derive(Clone)]
+pub struct CallVote {
+    pub display_name: String,
+    pub guest: bool,
+    pub option_ids: Vec<Uuid>,
+}
+
+#[derive(Clone)]
+pub struct CallPollOption {
+    pub id: Uuid,
+    pub text: String,
+}
+
+#[derive(Clone)]
+pub struct CallPoll {
+    pub id: Uuid,
+    pub room_id: Uuid,
+    pub question: String,
+    pub multi: bool,
+    pub persistent_poll_id: Option<Uuid>,
+    pub creator_id: Uuid,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub closed: bool,
+    pub options: Vec<CallPollOption>,
+    pub votes: HashMap<Uuid, CallVote>,
+}
+
+#[derive(Serialize)]
+struct CallVoterRef {
+    id: Uuid,
+    display_name: String,
+    guest: bool,
+}
+
+#[derive(Serialize)]
+struct CallPollOptionWire {
+    id: Uuid,
+    text: String,
+    count: i64,
+    voters: Vec<CallVoterRef>,
+}
+
+#[derive(Serialize)]
+struct CallPollWire {
+    id: Uuid,
+    room_id: Uuid,
+    question: String,
+    multi: bool,
+    persistent_poll_id: Option<Uuid>,
+    creator_id: Uuid,
+    expires_at: Option<DateTime<Utc>>,
+    closed: bool,
+    options: Vec<CallPollOptionWire>,
+    my_votes: Option<Vec<Uuid>>,
+}
+
 /// Resolve the audience for a voice broadcast: the union of the channel's
 /// members and the user-ids currently in the room (so guests, who are not
 /// channel members, still receive participant events), plus any extra ids the
 /// caller supplies (e.g. a just-removed participant for `participant_left`).
-pub(crate) async fn voice_targets(
-    state: &SharedState,
-    room_id: Uuid,
-    extra: &[Uuid],
-) -> Vec<Uuid> {
+pub(crate) async fn voice_targets(state: &SharedState, room_id: Uuid, extra: &[Uuid]) -> Vec<Uuid> {
     let mut ids: HashSet<Uuid> = HashSet::new();
     match sqlx::query_scalar::<_, Uuid>(
         "SELECT user_id FROM channel_members WHERE channel_id = $1
@@ -100,9 +153,9 @@ async fn current_voice_link_token(
              SELECT id, link_token AS token FROM standalone_calls
          ) rooms WHERE id = $1",
     )
-        .bind(room_id)
-        .fetch_optional(pool)
-        .await?;
+    .bind(room_id)
+    .fetch_optional(pool)
+    .await?;
     match row {
         Some(row) => row.try_get::<Option<String>, _>("token"),
         None => Ok(None),
@@ -116,7 +169,11 @@ async fn can_registered_user_join(
     supplied_link: Option<&str>,
 ) -> Result<bool, sqlx::Error> {
     if let Some(link) = supplied_link {
-        if current_voice_link_token(&state.pool, room_id).await?.as_deref() == Some(link) {
+        if current_voice_link_token(&state.pool, room_id)
+            .await?
+            .as_deref()
+            == Some(link)
+        {
             return Ok(true);
         }
     }
@@ -145,15 +202,12 @@ pub struct VoiceRoom {
     pub active_meeting_id: Option<Uuid>,
     pub meeting_starting: bool,
     pub attendance_ids: HashMap<Uuid, Uuid>,
+    pub poll: Option<CallPoll>,
 }
 
 pub type VoiceRooms = Mutex<HashMap<Uuid, VoiceRoom>>;
 
-pub async fn snapshot_for(
-    state: &SharedState,
-    user_id: Uuid,
-    guest: Option<&GuestInfo>,
-) -> Value {
+pub async fn snapshot_for(state: &SharedState, user_id: Uuid, guest: Option<&GuestInfo>) -> Value {
     let visible: HashSet<Uuid> = match guest {
         Some(info) => HashSet::from([info.channel_id]),
         None => sqlx::query_scalar::<_, Uuid>(
@@ -174,30 +228,45 @@ pub async fn snapshot_for(
         .into_iter()
         .collect(),
     };
-    let guard = state.voice_rooms.lock().unwrap();
-    let mut rooms: Vec<(Uuid, Vec<VoiceParticipant>, Option<Uuid>)> = guard
-        .iter()
-        .filter(|(room_id, room)| {
-            visible.contains(room_id)
-                || room.participants.values().any(|participant| participant.user_id == user_id)
-        })
-        .map(|(channel_id, room)| {
-            let mut participants: Vec<VoiceParticipant> =
-                room.participants.values().cloned().collect();
-            participants.sort_by_key(|participant| participant.conn_id);
-            (*channel_id, participants, room.active_meeting_id)
-        })
-        .collect();
-    rooms.sort_by_key(|(channel_id, _, _)| *channel_id);
-
-    json!(rooms
-        .into_iter()
-        .map(|(channel_id, participants, active_meeting_id)| json!({
+    let mut rooms: Vec<(Uuid, Vec<VoiceParticipant>, Option<Uuid>, Option<CallPoll>)> = {
+        let guard = state.voice_rooms.lock().unwrap();
+        guard
+            .iter()
+            .filter(|(room_id, room)| {
+                visible.contains(room_id)
+                    || room
+                        .participants
+                        .values()
+                        .any(|participant| participant.user_id == user_id)
+            })
+            .map(|(channel_id, room)| {
+                let mut participants: Vec<VoiceParticipant> =
+                    room.participants.values().cloned().collect();
+                participants.sort_by_key(|participant| participant.conn_id);
+                (
+                    *channel_id,
+                    participants,
+                    room.active_meeting_id,
+                    room.poll.clone(),
+                )
+            })
+            .collect()
+    };
+    rooms.sort_by_key(|(channel_id, _, _, _)| *channel_id);
+    let mut snapshots = Vec::with_capacity(rooms.len());
+    for (channel_id, participants, active_meeting_id, poll) in rooms {
+        let poll = match poll {
+            Some(poll) => build_call_poll(state, &poll).await.ok(),
+            None => None,
+        };
+        snapshots.push(json!({
             "channel_id": channel_id.to_string(),
             "participants": participants,
             "active_meeting_id": active_meeting_id,
-        }))
-        .collect::<Vec<_>>())
+            "poll": poll,
+        }));
+    }
+    json!(snapshots)
 }
 
 pub fn snapshot_transcript(
@@ -206,10 +275,10 @@ pub fn snapshot_transcript(
     minutes: i64,
 ) -> Vec<(String, String)> {
     let now = Instant::now();
-    let seconds = u64::try_from(minutes).unwrap_or_default().saturating_mul(60);
-    let cutoff = now
-        .checked_sub(Duration::from_secs(seconds))
-        .unwrap_or(now);
+    let seconds = u64::try_from(minutes)
+        .unwrap_or_default()
+        .saturating_mul(60);
+    let cutoff = now.checked_sub(Duration::from_secs(seconds)).unwrap_or(now);
     let guard = state.voice_rooms.lock().unwrap();
     guard
         .get(&channel_id)
@@ -258,7 +327,9 @@ pub async fn handle_voice_event(
     tx: &WsSender,
 ) {
     match event_type {
-        "voice.join" => handle_join(state, user_id, conn_id, display_name, guest, &payload, tx).await,
+        "voice.join" => {
+            handle_join(state, user_id, conn_id, display_name, guest, &payload, tx).await
+        }
         "voice.leave" => handle_leave(state, user_id, conn_id, &payload, tx).await,
         "voice.mute" => handle_mute(state, conn_id, &payload, tx).await,
         "voice.transcribe" => handle_transcribe(state, conn_id, &payload, tx).await,
@@ -267,12 +338,483 @@ pub async fn handle_voice_event(
         "voice.screen" => handle_screen(state, conn_id, &payload, tx).await,
         "voice.hand" => handle_hand(state, conn_id, &payload, tx).await,
         "voice.signal" => handle_signal(state, user_id, conn_id, &payload, tx).await,
+        "voice.poll_create" => {
+            handle_poll_create(state, user_id, conn_id, display_name, guest, &payload, tx).await
+        }
+        "voice.poll_vote" => {
+            handle_poll_vote(state, user_id, conn_id, display_name, guest, &payload, tx).await
+        }
+        "voice.poll_close" => handle_poll_close(state, user_id, conn_id, &payload, tx).await,
         _ => {}
     }
 }
 
+async fn build_call_poll(
+    state: &SharedState,
+    call_poll: &CallPoll,
+) -> crate::error::AppResult<CallPollWire> {
+    let (mut options, closed) = if let Some(persistent_id) = call_poll.persistent_poll_id {
+        let persistent = polls::load_poll(&state.pool, persistent_id, None).await?;
+        let options = persistent
+            .options
+            .into_iter()
+            .map(|option| CallPollOptionWire {
+                id: option.id,
+                text: option.text,
+                count: option.count,
+                voters: option
+                    .voters
+                    .into_iter()
+                    .map(|voter| CallVoterRef {
+                        id: voter.id,
+                        display_name: voter.display_name,
+                        guest: false,
+                    })
+                    .collect(),
+            })
+            .collect::<Vec<_>>();
+        (options, call_poll.closed || persistent.closed_at.is_some())
+    } else {
+        (
+            call_poll
+                .options
+                .iter()
+                .map(|option| CallPollOptionWire {
+                    id: option.id,
+                    text: option.text.clone(),
+                    count: 0,
+                    voters: Vec::new(),
+                })
+                .collect(),
+            call_poll.closed,
+        )
+    };
+
+    let indexes: HashMap<Uuid, usize> = options
+        .iter()
+        .enumerate()
+        .map(|(index, option)| (option.id, index))
+        .collect();
+    let mut votes: Vec<(Uuid, &CallVote)> = call_poll
+        .votes
+        .iter()
+        .map(|(id, vote)| (*id, vote))
+        .collect();
+    votes.sort_by_key(|(id, _)| *id);
+    for (voter_id, vote) in votes {
+        for option_id in &vote.option_ids {
+            if let Some(index) = indexes.get(option_id) {
+                options[*index].count += 1;
+                options[*index].voters.push(CallVoterRef {
+                    id: voter_id,
+                    display_name: vote.display_name.clone(),
+                    guest: vote.guest,
+                });
+            }
+        }
+    }
+
+    Ok(CallPollWire {
+        id: call_poll.id,
+        room_id: call_poll.room_id,
+        question: call_poll.question.clone(),
+        multi: call_poll.multi,
+        persistent_poll_id: call_poll.persistent_poll_id,
+        creator_id: call_poll.creator_id,
+        expires_at: call_poll.expires_at,
+        closed,
+        options,
+        my_votes: None,
+    })
+}
+
+async fn broadcast_poll_state(state: &SharedState, room_id: Uuid) {
+    let poll = {
+        let guard = state.voice_rooms.lock().unwrap();
+        guard.get(&room_id).and_then(|room| room.poll.clone())
+    };
+    let poll = match poll {
+        Some(poll) => match build_call_poll(state, &poll).await {
+            Ok(poll) => Some(poll),
+            Err(error) => {
+                tracing::warn!("voice poll state build failed: {}", error);
+                return;
+            }
+        },
+        None => None,
+    };
+    let targets = voice_targets(state, room_id, &[]).await;
+    state
+        .hub
+        .broadcast(
+            envelope(
+                "voice.poll_state",
+                json!({ "room_id": room_id, "poll": poll }),
+            ),
+            targets,
+        )
+        .await;
+}
+
+pub async fn broadcast_for_persistent_poll(state: &SharedState, poll_id: Uuid) {
+    let room_ids: Vec<Uuid> = {
+        let guard = state.voice_rooms.lock().unwrap();
+        guard
+            .iter()
+            .filter_map(|(room_id, room)| {
+                room.poll
+                    .as_ref()
+                    .is_some_and(|poll| poll.persistent_poll_id == Some(poll_id))
+                    .then_some(*room_id)
+            })
+            .collect()
+    };
+    for room_id in room_ids {
+        broadcast_poll_state(state, room_id).await;
+    }
+}
+
+pub async fn expire_call_polls(state: &SharedState) {
+    let room_ids: Vec<Uuid> = {
+        let mut guard = state.voice_rooms.lock().unwrap();
+        guard
+            .iter_mut()
+            .filter_map(|(room_id, room)| {
+                let poll = room.poll.as_mut()?;
+                if poll.persistent_poll_id.is_none()
+                    && !poll.closed
+                    && poll.expires_at.is_some_and(|at| at <= Utc::now())
+                {
+                    poll.closed = true;
+                    Some(*room_id)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
+    for room_id in room_ids {
+        broadcast_poll_state(state, room_id).await;
+    }
+}
+
+async fn broadcast_null_poll(state: &SharedState, room_id: Uuid, extra: &[Uuid]) {
+    let targets = voice_targets(state, room_id, extra).await;
+    state
+        .hub
+        .broadcast(
+            envelope(
+                "voice.poll_state",
+                json!({ "room_id": room_id, "poll": Value::Null }),
+            ),
+            targets,
+        )
+        .await;
+}
+
+fn poll_room_id(payload: &Value) -> Option<Uuid> {
+    uuid_field(payload, "room_id")
+}
+
+fn poll_option_ids(payload: &Value) -> Option<Vec<Uuid>> {
+    payload
+        .get("option_ids")?
+        .as_array()?
+        .iter()
+        .map(|value| value.as_str().and_then(|value| Uuid::parse_str(value).ok()))
+        .collect()
+}
+
+async fn handle_poll_create(
+    state: &SharedState,
+    user_id: Uuid,
+    conn_id: Uuid,
+    _display_name: &str,
+    guest: Option<&GuestInfo>,
+    payload: &Value,
+    tx: &WsSender,
+) {
+    let Some(room_id) = poll_room_id(payload) else {
+        return;
+    };
+    if guest.is_some() {
+        send_error(tx, room_id, "guests_cannot_create_polls");
+        return;
+    }
+    let in_room = {
+        let guard = state.voice_rooms.lock().unwrap();
+        guard.get(&room_id).is_some_and(|room| {
+            room.participants
+                .get(&conn_id)
+                .is_some_and(|participant| participant.user_id == user_id)
+                && room.poll.is_none()
+        })
+    };
+    if !in_room {
+        send_error(tx, room_id, "not_in_room_or_poll_exists");
+        return;
+    }
+    let Some(question) = payload.get("question").and_then(Value::as_str) else {
+        return;
+    };
+    let Some(option_values) = payload.get("options").and_then(Value::as_array) else {
+        return;
+    };
+    let Some(options) = option_values
+        .iter()
+        .map(|value| value.as_str().map(str::to_string))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return;
+    };
+    let Some(multi) = payload.get("multi").and_then(Value::as_bool) else {
+        return;
+    };
+    let expires_at = match payload.get("expires_at") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(value)) => match DateTime::parse_from_rfc3339(value) {
+            Ok(value) => Some(value.with_timezone(&Utc)),
+            Err(_) => {
+                send_error(tx, room_id, "invalid_expires_at");
+                return;
+            }
+        },
+        _ => return,
+    };
+    let request = CreatePollRequest {
+        question: question.to_string(),
+        options,
+        multi,
+        pinned: false,
+        expires_at,
+    };
+    let (question, option_texts) = match polls::validate_create(&request) {
+        Ok(validated) => validated,
+        Err(_) => {
+            send_error(tx, room_id, "invalid_poll");
+            return;
+        }
+    };
+
+    let channel_attached = sqlx::query("SELECT 1 AS x FROM channels WHERE id = $1")
+        .bind(room_id)
+        .fetch_optional(&state.pool)
+        .await
+        .ok()
+        .flatten()
+        .is_some();
+    let (persistent_poll_id, call_options) = if channel_attached {
+        match polls::create_poll_shared(state, room_id, user_id, &request).await {
+            Ok(poll) => {
+                let options = poll
+                    .options
+                    .into_iter()
+                    .map(|option| CallPollOption {
+                        id: option.id,
+                        text: option.text,
+                    })
+                    .collect();
+                (Some(poll.id), options)
+            }
+            Err(error) => {
+                tracing::warn!("voice persistent poll create failed: {}", error);
+                send_error(tx, room_id, "poll_create_failed");
+                return;
+            }
+        }
+    } else {
+        let standalone = sqlx::query("SELECT 1 AS x FROM standalone_calls WHERE id = $1")
+            .bind(room_id)
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+        if !standalone {
+            send_error(tx, room_id, "room_not_found");
+            return;
+        }
+        (
+            None,
+            option_texts
+                .into_iter()
+                .map(|text| CallPollOption {
+                    id: Uuid::new_v4(),
+                    text,
+                })
+                .collect(),
+        )
+    };
+
+    let call_poll = CallPoll {
+        id: Uuid::new_v4(),
+        room_id,
+        question,
+        multi,
+        persistent_poll_id,
+        creator_id: user_id,
+        expires_at,
+        closed: false,
+        options: call_options,
+        votes: HashMap::new(),
+    };
+    {
+        let mut guard = state.voice_rooms.lock().unwrap();
+        let Some(room) = guard.get_mut(&room_id) else {
+            return;
+        };
+        if room.poll.is_some() {
+            send_error(tx, room_id, "poll_exists");
+            return;
+        }
+        room.poll = Some(call_poll);
+    }
+    broadcast_poll_state(state, room_id).await;
+}
+
+async fn handle_poll_vote(
+    state: &SharedState,
+    user_id: Uuid,
+    conn_id: Uuid,
+    display_name: &str,
+    guest: Option<&GuestInfo>,
+    payload: &Value,
+    tx: &WsSender,
+) {
+    let Some(room_id) = poll_room_id(payload) else {
+        return;
+    };
+    let Some(call_poll_id) = uuid_field(payload, "poll_id") else {
+        return;
+    };
+    let Some(option_ids) = poll_option_ids(payload) else {
+        return;
+    };
+    let poll = {
+        let guard = state.voice_rooms.lock().unwrap();
+        let Some(room) = guard.get(&room_id) else {
+            send_error(tx, room_id, "not_in_room");
+            return;
+        };
+        if !room.participants.contains_key(&conn_id) {
+            send_error(tx, room_id, "not_in_room");
+            return;
+        }
+        let Some(poll) = room.poll.clone().filter(|poll| poll.id == call_poll_id) else {
+            send_error(tx, room_id, "poll_not_found");
+            return;
+        };
+        poll
+    };
+    if poll.closed || poll.expires_at.is_some_and(|at| at <= Utc::now()) {
+        send_error(tx, room_id, "poll_closed");
+        return;
+    }
+    let unique: HashSet<Uuid> = option_ids.iter().copied().collect();
+    let valid_options: HashSet<Uuid> = poll.options.iter().map(|option| option.id).collect();
+    if unique.len() != option_ids.len()
+        || (!poll.multi && option_ids.len() > 1)
+        || !unique.is_subset(&valid_options)
+    {
+        send_error(tx, room_id, "invalid_vote");
+        return;
+    }
+
+    if guest.is_none() {
+        if let Some(persistent_id) = poll.persistent_poll_id {
+            if let Err(error) =
+                polls::replace_votes(state, persistent_id, user_id, &option_ids, true).await
+            {
+                tracing::warn!("voice persistent poll vote failed: {}", error);
+                send_error(tx, room_id, "vote_failed");
+                return;
+            }
+            return;
+        }
+    }
+
+    {
+        let mut guard = state.voice_rooms.lock().unwrap();
+        let Some(active_poll) = guard.get_mut(&room_id).and_then(|room| room.poll.as_mut()) else {
+            return;
+        };
+        if active_poll.id != call_poll_id || active_poll.closed {
+            send_error(tx, room_id, "poll_closed");
+            return;
+        }
+        if option_ids.is_empty() {
+            active_poll.votes.remove(&user_id);
+        } else {
+            active_poll.votes.insert(
+                user_id,
+                CallVote {
+                    display_name: display_name.to_string(),
+                    guest: guest.is_some(),
+                    option_ids,
+                },
+            );
+        }
+    }
+    broadcast_poll_state(state, room_id).await;
+}
+
+async fn handle_poll_close(
+    state: &SharedState,
+    user_id: Uuid,
+    conn_id: Uuid,
+    payload: &Value,
+    tx: &WsSender,
+) {
+    let Some(room_id) = poll_room_id(payload) else {
+        return;
+    };
+    let Some(call_poll_id) = uuid_field(payload, "poll_id") else {
+        return;
+    };
+    let persistent_id = {
+        let guard = state.voice_rooms.lock().unwrap();
+        let Some(room) = guard.get(&room_id) else {
+            send_error(tx, room_id, "not_in_room");
+            return;
+        };
+        if !room.participants.contains_key(&conn_id) {
+            send_error(tx, room_id, "not_in_room");
+            return;
+        }
+        let Some(poll) = room.poll.as_ref().filter(|poll| poll.id == call_poll_id) else {
+            send_error(tx, room_id, "poll_not_found");
+            return;
+        };
+        if poll.creator_id != user_id {
+            send_error(tx, room_id, "not_poll_creator");
+            return;
+        }
+        poll.persistent_poll_id
+    };
+    if let Some(persistent_id) = persistent_id {
+        if let Err(error) = polls::finalize_poll_and_notify(state, persistent_id, "manual").await {
+            tracing::warn!("voice persistent poll close failed: {}", error);
+            send_error(tx, room_id, "poll_close_failed");
+            return;
+        }
+    }
+    {
+        let mut guard = state.voice_rooms.lock().unwrap();
+        if let Some(poll) = guard
+            .get_mut(&room_id)
+            .and_then(|room| room.poll.as_mut())
+            .filter(|poll| poll.id == call_poll_id)
+        {
+            poll.closed = true;
+        }
+    }
+    if persistent_id.is_none() {
+        broadcast_poll_state(state, room_id).await;
+    }
+}
+
 pub async fn cleanup_conn(state: &SharedState, user_id: Uuid, conn_id: Uuid) {
-    let removed: Vec<(Uuid, VoiceParticipant, Option<Uuid>, bool)> = {
+    let removed: Vec<(Uuid, VoiceParticipant, Option<Uuid>, bool, bool)> = {
         let mut guard = state.voice_rooms.lock().unwrap();
         let mut removed = Vec::new();
         for (channel_id, room) in guard.iter_mut() {
@@ -283,6 +825,7 @@ pub async fn cleanup_conn(state: &SharedState, user_id: Uuid, conn_id: Uuid) {
                     participant,
                     room.active_meeting_id,
                     room.participants.is_empty(),
+                    room.participants.is_empty() && room.poll.is_some(),
                 ));
             }
         }
@@ -290,7 +833,7 @@ pub async fn cleanup_conn(state: &SharedState, user_id: Uuid, conn_id: Uuid) {
         removed
     };
 
-    for (channel_id, participant, meeting_id, room_ended) in removed {
+    for (channel_id, participant, meeting_id, room_ended, poll_ended) in removed {
         debug_assert_eq!(participant.user_id, user_id);
         let left_at = Utc::now();
         if let Some(meeting_id) = meeting_id {
@@ -303,12 +846,20 @@ pub async fn cleanup_conn(state: &SharedState, user_id: Uuid, conn_id: Uuid) {
                 finish_and_broadcast_meeting(state, channel_id, meeting_id, left_at, false).await;
             }
         }
+        if poll_ended {
+            broadcast_null_poll(state, channel_id, &[participant.user_id]).await;
+        }
         broadcast_participant_left(state, channel_id, conn_id, user_id).await;
     }
 }
 
 pub async fn remove_member_from_room(state: &SharedState, channel_id: Uuid, user_id: Uuid) {
-    let (mut removed, meeting_id, room_ended): (Vec<VoiceParticipant>, Option<Uuid>, bool) = {
+    let (mut removed, meeting_id, room_ended, poll_ended): (
+        Vec<VoiceParticipant>,
+        Option<Uuid>,
+        bool,
+        bool,
+    ) = {
         let mut guard = state.voice_rooms.lock().unwrap();
         let Some(room) = guard.get_mut(&channel_id) else {
             return;
@@ -328,23 +879,19 @@ pub async fn remove_member_from_room(state: &SharedState, channel_id: Uuid, user
         }
         let meeting_id = room.active_meeting_id;
         let room_ended = room.participants.is_empty();
+        let poll_ended = room_ended && room.poll.is_some();
         if room_ended {
             guard.remove(&channel_id);
         }
-        (removed, meeting_id, room_ended)
+        (removed, meeting_id, room_ended, poll_ended)
     };
     removed.sort_by_key(|participant| participant.conn_id);
 
     let left_at = Utc::now();
     if let Some(meeting_id) = meeting_id {
         for participant in &removed {
-            let _ = meetings::close_live_attendee(
-                state,
-                meeting_id,
-                participant.conn_id,
-                left_at,
-            )
-            .await;
+            let _ = meetings::close_live_attendee(state, meeting_id, participant.conn_id, left_at)
+                .await;
         }
         if room_ended {
             finish_and_broadcast_meeting(state, channel_id, meeting_id, left_at, false).await;
@@ -353,6 +900,9 @@ pub async fn remove_member_from_room(state: &SharedState, channel_id: Uuid, user
 
     // Include removed (possibly-guest) user-ids so they receive their leave event.
     let extra: Vec<Uuid> = removed.iter().map(|p| p.user_id).collect();
+    if poll_ended {
+        broadcast_null_poll(state, channel_id, &extra).await;
+    }
     let targets = voice_targets(state, channel_id, &extra).await;
     for participant in removed {
         let event = participant_left_event(channel_id, participant.conn_id, participant.user_id);
@@ -361,10 +911,17 @@ pub async fn remove_member_from_room(state: &SharedState, channel_id: Uuid, user
 }
 
 pub async fn close_room(state: &SharedState, channel_id: Uuid) {
-    let (mut removed, meeting_id): (Vec<VoiceParticipant>, Option<Uuid>) = {
+    let (mut removed, meeting_id, had_poll): (Vec<VoiceParticipant>, Option<Uuid>, bool) = {
         let mut guard = state.voice_rooms.lock().unwrap();
         match guard.remove(&channel_id) {
-            Some(room) => (room.participants.into_values().collect(), room.active_meeting_id),
+            Some(room) => {
+                let had_poll = room.poll.is_some();
+                (
+                    room.participants.into_values().collect(),
+                    room.active_meeting_id,
+                    had_poll,
+                )
+            }
             None => return,
         }
     };
@@ -373,13 +930,8 @@ pub async fn close_room(state: &SharedState, channel_id: Uuid) {
     let left_at = Utc::now();
     if let Some(meeting_id) = meeting_id {
         for participant in &removed {
-            let _ = meetings::close_live_attendee(
-                state,
-                meeting_id,
-                participant.conn_id,
-                left_at,
-            )
-            .await;
+            let _ = meetings::close_live_attendee(state, meeting_id, participant.conn_id, left_at)
+                .await;
         }
         finish_and_broadcast_meeting(state, channel_id, meeting_id, left_at, false).await;
     }
@@ -387,6 +939,9 @@ pub async fn close_room(state: &SharedState, channel_id: Uuid) {
     // Room is gone from the map, so seed targets with all removed user-ids
     // (members + guests) to guarantee delivery of the leave events.
     let extra: Vec<Uuid> = removed.iter().map(|p| p.user_id).collect();
+    if had_poll {
+        broadcast_null_poll(state, channel_id, &extra).await;
+    }
     let targets = voice_targets(state, channel_id, &extra).await;
     for participant in removed {
         let event = participant_left_event(channel_id, participant.conn_id, participant.user_id);
@@ -419,11 +974,7 @@ async fn handle_join(
                 return;
             }
             Err(error) => {
-                tracing::warn!(
-                    "voice room {} link lookup failed: {}",
-                    channel_id,
-                    error
-                );
+                tracing::warn!("voice room {} link lookup failed: {}", channel_id, error);
                 return;
             }
         },
@@ -455,7 +1006,11 @@ async fn handle_join(
         let mut guard = state.voice_rooms.lock().unwrap();
         let room = guard.entry(channel_id).or_default();
         if room.participants.contains_key(&conn_id) {
-            JoinResult::Existing(room_participants(room), room.active_meeting_id)
+            JoinResult::Existing(
+                room_participants(room),
+                room.active_meeting_id,
+                room.poll.clone(),
+            )
         } else if room.participants.len() >= MAX_PARTICIPANTS {
             JoinResult::Full
         } else {
@@ -474,7 +1029,12 @@ async fn handle_join(
                 joined_at: Utc::now(),
             };
             room.participants.insert(conn_id, participant.clone());
-            JoinResult::Joined(participant, room_participants(room), room.active_meeting_id)
+            JoinResult::Joined(
+                participant,
+                room_participants(room),
+                room.active_meeting_id,
+                room.poll.clone(),
+            )
         }
     };
 
@@ -483,20 +1043,21 @@ async fn handle_join(
             send_error(tx, channel_id, "room_full");
             return;
         }
-        JoinResult::Existing(participants, active_meeting_id) => {
-            send_state(tx, channel_id, participants, active_meeting_id);
+        JoinResult::Existing(participants, active_meeting_id, poll) => {
+            send_state(state, tx, channel_id, participants, active_meeting_id, poll).await;
             return;
         }
-        JoinResult::Joined(participant, participants, active_meeting_id) => {
-            send_state(tx, channel_id, participants, active_meeting_id);
+        JoinResult::Joined(participant, participants, active_meeting_id, poll) => {
+            send_state(state, tx, channel_id, participants, active_meeting_id, poll).await;
             participant
         }
     };
 
-
     let active_meeting_id = {
         let guard = state.voice_rooms.lock().unwrap();
-        guard.get(&channel_id).and_then(|room| room.active_meeting_id)
+        guard
+            .get(&channel_id)
+            .and_then(|room| room.active_meeting_id)
     };
     if let Some(meeting_id) = active_meeting_id {
         let attendee = live_attendee(&participant);
@@ -531,7 +1092,7 @@ async fn handle_leave(
     let Some(channel_id) = channel_id(payload) else {
         return;
     };
-    let (participant, meeting_id, room_ended) = {
+    let (participant, meeting_id, room_ended, poll_ended) = {
         let mut guard = state.voice_rooms.lock().unwrap();
         let Some(room) = guard.get_mut(&channel_id) else {
             send_error(tx, channel_id, "not_in_room");
@@ -541,10 +1102,11 @@ async fn handle_leave(
         room.attendance_ids.remove(&conn_id);
         let meeting_id = room.active_meeting_id;
         let room_ended = room.participants.is_empty();
+        let poll_ended = room_ended && room.poll.is_some();
         if room_ended {
             guard.remove(&channel_id);
         }
-        (removed, meeting_id, room_ended)
+        (removed, meeting_id, room_ended, poll_ended)
     };
 
     let Some(participant) = participant else {
@@ -554,12 +1116,16 @@ async fn handle_leave(
     debug_assert_eq!(participant.user_id, user_id);
     let left_at = Utc::now();
     if let Some(meeting_id) = meeting_id {
-        if let Err(error) = meetings::close_live_attendee(state, meeting_id, conn_id, left_at).await {
+        if let Err(error) = meetings::close_live_attendee(state, meeting_id, conn_id, left_at).await
+        {
             tracing::warn!("meeting attendance leave failed: {}", error);
         }
         if room_ended {
             finish_and_broadcast_meeting(state, channel_id, meeting_id, left_at, false).await;
         }
+    }
+    if poll_ended {
+        broadcast_null_poll(state, channel_id, &[user_id]).await;
     }
     broadcast_participant_left(state, channel_id, conn_id, user_id).await;
 }
@@ -615,8 +1181,11 @@ async fn handle_hand(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &W
                     None
                 } else {
                     participant.hand_raised = raised;
-                    participant.hand_raised_at =
-                        if raised { Some(Utc::now().timestamp_millis()) } else { None };
+                    participant.hand_raised_at = if raised {
+                        Some(Utc::now().timestamp_millis())
+                    } else {
+                        None
+                    };
                     Some(participant.clone())
                 }
             }
@@ -699,15 +1268,8 @@ async fn handle_phrase(state: &SharedState, conn_id: Uuid, payload: &Value, tx: 
     };
     if let Some(meeting_id) = meeting_id {
         let attendee = live_attendee(&participant);
-        match meetings::save_live_phrase(
-            state,
-            meeting_id,
-            attendance_id,
-            &attendee,
-            &text,
-            at,
-        )
-        .await
+        match meetings::save_live_phrase(state, meeting_id, attendance_id, &attendee, &text, at)
+            .await
         {
             Ok(id) => {
                 let targets = voice_targets(state, channel_id, &[]).await;
@@ -757,10 +1319,7 @@ fn phrase_words(value: &str) -> Vec<String> {
             }
         })
         .collect();
-    normalized
-        .split_whitespace()
-        .map(str::to_string)
-        .collect()
+    normalized.split_whitespace().map(str::to_string).collect()
 }
 
 fn phrase_match_start(spoken: &str, trigger: &str) -> Option<usize> {
@@ -839,11 +1398,7 @@ async fn maybe_fire_voice_trigger(
         return;
     };
 
-    match gifs::try_acquire_suggestion_cooldown(
-        &state,
-        channel_id,
-        settings.duck_cooldown_secs,
-    ) {
+    match gifs::try_acquire_suggestion_cooldown(&state, channel_id, settings.duck_cooldown_secs) {
         Ok(true) => {}
         Ok(false) => return,
         Err(error) => {
@@ -883,13 +1438,8 @@ async fn maybe_fire_voice_trigger(
     let alt = if alt.is_empty() { "gif" } else { &alt };
     let query = sanitize_gif_token_field(&query);
     let content = format!("[[gif:{}|{}|duck|{}]]", result.url, alt, query);
-    if let Err(error) = messages::post_message_as(
-        &state,
-        channel_id,
-        participant.user_id,
-        &content,
-    )
-    .await
+    if let Err(error) =
+        messages::post_message_as(&state, channel_id, participant.user_id, &content).await
     {
         tracing::warn!("voice trigger message post failed: {}", error);
         return;
@@ -913,12 +1463,7 @@ async fn maybe_fire_voice_trigger(
         .await;
 }
 
-fn record_phrase(
-    room: &mut VoiceRoom,
-    display_name: String,
-    text: String,
-    now: Instant,
-) -> bool {
+fn record_phrase(room: &mut VoiceRoom, display_name: String, text: String, now: Instant) -> bool {
     room.transcript.push_back(VoicePhrase {
         display_name,
         text,
@@ -949,7 +1494,11 @@ fn record_phrase(
 fn live_attendee(participant: &VoiceParticipant) -> LiveAttendee {
     LiveAttendee {
         connection_id: participant.conn_id,
-        user_id: if participant.guest { None } else { Some(participant.user_id) },
+        user_id: if participant.guest {
+            None
+        } else {
+            Some(participant.user_id)
+        },
         display_name: participant.display_name.clone(),
         guest: participant.guest,
         joined_at: participant.joined_at,
@@ -971,7 +1520,11 @@ async fn ensure_meeting_started(state: &SharedState, channel_id: Uuid, conn_id: 
             .get(&conn_id)
             .filter(|participant| !participant.guest)
             .map(|participant| participant.user_id);
-        let attendees = room.participants.values().map(live_attendee).collect::<Vec<_>>();
+        let attendees = room
+            .participants
+            .values()
+            .map(live_attendee)
+            .collect::<Vec<_>>();
         (creator, attendees)
     };
 
@@ -986,7 +1539,9 @@ async fn ensure_meeting_started(state: &SharedState, channel_id: Uuid, conn_id: 
                     let missing = room
                         .participants
                         .values()
-                        .filter(|participant| !room.attendance_ids.contains_key(&participant.conn_id))
+                        .filter(|participant| {
+                            !room.attendance_ids.contains_key(&participant.conn_id)
+                        })
                         .map(live_attendee)
                         .collect::<Vec<_>>();
                     let departed = room
@@ -1016,13 +1571,8 @@ async fn ensure_meeting_started(state: &SharedState, channel_id: Uuid, conn_id: 
                 }
             }
             for connection_id in departed {
-                let _ = meetings::close_live_attendee(
-                    state,
-                    meeting_id,
-                    connection_id,
-                    Utc::now(),
-                )
-                .await;
+                let _ = meetings::close_live_attendee(state, meeting_id, connection_id, Utc::now())
+                    .await;
             }
             let targets = voice_targets(state, channel_id, &[]).await;
             state
@@ -1246,8 +1796,13 @@ async fn handle_signal(
 
 enum JoinResult {
     Full,
-    Existing(Vec<VoiceParticipant>, Option<Uuid>),
-    Joined(VoiceParticipant, Vec<VoiceParticipant>, Option<Uuid>),
+    Existing(Vec<VoiceParticipant>, Option<Uuid>, Option<CallPoll>),
+    Joined(
+        VoiceParticipant,
+        Vec<VoiceParticipant>,
+        Option<Uuid>,
+        Option<CallPoll>,
+    ),
 }
 
 fn room_participants(room: &VoiceRoom) -> Vec<VoiceParticipant> {
@@ -1267,18 +1822,25 @@ fn uuid_field(payload: &Value, field: &str) -> Option<Uuid> {
         .and_then(|value| Uuid::parse_str(value).ok())
 }
 
-fn send_state(
+async fn send_state(
+    state: &SharedState,
     tx: &WsSender,
     channel_id: Uuid,
     participants: Vec<VoiceParticipant>,
     active_meeting_id: Option<Uuid>,
+    poll: Option<CallPoll>,
 ) {
+    let poll = match poll {
+        Some(poll) => build_call_poll(state, &poll).await.ok(),
+        None => None,
+    };
     let event = envelope(
         "voice.state",
         json!({
             "channel_id": channel_id.to_string(),
             "participants": participants,
             "active_meeting_id": active_meeting_id,
+            "poll": poll,
         }),
     );
     let _ = tx.send(Message::Text(event.to_string()));
@@ -1444,12 +2006,7 @@ mod tests {
         ));
 
         let mut expired = VoiceRoom::default();
-        record_phrase(
-            &mut expired,
-            "Tester".to_string(),
-            "one".to_string(),
-            start,
-        );
+        record_phrase(&mut expired, "Tester".to_string(), "one".to_string(), start);
         record_phrase(
             &mut expired,
             "Tester".to_string(),
@@ -1473,7 +2030,10 @@ mod tests {
             phrase_match_start("  LET'S... drop   A roast! ", "let's drop a roast"),
             Some(0)
         );
-        assert_eq!(phrase_match_start("hello, sharp world", "sharp world"), Some(1));
+        assert_eq!(
+            phrase_match_start("hello, sharp world", "sharp world"),
+            Some(1)
+        );
     }
 
     #[test]

@@ -33,6 +33,14 @@ export async function startBrowserLogin(): Promise<void> {
   await open(url)
 }
 
+/** Open narrowly-scoped passkey management in the system browser. */
+export async function openPasskeyManagement(): Promise<void> {
+  const { code } = await api.startPasskeyManagement()
+  const url = `${resolveBaseUrl()}/passkey-settings?code=${encodeURIComponent(code)}`
+  const { open } = await import('@tauri-apps/plugin-shell')
+  await open(url)
+}
+
 /**
  * Parse a `sharp://auth?code=&state=` deep link, verify the state nonce, and
  * exchange the code for a JWT. Returns null if the URL isn't an auth callback

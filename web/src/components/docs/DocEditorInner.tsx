@@ -10,10 +10,37 @@ import {
 import { docSchema } from './schema'
 import { SharpDocProvider, type DocConnStatus, type DocRoleByte } from '../../lib/docSync'
 import { useStore } from '../../store'
-import { api } from '../../lib/api'
+import { api, fetchAttachmentBlob } from '../../lib/api'
 import { toastError } from '../../lib/toast'
 
 export type Peer = { clientId: number; name: string; color: string }
+
+const DOC_IMAGE_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/avif',
+])
+
+function resolveDocFileUrl(
+  url: string,
+  resolvedUrls: Map<string, Promise<string>>,
+): Promise<string> {
+  // Existing URL embeds remain browser-resolved. Only Sharp attachment paths
+  // need an authenticated fetch before BlockNote can render them.
+  if (!url.startsWith('/api/v1/files/')) return Promise.resolve(url)
+
+  const cached = resolvedUrls.get(url)
+  if (cached) return cached
+
+  const resolved = fetchAttachmentBlob(url).then((blob) => URL.createObjectURL(blob))
+  resolvedUrls.set(url, resolved)
+  resolved.catch(() => {
+    if (resolvedUrls.get(url) === resolved) resolvedUrls.delete(url)
+  })
+  return resolved
+}
 
 export function DocEditorInner({
   docId,
@@ -36,15 +63,20 @@ export function DocEditorInner({
   // One Y.Doc + provider per mount (component is keyed by docId upstream).
   // Lazily initialised via a ref so React StrictMode's double-render doesn't
   // create two of everything.
-  const holder = useRef<{ ydoc: Y.Doc; provider: SharpDocProvider } | null>(null)
+  const holder = useRef<{
+    ydoc: Y.Doc
+    provider: SharpDocProvider
+    resolvedUrls: Map<string, Promise<string>>
+  } | null>(null)
   if (!holder.current) {
     const ydoc = new Y.Doc()
     holder.current = {
       ydoc,
       provider: new SharpDocProvider({ docId, doc: ydoc, user, onStatus, onRole: setRole }),
+      resolvedUrls: new Map(),
     }
   }
-  const { ydoc, provider } = holder.current
+  const { ydoc, provider, resolvedUrls } = holder.current
   const teardownTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const editor = useCreateBlockNote(
@@ -55,6 +87,22 @@ export function DocEditorInner({
         user,
         provider: { awareness: provider.awareness },
       },
+      uploadFile: async (file) => {
+        const contentType = file.type.split(';', 1)[0].toLowerCase()
+        if (!DOC_IMAGE_TYPES.has(contentType)) {
+          const message = 'Docs only accept PNG, JPEG, GIF, WebP, or AVIF images'
+          toastError(message)
+          throw new Error(message)
+        }
+        try {
+          const attachment = await api.uploadDocImage(docId, file)
+          return { props: { name: attachment.filename, url: attachment.url } }
+        } catch (error) {
+          if (error instanceof Error) toastError(error.message)
+          throw error
+        }
+      },
+      resolveFileUrl: (url) => resolveDocFileUrl(url, resolvedUrls),
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -84,9 +132,13 @@ export function DocEditorInner({
       teardownTimer.current = setTimeout(() => {
         provider.destroy()
         ydoc.destroy()
+        for (const resolved of resolvedUrls.values()) {
+          resolved.then((url) => URL.revokeObjectURL(url)).catch(() => {})
+        }
+        resolvedUrls.clear()
       }, 1000)
     }
-  }, [provider, ydoc])
+  }, [provider, resolvedUrls, ydoc])
 
   // Presence: report peers (excluding self) from awareness.
   useEffect(() => {

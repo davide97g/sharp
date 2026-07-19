@@ -47,6 +47,8 @@ export type Attachment = {
   content_type: string
   size: number
   url: string // proxied download path, e.g. /api/v1/files/<id>
+  encrypted: boolean
+  decryption?: { key: string; nonce: string }
 }
 
 export type MessageAuthor = {
@@ -60,6 +62,7 @@ export type ReplyPreview = {
   user: MessageAuthor
   content: string // truncated preview; '' when the target was deleted
   deleted: boolean
+  encrypted: boolean
 }
 
 export type Message = {
@@ -68,6 +71,9 @@ export type Message = {
   parent_id: string | null
   user: MessageAuthor
   content: string // '' when deleted
+  encrypted: boolean
+  // Only encrypted messages use this field: undefined while decrypting, null on failure.
+  decryptedText?: string | null
   created_at: string
   edited_at: string | null
   deleted_at: string | null
@@ -78,7 +84,7 @@ export type Message = {
   reply_to: ReplyPreview | null
 }
 
-export type NotificationKind = 'mention' | 'dm' | 'reply'
+export type NotificationKind = 'mention' | 'dm' | 'reply' | 'poll_ended'
 
 export type Notification = {
   id: string
@@ -99,16 +105,63 @@ export type Prefs = {
   chat_layout: ChatLayout | null
 }
 
+export type E2eeDevice = {
+  id: string
+  user_id: string
+  name: string
+  x25519_pub: string
+  ed25519_pub: string
+  created_at: string
+}
+
+export type E2eeDevicesResponse = { devices: E2eeDevice[] }
+
+export type EncryptedAttachment = {
+  id: string
+  key: string
+  nonce: string
+  filename: string
+  content_type: string
+}
+
+export type EncryptedBody = {
+  text: string
+  attachments?: EncryptedAttachment[]
+}
+
+export type E2eeBackupInput = {
+  salt: string
+  nonce: string
+  ciphertext: string
+}
+
+export type E2eeBackup = E2eeBackupInput & { updated_at: string }
+
 // --- REST response shapes ---
 
 export type AuthResponse = { token: string; user: User }
+
+export type PasskeyConfig = { enabled: boolean; rp_name: string | null }
+export type PasskeyRecord = {
+  id: string
+  name: string
+  created_at: string
+  last_used_at: string | null
+}
+export type PasskeyList = {
+  enabled: boolean
+  prompt_dismissed: boolean
+  passkeys: PasskeyRecord[]
+}
+export type PasskeyChallenge = { ceremony_id: string; options: { publicKey: unknown } }
+export type PasskeyManageStart = { code: string; expires_in: number }
 export type UsersResponse = { users: User[]; online_user_ids: string[] }
 export type ChannelsResponse = { channels: Channel[] }
 export type ChannelMember = User & { role: ChannelRole }
 export type MembersResponse = { members: ChannelMember[] }
 export type MessagesResponse = { messages: Message[] }
 export type ThreadResponse = { parent: Message; replies: Message[] }
-export type SearchResult = Message & { channel_name: string; snippet: string }
+export type SearchResult = Message & { channel_name: string; snippet: string; local?: boolean }
 export type SearchResponse = { results: SearchResult[] }
 export type GifResult = {
   id: string
@@ -207,6 +260,64 @@ export type VoiceRoomSnapshot = {
   channel_id: string
   participants: VoiceParticipant[]
   active_meeting_id: string | null
+  poll: CallPoll | null
+}
+
+export type PollVoter = {
+  id: string
+  display_name: string
+}
+
+export type PollOption = {
+  id: string
+  position: number
+  text: string
+  count: number
+  voters: PollVoter[]
+}
+
+export type Poll = {
+  id: string
+  channel_id: string
+  creator_id: string
+  card_message_id: string | null
+  question: string
+  multi: boolean
+  pinned: boolean
+  expires_at: string | null
+  closed_at: string | null
+  closed_reason: 'manual' | 'expired' | null
+  deleted: boolean
+  created_at: string
+  options: PollOption[]
+  my_votes: string[]
+  total_voters: number
+}
+
+export type CallPollVoter = {
+  id: string
+  display_name: string
+  guest: boolean
+}
+
+export type CallPollOption = {
+  id: string
+  text: string
+  count: number
+  voters: CallPollVoter[]
+}
+
+export type CallPoll = {
+  id: string
+  room_id: string
+  question: string
+  multi: boolean
+  persistent_poll_id: string | null
+  creator_id: string
+  expires_at: string | null
+  closed: boolean
+  options: CallPollOption[]
+  my_votes: null
 }
 
 export type MeetingStatus = 'active' | 'completed' | 'interrupted'
@@ -282,6 +393,7 @@ export type DuckStreakPayload = {
   duck_streak: DuckStreakSnapshot
 }
 export type MessageUpdatedPayload = { message: Message }
+export type E2eeDevicesChangedPayload = { user_id: string }
 export type MessageDeletedPayload = {
   message_id: string
   channel_id: string
@@ -486,3 +598,11 @@ export type TypingPayload = {
 }
 export type PresencePayload = { user_id: string; status: 'online' | 'offline' }
 export type NotificationCreatedPayload = { notification: Notification }
+export type PollCreatedPayload = { poll: Poll }
+export type PollUpdatedPayload = { poll: Poll }
+export type PollDeletedPayload = {
+  poll_id: string
+  channel_id: string
+  message_id: string | null
+}
+export type VoicePollStatePayload = { room_id: string; poll: CallPoll | null }

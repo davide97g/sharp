@@ -12,6 +12,8 @@ import { CallChatRail } from './CallChatRail'
 import { VoiceDuckSuggest } from './VoiceDuckSuggest'
 import { useVoicePip } from './VoicePip'
 import { MicActivityIcon } from './MicActivityIcon'
+import { CallPollOverlay } from '../CallPollOverlay'
+import { CreatePollModal } from '../CreatePollModal'
 
 type StageParticipant = {
   userId: string
@@ -109,6 +111,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
   const [dragging, setDragging] = useState(false)
   const [chatOpen, setChatOpen] = useState(true)
+  const [pollCreatorOpen, setPollCreatorOpen] = useState(false)
   const [handledNotesMeetingId, setHandledNotesMeetingId] = useState<string | null>(null)
   const hasFallbackVideo = Boolean(
     localStream?.getVideoTracks().length ||
@@ -308,6 +311,19 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
     return (
       <>
         <VoiceMiniWidget />
+        <CallPollOverlay mode="mini" />
+        {!isGuest ? (
+          <button
+            type="button"
+            onClick={() => setPollCreatorOpen(true)}
+            aria-label="Start a quick poll"
+            title="Quick poll"
+            className="fixed bottom-24 right-[4.5rem] z-[64] flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] text-[var(--color-text-dim)] shadow-2xl hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+          >
+            <PollControlIcon />
+          </button>
+        ) : null}
+        {pollCreatorOpen ? <CreatePollModal mode="call" onClose={() => setPollCreatorOpen(false)} /> : null}
         {notesConsentPrompt}
       </>
     )
@@ -452,6 +468,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
 
   if (stageMode === 'full') {
     return (
+      <>
       <section
         aria-label={`${roomName} huddle`}
         className="voice-stage fixed inset-0 z-[60] flex bg-black text-[var(--color-text)]"
@@ -499,6 +516,17 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
                   <ChatIcon />
                 </button>
               )}
+              {!isGuest && (
+                <button
+                  type="button"
+                  aria-label="Start a quick poll"
+                  title="Quick poll"
+                  onClick={() => setPollCreatorOpen(true)}
+                  className={headerBtnClass}
+                >
+                  <PollControlIcon />
+                </button>
+              )}
               <button
                 type="button"
                 aria-label="Minimize call"
@@ -535,6 +563,8 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
           </div>
         </div>
 
+        <CallPollOverlay mode="full" />
+
         {!isGuest && channel?.is_member && (
           <div
             className="shrink-0 overflow-hidden border-l border-[var(--color-border)] bg-[var(--color-ink)] transition-[width] duration-200 ease-out motion-reduce:transition-none"
@@ -546,6 +576,8 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
           </div>
         )}
       </section>
+      {pollCreatorOpen ? <CreatePollModal mode="call" onClose={() => setPollCreatorOpen(false)} /> : null}
+      </>
     )
   }
 
@@ -668,6 +700,17 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
             <PipIcon />
           </button>
         )}
+        {!isGuest ? (
+          <button
+            type="button"
+            aria-label="Start a quick poll"
+            title="Quick poll"
+            onClick={() => setPollCreatorOpen(true)}
+            className={headerBtnClass}
+          >
+            <PollControlIcon />
+          </button>
+        ) : null}
         <button
           type="button"
           aria-label={stageMode === 'expanded' ? 'Reduce call window' : 'Expand call window'}
@@ -707,9 +750,19 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
           {stageControls}
         </div>
       </footer>
+      <CallPollOverlay mode={stageMode} />
     </section>
+    {pollCreatorOpen ? <CreatePollModal mode="call" onClose={() => setPollCreatorOpen(false)} /> : null}
     {notesConsentPrompt}
     </>
+  )
+}
+
+function PollControlIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+      <path d="M5 20V10M12 20V4M19 20v-7" />
+    </svg>
   )
 }
 

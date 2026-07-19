@@ -226,6 +226,39 @@ async fn access(pool: &PgPool, doc_id: Uuid, user_id: Uuid) -> AppResult<(RawDoc
     Ok((raw, role))
 }
 
+/// Resolve an editable, active BlockNote doc and return its channel.
+/// Used by doc-scoped uploads so image permissions match live editor permissions.
+pub(crate) async fn editable_doc_channel(
+    pool: &PgPool,
+    doc_id: Uuid,
+    user_id: Uuid,
+) -> AppResult<Uuid> {
+    let (raw, role) = access(pool, doc_id, user_id).await?;
+    if raw.kind != "doc" {
+        return Err(AppError::Validation(
+            "images can only be uploaded to docs".to_string(),
+        ));
+    }
+    if raw.deleted_at.is_some() {
+        return Err(AppError::Forbidden(
+            "cannot upload images to a trashed doc".to_string(),
+        ));
+    }
+    if !role.can_edit() {
+        return Err(AppError::Forbidden("editor role required".to_string()));
+    }
+    Ok(raw.channel_id)
+}
+
+pub(crate) async fn require_doc_visible(
+    pool: &PgPool,
+    doc_id: Uuid,
+    user_id: Uuid,
+) -> AppResult<()> {
+    let (_, role) = access(pool, doc_id, user_id).await?;
+    require_visible(role)
+}
+
 fn require_visible(role: DocRole) -> AppResult<()> {
     if role == DocRole::None {
         return Err(AppError::Forbidden("no access to this doc".to_string()));

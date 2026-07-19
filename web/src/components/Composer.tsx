@@ -9,7 +9,10 @@ import { useCoarsePointer } from '../lib/useMediaQuery'
 import { Avatar } from './Avatar'
 import { GifPicker, type GifPickerHandle } from './GifPicker'
 import { DuckStreakBar } from './DuckStreakBar'
+import { CreatePollModal } from './CreatePollModal'
 import type { Attachment, Channel, GifResult } from '../lib/types'
+import type { EncryptedAttachment } from '../lib/types'
+import { encryptAttachmentFile, MAX_ENCRYPTED_FILE_BYTES } from '../lib/e2ee/attachments'
 
 type Pending = {
   id: string
@@ -19,6 +22,7 @@ type Pending = {
   previewUrl?: string
   progress: number
   attachment?: Attachment
+  encryptedMetadata?: EncryptedAttachment
   error?: boolean
 }
 
@@ -84,6 +88,7 @@ export function Composer({
   )
 
   const [sending, setSending] = useState(false)
+  const encrypted = useStore((s) => s.isDmEncrypted(channel.id))
   const [pending, setPending] = useState<Pending[]>([])
   const [dragOver, setDragOver] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -109,6 +114,8 @@ export function Composer({
   const caretRef = useRef(0)
   const [manualGifOpen, setManualGifOpen] = useState(false)
   const [dismissedGifCommand, setDismissedGifCommand] = useState<string | null>(null)
+  const [pollOpen, setPollOpen] = useState(false)
+  const isGuest = useStore((s) => s.isGuest)
 
   const gifCommand = /^\/gif(?:\s+(.*))?$/.exec(value)
   const slashGifOpen = gifEnabled && gifCommand !== null && dismissedGifCommand !== value
@@ -332,6 +339,10 @@ export function Composer({
 
   const uploadOne = useCallback(
     (file: File) => {
+      if (encrypted && file.size > MAX_ENCRYPTED_FILE_BYTES) {
+        toastError('Encrypted attachments are limited to 50 MB because encryption happens in memory.')
+        return
+      }
       const id = String(++counterRef.current)
       const isImage = file.type.startsWith('image/')
       const previewUrl = isImage ? URL.createObjectURL(file) : undefined
@@ -339,13 +350,27 @@ export function Composer({
         ...p,
         { id, name: file.name, size: file.size, isImage, previewUrl, progress: 0 },
       ])
-      api
-        .uploadFile(channel.id, file, (frac) =>
+      void (async () => {
+        const prepared = encrypted ? await encryptAttachmentFile(file) : null
+        return api.uploadFile(channel.id, prepared?.file ?? file, (frac) =>
           setPending((p) => p.map((x) => (x.id === id ? { ...x, progress: frac } : x))),
-        )
-        .then((att) =>
+          encrypted,
+        ).then((attachment) => ({ attachment, prepared }))
+      })()
+        .then(({ attachment, prepared }) =>
           setPending((p) =>
-            p.map((x) => (x.id === id ? { ...x, progress: 1, attachment: att } : x)),
+            p.map((x) =>
+              x.id === id
+                ? {
+                    ...x,
+                    progress: 1,
+                    attachment,
+                    encryptedMetadata: prepared
+                      ? { id: attachment.id, ...prepared.metadata }
+                      : undefined,
+                  }
+                : x,
+            ),
           ),
         )
         .catch((e) => {
@@ -353,7 +378,7 @@ export function Composer({
           if (e instanceof Error) toastError(e.message)
         })
     },
-    [channel.id],
+    [channel.id, encrypted],
   )
 
   const addFiles = useCallback(
@@ -373,6 +398,9 @@ export function Composer({
 
   const uploading = pending.some((p) => !p.attachment && !p.error)
   const readyIds = pending.filter((p) => p.attachment).map((p) => p.attachment!.id)
+  const encryptedAttachments = pending
+    .map((p) => p.encryptedMetadata)
+    .filter((item): item is EncryptedAttachment => !!item)
 
   async function doSend() {
     const content = value.trim()
@@ -391,6 +419,7 @@ export function Composer({
         parentId,
         readyIds.length ? readyIds : undefined,
         activeReply?.id,
+        encryptedAttachments.length ? encryptedAttachments : undefined,
       )
       if (activeReply) setReplyTarget(channel.id, null)
       // Sent — the staged previews are gone from the UI, so free their blob URLs.
@@ -656,7 +685,11 @@ export function Composer({
               <div className="truncate text-xs text-[var(--color-text-dim)]">
                 {activeReply.deleted_at
                   ? 'Deleted message'
-                  : gifPreviewText(activeReply.content) || 'Attachment'}
+                  : activeReply.encrypted
+                    ? typeof activeReply.decryptedText === 'string'
+                      ? gifPreviewText(activeReply.decryptedText) || 'Attachment'
+                      : '🔒 Encrypted message'
+                    : gifPreviewText(activeReply.content) || 'Attachment'}
               </div>
             </div>
             <button
@@ -749,6 +782,17 @@ export function Composer({
               GIF
             </button>
           )}
+          {channel.kind !== 'dm' && !isGuest && canPost ? (
+            <button
+              type="button"
+              onClick={() => setPollOpen(true)}
+              title="Create a poll"
+              aria-label="Create a poll"
+              className="mb-0.5 flex h-11 w-11 items-center justify-center rounded-md text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] md:h-auto md:w-auto md:px-2 md:py-1.5"
+            >
+              <PollIcon />
+            </button>
+          ) : null}
           <textarea
             ref={ref}
             rows={1}
@@ -771,6 +815,17 @@ export function Composer({
           </button>
         </div>
       </div>
+      {pollOpen ? (
+        <CreatePollModal mode="channel" channelId={channel.id} onClose={() => setPollOpen(false)} />
+      ) : null}
     </div>
+  )
+}
+
+function PollIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+      <path d="M5 20V10M12 20V4M19 20v-7" />
+    </svg>
   )
 }

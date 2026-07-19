@@ -223,6 +223,10 @@ Server → client:
 - `voice_trigger.created` `{channel_id, trigger: VoiceTrigger}` and
   `voice_trigger.deleted` `{channel_id, trigger_id}` — to all channel members after a shared
   channel/DM voice trigger changes. Personal triggers are private and do not emit WS events.
+- `poll.created` / `poll.updated` `{poll: Poll}` — personalized per channel member so
+  `my_votes` reflects that recipient.
+- `poll.deleted` `{poll_id, channel_id, message_id}` — after creator-only soft deletion;
+  `message_id` is the removed poll-card message id or `null`.
 
 Client → server:
 
@@ -514,7 +518,9 @@ fills (1024 frames) is evicted from the room.
 - **Editor page**: emoji icon + borderless title input (debounced PATCH), BlockNote
   editor bound to the doc's Y.Doc fragment, presence avatars from awareness, share-to-
   channel action, role manager modal (owner only), backlinks list, read-only banner for
-  viewers, trashed banner with restore.
+  viewers, trashed banner with restore. Editors can paste, drop, or select raster images;
+  BlockNote uploads them through `/docs/{id}/uploads` and persists the authenticated proxied
+  `/files/{id}` URL in Yjs. Rendering resolves that URL to a short-lived local blob URL.
 - **Provider**: custom `SharpDocProvider` in `web/src/lib/docSync.ts` implementing the
   frame protocol over WebSocket with reconnect+backoff, exposing a `y-protocols`
   `Awareness` instance for BlockNote's `collaboration.provider`.
@@ -606,6 +612,9 @@ Client → server:
   Guests may send it. Unmuting via `voice.mute` also lowers a raised hand automatically.
 - `voice.signal` `{channel_id, to_user, to_conn, kind: "offer"|"answer"|"candidate", data: object}`
   — `data` is SDP `{type,sdp}` for an offer/answer, or `RTCIceCandidateInit` for a candidate.
+- `voice.poll_create` `{room_id, question, options, multi, expires_at?}`
+- `voice.poll_vote` `{room_id, poll_id, option_ids}` — an empty option list retracts the vote.
+- `voice.poll_close` `{room_id, poll_id}` — creator only.
 
 Server → client:
 
@@ -635,6 +644,9 @@ Server → client:
 - `voice.signal` `{channel_id, from_user, from_conn, to_user, to_conn, kind, data}` —
   delivered to `to_user`'s connections; receivers filter on
   `to_conn === my conn_id`.
+- `voice.poll_state` `{room_id, poll: CallPoll|null}` — complete current call-poll state after
+  create, vote, close, or expiry. `voice.state` and the `hello.voice_rooms` snapshots also carry
+  the current `poll`.
 - `voice.error`
   `{channel_id, code: "room_full"|"camera_full"|"screen_taken"|"not_member"|"not_in_room"|"link_revoked"}`
   — sent only to the offending connection. `camera_full` and `screen_taken` do not end the
@@ -843,6 +855,7 @@ files(
   id uuid PK default gen_random_uuid(),
   channel_id uuid NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
   message_id bigint REFERENCES messages(id) ON DELETE CASCADE,  -- NULL until attached
+  doc_id uuid REFERENCES docs(id) ON DELETE CASCADE,             -- doc image; migration 0020
   user_id uuid NOT NULL REFERENCES users(id),                   -- uploader
   key text NOT NULL,                    -- object key: channels/<channel_id>/<file_id>
   filename text NOT NULL, content_type text NOT NULL, size bigint NOT NULL,
@@ -853,7 +866,7 @@ files(
 notifications(
   id bigint PK GENERATED ALWAYS AS IDENTITY,
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,   -- recipient
-  kind text NOT NULL CHECK (kind IN ('mention','dm','reply')),
+  kind text NOT NULL CHECK (kind IN ('mention','dm','reply','poll_ended')),
   actor_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   channel_id uuid NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
   message_id bigint REFERENCES messages(id) ON DELETE CASCADE,
@@ -882,7 +895,7 @@ Attachment = { id: string, filename: string, content_type: string, size: number,
                url: string }              // url = proxied path "/api/v1/files/<id>"
 Message = { …, attachments: Attachment[] }  // added to the existing Message shape
 
-NotificationKind = 'mention'|'dm'|'reply'
+NotificationKind = 'mention'|'dm'|'reply'|'poll_ended'
 Notification = {
   id: string, kind: NotificationKind,
   actor: { id: string, display_name: string, avatar_url: string|null },
@@ -900,7 +913,8 @@ Prefs = { dnd: boolean, muted_channel_ids: string[], chat_layout: ChatLayout | n
 |---|---|---|
 | POST | `/channels/{id}/messages` | now also accepts `attachment_ids?: string[]`; content may be empty iff ≥1 attachment |
 | POST | `/channels/{id}/uploads` | multipart `file` → `201 Attachment` (channel owner/editor; ≤ `MAX_UPLOAD_MB`) |
-| GET | `/files/{id}?download=1` | streamed bytes (member only); `download=1` forces attachment disposition |
+| POST | `/docs/{id}/uploads` | multipart `file` → `201 Attachment` (doc editor/owner; active `kind:'doc'` only; PNG/JPEG/GIF/WebP/AVIF signature required; ≤ `MAX_UPLOAD_MB`) |
+| GET | `/files/{id}?download=1` | streamed bytes (message file: channel member; doc image: visible doc role); `download=1` forces attachment disposition |
 | GET | `/notifications?before=<id>&limit=30` | → `{notifications: Notification[], unread_count}` (newest first) |
 | POST | `/notifications/read` | `{ids?: string[]}` or `{all: true}` → `204` |
 | GET | `/prefs` | → `Prefs` |
@@ -965,7 +979,8 @@ in sync.
 ## Storage & push implementation
 
 - **Storage**: `object_store` crate (feature `aws`) → one config targets AWS S3, MinIO,
-  R2, B2. `server/src/storage.rs`. Object key = `channels/<channel_id>/<file_id>`.
+  R2, B2. `server/src/storage.rs`. Message object key =
+  `channels/<channel_id>/<file_id>`; doc image key = `docs/<doc_id>/<file_id>`.
 - **Web push**: `web-push` crate (VAPID / RFC 8291, `hyper-client`). Keys resolve
   env → `app_meta` → auto-generated P-256 (`p256`) and persisted, so push works with zero
   config. Public key served at `/push/vapid`; dead subscriptions (404/410) are pruned.
@@ -1059,7 +1074,8 @@ skips prior roasts (any `|duck` token) while the web client still renders them l
 normal GIFs and shows `<query>` under the image on hover. Manual GIF sends stay unmarked.
 The web client pre-splits content on this token **before**
 react-markdown (remark-gfm would autolink the embedded URL) and renders an `<img>` linked
-to the source; same family as the `[[doc:…]]`/`[[canvas:…]]` chips. Chat-only
+to the source; same family as the `[[doc:…]]`/`[[canvas:…]]`/`[[meet:…]]`/`[[poll:…]]`
+chips. Chat-only
 (channels/DMs/threads); docs and canvas are not integrated.
 
 ## Duck flow
@@ -1202,6 +1218,10 @@ stores its id in `card_message_id`. `notify::strip_resource_tokens` humanizes th
 - **Google sync poller** (5-min tick, `calendar_sync::poll_active_accounts`): iterate
   `calendar_accounts WHERE status='active'`, `sync_account` each; `invalid_grant` on refresh
   flips `status='invalid'`. The whole loop is gated on `config.google.is_some()`.
+- **Poll expiry scheduler** (30s tick, `routes::polls::expire_tick`): finds due open persistent
+  polls, atomically claims each through `closed_notified_at`, closes it with reason `expired`,
+  broadcasts its final state, and dispatches completion notifications. The same tick closes
+  expired ephemeral standalone-call polls in memory.
 
 ## Google OAuth
 
@@ -1245,3 +1265,252 @@ subdomain, not the SPA.
 `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (both required to enable Google Calendar) ·
 `GOOGLE_REDIRECT_URI` (required alongside them; exact-match, API origin). All unset → calendar
 connections disabled (native scheduled meetings still work).
+
+# Phase 6 — Polls
+
+Channel polls are durable chat resources with live per-user vote state, optional expiry, and an
+optional pinned banner. The same poll surface runs inside calls: channel-attached rooms bridge to
+the durable channel poll, while standalone-call rooms use replica-local ephemeral state.
+
+## Principles
+
+- **Channel resource, not DM content**: poll creation requires owner/editor posting permission
+  in a non-DM channel. Channel members may read and vote.
+- **Replacement voting**: each vote request replaces that user's full option set; an empty set
+  retracts it. Single-choice polls accept at most one option; multi-choice polls accept any
+  unique subset of their options.
+- **Personalized fanout**: durable poll events are rebuilt per recipient so `my_votes` is never
+  another member's selection.
+- **One completion claim**: `closed_notified_at` atomically claims finalization across replicas,
+  preventing duplicate close broadcasts and `poll_ended` notifications.
+
+## Database schema (migration `0017_polls.sql`)
+
+- `polls` — UUID `id`, `channel_id`, `creator_id`, nullable `card_message_id`, `question`,
+  `multi`, `pinned`, optional `expires_at`, `closed_at`, `closed_reason`,
+  `closed_notified_at`, soft-delete `deleted_at`, and `created_at`. Channel/creator deletion
+  cascades; deleting the card message only nulls `card_message_id`. Partial indexes cover open
+  channel polls and due expiry candidates.
+- `poll_options` — UUID `id`, owning `poll_id`, zero-based `position`, and `text`, unique on
+  `(poll_id, position)`; rows cascade with the poll.
+- `poll_votes` — `(poll_id, option_id, user_id)` primary key plus `voted_at`; option, poll, and
+  user references cascade. A separate `poll_id` index supports tallying.
+- Migration extends the notifications kind constraint with `poll_ended`.
+
+## Wire types
+
+All ids are strings. `card_message_id` is a string because message ids are `bigint`; timestamps
+are RFC3339 UTC strings.
+
+```ts
+PollVoter = { id: string; display_name: string }
+PollOption = { id: string; position: number; text: string; count: number;
+  voters: PollVoter[] }
+Poll = { id: string; channel_id: string; creator_id: string;
+  card_message_id: string|null; question: string; multi: boolean; pinned: boolean;
+  expires_at: string|null; closed_at: string|null;
+  closed_reason: 'manual'|'expired'|null; deleted: boolean; created_at: string;
+  options: PollOption[]; my_votes: string[]; total_voters: number }
+
+CallPollVoter = { id: string; display_name: string; guest: boolean }
+CallPollOption = { id: string; text: string; count: number; voters: CallPollVoter[] }
+CallPoll = { id: string; room_id: string; question: string; multi: boolean;
+  persistent_poll_id: string|null; creator_id: string; expires_at: string|null;
+  closed: boolean; options: CallPollOption[]; my_votes: null }
+```
+
+`total_voters` counts distinct registered voters, not selected options. Option `count` and
+`voters` expose each option's tally and voter identities.
+
+## REST API (`/api/v1`, non-guest `AuthUser`)
+
+| Method | Path | Request / response |
+|---|---|---|
+| GET | `/channels/{id}/polls?active=1` | Channel member → `{polls: Poll[]}`, newest first. Without `active=1`, includes closed and deleted polls; active mode includes only non-deleted, unexpired, unclosed polls. |
+| POST | `/channels/{id}/polls` | Non-DM owner/editor; `{question, options, multi, pinned, expires_at?}` → `201 Poll`. Creates the durable poll, posts its chat card, then emits `poll.created`. |
+| GET | `/polls/{id}` | Channel member → personalized `Poll`. |
+| DELETE | `/polls/{id}` | Creator only → 204. Soft-deletes the poll and its card message, then emits `poll.deleted`. |
+| POST | `/polls/{id}/vote` | Channel member; `{option_ids}` → personalized `Poll`. Replaces all caller votes and emits `poll.updated`. |
+| DELETE | `/polls/{id}/vote` | Channel member → personalized `Poll`. Retracts all caller votes and emits `poll.updated`. |
+| POST | `/polls/{id}/close` | Creator or channel owner → `Poll`. Idempotently closes with reason `manual`, emits `poll.updated`, and dispatches completion notifications once. |
+| POST | `/polls/{id}/pin` | Creator or channel owner; `{pinned}` → `Poll`. Open polls only; emits `poll.updated`. |
+
+Creation trims all text. Question length is **1–500 characters**; there must be **2–10**
+options; each option is **1–100 characters** after trimming and option text must be unique.
+`expires_at`, when supplied, must be in the future. Vote option ids must be unique and belong
+to that poll.
+
+## Message token and pinned banner
+
+Creating any durable poll posts a normal message as the creator with content
+`[[poll:<uuid>|<question>]]`; `|`, `]`, and newlines in the token question are replaced with
+spaces. The message follows the normal message broadcast/notification path, stores its id in
+`card_message_id`, and renders as the interactive poll card. Notification previews humanize the
+token as `📊 <question>`.
+
+`pinned=true` makes an **open** poll appear in the channel's sticky active-poll banner. Multiple
+pinned polls collapse behind a count and can be expanded. The banner admits only non-deleted,
+unclosed polls; manual close, or the scheduler processing an expiry, therefore auto-unsticks the
+poll even though the stored `pinned` field need not be rewritten. Pin changes are rejected after
+close/expiry.
+
+## WS events
+
+Durable server events use the existing main socket:
+
+- `poll.created` / `poll.updated` — `{poll: Poll}`, sent to all channel members with
+  recipient-specific `my_votes`.
+- `poll.deleted` — `{poll_id, channel_id, message_id}` to all channel members.
+
+Call-poll commands and state use that same socket:
+
+- client `voice.poll_create` — `{room_id, question, options, multi, expires_at?}`; registered
+  active room participant only, with the same text/count/expiry validation as REST. Guests cannot
+  create polls, and a room holds at most one poll.
+- client `voice.poll_vote` — `{room_id, poll_id, option_ids}`; active participants, including
+  guests. Empty `option_ids` retracts the vote.
+- client `voice.poll_close` — `{room_id, poll_id}`; active poll creator only.
+- server `voice.poll_state` — `{room_id, poll: CallPoll|null}`, broadcast as a complete snapshot
+  after mutations and standalone expiry. Current poll state is also included in `voice.state` and
+  `hello.voice_rooms` snapshots for joining/reconnecting clients.
+
+## Call-poll persistence boundary
+
+- **Channel-attached call**: creation calls the durable channel-poll path with `pinned=false`,
+  persists options and registered-user votes in Postgres, posts the `[[poll:…]]` chat card, and
+  mirrors durable changes between chat and `voice.poll_state`. The call wrapper's
+  `persistent_poll_id` identifies the durable poll.
+- **Standalone call**: poll, options, and votes live only in the room's in-memory `CallPoll` on
+  one replica. They are not Redis-fanned, never post to chat, and disappear when the last
+  participant leaves and the room is removed (or the replica restarts).
+- **Guest votes**: always live in the in-memory call overlay, including on a channel-attached
+  poll. They affect the live `voice.poll_state` tally only: they are never inserted into
+  `poll_votes`, never emitted on the durable `Poll`, and never appear on the chat card. Registered
+  votes on a channel-attached poll use the durable vote path; standalone registered votes remain
+  in the same ephemeral overlay.
+
+## Expiry and completion notifications
+
+`main.rs` runs `routes::polls::expire_tick` every 30 seconds. It selects due, open, non-deleted
+durable polls; `finalize_poll_and_notify` atomically claims each with
+`UPDATE … WHERE closed_notified_at IS NULL RETURNING`, sets `closed_at`, reason `expired`, and
+`closed_notified_at`, emits the final `poll.updated`, dispatches notifications, and mirrors closure
+into any live channel call. The tick also marks expired standalone-call polls closed in memory and
+broadcasts `voice.poll_state`.
+
+Completion recipients are `creator ∪ distinct registered voters`. Each unmuted recipient gets a
+`poll_ended` inbox row and recipient-only `notification.created`; the actor is the poll creator and
+the message link targets the card when present. Preview contains the question plus the first
+highest-count option and tally, or `no votes`. A channel mute suppresses the row and every delivery.
+DND preserves the inbox row and WS event but suppresses web/Expo push; normal client DND handling
+also suppresses arrival toast/OS popup. Delivery is best-effort after the atomic finalization claim.
+
+# E2EE (DMs)
+
+End-to-end encryption is available only for direct messages. The server performs **zero
+cryptography**: it stores and relays opaque message/file ciphertext plus public device keys.
+This is a Keybase-style device-key design with **no forward secrecy**. The server never sees
+message or attachment plaintext.
+
+## Database schema (migration `0017_e2ee.sql`)
+
+- `e2ee_devices` — client-generated `id` UUID primary key, owning `user_id`, human-readable
+  `name`, base64url `x25519_pub` and `ed25519_pub`, `created_at`, and server-maintained
+  `last_seen_at`. Indexed by `user_id`; rows cascade when their user is deleted.
+- `e2ee_backups` — one opaque password-sealed backup per user (`user_id` primary key), with
+  `salt`, `nonce`, `ciphertext`, and `updated_at`. Rows cascade when their user is deleted.
+- `messages.encrypted boolean NOT NULL DEFAULT false` marks base64 JSON envelopes in
+  `messages.content`.
+- `files.encrypted boolean NOT NULL DEFAULT false` marks opaque encrypted upload bytes.
+
+Wire types add `encrypted: boolean` to `Message`, `ReplyPreview`, and `Attachment`. An encrypted
+quote target has `ReplyPreview.content = ''` and `ReplyPreview.encrypted = true`; clients decrypt
+and resolve its local preview.
+
+## REST API (`/api/v1`, non-guest `AuthUser` only)
+
+| Method | Path | Request / response |
+|---|---|---|
+| GET | `/e2ee/devices?user_id=<uuid>` | Any authenticated user may query any user's public devices. Returns `{"devices":[{"id":"<uuid>","user_id":"<uuid>","name":"Chrome on macOS","x25519_pub":"<base64url>","ed25519_pub":"<base64url>","created_at":"<RFC3339>"}]}`. `last_seen_at` is never sent. |
+| POST | `/e2ee/devices` | `{"id":"<client uuid>","name":"Chrome on macOS","x25519_pub":"<base64url>","ed25519_pub":"<base64url>"}` → 201. Upserts by id only when the row belongs to the caller; another user's id returns 403. `name` is at most 100 characters; each public key must be a 43–44 character base64url encoding of exactly 32 bytes. |
+| DELETE | `/e2ee/devices/{id}` | Own device only → 204; another user's device returns 403. |
+| PUT | `/e2ee/backup` | `{"salt":"<opaque>","nonce":"<opaque>","ciphertext":"<opaque>"}` → 204; upserts the caller's row. Combined payload fields are capped at 200 KB. |
+| GET | `/e2ee/backup` | Own backup only → `{"salt":"<opaque>","nonce":"<opaque>","ciphertext":"<opaque>","updated_at":"<RFC3339>"}`; 404 when absent. |
+
+Guest voice-link tokens cannot access any E2EE route. Every successful device create/update or
+delete broadcasts global WS event `e2ee.devices_changed` with
+`{"user_id":"<owner uuid>"}` to all connected users.
+
+## Encrypted messages and files
+
+Message create and edit bodies accept optional `encrypted` (default `false`). When true:
+
+- channel kind must be `dm`; other channel kinds return 400;
+- `content` remains required and non-empty, with a 65,536-character limit instead of 8,000;
+- `content` is an opaque base64 JSON envelope persisted unchanged;
+- encrypted messages skip duck-streak processing;
+- edit requests must send `encrypted:true` for encrypted messages. Plaintext messages must send
+  false or omit the field. Changing either message's encryption state returns 400.
+
+Upload multipart bodies accept optional text field `encrypted` (`true`/`1`, with `false`/`0`
+accepted explicitly) and persist it on `files`. Encrypted clients send an opaque body with a
+placeholder filename and `application/octet-stream`; storage and download behavior otherwise stay
+unchanged.
+
+Encrypted message bodies are excluded from full-text search. DM notifications never inspect
+encrypted content: inbox `preview`, web-push body, and Expo-push body are always
+`🔒 Encrypted message`; push title remains the actor's display name. When every member of a DM has
+at least one `e2ee_devices` row, meeting transcription capture is unavailable for that DM.
+
+## Client envelope (opaque to server)
+
+```json
+{ "v": 1, "dev": "…", "epk": "…", "n": "…", "ct": "…", "keys": { "deviceId": "wrappedKey" }, "sig": "…" }
+```
+
+Envelope binary fields are base64url. After client-side decryption, body plaintext is:
+
+```json
+{
+  "text": "message text",
+  "attachments": [
+    { "id": "…", "key": "…", "nonce": "…", "filename": "…", "content_type": "…" }
+  ]
+}
+```
+
+`attachments` is optional. Clients use X25519, Ed25519, and XChaCha20-Poly1305; these algorithms
+and envelope fields are client contract only and remain uninterpreted by the server.
+
+## Client-side behavior (`web/src/lib/e2ee/`)
+
+Trust model is Keybase-style: long-lived per-device keys, no ratchet, therefore no per-message
+forward secrecy — a compromised device private key decrypts that device's message history. The
+server never sees plaintext.
+
+- **Devices** — on login the client loads or generates a device (X25519 + Ed25519 keypairs,
+  private keys in IndexedDB db `sharp-e2ee`) and re-registers it (idempotent upsert). A DM is
+  encrypted iff every member has ≥1 registered device; otherwise messages fall back to plaintext
+  with a banner.
+- **Sealing** — random 32-byte message key encrypts the body (XChaCha20-Poly1305); one ephemeral
+  X25519 key per message; per-recipient-device wrap = ECDH → HKDF-SHA256 (info `sharp-e2ee-v1`)
+  → XChaCha20-Poly1305 (`nonce24 || ct`). Recipients are all devices of both members, including
+  the sender's other devices. `sig` = Ed25519 over the raw ciphertext, verified against the
+  sender device's published key; failure renders as undecryptable.
+- **Attachments** — in encrypted DMs each file gets a random key + nonce, is encrypted
+  client-side (50 MB cap) and uploaded as `encrypted.bin` / `application/octet-stream` with the
+  `encrypted` flag; real `{filename, content_type, key, nonce}` ride inside the sealed body.
+  Downloads fetch ciphertext and decrypt in memory.
+- **Local search** — decrypted DM messages are indexed in the IndexedDB `messages` store
+  (`{id, channelId, text, authorName, ts}`); the search palette merges these lock-tagged hits
+  with server results (server search excludes encrypted rows). On logout the `messages` and
+  `trust` stores are wiped; device keys are kept so the same browser keeps its identity.
+- **Backup** — Argon2id(passphrase, 16-byte salt; t=3, m=64 MiB, p=1) → XChaCha20-Poly1305 over
+  JSON of `{device id, name, x25519_priv, ed25519_priv}`; stored via `PUT /e2ee/backup`. Restore
+  decrypts and re-registers the same device id, so history sealed to it becomes readable. A fresh
+  browser with an existing backup is offered restore-or-start-fresh before generating a new
+  device.
+- **Verification** — per-DM fingerprint = 8 emoji derived from SHA-256 over both users' sorted
+  device-set public keys, compared out-of-band; the verified mark lives in the local `trust`
+  store and resets whenever the partner's device set changes (header shows a
+  "device list changed" warning until re-verified).

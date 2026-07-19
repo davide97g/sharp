@@ -1,7 +1,9 @@
 use crate::error::{AppError, AppResult};
 use crate::models::User;
 use crate::state::SharedState;
-use argon2::password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::password_hash::{
+    rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
+};
 use argon2::Argon2;
 use axum::async_trait;
 use axum::extract::{FromRequestParts, State};
@@ -138,10 +140,12 @@ pub fn verify_token(token: &str, secret: &str) -> Option<Uuid> {
     verify_claims(token, secret).map(|(_, id)| id)
 }
 
-fn bearer_from_parts(parts: &Parts) -> Option<String> {
+pub(crate) fn bearer_from_parts(parts: &Parts) -> Option<String> {
     let header = parts.headers.get(AUTHORIZATION)?;
     let value = header.to_str().ok()?;
-    let token = value.strip_prefix("Bearer ").or_else(|| value.strip_prefix("bearer "))?;
+    let token = value
+        .strip_prefix("Bearer ")
+        .or_else(|| value.strip_prefix("bearer "))?;
     Some(token.trim().to_string())
 }
 
@@ -337,7 +341,10 @@ mod tests {
         // AuthUser rejects guests; this is the claims-level invariant it relies on.
         let token = create_guest_token("Guest", Uuid::new_v4(), "link", SECRET).unwrap();
         let (claims, _) = verify_claims(&token, SECRET).unwrap();
-        assert!(claims.guest, "AuthUser must reject tokens where guest == true");
+        assert!(
+            claims.guest,
+            "AuthUser must reject tokens where guest == true"
+        );
 
         let user = create_token(Uuid::new_v4(), SECRET).unwrap();
         let (user_claims, _) = verify_claims(&user, SECRET).unwrap();
@@ -404,7 +411,11 @@ pub async fn desktop_exchange(
 
     let user_id = match entry {
         Some((id, exp)) if exp > now => id,
-        _ => return Err(AppError::Unauthorized("invalid or expired code".to_string())),
+        _ => {
+            return Err(AppError::Unauthorized(
+                "invalid or expired code".to_string(),
+            ))
+        }
     };
 
     let row = sqlx::query(

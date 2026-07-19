@@ -47,6 +47,10 @@
         border-radius: 8px; background: var(--accent); color: #fff; padding: 10px 16px;
         font-size: 14px; font-weight: 600;
       }
+      .secondary { width: 100%; background: transparent; border: 1px solid var(--border); }
+      .secondary:hover { background: var(--panel); }
+      .or { display: flex; align-items: center; gap: 10px; margin: 14px 0; color: var(--faint); font-size: 12px; }
+      .or:before, .or:after { content: ''; height: 1px; flex: 1; background: var(--border); }
       .hidden { display: none; }
     </style>
   </head>
@@ -71,6 +75,20 @@
         <p id="error" class="msg err hidden"></p>
       </form>
 
+      <div id="passkeyLogin" class="hidden">
+        <div class="or">or</div>
+        <button id="passkeyButton" class="secondary" type="button">Sign in with passkey</button>
+      </div>
+
+      <div id="setup" class="hidden">
+        <h1>Set up a passkey?</h1>
+        <p class="sub" style="margin:8px 0 16px">Use Face ID, Touch ID, Windows Hello, or a security key next time.</p>
+        <label><span>Passkey name</span><input id="passkeyName" maxlength="80" value="My passkey" /></label>
+        <button id="setupButton" type="button" style="width:100%">Create passkey</button>
+        <button id="skipButton" class="secondary" type="button">Not now</button>
+        <p id="setupError" class="msg err hidden"></p>
+      </div>
+
       <div id="done" class="hidden">
         <p class="msg">Opening the sharp app… You can close this tab.</p>
         <a id="openLink" class="open-btn" href="#">Open sharp</a>
@@ -87,6 +105,14 @@
         var btn = document.getElementById('submit');
         var doneEl = document.getElementById('done');
         var openLink = document.getElementById('openLink');
+        var passkeyLogin = document.getElementById('passkeyLogin');
+        var passkeyButton = document.getElementById('passkeyButton');
+        var setup = document.getElementById('setup');
+        var setupButton = document.getElementById('setupButton');
+        var skipButton = document.getElementById('skipButton');
+        var setupError = document.getElementById('setupError');
+        var pendingToken = null;
+        var pendingPassword = null;
 
         function showError(msg) {
           errEl.textContent = msg;
@@ -101,6 +127,103 @@
           location.href = url;
         }
 
+        function api(path, options) {
+          return fetch('/api/v1' + path, options).then(function (r) {
+            if (r.status === 204) return null;
+            return r.json().then(function (d) {
+              if (!r.ok) throw new Error((d.error && d.error.message) || 'Request failed');
+              return d;
+            });
+          });
+        }
+
+        function b64decode(value) {
+          var base64 = value.replace(/-/g, '+').replace(/_/g, '/');
+          while (base64.length % 4) base64 += '=';
+          var binary = atob(base64), bytes = new Uint8Array(binary.length);
+          for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          return bytes.buffer;
+        }
+
+        function b64encode(value) {
+          if (!value) return null;
+          var bytes = new Uint8Array(value), binary = '';
+          for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+          return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+
+        function createOptions(raw) {
+          var options = raw;
+          options.challenge = b64decode(options.challenge);
+          options.user.id = b64decode(options.user.id);
+          if (options.excludeCredentials) options.excludeCredentials.forEach(function (c) { c.id = b64decode(c.id); });
+          return options;
+        }
+
+        function getOptions(raw) {
+          var options = raw;
+          options.challenge = b64decode(options.challenge);
+          if (options.allowCredentials) options.allowCredentials.forEach(function (c) { c.id = b64decode(c.id); });
+          return options;
+        }
+
+        function registrationJSON(credential) {
+          return { id: credential.id, rawId: b64encode(credential.rawId), type: credential.type,
+            authenticatorAttachment: credential.authenticatorAttachment,
+            response: { attestationObject: b64encode(credential.response.attestationObject), clientDataJSON: b64encode(credential.response.clientDataJSON), transports: credential.response.getTransports ? credential.response.getTransports() : [] },
+            extensions: credential.getClientExtensionResults() };
+        }
+
+        function authenticationJSON(credential) {
+          return { id: credential.id, rawId: b64encode(credential.rawId), type: credential.type,
+            authenticatorAttachment: credential.authenticatorAttachment,
+            response: { authenticatorData: b64encode(credential.response.authenticatorData), clientDataJSON: b64encode(credential.response.clientDataJSON), signature: b64encode(credential.response.signature), userHandle: b64encode(credential.response.userHandle) },
+            extensions: credential.getClientExtensionResults() };
+        }
+
+        function finishWithToken(token) {
+          return api('/auth/desktop/code', { method: 'POST', headers: { Authorization: 'Bearer ' + token } })
+            .then(function (d) { finish(d.code); });
+        }
+
+        function offerSetup(token, password) {
+          return api('/auth/passkeys', { headers: { Authorization: 'Bearer ' + token } }).then(function (d) {
+            if (!d.enabled || d.prompt_dismissed || d.passkeys.length) return finishWithToken(token);
+            pendingToken = token;
+            pendingPassword = password;
+            form.classList.add('hidden');
+            passkeyLogin.classList.add('hidden');
+            setup.classList.remove('hidden');
+          });
+        }
+
+        api('/auth/passkeys/config').then(function (d) {
+          if (d.enabled && window.isSecureContext && window.PublicKeyCredential) passkeyLogin.classList.remove('hidden');
+        }).catch(function () {});
+
+        passkeyButton.addEventListener('click', function () {
+          if (!state) { showError('Missing sign-in state. Return to the app and try again.'); return; }
+          errEl.classList.add('hidden'); passkeyButton.disabled = true;
+          api('/auth/passkeys/login/start', { method: 'POST' })
+            .then(function (challenge) { return navigator.credentials.get({ publicKey: getOptions(challenge.options.publicKey) }).then(function (credential) { return api('/auth/passkeys/login/finish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ceremony_id: challenge.ceremony_id, credential: authenticationJSON(credential) }) }); }); })
+            .then(function (d) { return finishWithToken(d.token); })
+            .catch(function (error) { if (error.name !== 'NotAllowedError') showError(error.message || 'Passkey sign-in failed.'); passkeyButton.disabled = false; });
+        });
+
+        setupButton.addEventListener('click', function () {
+          var name = document.getElementById('passkeyName').value.trim();
+          if (!name || !pendingPassword) return;
+          setupButton.disabled = true; setupError.classList.add('hidden');
+          api('/auth/passkeys', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + pendingToken }, body: JSON.stringify({ name: name, password: pendingPassword }) })
+            .then(function (challenge) { return navigator.credentials.create({ publicKey: createOptions(challenge.options.publicKey) }).then(function (credential) { return api('/auth/passkeys/register/finish', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + pendingToken }, body: JSON.stringify({ ceremony_id: challenge.ceremony_id, credential: registrationJSON(credential) }) }); }); })
+            .then(function () { pendingPassword = null; return finishWithToken(pendingToken); })
+            .catch(function (error) { if (error.name !== 'NotAllowedError') { setupError.textContent = error.message || 'Could not add passkey.'; setupError.classList.remove('hidden'); } setupButton.disabled = false; });
+        });
+
+        skipButton.addEventListener('click', function () {
+          api('/auth/passkeys/prompt/dismiss', { method: 'POST', headers: { Authorization: 'Bearer ' + pendingToken } }).catch(function () {}).then(function () { pendingPassword = null; return finishWithToken(pendingToken); });
+        });
+
         form.addEventListener('submit', function (e) {
           e.preventDefault();
           errEl.classList.add('hidden');
@@ -110,29 +233,12 @@
           var email = document.getElementById('email').value.trim().toLowerCase();
           var password = document.getElementById('password').value;
 
-          fetch('/api/v1/auth/login', {
+          api('/auth/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email: email, password: password }),
           })
-            .then(function (r) {
-              return r.json().then(function (d) {
-                if (!r.ok) throw new Error((d.error && d.error.message) || 'Sign in failed');
-                return d.token;
-              });
-            })
-            .then(function (token) {
-              return fetch('/api/v1/auth/desktop/code', {
-                method: 'POST',
-                headers: { Authorization: 'Bearer ' + token },
-              }).then(function (r) {
-                return r.json().then(function (d) {
-                  if (!r.ok) throw new Error((d.error && d.error.message) || 'Could not create login code');
-                  return d.code;
-                });
-              });
-            })
-            .then(function (code) { finish(code); })
+            .then(function (d) { return offerSetup(d.token, password); })
             .catch(function (err) {
               showError(err.message || 'Something went wrong.');
               btn.disabled = false;

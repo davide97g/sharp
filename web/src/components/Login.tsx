@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, getServerUrl, setServerUrl } from '../lib/api'
 import { ApiRequestError } from '../lib/api'
@@ -7,6 +7,7 @@ import { useStore } from '../store'
 import { toastError } from '../lib/toast'
 import { sound } from '../lib/sound'
 import { BrandLockup, LOGIN_BRAND_ID } from './BrandLockup'
+import { isPasskeyCancellation, loginWithPasskey, supportsPasskeys } from '../lib/passkeys'
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
@@ -17,8 +18,14 @@ export function Login() {
   const [displayName, setDisplayName] = useState('')
   const [server, setServer] = useState(getServerUrl() ?? '')
   const [busy, setBusy] = useState(false)
+  const [passkeysEnabled, setPasskeysEnabled] = useState(false)
   const init = useStore((s) => s.init)
   const navigate = useNavigate()
+
+  useEffect(() => {
+    if (isTauri || !supportsPasskeys()) return
+    api.passkeyConfig().then((value) => setPasskeysEnabled(value.enabled)).catch(() => {})
+  }, [])
 
   async function browserLogin() {
     if (busy) return
@@ -55,12 +62,30 @@ export function Login() {
           ? await api.login(email.trim().toLowerCase(), password)
           : await api.register(email.trim().toLowerCase(), password, displayName.trim())
       await init(res.token, res.user)
+      sessionStorage.setItem('sharp.offerPasskey', '1')
       sound.loginSuccess()
       navigate('/', { replace: true })
     } catch (err) {
       if (err instanceof ApiRequestError) toastError(err.message)
       else if (err instanceof Error) toastError(err.message)
       else toastError('Something went wrong.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function passkeyLogin() {
+    if (busy) return
+    setBusy(true)
+    try {
+      const res = await loginWithPasskey()
+      await init(res.token, res.user)
+      sound.loginSuccess()
+      navigate('/', { replace: true })
+    } catch (error) {
+      if (!isPasskeyCancellation(error)) {
+        toastError(error instanceof Error ? error.message : 'Passkey sign-in failed.')
+      }
     } finally {
       setBusy(false)
     }
@@ -152,6 +177,24 @@ export function Login() {
               {busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
             </button>
           </form>
+
+          {mode === 'login' && passkeysEnabled && (
+            <>
+              <div className="my-4 flex items-center gap-3 text-xs text-[var(--color-text-faint)]">
+                <span className="h-px flex-1 bg-[var(--color-border)]" />
+                or
+                <span className="h-px flex-1 bg-[var(--color-border)]" />
+              </div>
+              <button
+                type="button"
+                onClick={() => void passkeyLogin()}
+                disabled={busy}
+                className="min-h-11 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-4 py-2.5 text-base font-semibold text-[var(--color-text)] transition hover:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)] disabled:opacity-60 sm:text-sm"
+              >
+                Sign in with passkey
+              </button>
+            </>
+          )}
 
           {isTauri && (
             <>

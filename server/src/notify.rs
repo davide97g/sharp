@@ -104,7 +104,8 @@ fn truncate_chars(s: &str, max: usize) -> String {
 /// Replace resource chips with a readable icon + title so notification previews
 /// don't leak raw tokens: `[[doc:<uuid>|Title]]` → "📄 Title",
 /// `[[canvas:<uuid>|Title]]` → "🎨 Title", and the scheduled-meeting card
-/// `[[meet:<uuid>|Title|<start_iso>]]` → "📅 Title".
+/// `[[meet:<uuid>|Title|<start_iso>]]` → "📅 Title" and
+/// `[[poll:<uuid>|Question]]` → "📊 Question".
 fn strip_resource_tokens(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
@@ -117,6 +118,8 @@ fn strip_resource_tokens(text: &str) -> String {
             Some("📄")
         } else if after.starts_with("meet:") {
             Some("📅")
+        } else if after.starts_with("poll:") {
+            Some("📊")
         } else {
             None
         };
@@ -189,7 +192,7 @@ fn build_preview(content: &str, first_attachment: Option<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{contains_all_mention, preview_text};
+    use super::{contains_all_mention, preview_text, strip_resource_tokens};
 
     #[test]
     fn humanizes_standalone_gif_token() {
@@ -237,6 +240,14 @@ mod tests {
             "sent a GIF"
         );
     }
+
+    #[test]
+    fn humanizes_poll_token() {
+        assert_eq!(
+            strip_resource_tokens("[[poll:00000000-0000-0000-0000-000000000000|Lunch?]]"),
+            "📊 Lunch?"
+        );
+    }
 }
 
 /// Does `content` contain an `@all` broadcast mention? Same boundary rules as
@@ -257,7 +268,11 @@ fn contains_all_mention(content: &str) -> bool {
         }
         let after = &lower[i + 1..];
         if let Some(rest) = after.strip_prefix("all") {
-            let boundary = rest.chars().next().map(|c| !c.is_alphanumeric()).unwrap_or(true);
+            let boundary = rest
+                .chars()
+                .next()
+                .map(|c| !c.is_alphanumeric())
+                .unwrap_or(true);
             if boundary {
                 return true;
             }
@@ -318,7 +333,11 @@ async fn mentioned_ids(
         for (uid, name) in &members {
             if after.starts_with(name.as_str()) {
                 let rest = &after[name.len()..];
-                let boundary = rest.chars().next().map(|c| !c.is_alphanumeric()).unwrap_or(true);
+                let boundary = rest
+                    .chars()
+                    .next()
+                    .map(|c| !c.is_alphanumeric())
+                    .unwrap_or(true);
                 if boundary {
                     found.insert(*uid);
                     break;
@@ -330,13 +349,12 @@ async fn mentioned_ids(
 }
 
 async fn other_member_ids(pool: &PgPool, channel_id: Uuid, exclude: Uuid) -> AppResult<Vec<Uuid>> {
-    let rows = sqlx::query(
-        "SELECT user_id FROM channel_members WHERE channel_id = $1 AND user_id <> $2",
-    )
-    .bind(channel_id)
-    .bind(exclude)
-    .fetch_all(pool)
-    .await?;
+    let rows =
+        sqlx::query("SELECT user_id FROM channel_members WHERE channel_id = $1 AND user_id <> $2")
+            .bind(channel_id)
+            .bind(exclude)
+            .fetch_all(pool)
+            .await?;
     let mut ids = Vec::with_capacity(rows.len());
     for row in &rows {
         ids.push(row.try_get::<Uuid, _>("user_id")?);
@@ -430,6 +448,7 @@ pub async fn dispatch_message(
     author: Uuid,
     content: &str,
     first_attachment: Option<&str>,
+    encrypted: bool,
 ) {
     if let Err(e) = dispatch_inner(
         state,
@@ -440,6 +459,7 @@ pub async fn dispatch_message(
         author,
         content,
         first_attachment,
+        encrypted,
     )
     .await
     {
@@ -457,6 +477,7 @@ async fn dispatch_inner(
     author: Uuid,
     content: &str,
     first_attachment: Option<&str>,
+    encrypted: bool,
 ) -> AppResult<()> {
     let pool = &state.pool;
 
@@ -464,7 +485,7 @@ async fn dispatch_inner(
     let mut targets: Vec<(Uuid, &'static str)> = Vec::new();
     let mut seen: HashSet<Uuid> = HashSet::new();
 
-    if channel_kind == "dm" {
+    if encrypted || channel_kind == "dm" {
         for uid in other_member_ids(pool, channel_id, author).await? {
             if seen.insert(uid) {
                 targets.push((uid, "dm"));
@@ -498,7 +519,11 @@ async fn dispatch_inner(
         return Ok(());
     }
 
-    let preview = build_preview(content, first_attachment);
+    let preview = if encrypted {
+        "🔒 Encrypted message".to_string()
+    } else {
+        build_preview(content, first_attachment)
+    };
 
     for (uid, kind) in targets {
         if is_muted(pool, uid, channel_id).await {
@@ -553,6 +578,97 @@ async fn dispatch_inner(
     Ok(())
 }
 
+/// Best-effort poll completion notification dispatch. Atomic poll finalization
+/// owns deduplication; this function owns recipient/inbox/push delivery.
+pub async fn dispatch_poll_ended(state: &SharedState, poll: &crate::routes::polls::Poll) {
+    if let Err(error) = dispatch_poll_ended_inner(state, poll).await {
+        tracing::warn!("poll-ended notification dispatch failed: {}", error);
+    }
+}
+
+async fn dispatch_poll_ended_inner(
+    state: &SharedState,
+    poll: &crate::routes::polls::Poll,
+) -> AppResult<()> {
+    let mut recipients: HashSet<Uuid> = HashSet::from([poll.creator_id]);
+    let voter_rows = sqlx::query("SELECT DISTINCT user_id FROM poll_votes WHERE poll_id = $1")
+        .bind(poll.id)
+        .fetch_all(&state.pool)
+        .await?;
+    for row in voter_rows {
+        recipients.insert(row.try_get("user_id")?);
+    }
+
+    let winning_count = poll
+        .options
+        .iter()
+        .map(|option| option.count)
+        .max()
+        .unwrap_or(0);
+    let winner = poll
+        .options
+        .iter()
+        .find(|option| option.count == winning_count);
+    let preview = match winner.filter(|option| option.count > 0) {
+        Some(option) => format!("📊 {} — {} ({})", poll.question, option.text, option.count),
+        None => format!("📊 {} — no votes", poll.question),
+    };
+
+    for uid in recipients {
+        if is_muted(&state.pool, uid, poll.channel_id).await {
+            continue;
+        }
+        let row = sqlx::query(
+            "INSERT INTO notifications (user_id, kind, actor_id, channel_id, message_id, preview)
+             VALUES ($1, 'poll_ended', $2, $3, $4, $5) RETURNING id",
+        )
+        .bind(uid)
+        .bind(poll.creator_id)
+        .bind(poll.channel_id)
+        .bind(poll.card_message_id)
+        .bind(&preview)
+        .fetch_one(&state.pool)
+        .await?;
+        let notification = load_notification(&state.pool, row.try_get("id")?).await?;
+        state
+            .hub
+            .broadcast(
+                envelope(
+                    "notification.created",
+                    json!({ "notification": &notification }),
+                ),
+                vec![uid],
+            )
+            .await;
+
+        if !is_dnd(&state.pool, uid).await {
+            let web_allowed = !state.hub.has_visible_session(uid).await;
+            let expo_allowed = !state.hub.is_online(uid);
+            let (title, body) = push::title_and_body(&notification);
+            let web = async {
+                if web_allowed {
+                    push::send_to_user(state, uid, &notification).await;
+                }
+            };
+            let expo = async {
+                if expo_allowed {
+                    expo_push::send_to_user(
+                        state,
+                        uid,
+                        &title,
+                        &body,
+                        notification.channel_id,
+                        &notification.kind,
+                    )
+                    .await;
+                }
+            };
+            tokio::join!(web, expo);
+        }
+    }
+    Ok(())
+}
+
 /// Web push (RFC 8291 / VAPID) delivery.
 mod push {
     use crate::models::Notification;
@@ -569,6 +685,7 @@ mod push {
         // Title/body shaped for the service worker.
         let title = match notif.kind.as_str() {
             "dm" => notif.actor.display_name.clone(),
+            "poll_ended" => format!("Poll ended in #{}", notif.channel_name),
             _ => format!("{} in #{}", notif.actor.display_name, notif.channel_name),
         };
         (title, notif.preview.clone())

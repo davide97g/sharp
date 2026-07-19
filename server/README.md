@@ -20,6 +20,9 @@ files with SPA fallback.
 | `REDIS_URL` | no | — | If set, events are published/consumed on `sharp:events` for cross-replica sync |
 | `WEB_DIST` | no | `./web-dist` | Directory of the built SPA. If missing, the server runs API-only |
 | `SHARP_DISABLE_SIGNUP` | no | `false` | `true`/`1` blocks registration — except when the users table is empty (first user) |
+| `WEBAUTHN_RP_ID` | no | — | Stable WebAuthn relying-party domain; enables passkeys with `WEBAUTHN_ORIGINS` |
+| `WEBAUTHN_ORIGINS` | no | — | Comma-separated exact HTTPS origins allowed for passkey ceremonies |
+| `WEBAUTHN_RP_NAME` | no | `Sharp` | Name shown by authenticator UI |
 | `RUST_LOG` | no | `info` | Tracing filter, e.g. `sharp_server=debug,tower_http=debug` |
 
 ## Running
@@ -41,6 +44,8 @@ Base path `/api/v1`, auth via `Authorization: Bearer <jwt>`. Message ids are ser
 as strings. See `../docs/ARCHITECTURE.md` for the full contract.
 
 - `POST /auth/register`, `POST /auth/login`
+- `POST /auth/passkeys/login/start`, `POST /auth/passkeys/login/finish`
+- `GET|POST /auth/passkeys`, `POST /auth/passkeys/register/finish`
 - `GET /me`, `GET /users`
 - `GET /channels`, `POST /channels`, `POST /channels/dm`
 - `POST /channels/{id}/join`, `POST /channels/{id}/leave`

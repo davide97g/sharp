@@ -5,6 +5,20 @@ import { isSpeechSupported, PhraseRecognizer } from './lib/speech'
 import { WsClient } from './lib/ws'
 import { cmpId } from './lib/util'
 import { gifPreviewText } from './lib/gif'
+import {
+  decryptDmMessage,
+  encryptDmMessage,
+  ensureDevice,
+  getDevices,
+  getLocalDevice,
+  invalidateDevices,
+  isChannelEncrypted,
+} from './lib/e2ee'
+import { resolveEncryptedAttachments } from './lib/e2ee/attachments'
+import { idbClear } from './lib/e2ee/idb'
+import { indexDecryptedMessage, removeIndexedMessage } from './lib/e2ee/search'
+import { markAllDeviceSetsChanged, markDeviceSetChanged } from './lib/e2ee/trust'
+import { restoreBackup } from './lib/e2ee/backup'
 import { toastError, toastInfo, toastNotify } from './lib/toast'
 import { navigateTo } from './lib/nav'
 import {
@@ -47,6 +61,8 @@ import type {
   MessageDeletedPayload,
   MessageUpdatedPayload,
   DuckStreakPayload,
+  E2eeDevicesChangedPayload,
+  EncryptedAttachment,
   Notification,
   NotificationCreatedPayload,
   PresencePayload,
@@ -75,6 +91,12 @@ import type {
   CalendarMeetingCancelledPayload,
   CalendarSyncedPayload,
   CalendarReminderPayload,
+  Poll,
+  CallPoll,
+  PollCreatedPayload,
+  PollUpdatedPayload,
+  PollDeletedPayload,
+  VoicePollStatePayload,
   WsEnvelope,
 } from './lib/types'
 
@@ -172,6 +194,14 @@ type State = {
   // messages keyed by channel id
   byChannel: Record<string, ChannelMessages>
 
+  pollsById: Record<string, Poll>
+  callPoll: CallPoll | null
+
+  // undefined while device availability is unresolved; false means plaintext fallback.
+  dmEncryption: Record<string, boolean | undefined>
+  dmPartnerReady: Record<string, boolean | undefined>
+  backupRestorePrompt: boolean
+
   // GIF feature flags + per-channel fast-streak activity used by duck suggestions
   gifConfig: GifConfig | null
   duckActivity: Record<string, { count: number; lastAt: number }>
@@ -258,6 +288,10 @@ type State = {
   refetchDirectory: () => Promise<void>
   refreshGifConfig: () => Promise<void>
   resetDuckActivity: (channelId: string) => void
+  refreshDmEncryption: (userId?: string) => Promise<void>
+  isDmEncrypted: (channelId: string) => boolean
+  restoreEncryptionBackup: (passphrase: string) => Promise<void>
+  startFreshEncryption: () => Promise<void>
 
   setCurrentChannel: (id: string | null) => void
   loadMessages: (channelId: string) => Promise<void>
@@ -268,6 +302,7 @@ type State = {
     parentId?: string,
     attachmentIds?: string[],
     replyToId?: string,
+    encryptedAttachments?: EncryptedAttachment[],
   ) => Promise<void>
   markRead: (channelId: string, messageId: string) => void
 
@@ -303,6 +338,33 @@ type State = {
   ) => void
   editMessage: (messageId: string, content: string) => Promise<void>
   deleteMessage: (messageId: string) => Promise<void>
+
+  createPoll: (
+    channelId: string,
+    input: {
+      question: string
+      options: string[]
+      multi: boolean
+      pinned: boolean
+      expires_at?: string
+    },
+  ) => Promise<Poll>
+  votePoll: (pollId: string, optionIds: string[]) => Promise<void>
+  retractVote: (pollId: string) => Promise<void>
+  closePoll: (pollId: string) => Promise<void>
+  pinPoll: (pollId: string, pinned: boolean) => Promise<void>
+  deletePoll: (pollId: string) => Promise<void>
+  fetchPoll: (pollId: string) => Promise<Poll>
+  fetchActivePolls: (channelId: string) => Promise<void>
+  createCallPoll: (input: {
+    question: string
+    options: string[]
+    multi: boolean
+    expires_at?: string
+    preset?: string
+  }) => void
+  voteCallPoll: (pollId: string, optionIds: string[]) => void
+  closeCallPoll: (pollId: string) => void
 
   openThread: (parentId: string) => Promise<void>
   closeThread: () => void
@@ -474,6 +536,11 @@ export const useStore = create<State>((set, get) => ({
   channels: [],
   currentChannelId: null,
   byChannel: {},
+  pollsById: {},
+  callPoll: null,
+  dmEncryption: {},
+  dmPartnerReady: {},
+  backupRestorePrompt: false,
   gifConfig: null,
   duckActivity: {},
   members: {},
@@ -515,6 +582,25 @@ export const useStore = create<State>((set, get) => ({
   async init(token, me) {
     setToken(token)
     set({ token, me, ready: false })
+    void (async () => {
+      try {
+        const local = await getLocalDevice()
+        if (!local) {
+          try {
+            await api.getBackup()
+            set({ backupRestorePrompt: true })
+            return
+          } catch (error) {
+            if (!(error instanceof ApiRequestError) || error.status !== 404) throw error
+          }
+        }
+        await ensureDevice()
+        invalidateDevices(me.id)
+        await get().refreshDmEncryption(me.id)
+      } catch (error) {
+        console.warn('Could not initialize E2EE device', error)
+      }
+    })()
     const existing = get().ws
     if (existing) existing.close()
     const ws = new WsClient({
@@ -524,7 +610,12 @@ export const useStore = create<State>((set, get) => ({
         get().loadMentions()
         get().loadInboxAndPrefs()
         const cur = get().currentChannelId
-        if (cur) get().loadMessages(cur)
+        if (cur) {
+          get().loadMessages(cur)
+          if (get().channels.find((channel) => channel.id === cur)?.kind !== 'dm') {
+            void get().fetchActivePolls(cur).catch(() => {})
+          }
+        }
         for (const channelId of Object.keys(get().channelVoiceTriggers)) {
           void get().loadChannelVoiceTriggers(channelId).catch(() => {})
         }
@@ -584,6 +675,7 @@ export const useStore = create<State>((set, get) => ({
       ws,
       myConnId: null,
       voice: emptyVoiceState(),
+      callPoll: null,
     })
     ws.connect()
   },
@@ -607,6 +699,9 @@ export const useStore = create<State>((set, get) => ({
     // Capture auth for server detachment, then clear the session immediately.
     // Cleanup is best-effort and never blocks logout UI.
     void disablePush(pushToken)
+    void Promise.all([idbClear('messages'), idbClear('trust')]).catch(() => {
+      // Logout remains immediate when browser storage is unavailable.
+    })
     clearToken()
     setSessionToken(null)
     set({
@@ -623,6 +718,11 @@ export const useStore = create<State>((set, get) => ({
       channels: [],
       currentChannelId: null,
       byChannel: {},
+      pollsById: {},
+      callPoll: null,
+      dmEncryption: {},
+      dmPartnerReady: {},
+      backupRestorePrompt: false,
       gifConfig: null,
       duckActivity: {},
       members: {},
@@ -669,6 +769,7 @@ export const useStore = create<State>((set, get) => ({
         online: new Set(usersRes.online_user_ids),
         channels: channelsRes.channels,
       })
+      void get().refreshDmEncryption()
     } catch (e) {
       if (e instanceof Error) toastError(e.message)
     }
@@ -731,6 +832,61 @@ export const useStore = create<State>((set, get) => ({
     }))
   },
 
+  async refreshDmEncryption(userId) {
+    const state = get()
+    if (!state.me) return
+    const dms = state.channels.filter(
+      (channel) =>
+        channel.kind === 'dm' &&
+        channel.dm_user &&
+        (!userId || userId === state.me?.id || userId === channel.dm_user.id),
+    )
+    await Promise.all(
+      dms.map(async (channel) => {
+        const partnerId = channel.dm_user?.id
+        if (!partnerId) return
+        try {
+          const [mine, partner] = await Promise.all([
+            getDevices(state.me!.id),
+            getDevices(partnerId),
+          ])
+          set((current) => ({
+            dmEncryption: {
+              ...current.dmEncryption,
+              [channel.id]: mine.length > 0 && isChannelEncrypted(channel, partner),
+            },
+            dmPartnerReady: {
+              ...current.dmPartnerReady,
+              [channel.id]: partner.length > 0,
+            },
+          }))
+        } catch (error) {
+          console.warn('Could not resolve E2EE devices', error)
+        }
+      }),
+    )
+  },
+
+  isDmEncrypted(channelId) {
+    return get().dmEncryption[channelId] === true
+  },
+
+  async restoreEncryptionBackup(passphrase) {
+    await restoreBackup(passphrase)
+    const me = get().me
+    if (me) invalidateDevices(me.id)
+    set({ backupRestorePrompt: false })
+    await get().refreshDmEncryption(me?.id)
+  },
+
+  async startFreshEncryption() {
+    await ensureDevice()
+    const me = get().me
+    if (me) invalidateDevices(me.id)
+    set({ backupRestorePrompt: false })
+    await get().refreshDmEncryption(me?.id)
+  },
+
   setCurrentChannel(id) {
     // Drafts + reply targets are per-channel and persist; only the transient
     // hover/palette state resets when leaving a channel.
@@ -762,6 +918,7 @@ export const useStore = create<State>((set, get) => ({
           },
         },
       }))
+      queueDecryptions(set, res.messages)
     } catch (e) {
       set((s) => ({
         byChannel: {
@@ -801,6 +958,7 @@ export const useStore = create<State>((set, get) => ({
           },
         }
       })
+      queueDecryptions(set, res.messages)
     } catch (e) {
       set((s) => ({
         byChannel: {
@@ -815,9 +973,20 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
-  async sendMessage(channelId, content, parentId, attachmentIds, replyToId) {
+  async sendMessage(channelId, content, parentId, attachmentIds, replyToId, encryptedAttachments) {
     try {
-      const msg = await api.sendMessage(channelId, content, parentId, attachmentIds, replyToId)
+      const encrypted = get().isDmEncrypted(channelId)
+      const wireContent = encrypted
+        ? await encryptDmMessage(channelId, content, encryptedAttachments)
+        : content
+      const msg = await api.sendMessage(
+        channelId,
+        wireContent,
+        parentId,
+        attachmentIds,
+        replyToId,
+        encrypted || undefined,
+      )
       sound.messageSend()
       // Merge immediately; the WS echo will dedupe by id.
       get().applyWsEvent({ type: 'message.created', payload: { message: msg } })
@@ -948,6 +1117,7 @@ export const useStore = create<State>((set, get) => ({
         ? s.channels.map((c) => (c.id === ch.id ? ch : c))
         : [...s.channels, ch],
     }))
+    void get().refreshDmEncryption(userId)
     return ch
   },
 
@@ -1000,8 +1170,30 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async editMessage(messageId, content) {
-    const msg = await api.editMessage(messageId, content)
-    get().applyWsEvent({ type: 'message.updated', payload: { message: msg } })
+    try {
+      const original = findMessage(get(), messageId)
+      if (!original) throw new Error('Message not found')
+      const wireContent = original.encrypted
+        ? await encryptDmMessage(
+            original.channel_id,
+            content,
+            original.attachments
+              .filter((attachment) => attachment.decryption)
+              .map((attachment) => ({
+                id: attachment.id,
+                key: attachment.decryption!.key,
+                nonce: attachment.decryption!.nonce,
+                filename: attachment.filename,
+                content_type: attachment.content_type,
+              })),
+          )
+        : content
+      const msg = await api.editMessage(messageId, wireContent, original.encrypted || undefined)
+      get().applyWsEvent({ type: 'message.updated', payload: { message: msg } })
+    } catch (error) {
+      if (error instanceof Error) toastError(error.message)
+      throw error
+    }
   },
 
   async deleteMessage(messageId) {
@@ -1033,6 +1225,125 @@ export const useStore = create<State>((set, get) => ({
     })
   },
 
+  async createPoll(channelId, input) {
+    const poll = await api.polls.create(channelId, input)
+    set((s) => ({ pollsById: { ...s.pollsById, [poll.id]: poll } }))
+    return poll
+  },
+
+  async votePoll(pollId, optionIds) {
+    const original = get().pollsById[pollId]
+    const me = get().me
+    if (!original || !me || original.closed_at || original.deleted) return
+    const optimistic = withPollVotes(original, optionIds, me.id, me.display_name)
+    set((s) => ({ pollsById: { ...s.pollsById, [pollId]: optimistic } }))
+    try {
+      const poll = await api.polls.vote(pollId, optionIds)
+      set((s) => ({ pollsById: { ...s.pollsById, [poll.id]: poll } }))
+    } catch (error) {
+      set((s) => ({ pollsById: { ...s.pollsById, [pollId]: original } }))
+      toastError(error instanceof Error ? error.message : 'Could not update vote.')
+    }
+  },
+
+  async retractVote(pollId) {
+    const original = get().pollsById[pollId]
+    const me = get().me
+    if (!original || !me || original.closed_at || original.deleted) return
+    set((s) => ({
+      pollsById: {
+        ...s.pollsById,
+        [pollId]: withPollVotes(original, [], me.id, me.display_name),
+      },
+    }))
+    try {
+      const poll = await api.polls.retract(pollId)
+      set((s) => ({ pollsById: { ...s.pollsById, [poll.id]: poll } }))
+    } catch (error) {
+      set((s) => ({ pollsById: { ...s.pollsById, [pollId]: original } }))
+      toastError(error instanceof Error ? error.message : 'Could not retract vote.')
+    }
+  },
+
+  async closePoll(pollId) {
+    try {
+      const poll = await api.polls.close(pollId)
+      set((s) => ({ pollsById: { ...s.pollsById, [poll.id]: poll } }))
+    } catch (error) {
+      toastError(error instanceof Error ? error.message : 'Could not close poll.')
+    }
+  },
+
+  async pinPoll(pollId, pinned) {
+    try {
+      const poll = await api.polls.pin(pollId, pinned)
+      set((s) => ({ pollsById: { ...s.pollsById, [poll.id]: poll } }))
+    } catch (error) {
+      toastError(error instanceof Error ? error.message : 'Could not update poll pin.')
+    }
+  },
+
+  async deletePoll(pollId) {
+    const original = get().pollsById[pollId]
+    set((s) => {
+      const pollsById = { ...s.pollsById }
+      delete pollsById[pollId]
+      return { pollsById }
+    })
+    try {
+      await api.polls.delete(pollId)
+    } catch (error) {
+      if (original) {
+        set((s) => ({ pollsById: { ...s.pollsById, [pollId]: original } }))
+      }
+      toastError(error instanceof Error ? error.message : 'Could not delete poll.')
+    }
+  },
+
+  async fetchPoll(pollId) {
+    const poll = await api.polls.get(pollId)
+    set((s) => ({ pollsById: { ...s.pollsById, [poll.id]: poll } }))
+    return poll
+  },
+
+  async fetchActivePolls(channelId) {
+    const { polls } = await api.polls.listActive(channelId)
+    set((s) => {
+      const pollsById = { ...s.pollsById }
+      for (const [id, poll] of Object.entries(pollsById)) {
+        if (poll.channel_id === channelId && !poll.closed_at && !poll.deleted) delete pollsById[id]
+      }
+      for (const poll of polls) pollsById[poll.id] = poll
+      return { pollsById }
+    })
+  },
+
+  createCallPoll(input) {
+    const state = get()
+    const roomId = state.voice.channelId
+    if (!roomId || state.isGuest) return
+    state.ws?.send('voice.poll_create', { room_id: roomId, ...input })
+  },
+
+  voteCallPoll(pollId, optionIds) {
+    const state = get()
+    if (!state.voice.channelId) return
+    state.ws?.send('voice.poll_vote', {
+      room_id: state.voice.channelId,
+      poll_id: pollId,
+      option_ids: optionIds,
+    })
+  },
+
+  closeCallPoll(pollId) {
+    const state = get()
+    if (!state.voice.channelId) return
+    state.ws?.send('voice.poll_close', {
+      room_id: state.voice.channelId,
+      poll_id: pollId,
+    })
+  },
+
   async openThread(parentId) {
     set({ thread: { open: true, parentId, parent: null, replies: [], loading: true } })
     try {
@@ -1050,6 +1361,7 @@ export const useStore = create<State>((set, get) => ({
             }
           : s,
       )
+      queueDecryptions(set, [res.parent, ...res.replies])
     } catch (e) {
       set({ thread: { open: false, parentId: null, parent: null, replies: [], loading: false } })
       if (e instanceof Error) toastError(e.message)
@@ -1136,6 +1448,7 @@ export const useStore = create<State>((set, get) => ({
     }
 
     set({
+      callPoll: null,
       voice: {
         channelId,
         status: 'connecting',
@@ -1268,7 +1581,7 @@ export const useStore = create<State>((set, get) => ({
         active.channelId === channelId &&
         (client === null ? active.client === null : active.client === client)
       ) {
-        set({ voice: emptyVoiceState() })
+        set({ voice: emptyVoiceState(), callPoll: null })
       }
       if (e instanceof Error) toastError(e.message)
       else toastError('Could not join the voice room.')
@@ -1280,7 +1593,7 @@ export const useStore = create<State>((set, get) => ({
     if (channelId) get().ws?.send('voice.leave', { channel_id: channelId })
     stopVoiceRecognizer()
     client?.stop()
-    set({ voice: emptyVoiceState() })
+    set({ voice: emptyVoiceState(), callPoll: null })
     if (channelId && status === 'connected') playVoiceLeaveSound()
   },
 
@@ -1804,6 +2117,10 @@ export const useStore = create<State>((set, get) => ({
           myConnId: p.conn_id,
           voiceRooms: voiceRoomsFromSnapshots(p.voice_rooms),
           activeMeetings: activeMeetingsFromSnapshots(p.voice_rooms),
+          callPoll:
+            p.voice_rooms.find(
+              (room) => room.channel_id === (previous.voice.channelId ?? previous.guestChannelId),
+            )?.poll ?? null,
           ...(voiceReconnected ? { voice: emptyVoiceState() } : {}),
         })
         // Guest bootstrap: once we have a conn id, auto-join the bound channel's
@@ -1824,6 +2141,14 @@ export const useStore = create<State>((set, get) => ({
           else online.delete(p.user_id)
           return { online }
         })
+        break
+      }
+      case 'e2ee.devices_changed': {
+        const p = env.payload as E2eeDevicesChangedPayload
+        invalidateDevices(p.user_id)
+        if (p.user_id === me?.id) void markAllDeviceSetsChanged()
+        else void markDeviceSetChanged(p.user_id)
+        void get().refreshDmEncryption(p.user_id)
         break
       }
       case 'typing': {
@@ -1852,6 +2177,7 @@ export const useStore = create<State>((set, get) => ({
           activeMeetings: p.active_meeting_id
             ? { ...s.activeMeetings, [p.channel_id]: p.active_meeting_id }
             : s.activeMeetings,
+          callPoll: p.poll,
           ...(s.voice.channelId === p.channel_id
             ? {
                 voice: {
@@ -1952,7 +2278,7 @@ export const useStore = create<State>((set, get) => ({
           if (p.conn_id === get().myConnId) {
             stopVoiceRecognizer()
             activeBeforeLeave.client?.stop()
-            set({ voice: emptyVoiceState() })
+            set({ voice: emptyVoiceState(), callPoll: null })
           } else {
             activeBeforeLeave.client?.removePeer(p.conn_id)
             set((s) => {
@@ -2119,19 +2445,25 @@ export const useStore = create<State>((set, get) => ({
           // guest page shows the invalid-link state instead of Rejoin.
           stopVoiceRecognizer()
           get().voice.client?.stop()
-          set({ voice: emptyVoiceState(), guestRevoked: true, guestPendingJoin: false })
+          set({
+            voice: emptyVoiceState(),
+            callPoll: null,
+            guestRevoked: true,
+            guestPendingJoin: false,
+          })
           toastError(voiceErrorMessage(p.code))
           break
         }
         stopVoiceRecognizer()
         get().voice.client?.stop()
-        set({ voice: emptyVoiceState() })
+        set({ voice: emptyVoiceState(), callPoll: null })
         toastError(voiceErrorMessage(p.code))
         break
       }
       case 'message.created': {
         const { message, duck_streak } = env.payload as MessageCreatedPayload
         applyMessageCreated(set, message, me?.id ?? null, duck_streak)
+        queueDecryptions(set, [message])
         // Ultra-soft cue when a top-level message lands in the channel you're
         // looking at (others' messages only — DM/mention/reply get the fuller
         // notification chime via notification.created instead).
@@ -2180,11 +2512,13 @@ export const useStore = create<State>((set, get) => ({
       case 'message.updated': {
         const { message } = env.payload as MessageUpdatedPayload
         applyMessageUpdated(set, message)
+        queueDecryptions(set, [message])
         break
       }
       case 'message.deleted': {
         const p = env.payload as MessageDeletedPayload
         applyMessageDeleted(set, p)
+        void removeIndexedMessage(p.message_id)
         break
       }
       case 'reaction.added': {
@@ -2213,6 +2547,7 @@ export const useStore = create<State>((set, get) => ({
             ? s.channels.map((c) => (c.id === channel.id ? channel : c))
             : [...s.channels, channel],
         }))
+        if (channel.kind === 'dm') void get().refreshDmEncryption(channel.dm_user?.id)
         break
       }
       case 'channel.updated': {
@@ -2401,6 +2736,26 @@ export const useStore = create<State>((set, get) => ({
         }
         break
       }
+      case 'poll.created':
+      case 'poll.updated': {
+        const { poll } = env.payload as PollCreatedPayload | PollUpdatedPayload
+        set((s) => ({ pollsById: { ...s.pollsById, [poll.id]: poll } }))
+        break
+      }
+      case 'poll.deleted': {
+        const { poll_id } = env.payload as PollDeletedPayload
+        set((s) => {
+          const pollsById = { ...s.pollsById }
+          delete pollsById[poll_id]
+          return { pollsById }
+        })
+        break
+      }
+      case 'voice.poll_state': {
+        const { room_id, poll } = env.payload as VoicePollStatePayload
+        if (get().voice.channelId === room_id) set({ callPoll: poll })
+        break
+      }
       case 'calendar.meeting_created':
       case 'calendar.meeting_updated': {
         const { meeting } = env.payload as
@@ -2550,6 +2905,25 @@ function voiceRoomsFromSnapshots(snapshots: VoiceRoomSnapshot[]): Record<string,
     rooms[snapshot.channel_id] = voiceRoomFromParticipants(snapshot.participants)
   }
   return rooms
+}
+
+function withPollVotes(
+  poll: Poll,
+  optionIds: string[],
+  userId: string,
+  displayName: string,
+): Poll {
+  const selected = new Set(optionIds)
+  const options = poll.options.map((option) => {
+    const voters = option.voters.filter((voter) => voter.id !== userId)
+    if (selected.has(option.id)) voters.push({ id: userId, display_name: displayName })
+    return { ...option, voters, count: voters.length }
+  })
+  const voterIds = new Set<string>()
+  for (const option of options) {
+    for (const voter of option.voters) voterIds.add(voter.id)
+  }
+  return { ...poll, options, my_votes: [...selected], total_voters: voterIds.size }
 }
 
 function voiceErrorMessage(code: string): string {
@@ -2702,7 +3076,13 @@ function updateReactions(
 
 function upsertAscending(list: Message[], msg: Message): Message[] {
   if (list.some((m) => m.id === msg.id)) {
-    return list.map((m) => (m.id === msg.id ? msg : m))
+    return list.map((m) =>
+      m.id === msg.id && m.content === msg.content && m.decryptedText !== undefined
+        ? { ...msg, decryptedText: m.decryptedText, attachments: m.attachments }
+        : m.id === msg.id
+          ? msg
+          : m,
+    )
   }
   if (list.length === 0 || cmpId(msg.id, list[list.length - 1].id) > 0) {
     return [...list, msg]
@@ -2710,6 +3090,75 @@ function upsertAscending(list: Message[], msg: Message): Message[] {
   const next = [...list, msg]
   next.sort((a, b) => cmpId(a.id, b.id))
   return next
+}
+
+function findMessage(state: State, messageId: string): Message | null {
+  for (const channel of Object.values(state.byChannel)) {
+    const message = channel.list.find((item) => item.id === messageId)
+    if (message) return message
+  }
+  if (state.thread.parent?.id === messageId) return state.thread.parent
+  return state.thread.replies.find((item) => item.id === messageId) ?? null
+}
+
+async function decryptIncoming(message: Message): Promise<Message> {
+  if (!message.encrypted || message.deleted_at) return message
+  try {
+    const body = await decryptDmMessage(message)
+    void indexDecryptedMessage({
+      id: message.id,
+      channelId: message.channel_id,
+      text: body.text,
+      authorName: message.user.display_name,
+      ts: message.created_at,
+    })
+    return {
+      ...message,
+      decryptedText: body.text,
+      attachments: resolveEncryptedAttachments(message.attachments, body.attachments),
+    }
+  } catch {
+    return { ...message, decryptedText: null }
+  }
+}
+
+function patchDecryptedMessages(set: Setter, decrypted: Message[]): void {
+  const byId = new Map(decrypted.map((message) => [message.id, message]))
+  const transform = (message: Message): Message => {
+    const next = byId.get(message.id)
+    return next && message.content === next.content
+      ? { ...message, decryptedText: next.decryptedText, attachments: next.attachments }
+      : message
+  }
+  set((state) => {
+    const byChannel: Record<string, ChannelMessages> = {}
+    for (const [channelId, messages] of Object.entries(state.byChannel)) {
+      byChannel[channelId] = { ...messages, list: messages.list.map(transform) }
+    }
+    const replyTargets = { ...state.replyTargets }
+    for (const [channelId, message] of Object.entries(replyTargets)) {
+      replyTargets[channelId] = transform(message)
+    }
+    return {
+      byChannel,
+      replyTargets,
+      thread: {
+        ...state.thread,
+        parent: state.thread.parent ? transform(state.thread.parent) : null,
+        replies: state.thread.replies.map(transform),
+      },
+    }
+  })
+}
+
+function queueDecryptions(set: Setter, messages: Message[]): void {
+  const pending = messages.filter(
+    (message) => message.encrypted && !message.deleted_at && message.decryptedText === undefined,
+  )
+  if (!pending.length) return
+  void Promise.all(pending.map(decryptIncoming)).then((decrypted) =>
+    patchDecryptedMessages(set, decrypted),
+  )
 }
 
 function applyDuckStreak(
@@ -2817,11 +3266,15 @@ function applyMessageUpdated(set: Setter, message: Message) {
       ? {
           ...m,
           content: message.content,
+          encrypted: message.encrypted,
+          decryptedText: message.encrypted ? undefined : message.decryptedText,
           edited_at: message.edited_at,
           deleted_at: message.deleted_at,
           reactions: message.reactions,
           reply_count: message.reply_count,
           last_reply_at: message.last_reply_at,
+          attachments: message.attachments,
+          reply_to: message.reply_to,
         }
       : m
   set((s) => {

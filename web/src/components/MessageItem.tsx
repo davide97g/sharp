@@ -7,6 +7,7 @@ import { Markdown } from './Markdown'
 import { AttachmentList } from './Attachments'
 import { fmtTime } from '../lib/util'
 import { gifPreviewText } from '../lib/gif'
+import { LockIcon } from './icons'
 
 export const REACTION_PALETTE = ['👍', '✅', '👀', '❤️', '😂', '🎉']
 
@@ -77,6 +78,22 @@ function Icon({ name }: { name: 'react' | 'reply' | 'thread' | 'edit' | 'trash' 
 
 // The quoted-message chip rendered above a reply's own content.
 function QuotedReply({ reply }: { reply: ReplyPreview }) {
+  const decryptedText = useStore((state) => {
+    if (!reply.encrypted) return undefined
+    for (const channel of Object.values(state.byChannel)) {
+      const message = channel.list.find((item) => item.id === reply.id)
+      if (message) return message.decryptedText
+    }
+    if (state.thread.parent?.id === reply.id) return state.thread.parent.decryptedText
+    return state.thread.replies.find((item) => item.id === reply.id)?.decryptedText
+  })
+  const preview = reply.deleted
+    ? 'Deleted message'
+    : reply.encrypted
+      ? typeof decryptedText === 'string'
+        ? gifPreviewText(decryptedText) || 'Attachment'
+        : '🔒 Encrypted message'
+      : gifPreviewText(reply.content) || 'Attachment'
   return (
     <button
       onClick={() => scrollToMessage(reply.id)}
@@ -87,7 +104,7 @@ function QuotedReply({ reply }: { reply: ReplyPreview }) {
           {reply.user.display_name}
         </div>
         <div className="truncate text-xs text-[var(--color-text-dim)]">
-          {reply.deleted ? 'Deleted message' : gifPreviewText(reply.content) || 'Attachment'}
+          {preview}
         </div>
       </div>
     </button>
@@ -170,7 +187,8 @@ export function MessageItem({
 
   const [editing, setEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [draft, setDraft] = useState(message.content)
+  const displayContent = message.encrypted ? message.decryptedText : message.content
+  const [draft, setDraft] = useState(typeof displayContent === 'string' ? displayContent : '')
   const [freshOnMount] = useState(() => Date.now() - Date.parse(message.created_at) < 8000)
   const [reactionBurst, setReactionBurst] = useState<{ emoji: string; id: number } | null>(null)
   const editRef = useRef<HTMLTextAreaElement>(null)
@@ -179,10 +197,11 @@ export function MessageItem({
 
   const isMine = me?.id === message.user.id
   const isDeleted = !!message.deleted_at
+  const canEdit = isMine && (!message.encrypted || typeof message.decryptedText === 'string')
 
   useEffect(() => {
     if (editing) {
-      setDraft(message.content)
+      setDraft(typeof displayContent === 'string' ? displayContent : '')
       requestAnimationFrame(() => {
         const el = editRef.current
         if (el) {
@@ -240,7 +259,7 @@ export function MessageItem({
 
   async function saveEdit() {
     const content = draft.trim()
-    if (!content || content === message.content) {
+    if (!content || content === displayContent) {
       setEditing(false)
       return
     }
@@ -337,16 +356,22 @@ export function MessageItem({
               }`}
             >
               {message.reply_to && <QuotedReply reply={message.reply_to} />}
-              {message.content && <Markdown content={message.content} highlight={focusQuery} />}
+              <RenderedMessageContent message={message} highlight={focusQuery} />
               <span className="ml-2 mt-0.5 inline-block align-baseline text-[10px] text-[var(--color-text-faint)]">
                 {message.edited_at && <span className="mr-1">(edited)</span>}
+                {message.encrypted && (
+                  <span className="mr-1 inline-flex align-[-1px]" title="End-to-end encrypted">
+                    <LockIcon size={9} />
+                  </span>
+                )}
                 {fmtTime(message.created_at)}
               </span>
             </div>
           )}
 
           {/* attachments */}
-          {!isDeleted && !editing && message.attachments.length > 0 && (
+          {!isDeleted && !editing && message.attachments.length > 0 &&
+            (!message.encrypted || typeof message.decryptedText === 'string') && (
             <AttachmentList attachments={message.attachments} />
           )}
 
@@ -407,7 +432,7 @@ export function MessageItem({
               <ToolbarBtn title="Reply (R)" onClick={() => setReplyTarget(message.channel_id, message)}>
                 <Icon name="reply" />
               </ToolbarBtn>
-              {isMine && (
+              {canEdit && (
                 <ToolbarBtn title="Edit" onClick={() => setEditing(true)}>
                   <Icon name="edit" />
                 </ToolbarBtn>
@@ -458,6 +483,11 @@ export function MessageItem({
         {grouped ? (
           // Absolute + nowrap so the hover timestamp never reflows the row height.
           <span className="absolute right-0 top-0.5 whitespace-nowrap text-[10px] leading-5 tabular-nums text-[var(--color-text-faint)] opacity-0 group-hover:opacity-100 max-md:hidden">
+            {message.encrypted && (
+              <span className="mr-1 inline-flex align-[-1px]" title="End-to-end encrypted">
+                <LockIcon size={9} />
+              </span>
+            )}
             {fmtTime(message.created_at)}
           </span>
         ) : (
@@ -472,6 +502,11 @@ export function MessageItem({
               {message.user.display_name}
             </span>
             <span className="text-[11px] text-[var(--color-text-faint)]">
+              {message.encrypted && (
+                <span className="mr-1 inline-flex align-[-1px]" title="End-to-end encrypted">
+                  <LockIcon size={9} />
+                </span>
+              )}
               {fmtTime(message.created_at)}
             </span>
           </div>
@@ -528,7 +563,7 @@ export function MessageItem({
           </div>
         ) : (
           <div className="pr-8">
-            {message.content && <Markdown content={message.content} highlight={focusQuery} />}
+            <RenderedMessageContent message={message} highlight={focusQuery} />
             {message.edited_at && (
               <span className="ml-1 align-baseline text-[10px] text-[var(--color-text-faint)]">
                 (edited)
@@ -538,7 +573,8 @@ export function MessageItem({
         )}
 
         {/* attachments */}
-        {!isDeleted && !editing && message.attachments.length > 0 && (
+        {!isDeleted && !editing && message.attachments.length > 0 &&
+          (!message.encrypted || typeof message.decryptedText === 'string') && (
           <AttachmentList attachments={message.attachments} />
         )}
 
@@ -618,7 +654,7 @@ export function MessageItem({
               <Icon name="thread" />
             </ToolbarBtn>
           )}
-          {isMine && (
+          {canEdit && (
             <ToolbarBtn title="Edit" onClick={() => setEditing(true)}>
               <Icon name="edit" />
             </ToolbarBtn>
@@ -645,6 +681,30 @@ export function MessageItem({
       )}
     </div>
   )
+}
+
+function RenderedMessageContent({ message, highlight }: { message: Message; highlight?: string }) {
+  if (!message.encrypted) {
+    return message.content ? <Markdown content={message.content} highlight={highlight} /> : null
+  }
+  if (message.decryptedText === undefined) {
+    return (
+      <div className="flex items-center gap-2 py-0.5 text-sm text-[var(--color-text-faint)]">
+        <span className="skeleton h-3 w-16 rounded" aria-hidden />
+        <span>Decrypting…</span>
+      </div>
+    )
+  }
+  if (message.decryptedText === null) {
+    return (
+      <div className="py-0.5 text-sm italic text-[var(--color-text-faint)]">
+        Can't decrypt — sent to another device
+      </div>
+    )
+  }
+  return message.decryptedText ? (
+    <Markdown content={message.decryptedText} highlight={highlight} />
+  ) : null
 }
 
 function ToolbarBtn({

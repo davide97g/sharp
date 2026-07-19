@@ -1,6 +1,7 @@
 use crate::auth::AuthUser;
 use crate::deepseek;
 use crate::error::{AppError, AppResult};
+use crate::routes::e2ee;
 use crate::state::SharedState;
 use crate::ws::envelope;
 use axum::extract::{Path, Query, State};
@@ -29,6 +30,15 @@ pub(crate) async fn start_live_meeting(
 ) -> AppResult<(Uuid, Vec<(Uuid, Uuid)>)> {
     let now = Utc::now();
     let context = load_room_context(state, room_id).await?;
+    if context.kind == "dm" {
+        if let Some(channel_id) = context.channel_id {
+            if e2ee::dm_is_encrypted(&state.pool, channel_id).await? {
+                return Err(AppError::ServiceUnavailable(
+                    "transcription is unavailable for encrypted DMs".to_string(),
+                ));
+            }
+        }
+    }
     let title = if context.kind == "standalone" {
         context.name.clone()
     } else if context.kind == "dm" {
@@ -49,7 +59,11 @@ pub(crate) async fn start_live_meeting(
     } else {
         format!("{} · {}", context.name, now.format("%b %-d, %Y · %H:%M"))
     };
-    let summary_status = if state.config.deepseek.is_some() { "pending" } else { "unavailable" };
+    let summary_status = if state.config.deepseek.is_some() {
+        "pending"
+    } else {
+        "unavailable"
+    };
     let mut tx = state.pool.begin().await?;
     let meeting_id: Uuid = sqlx::query_scalar(
         "INSERT INTO meetings
@@ -202,7 +216,11 @@ pub(crate) async fn finish_live_meeting(
     at: DateTime<Utc>,
     interrupted: bool,
 ) -> AppResult<()> {
-    let status = if interrupted { "interrupted" } else { "completed" };
+    let status = if interrupted {
+        "interrupted"
+    } else {
+        "completed"
+    };
     let result = sqlx::query(
         "UPDATE meetings SET status = $2, ended_at = $3, last_activity_at = $3, updated_at = now()
           WHERE id = $1 AND status = 'active'",
@@ -401,13 +419,26 @@ pub async fn update_meeting(
         return Err(AppError::BadRequest("no meeting fields supplied".into()));
     }
     let title = body.title.map(|value| value.trim().to_string());
-    if title.as_ref().is_some_and(|value| value.is_empty() || value.chars().count() > 160) {
-        return Err(AppError::Validation("title must be 1–160 characters".into()));
-    }
-    if body.summary.as_ref().is_some_and(|value| value.chars().count() > 20_000)
-        || body.decisions.as_ref().is_some_and(|value| value.chars().count() > 20_000)
+    if title
+        .as_ref()
+        .is_some_and(|value| value.is_empty() || value.chars().count() > 160)
     {
-        return Err(AppError::Validation("notes must be at most 20,000 characters".into()));
+        return Err(AppError::Validation(
+            "title must be 1–160 characters".into(),
+        ));
+    }
+    if body
+        .summary
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 20_000)
+        || body
+            .decisions
+            .as_ref()
+            .is_some_and(|value| value.chars().count() > 20_000)
+    {
+        return Err(AppError::Validation(
+            "notes must be at most 20,000 characters".into(),
+        ));
     }
     sqlx::query(
         "UPDATE meetings
@@ -432,12 +463,16 @@ pub async fn save_actions(
 ) -> AppResult<Json<Value>> {
     ensure_meeting_access(&state, id, auth.id).await?;
     if body.actions.len() > 100 {
-        return Err(AppError::Validation("a meeting can have at most 100 action items".into()));
+        return Err(AppError::Validation(
+            "a meeting can have at most 100 action items".into(),
+        ));
     }
     for action in &body.actions {
         let len = action.text.trim().chars().count();
         if len == 0 || len > 500 {
-            return Err(AppError::Validation("action text must be 1–500 characters".into()));
+            return Err(AppError::Validation(
+                "action text must be 1–500 characters".into(),
+            ));
         }
         if let Some(user_id) = action.assignee_user_id {
             let attendee = sqlx::query(
@@ -448,7 +483,9 @@ pub async fn save_actions(
             .fetch_optional(&state.pool)
             .await?;
             if attendee.is_none() {
-                return Err(AppError::Validation("action assignee must be a meeting attendee".into()));
+                return Err(AppError::Validation(
+                    "action assignee must be a meeting attendee".into(),
+                ));
             }
         }
     }
@@ -493,7 +530,11 @@ pub async fn regenerate_meeting(
     if status == "active" {
         return Err(AppError::Conflict("meeting is still active".into()));
     }
-    let summary_status = if state.config.deepseek.is_some() { "pending" } else { "unavailable" };
+    let summary_status = if state.config.deepseek.is_some() {
+        "pending"
+    } else {
+        "unavailable"
+    };
     sqlx::query("UPDATE meetings SET summary_status = $2, updated_at = now() WHERE id = $1")
         .bind(id)
         .bind(summary_status)
@@ -502,7 +543,10 @@ pub async fn regenerate_meeting(
     if state.config.deepseek.is_some() {
         queue_summary(state.clone(), id);
     }
-    Ok((StatusCode::ACCEPTED, Json(json!({ "summary_status": summary_status }))))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(json!({ "summary_status": summary_status })),
+    ))
 }
 
 pub async fn delete_meeting(
@@ -543,11 +587,11 @@ async fn ensure_meeting_access(state: &SharedState, id: Uuid, user_id: Uuid) -> 
                 ))
           )",
     )
-        .bind(id)
-        .bind(user_id)
-        .fetch_optional(&state.pool)
-        .await?
-        .flatten();
+    .bind(id)
+    .bind(user_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .flatten();
     room_id.ok_or_else(|| AppError::NotFound("meeting not found".into()))
 }
 
@@ -607,16 +651,22 @@ async fn load_meeting_detail(state: &SharedState, id: Uuid) -> AppResult<Value> 
     .fetch_all(&state.pool)
     .await?
     .into_iter()
-    .map(|row| json!({
-        "id": row.get::<Uuid, _>("id"), "text": row.get::<String, _>("text"),
-        "assignee_user_id": row.get::<Option<Uuid>, _>("assignee_user_id"),
-        "assignee_name": row.get::<Option<String>, _>("assignee_name"),
-        "completed": row.get::<bool, _>("completed"), "position": row.get::<i32, _>("position")
-    }))
+    .map(|row| {
+        json!({
+            "id": row.get::<Uuid, _>("id"), "text": row.get::<String, _>("text"),
+            "assignee_user_id": row.get::<Option<Uuid>, _>("assignee_user_id"),
+            "assignee_name": row.get::<Option<String>, _>("assignee_name"),
+            "completed": row.get::<bool, _>("completed"), "position": row.get::<i32, _>("position")
+        })
+    })
     .collect::<Vec<_>>();
     let participant_count = attendance
         .iter()
-        .filter_map(|item| item.get("user_id").and_then(Value::as_str).or_else(|| item.get("id").and_then(Value::as_str)))
+        .filter_map(|item| {
+            item.get("user_id")
+                .and_then(Value::as_str)
+                .or_else(|| item.get("id").and_then(Value::as_str))
+        })
         .collect::<std::collections::HashSet<_>>()
         .len();
     let transcript_count = transcript.len();
@@ -655,7 +705,11 @@ pub(crate) fn queue_summary(state: SharedState, meeting_id: Uuid) {
 }
 
 async fn generate_summary(state: &SharedState, meeting_id: Uuid) -> anyhow::Result<()> {
-    let config = state.config.deepseek.as_ref().ok_or_else(|| anyhow::anyhow!("AI unavailable"))?;
+    let config = state
+        .config
+        .deepseek
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("AI unavailable"))?;
     let rows = sqlx::query(
         "SELECT display_name, text, spoken_at FROM meeting_transcript_phrases
           WHERE meeting_id = $1 ORDER BY spoken_at, id",
@@ -667,7 +721,12 @@ async fn generate_summary(state: &SharedState, meeting_id: Uuid) -> anyhow::Resu
         .iter()
         .map(|row| {
             let at: DateTime<Utc> = row.get("spoken_at");
-            format!("[{}] {}: {}", at.format("%H:%M:%S"), row.get::<String, _>("display_name"), row.get::<String, _>("text"))
+            format!(
+                "[{}] {}: {}",
+                at.format("%H:%M:%S"),
+                row.get::<String, _>("display_name"),
+                row.get::<String, _>("text")
+            )
         })
         .collect::<Vec<_>>();
     let notes = deepseek::summarize_meeting(config, &transcript).await?;
@@ -685,7 +744,13 @@ async fn generate_summary(state: &SharedState, meeting_id: Uuid) -> anyhow::Resu
         .await?;
     for (position, action) in notes.actions.iter().enumerate() {
         let assignee = action.assignee.as_ref().and_then(|name| {
-            attendees.iter().find(|row| row.get::<String, _>("display_name").eq_ignore_ascii_case(name)).map(|row| row.get::<Uuid, _>("user_id"))
+            attendees
+                .iter()
+                .find(|row| {
+                    row.get::<String, _>("display_name")
+                        .eq_ignore_ascii_case(name)
+                })
+                .map(|row| row.get::<Uuid, _>("user_id"))
         });
         sqlx::query(
             "INSERT INTO meeting_action_items
@@ -712,9 +777,9 @@ async fn generate_summary(state: &SharedState, meeting_id: Uuid) -> anyhow::Resu
     let room_id: Uuid = sqlx::query_scalar(
         "SELECT COALESCE(channel_id, standalone_call_id) FROM meetings WHERE id = $1",
     )
-        .bind(meeting_id)
-        .fetch_one(&state.pool)
-        .await?;
+    .bind(meeting_id)
+    .fetch_one(&state.pool)
+    .await?;
     let targets = crate::ws::voice::voice_targets(state, room_id, &[]).await;
     state
         .hub

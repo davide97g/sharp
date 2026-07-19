@@ -2,14 +2,15 @@ mod auth;
 mod calendar_crypto;
 mod calendar_sync;
 mod config;
-mod docs_sync;
 mod deepseek;
+mod docs_sync;
 mod error;
 mod expo_push;
 mod gif;
 mod google_oauth;
 mod models;
 mod notify;
+mod passkeys;
 mod routes;
 mod state;
 mod storage;
@@ -74,6 +75,10 @@ async fn desktop_auth_page() -> axum::response::Html<&'static str> {
     axum::response::Html(include_str!("desktop_auth.html"))
 }
 
+async fn passkey_settings_page() -> axum::response::Html<&'static str> {
+    axum::response::Html(include_str!("passkey_settings.html"))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
@@ -115,7 +120,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let vapid = vapid::resolve(&config, &pool).await;
     tracing::info!(
         "web push {}",
-        if vapid.is_some() { "enabled" } else { "disabled" }
+        if vapid.is_some() {
+            "enabled"
+        } else {
+            "disabled"
+        }
     );
 
     // Optional Redis client for cross-replica fanout.
@@ -138,6 +147,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let port = config.port;
     let web_dist = config.web_dist.clone();
     let upload_limit = config.max_upload_bytes + 1024 * 1024;
+    let webauthn = passkeys::build_webauthn(&config)?;
 
     let app_state: state::SharedState = Arc::new(AppState {
         pool,
@@ -151,6 +161,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         gif_suggest_cooldowns: Default::default(),
         duck_streaks: Default::default(),
         giphy_usage: Default::default(),
+        webauthn,
     });
 
     // Heartbeats distinguish quiet live calls from records orphaned by a process
@@ -162,7 +173,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Err(error) = routes::meetings::heartbeat_live_meetings(&meeting_state).await {
                 tracing::warn!("meeting heartbeat failed: {}", error);
             }
-            if let Err(error) = routes::meetings::recover_interrupted_meetings(&meeting_state).await {
+            if let Err(error) = routes::meetings::recover_interrupted_meetings(&meeting_state).await
+            {
                 tracing::warn!("meeting recovery failed: {}", error);
             }
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
@@ -176,6 +188,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             if let Err(error) = calendar_sync::reminder_tick(&reminder_state).await {
                 tracing::warn!("calendar reminder tick failed: {}", error);
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        }
+    });
+
+    let poll_expiry_state = app_state.clone();
+    tokio::spawn(async move {
+        loop {
+            if let Err(error) = routes::polls::expire_tick(&poll_expiry_state).await {
+                tracing::warn!("poll expiry tick failed: {}", error);
             }
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
         }
@@ -198,7 +220,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/auth/login", post(auth::login))
         .route("/auth/desktop/code", post(auth::desktop_code))
         .route("/auth/desktop/exchange", post(auth::desktop_exchange))
-        .route("/me", get(routes::users::me).patch(routes::users::update_me))
+        .route("/auth/passkeys/config", get(passkeys::config))
+        .route("/auth/passkeys/login/start", post(passkeys::login_start))
+        .route("/auth/passkeys/login/finish", post(passkeys::login_finish))
+        .route(
+            "/auth/passkeys",
+            get(passkeys::list).post(passkeys::register_start),
+        )
+        .route(
+            "/auth/passkeys/register/finish",
+            post(passkeys::register_finish),
+        )
+        .route(
+            "/auth/passkeys/:id",
+            patch(passkeys::rename).delete(passkeys::remove),
+        )
+        .route(
+            "/auth/passkeys/prompt/dismiss",
+            post(passkeys::dismiss_prompt),
+        )
+        .route("/auth/passkeys/manage/start", post(passkeys::manage_start))
+        .route(
+            "/auth/passkeys/manage/exchange",
+            post(passkeys::manage_exchange),
+        )
+        .route(
+            "/me",
+            get(routes::users::me).patch(routes::users::update_me),
+        )
         .route(
             "/me/avatar",
             post(routes::users::upload_avatar)
@@ -207,6 +256,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/users", get(routes::users::list_users))
         .route("/users/:id/avatar", get(routes::users::get_avatar))
+        .route(
+            "/e2ee/devices",
+            get(routes::e2ee::list_devices).post(routes::e2ee::put_device),
+        )
+        .route("/e2ee/devices/:id", delete(routes::e2ee::delete_device))
+        .route(
+            "/e2ee/backup",
+            get(routes::e2ee::get_backup).put(routes::e2ee::put_backup),
+        )
         .route("/gifs/config", get(routes::gifs::get_config))
         .route("/gifs/search", get(routes::gifs::search))
         .route(
@@ -231,10 +289,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .patch(routes::meetings::update_meeting)
                 .delete(routes::meetings::delete_meeting),
         )
-        .route(
-            "/meetings/:id/actions",
-            put(routes::meetings::save_actions),
-        )
+        .route("/meetings/:id/actions", put(routes::meetings::save_actions))
         .route(
             "/meetings/:id/regenerate",
             post(routes::meetings::regenerate_meeting),
@@ -262,20 +317,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/calendar/sync", post(routes::calendar::sync_now))
         .route("/calendar/events", get(routes::calendar::list_events))
-        .route(
-            "/calendar/meetings",
-            post(routes::calendar::create_meeting),
-        )
+        .route("/calendar/meetings", post(routes::calendar::create_meeting))
         .route(
             "/calendar/meetings/:id",
             get(routes::calendar::get_meeting)
                 .patch(routes::calendar::update_meeting)
                 .delete(routes::calendar::cancel_meeting),
         )
-        .route(
-            "/calendar/meetings/:id/rsvp",
-            post(routes::calendar::rsvp),
-        )
+        .route("/calendar/meetings/:id/rsvp", post(routes::calendar::rsvp))
         .route(
             "/channels",
             get(routes::channels::list_channels).post(routes::channels::create_channel),
@@ -302,8 +351,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/channels/:id/read", post(routes::channels::mark_read))
         .route(
             "/channels/:id/voice-triggers",
-            get(routes::voice_triggers::list_channel)
-                .post(routes::voice_triggers::create_channel),
+            get(routes::voice_triggers::list_channel).post(routes::voice_triggers::create_channel),
         )
         .route(
             "/channels/:id/voice-triggers/:trigger_id",
@@ -327,6 +375,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/channels/:id/messages",
             get(routes::messages::list_messages).post(routes::messages::create_message),
         )
+        .route(
+            "/channels/:id/polls",
+            get(routes::polls::list_polls).post(routes::polls::create_poll),
+        )
+        .route(
+            "/polls/:id",
+            get(routes::polls::get_poll).delete(routes::polls::delete_poll),
+        )
+        .route(
+            "/polls/:id/vote",
+            post(routes::polls::vote).delete(routes::polls::retract_vote),
+        )
+        .route("/polls/:id/close", post(routes::polls::close_poll))
+        .route("/polls/:id/pin", post(routes::polls::pin_poll))
         .route("/messages/:id/thread", get(routes::messages::get_thread))
         .route(
             "/messages/:id",
@@ -347,7 +409,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/notifications",
             get(routes::notifications::list_notifications),
         )
-        .route("/notifications/read", post(routes::notifications::mark_read))
+        .route(
+            "/notifications/read",
+            post(routes::notifications::mark_read),
+        )
         .route("/prefs", get(routes::notifications::get_prefs))
         .route("/prefs/dnd", put(routes::notifications::set_dnd))
         .route(
@@ -402,11 +467,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/docs/:id/backlinks", get(routes::docs::backlinks))
         .route("/docs/:id/mentions", post(routes::docs::create_mention))
-        .route("/docs/:id/sync", get(docs_sync::doc_sync_handler))
         .route(
-            "/mentions",
-            get(routes::docs::list_mentions),
+            "/docs/:id/uploads",
+            post(routes::files::upload_doc_image).layer(DefaultBodyLimit::max(upload_limit)),
         )
+        .route("/docs/:id/sync", get(docs_sync::doc_sync_handler))
+        .route("/mentions", get(routes::docs::list_mentions))
         .route("/mentions/read", post(routes::docs::read_mentions))
         .route("/healthz", get(healthz))
         .route("/ws", get(ws::ws_handler));
@@ -414,7 +480,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app: Router<state::SharedState> = Router::new()
         .nest("/api/v1", api)
         // Desktop browser-login bridge — served on the API host, SPA-independent.
-        .route("/desktop-auth", get(desktop_auth_page));
+        .route("/desktop-auth", get(desktop_auth_page))
+        .route("/passkey-settings", get(passkey_settings_page));
 
     // Serve the built SPA (if present) with fallback to index.html.
     let dist_path = Path::new(&web_dist);

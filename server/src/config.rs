@@ -26,6 +26,8 @@ pub struct Config {
     pub deepseek: Option<DeepSeekConfig>,
     /// Google Calendar OAuth. `None` unless client id + secret (+ redirect) are set.
     pub google: Option<GoogleConfig>,
+    /// WebAuthn relying-party configuration. `None` keeps passkeys disabled.
+    pub webauthn: Option<WebauthnConfig>,
 }
 
 #[derive(Clone)]
@@ -73,6 +75,15 @@ pub struct GoogleConfig {
     /// Must exactly match a redirect URI registered on the Google OAuth client,
     /// e.g. `https://<app-domain>/api/v1/calendar/google/callback`.
     pub redirect_uri: String,
+}
+
+#[derive(Clone)]
+pub struct WebauthnConfig {
+    /// Permanent credential scope. Changing this invalidates enrolled passkeys.
+    pub rp_id: String,
+    /// Exact browser origins allowed to complete ceremonies.
+    pub origins: Vec<String>,
+    pub rp_name: String,
 }
 
 fn env_opt(key: &str) -> Option<String> {
@@ -198,6 +209,27 @@ impl Config {
             _ => None,
         };
 
+        let webauthn = match (env_opt("WEBAUTHN_RP_ID"), env_opt("WEBAUTHN_ORIGINS")) {
+            (None, None) => None,
+            (Some(rp_id), Some(origins)) => {
+                let origins = origins
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|origin| !origin.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                if origins.is_empty() {
+                    return Err("WEBAUTHN_ORIGINS must contain at least one origin".to_string());
+                }
+                Some(WebauthnConfig {
+                    rp_id,
+                    origins,
+                    rp_name: env_opt("WEBAUTHN_RP_NAME").unwrap_or_else(|| "Sharp".to_string()),
+                })
+            }
+            _ => return Err("WEBAUTHN_RP_ID and WEBAUTHN_ORIGINS must be set together".to_string()),
+        };
+
         Ok(Config {
             database_url,
             jwt_secret,
@@ -214,6 +246,7 @@ impl Config {
             tenor_api_key,
             deepseek,
             google,
+            webauthn,
         })
     }
 }
