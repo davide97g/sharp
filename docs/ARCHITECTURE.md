@@ -682,9 +682,10 @@ Client → server:
 - `voice.poll_vote` `{room_id, poll_id, option_ids}` — an empty option list retracts the vote.
 - `voice.poll_close` `{room_id, poll_id}` — creator only.
 - `voice.annotate_allow` `{channel_id, allowed: boolean}` — toggle whether non-sharers may draw
-  over the shared screen. Accepted only from the participant holding the screen-share slot
-  (`screen_on == true`); a non-sharer gets `voice.error {code:"annotate_denied"}`. Idempotent
-  (a request matching the current state is a no-op with no broadcast).
+  over the shared screen. New screen shares enable this by default. Accepted only from the
+  participant holding the screen-share slot (`screen_on == true`); a non-sharer gets
+  `voice.error {code:"annotate_denied"}`. Idempotent (a request matching the current state is a
+  no-op with no broadcast).
 - `voice.annotate` `{channel_id, stroke_id: string, kind: "start"|"points"|"end", points: [number, number][], size?: number}`
   — an ephemeral pen stroke fragment. `points` are normalized (0..1) coordinates relative to
   the shared video content. Validation: `stroke_id` ≤ 64 chars, `points` ≤ 128 pairs, each
@@ -728,9 +729,9 @@ Server → client:
   create, vote, close, or expiry. `voice.state` and the `hello.voice_rooms` snapshots also carry
   the current `poll`.
 - `voice.annotate_state` `{channel_id, allowed: boolean}` — broadcast to the room audience
-  whenever `annotations_allowed` changes, including the automatic reset to `false` when the
-  active screen share ends for any reason (screen disable, sharer leaves/disconnects/evicted,
-  room closed). The reset is only broadcast if it was previously `true`.
+  whenever `annotations_allowed` changes, including automatic enablement when a new screen
+  share starts and reset to `false` when the active share ends for any reason (screen disable,
+  sharer leaves/disconnects/evicted, room closed). Events are only broadcast on state changes.
 - `voice.annotate` `{channel_id, conn_id, user_id, color, stroke_id, kind, points, size?}` —
   relay of a sender's stroke fragment to the room audience, stamped with the sender's `conn_id`,
   `user_id`, and `annotation_color`. Clients ignore events whose `conn_id` matches their own
@@ -813,7 +814,9 @@ Server → client:
   accepts only the current sharer and toggles the room's `annotations_allowed`, broadcasting
   `voice.annotate_state` on change (idempotent otherwise). `voice.annotate` and
   `voice.annotate_clear` are pure relays (nothing is stored server-side): the server validates
-  and stamps `conn_id`/`user_id`/`color`, then broadcasts to the room audience. When the active
+  and stamps `conn_id`/`user_id`/`color`, then broadcasts to the room audience. Starting a new
+  share enables annotations for all participants by default; the sharer can disable them without
+  a repeated idempotent `voice.screen` enable undoing that choice. When the active
   screen share ends for any reason — `voice.screen` disable, or the sharer leaving,
   disconnecting, being evicted, or the room closing — the server clears `annotations_allowed`
   and broadcasts `voice.annotate_state {allowed:false}`, but only if it was previously `true`.

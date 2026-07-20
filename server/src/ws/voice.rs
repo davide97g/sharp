@@ -1736,17 +1736,11 @@ async fn handle_screen(state: &SharedState, conn_id: Uuid, payload: &Value, tx: 
         .and_then(Value::as_str)
         .map(str::to_string);
 
-    let (result, annotations_reset) = {
+    let (result, annotation_state_changed) = {
         let mut guard = state.voice_rooms.lock().unwrap();
         match guard.get_mut(&channel_id) {
-            Some(room) => {
-                let result = update_screen(room, conn_id, enabled, stream_id);
-                // Ending the share revokes any annotation permission it granted.
-                let reset = matches!(result, ScreenUpdateResult::Updated(_))
-                    && reset_annotations_if_screen_gone(room);
-                (result, reset)
-            }
-            None => (ScreenUpdateResult::Missing, false),
+            Some(room) => update_screen_with_annotations(room, conn_id, enabled, stream_id),
+            None => (ScreenUpdateResult::Missing, None),
         }
     };
 
@@ -1763,8 +1757,8 @@ async fn handle_screen(state: &SharedState, conn_id: Uuid, payload: &Value, tx: 
     };
 
     broadcast_participant_updated(state, channel_id, participant).await;
-    if annotations_reset {
-        broadcast_annotate_state(state, channel_id, false, &[]).await;
+    if let Some(allowed) = annotation_state_changed {
+        broadcast_annotate_state(state, channel_id, allowed, &[]).await;
     }
 }
 
@@ -1801,6 +1795,40 @@ fn update_screen(
     participant.screen_on = enabled;
     participant.screen_stream_id = if enabled { stream_id } else { None };
     ScreenUpdateResult::Updated(participant.clone())
+}
+
+/// Apply a screen update and keep collaborative drawing permission in sync with
+/// the share lifecycle. A new share starts open so every participant can draw;
+/// the sharer may still disable drawing afterward. Repeated enable events must
+/// not undo that explicit choice.
+fn update_screen_with_annotations(
+    room: &mut VoiceRoom,
+    conn_id: Uuid,
+    enabled: bool,
+    stream_id: Option<String>,
+) -> (ScreenUpdateResult, Option<bool>) {
+    let was_screen_on = room
+        .participants
+        .get(&conn_id)
+        .is_some_and(|participant| participant.screen_on);
+    let result = update_screen(room, conn_id, enabled, stream_id);
+    if !matches!(result, ScreenUpdateResult::Updated(_)) {
+        return (result, None);
+    }
+
+    let annotation_state_changed = if enabled && !was_screen_on {
+        if room.annotations_allowed {
+            None
+        } else {
+            room.annotations_allowed = true;
+            Some(true)
+        }
+    } else if !enabled && reset_annotations_if_screen_gone(room) {
+        Some(false)
+    } else {
+        None
+    };
+    (result, annotation_state_changed)
 }
 
 /// Pick a pen color for a joining participant: prefer a palette hue not already
@@ -2437,6 +2465,62 @@ mod tests {
                 if participant.screen_on
                     && participant.screen_stream_id.as_deref() == Some("stream-a")
         ));
+    }
+
+    #[test]
+    fn starting_screen_enables_drawing_for_everyone() {
+        let mut room = room_with_screens(&[false, false]);
+        let conn_id = *room.participants.keys().next().unwrap();
+
+        let (result, annotation_state_changed) =
+            update_screen_with_annotations(&mut room, conn_id, true, Some("stream-a".to_string()));
+
+        assert!(matches!(
+            result,
+            ScreenUpdateResult::Updated(participant) if participant.screen_on
+        ));
+        assert!(room.annotations_allowed);
+        assert_eq!(annotation_state_changed, Some(true));
+    }
+
+    #[test]
+    fn repeated_screen_enable_preserves_sharer_drawing_choice() {
+        let mut room = room_with_screens(&[true, false]);
+        let conn_id = room
+            .participants
+            .values()
+            .find(|participant| participant.screen_on)
+            .unwrap()
+            .conn_id;
+        room.annotations_allowed = false;
+
+        let (_, annotation_state_changed) = update_screen_with_annotations(
+            &mut room,
+            conn_id,
+            true,
+            Some("stream-repeated".to_string()),
+        );
+
+        assert!(!room.annotations_allowed);
+        assert_eq!(annotation_state_changed, None);
+    }
+
+    #[test]
+    fn ending_screen_disables_drawing_for_everyone() {
+        let mut room = room_with_screens(&[true, false]);
+        let conn_id = room
+            .participants
+            .values()
+            .find(|participant| participant.screen_on)
+            .unwrap()
+            .conn_id;
+        room.annotations_allowed = true;
+
+        let (_, annotation_state_changed) =
+            update_screen_with_annotations(&mut room, conn_id, false, None);
+
+        assert!(!room.annotations_allowed);
+        assert_eq!(annotation_state_changed, Some(false));
     }
 
     #[test]
