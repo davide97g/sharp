@@ -243,6 +243,8 @@ export type VoiceParticipant = {
   user_id: string
   // Server-filled for every participant (members + guests).
   display_name: string
+  // Server-assigned drawing color (CSS hex, e.g. "#f97316"), stable for the session.
+  annotation_color: string
   // True for unregistered visitors who joined via a public call link.
   guest: boolean
   muted: boolean
@@ -261,6 +263,8 @@ export type VoiceRoomSnapshot = {
   participants: VoiceParticipant[]
   active_meeting_id: string | null
   poll: CallPoll | null
+  // Whether non-sharers may currently draw on the active screen share.
+  annotations_allowed: boolean
 }
 
 export type PollVoter = {
@@ -439,6 +443,19 @@ export type VoiceSignalPayload = {
   data: unknown
 }
 export type VoiceErrorPayload = { channel_id: string; code: string }
+// Screen-share annotation relays (server -> client).
+export type VoiceAnnotatePayload = {
+  channel_id: string
+  conn_id: string
+  user_id: string
+  color: string
+  stroke_id: string
+  kind: 'start' | 'points' | 'end'
+  points: [number, number][]
+  size?: number
+}
+export type VoiceAnnotateClearPayload = { channel_id: string }
+export type VoiceAnnotateStatePayload = { channel_id: string; allowed: boolean }
 export type VoiceTriggerCreatedPayload = { channel_id: string; trigger: VoiceTrigger }
 export type VoiceTriggerDeletedPayload = { channel_id: string; trigger_id: string }
 export type VoiceTriggerFiredPayload = {

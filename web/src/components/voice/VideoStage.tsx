@@ -18,6 +18,7 @@ import { CallChatRail } from './CallChatRail'
 import { VoiceDuckSuggest } from './VoiceDuckSuggest'
 import { useVoicePip } from './VoicePip'
 import { MicActivityIcon } from './MicActivityIcon'
+import { AnnotationOverlay } from './AnnotationOverlay'
 import { CallPollOverlay } from '../CallPollOverlay'
 import { CreatePollModal } from '../CreatePollModal'
 
@@ -1125,6 +1126,24 @@ function ScreenTile({
   const hasVideo = Boolean(stream?.getVideoTracks().length)
   const [fullScreen, setFullScreen] = useState(false)
 
+  const myConnId = useStore((s) => s.myConnId)
+  const channelId = useStore((s) => s.voice.channelId)
+  const annotating = useStore((s) => s.voice.annotating)
+  const annotationsAllowed = useStore((s) => s.voice.annotationsAllowed)
+  const myColor = useStore((s) =>
+    myConnId && channelId
+      ? s.voiceRooms[channelId]?.[myConnId]?.annotation_color ?? '#f97316'
+      : '#f97316',
+  )
+  const toggleAnnotating = useStore((s) => s.toggleAnnotating)
+  const setAnnotationsAllowed = useStore((s) => s.setAnnotationsAllowed)
+  const clearAnnotations = useStore((s) => s.clearAnnotations)
+
+  // The sharer may always draw on their own share; everyone else only when the
+  // sharer has allowed it. `local` means this tile is our own screen.
+  const canDraw = local || annotationsAllowed
+  const penActive = annotating && canDraw && hasVideo
+
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
@@ -1176,23 +1195,83 @@ function ScreenTile({
           Waiting for screen…
         </div>
       )}
+      {/* Drawing surface — inside tileRef so it also covers element-fullscreen. */}
       {hasVideo ? (
-        <button
-          type="button"
-          aria-label={fullScreen ? 'Exit shared screen full screen' : 'View shared screen full screen'}
-          title={fullScreen ? 'Exit full screen' : 'View full screen'}
-          onClick={() => void toggleFullScreen()}
-          className="absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-black/60 text-white shadow-lg backdrop-blur-sm outline-none hover:bg-black/80 focus-visible:ring-2 focus-visible:ring-white"
-        >
-          {fullScreen ? <ReduceIcon /> : <FullscreenIcon />}
-        </button>
+        <AnnotationOverlay
+          videoRef={videoRef}
+          active={penActive}
+          color={myColor}
+        />
       ) : null}
-      <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/75 to-transparent px-3 pb-2.5 pt-6 text-sm font-medium text-white">
+      {hasVideo ? (
+        <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
+          {(local || annotationsAllowed) ? (
+            <button
+              type="button"
+              aria-label={annotating ? 'Stop drawing' : 'Draw on the shared screen'}
+              title={annotating ? 'Stop drawing' : 'Draw on the shared screen'}
+              aria-pressed={annotating}
+              onClick={toggleAnnotating}
+              className={screenBtnClass(annotating)}
+            >
+              <PenIcon />
+              <span
+                aria-hidden
+                className="absolute bottom-1 left-1/2 h-1 w-4 -translate-x-1/2 rounded-full"
+                style={{ backgroundColor: myColor }}
+              />
+            </button>
+          ) : null}
+          {local ? (
+            <button
+              type="button"
+              aria-label={annotationsAllowed ? 'Disable drawing for others' : 'Allow others to draw'}
+              title={annotationsAllowed ? 'Disable drawing for others' : 'Allow others to draw'}
+              aria-pressed={annotationsAllowed}
+              onClick={() => setAnnotationsAllowed(!annotationsAllowed)}
+              className={screenBtnClass(annotationsAllowed)}
+            >
+              <AllowDrawIcon allowed={annotationsAllowed} />
+            </button>
+          ) : null}
+          {local ? (
+            <button
+              type="button"
+              aria-label="Clear all annotations"
+              title="Clear all annotations"
+              onClick={clearAnnotations}
+              className={screenBtnClass(false)}
+            >
+              <EraseIcon />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            aria-label={fullScreen ? 'Exit shared screen full screen' : 'View shared screen full screen'}
+            title={fullScreen ? 'Exit full screen' : 'View full screen'}
+            onClick={() => void toggleFullScreen()}
+            className={screenBtnClass(false)}
+          >
+            {fullScreen ? <ReduceIcon /> : <FullscreenIcon />}
+          </button>
+        </div>
+      ) : null}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/75 to-transparent px-3 pb-2.5 pt-6 text-sm font-medium text-white">
         <ScreenShareIcon />
         <span className="truncate">{local ? 'Your screen' : `${name}'s screen`}</span>
       </div>
     </article>
   )
+}
+
+// Shared styling for the screen-tile control buttons; `active` mirrors the
+// accent-filled look used by other active toggles in the call UI.
+function screenBtnClass(active: boolean): string {
+  return `relative flex h-10 w-10 items-center justify-center rounded-xl border shadow-lg backdrop-blur-sm outline-none focus-visible:ring-2 focus-visible:ring-white ${
+    active
+      ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-white hover:brightness-110'
+      : 'border-white/15 bg-black/60 text-white hover:bg-black/80'
+  }`
 }
 
 function StageControlsBar({
@@ -2281,6 +2360,69 @@ function ScreenShareIcon() {
       <path d="M12 17v4" />
       <path d="m9 11 3-3 3 3" />
       <path d="M12 8v6" />
+    </svg>
+  )
+}
+
+function PenIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 19l7-7 3 3-7 7-3-3z" />
+      <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18z" />
+      <path d="M2 2l7.586 7.586" />
+      <circle cx="11" cy="11" r="2" />
+    </svg>
+  )
+}
+
+// "Allow others to draw" — a pencil over a screen; a slash when disabled.
+function AllowDrawIcon({ allowed }: { allowed: boolean }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="2" y="4" width="20" height="13" rx="2" />
+      <path d="m14 8-6 6" />
+      <path d="m13 7 3 3" />
+      {!allowed ? <path d="M4 3l16 16" /> : null}
+    </svg>
+  )
+}
+
+function EraseIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M7 21h10" />
+      <path d="M5 13l6-6 6 6-5 5H9z" />
+      <path d="M11 7l6 6" />
     </svg>
   )
 }

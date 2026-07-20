@@ -1,11 +1,17 @@
 import { create } from 'zustand'
 import { api, ApiRequestError, clearToken, setSessionToken, setToken } from './lib/api'
 import { VoiceClient } from './lib/voice'
+import { annotations } from './lib/annotations'
 import {
   loadVideoBackground,
   saveVideoBackground,
   type VideoBackground,
 } from './lib/videoBackgrounds'
+import {
+  loadVoiceDevicePrefs,
+  saveVoiceAudioDevice,
+  saveVoiceVideoDevice,
+} from './lib/voicePrefs'
 import { isSpeechSupported, PhraseRecognizer } from './lib/speech'
 import { WsClient } from './lib/ws'
 import { cmpId } from './lib/util'
@@ -76,6 +82,9 @@ import type {
   User,
   UserUpdatedPayload,
   VoiceErrorPayload,
+  VoiceAnnotatePayload,
+  VoiceAnnotateClearPayload,
+  VoiceAnnotateStatePayload,
   VoiceParticipantJoinedPayload,
   VoiceParticipantLeftPayload,
   VoiceParticipantUpdatedPayload,
@@ -129,6 +138,7 @@ export type VoiceRoom = Record<
   {
     user_id: string
     display_name: string
+    annotation_color: string
     guest: boolean
     muted: boolean
     transcribing: boolean
@@ -164,6 +174,10 @@ type VoiceState = {
   localScreenStream: MediaStream | null
   remoteScreenStreams: Record<string, MediaStream>
   client: VoiceClient | null
+  // Screen-share annotations: whether non-sharers may draw (server-authoritative),
+  // and whether the local pen tool is engaged.
+  annotationsAllowed: boolean
+  annotating: boolean
 }
 
 export type ChannelMessages = {
@@ -402,6 +416,9 @@ type State = {
   setVoiceAudioDevice: (deviceId: string) => Promise<void>
   setVoiceVideoDevice: (deviceId: string) => Promise<void>
   setVoiceStageMode: (mode: VoiceStageMode) => void
+  toggleAnnotating: () => void
+  setAnnotationsAllowed: (allowed: boolean) => void
+  clearAnnotations: () => void
 
   // docs actions
   loadChannelDocs: (channelId: string) => Promise<void>
@@ -515,6 +532,8 @@ function emptyVoiceState(): VoiceState {
     localScreenStream: null,
     remoteScreenStreams: {},
     client: null,
+    annotationsAllowed: false,
+    annotating: false,
   }
 }
 
@@ -1444,6 +1463,7 @@ export const useStore = create<State>((set, get) => ({
     }
 
     const videoBackground = loadVideoBackground(me.id)
+    const devicePrefs = loadVoiceDevicePrefs(me.id)
     set({
       callPoll: null,
       voice: {
@@ -1460,15 +1480,23 @@ export const useStore = create<State>((set, get) => ({
         cameraStatus: 'off',
         screenStatus: 'off',
         stageMode: opts?.stageMode ?? 'expanded',
-        audioDeviceId: null,
-        videoDeviceId: null,
+        audioDeviceId: devicePrefs.audioDeviceId,
+        videoDeviceId: devicePrefs.videoDeviceId,
         localStream: null,
         remoteStreams: {},
         localScreenStream: null,
         remoteScreenStreams: {},
         client: null,
+        annotationsAllowed: false,
+        annotating: false,
       },
     })
+    // Fresh annotation engine for this call; wire outgoing batches to the ws.
+    annotations.reset()
+    annotations.setSend(
+      (payload) => get().ws?.send('voice.annotate', { channel_id: channelId, ...payload }),
+      myConnId,
+    )
 
     let client: VoiceClient | null = null
     try {
@@ -1489,6 +1517,8 @@ export const useStore = create<State>((set, get) => ({
         iceServers: config.ice_servers,
         noiseSuppression: get().voice.noiseSuppression,
         videoBackground: get().voice.videoBackground,
+        audioDeviceId: devicePrefs.audioDeviceId,
+        videoDeviceId: devicePrefs.videoDeviceId,
         send: (type, payload) => get().ws!.send(type, payload),
         onSpeaking: (connId, speaking) => {
           set((s) => {
@@ -1590,6 +1620,8 @@ export const useStore = create<State>((set, get) => ({
     if (channelId) get().ws?.send('voice.leave', { channel_id: channelId })
     stopVoiceRecognizer()
     client?.stop()
+    annotations.reset()
+    annotations.setSend(null, null)
     set({ voice: emptyVoiceState(), callPoll: null })
     if (channelId && status === 'connected') playVoiceLeaveSound()
   },
@@ -1751,8 +1783,11 @@ export const useStore = create<State>((set, get) => ({
     try {
       await client.setAudioInput(deviceId)
       if (get().voice.client !== client) return
+      const activeId = client.getAudioDeviceId()
+      const me = get().me
+      if (me) saveVoiceAudioDevice(me.id, activeId)
       set((s) => ({
-        voice: { ...s.voice, audioDeviceId: client.getAudioDeviceId() },
+        voice: { ...s.voice, audioDeviceId: activeId },
       }))
     } catch (e) {
       if (e instanceof Error) toastError(e.message)
@@ -1766,8 +1801,11 @@ export const useStore = create<State>((set, get) => ({
     try {
       await client.setVideoInput(deviceId)
       if (get().voice.client !== client) return
+      const activeId = client.getVideoDeviceId()
+      const me = get().me
+      if (me) saveVoiceVideoDevice(me.id, activeId)
       set((s) => ({
-        voice: { ...s.voice, videoDeviceId: client.getVideoDeviceId() },
+        voice: { ...s.voice, videoDeviceId: activeId },
       }))
     } catch (e) {
       if (e instanceof Error) toastError(e.message)
@@ -1778,6 +1816,26 @@ export const useStore = create<State>((set, get) => ({
   setVoiceStageMode(mode) {
     if (!get().voice.channelId) return
     set((s) => ({ voice: { ...s.voice, stageMode: mode } }))
+  },
+
+  toggleAnnotating() {
+    if (!get().voice.channelId) return
+    set((s) => ({ voice: { ...s.voice, annotating: !s.voice.annotating } }))
+  },
+
+  setAnnotationsAllowed(allowed) {
+    const { channelId } = get().voice
+    if (!channelId) return
+    // Sharer-only on the server; the resulting voice.annotate_state event flips
+    // the local flag, so we don't set it optimistically here.
+    get().ws?.send('voice.annotate_allow', { channel_id: channelId, allowed })
+  },
+
+  clearAnnotations() {
+    const { channelId } = get().voice
+    if (!channelId) return
+    get().ws?.send('voice.annotate_clear', { channel_id: channelId })
+    annotations.clearAll()
   },
 
   totalUnread() {
@@ -2117,6 +2175,8 @@ export const useStore = create<State>((set, get) => ({
         if (voiceReconnected) {
           stopVoiceRecognizer()
           previous.voice.client?.stop()
+          annotations.reset()
+          annotations.setSend(null, null)
         }
         set({
           online: new Set(p.online_user_ids),
@@ -2190,6 +2250,7 @@ export const useStore = create<State>((set, get) => ({
                   ...s.voice,
                   status: 'connected' as const,
                   speaking: {},
+                  annotationsAllowed: p.annotations_allowed,
                 },
               }
             : {}),
@@ -2220,6 +2281,7 @@ export const useStore = create<State>((set, get) => ({
               [p.participant.conn_id]: {
                 user_id: p.participant.user_id,
                 display_name: p.participant.display_name,
+                annotation_color: p.participant.annotation_color,
                 guest: p.participant.guest,
                 muted: p.participant.muted,
                 transcribing: p.participant.transcribing,
@@ -2284,8 +2346,11 @@ export const useStore = create<State>((set, get) => ({
           if (p.conn_id === get().myConnId) {
             stopVoiceRecognizer()
             activeBeforeLeave.client?.stop()
+            annotations.reset()
+            annotations.setSend(null, null)
             set({ voice: emptyVoiceState(), callPoll: null })
           } else {
+            annotations.clearConn(p.conn_id)
             activeBeforeLeave.client?.removePeer(p.conn_id)
             set((s) => {
               if (s.voice.client !== activeBeforeLeave.client) return {}
@@ -2318,6 +2383,7 @@ export const useStore = create<State>((set, get) => ({
                 [p.participant.conn_id]: {
                   user_id: p.participant.user_id,
                   display_name: p.participant.display_name,
+                  annotation_color: p.participant.annotation_color,
                   guest: p.participant.guest,
                   muted: p.participant.muted,
                   transcribing: p.participant.transcribing,
@@ -2431,8 +2497,41 @@ export const useStore = create<State>((set, get) => ({
         }
         break
       }
+      case 'voice.annotate': {
+        const p = env.payload as VoiceAnnotatePayload
+        if (get().voice.channelId === p.channel_id) annotations.applyRemote(p)
+        break
+      }
+      case 'voice.annotate_clear': {
+        const p = env.payload as VoiceAnnotateClearPayload
+        if (get().voice.channelId === p.channel_id) annotations.clearAll()
+        break
+      }
+      case 'voice.annotate_state': {
+        const p = env.payload as VoiceAnnotateStatePayload
+        if (get().voice.channelId !== p.channel_id) break
+        set((s) => {
+          const room = s.voiceRooms[p.channel_id]
+          const iAmSharer = s.myConnId ? room?.[s.myConnId]?.screen_on ?? false : false
+          return {
+            voice: {
+              ...s.voice,
+              annotationsAllowed: p.allowed,
+              // Drop the pen when drawing is revoked for non-sharers.
+              annotating: !p.allowed && !iAmSharer ? false : s.voice.annotating,
+            },
+          }
+        })
+        break
+      }
       case 'voice.error': {
         const p = env.payload as VoiceErrorPayload
+        if (p.code === 'annotate_denied') {
+          // Non-fatal: server refused a draw/allow/clear. Stay in the call; just
+          // drop the pen so the UI reflects that drawing isn't permitted.
+          set((s) => ({ voice: { ...s.voice, annotating: false } }))
+          break
+        }
         if (p.code === 'camera_full') {
           set((s) => ({ voice: { ...s.voice, cameraStatus: 'off', localStream: null } }))
           toastError(voiceErrorMessage(p.code))
@@ -2451,6 +2550,8 @@ export const useStore = create<State>((set, get) => ({
           // guest page shows the invalid-link state instead of Rejoin.
           stopVoiceRecognizer()
           get().voice.client?.stop()
+          annotations.reset()
+          annotations.setSend(null, null)
           set({
             voice: emptyVoiceState(),
             callPoll: null,
@@ -2462,6 +2563,8 @@ export const useStore = create<State>((set, get) => ({
         }
         stopVoiceRecognizer()
         get().voice.client?.stop()
+        annotations.reset()
+        annotations.setSend(null, null)
         set({ voice: emptyVoiceState(), callPoll: null })
         toastError(voiceErrorMessage(p.code))
         break
@@ -2884,6 +2987,7 @@ function voiceRoomFromParticipants(
     room[participant.conn_id] = {
       user_id: participant.user_id,
       display_name: participant.display_name,
+      annotation_color: participant.annotation_color,
       guest: participant.guest,
       muted: participant.muted,
       transcribing: participant.transcribing,

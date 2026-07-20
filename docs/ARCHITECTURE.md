@@ -647,8 +647,8 @@ vocabulary. No media passes through the server and there is no SFU.
 All ids are strings in JSON (UUIDs). A WebSocket connection id is the peer identity.
 
 ```ts
-VoiceParticipant = { conn_id: string, user_id: string, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null, hand_raised: boolean, hand_raised_at: number | null, joined_at: string }
-VoiceRoomSnapshot = { channel_id: string, participants: VoiceParticipant[], active_meeting_id: string | null }
+VoiceParticipant = { conn_id: string, user_id: string, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null, hand_raised: boolean, hand_raised_at: number | null, annotation_color: string, joined_at: string }
+VoiceRoomSnapshot = { channel_id: string, participants: VoiceParticipant[], active_meeting_id: string | null, annotations_allowed: boolean }
 VoiceSignalKind = 'offer'|'answer'|'candidate'
 ```
 
@@ -681,18 +681,32 @@ Client → server:
 - `voice.poll_create` `{room_id, question, options, multi, expires_at?}`
 - `voice.poll_vote` `{room_id, poll_id, option_ids}` — an empty option list retracts the vote.
 - `voice.poll_close` `{room_id, poll_id}` — creator only.
+- `voice.annotate_allow` `{channel_id, allowed: boolean}` — toggle whether non-sharers may draw
+  over the shared screen. Accepted only from the participant holding the screen-share slot
+  (`screen_on == true`); a non-sharer gets `voice.error {code:"annotate_denied"}`. Idempotent
+  (a request matching the current state is a no-op with no broadcast).
+- `voice.annotate` `{channel_id, stroke_id: string, kind: "start"|"points"|"end", points: [number, number][], size?: number}`
+  — an ephemeral pen stroke fragment. `points` are normalized (0..1) coordinates relative to
+  the shared video content. Validation: `stroke_id` ≤ 64 chars, `points` ≤ 128 pairs, each
+  coord a finite number clamped server-side to `[0,1]`; `size` (brush width as a fraction of
+  video width) clamped to `(0, 0.02]`. Sender must be an active participant (else
+  `not_in_room`), the room must have an active screen share, and either
+  `annotations_allowed == true` or the sender is the sharer (else `annotate_denied`).
+- `voice.annotate_clear` `{channel_id}` — clear all live strokes. Sharer only (else
+  `annotate_denied`).
 
 Server → client:
 
 - `hello` payload is extended with `conn_id: string` and
   `voice_rooms: VoiceRoomSnapshot[]`, where each snapshot is
-  `{channel_id, participants: VoiceParticipant[], active_meeting_id}` and each participant is
-  `{conn_id, user_id, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null, hand_raised: boolean, hand_raised_at: number | null, joined_at: string}`.
+  `{channel_id, participants: VoiceParticipant[], active_meeting_id, annotations_allowed}` and each participant is
+  `{conn_id, user_id, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null, hand_raised: boolean, hand_raised_at: number | null, annotation_color: string, joined_at: string}`.
+  `annotation_color` is a CSS hex color assigned server-side at join (a fixed 12-hue palette).
   `hand_raised_at` is Unix epoch milliseconds set when the hand was raised and `null` while lowered.
   `display_name` is filled server-side for everyone (users from the `users` table,
   guests from their token) so clients can render names without `/users` access; `guest`
   marks public voice-link joiners.
-- `voice.state` `{channel_id, participants: VoiceParticipant[]}` — sent only to the joining
+- `voice.state` `{channel_id, participants: VoiceParticipant[], active_meeting_id, poll, annotations_allowed}` — sent only to the joining
   connection immediately after a successful join.
 - `voice.participant_joined` `{channel_id, participant: VoiceParticipant}` — broadcast to
   the room audience (see broadcast targeting below).
@@ -713,8 +727,18 @@ Server → client:
 - `voice.poll_state` `{room_id, poll: CallPoll|null}` — complete current call-poll state after
   create, vote, close, or expiry. `voice.state` and the `hello.voice_rooms` snapshots also carry
   the current `poll`.
+- `voice.annotate_state` `{channel_id, allowed: boolean}` — broadcast to the room audience
+  whenever `annotations_allowed` changes, including the automatic reset to `false` when the
+  active screen share ends for any reason (screen disable, sharer leaves/disconnects/evicted,
+  room closed). The reset is only broadcast if it was previously `true`.
+- `voice.annotate` `{channel_id, conn_id, user_id, color, stroke_id, kind, points, size?}` —
+  relay of a sender's stroke fragment to the room audience, stamped with the sender's `conn_id`,
+  `user_id`, and `annotation_color`. Clients ignore events whose `conn_id` matches their own
+  (local echo is drawn directly). Nothing is persisted; late joiners see only strokes drawn
+  after they join.
+- `voice.annotate_clear` `{channel_id}` — relay of the sharer's clear-all to the room audience.
 - `voice.error`
-  `{channel_id, code: "room_full"|"camera_full"|"screen_taken"|"not_member"|"not_in_room"|"link_revoked"}`
+  `{channel_id, code: "room_full"|"camera_full"|"screen_taken"|"not_member"|"not_in_room"|"link_revoked"|"annotate_denied"}`
   — sent only to the offending connection. `camera_full` and `screen_taken` do not end the
   audio call. `link_revoked` is sent to a guest whose voice link no longer matches the
   channel's current token (the link was regenerated or removed).
@@ -783,6 +807,16 @@ Server → client:
 - `voice.signal`: the sender must be a participant of `channel_id`; otherwise send
   `voice.error` with `code: "not_in_room"`. Relay with
   `hub.broadcast(envelope, vec![to_user])`, adding `from_user` and `from_conn`.
+- Screen-share annotations: each participant is assigned an `annotation_color` at join —
+  a hue from a fixed 12-color palette, preferring one unused by current room participants,
+  otherwise derived from the conn_id bytes (no rand dependency). `voice.annotate_allow`
+  accepts only the current sharer and toggles the room's `annotations_allowed`, broadcasting
+  `voice.annotate_state` on change (idempotent otherwise). `voice.annotate` and
+  `voice.annotate_clear` are pure relays (nothing is stored server-side): the server validates
+  and stamps `conn_id`/`user_id`/`color`, then broadcasts to the room audience. When the active
+  screen share ends for any reason — `voice.screen` disable, or the sharer leaving,
+  disconnecting, being evicted, or the room closing — the server clears `annotations_allowed`
+  and broadcasts `voice.annotate_state {allowed:false}`, but only if it was previously `true`.
 - WS disconnect: remove that conn from every room it is in, broadcast
   `voice.participant_left` for each, close durable attendance, and drop empty rooms. Last leave
   finalizes the meeting and queues AI notes.

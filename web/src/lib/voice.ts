@@ -14,6 +14,9 @@ type VoiceClientOpts = {
   iceServers: RTCIceServer[]
   noiseSuppression?: boolean
   videoBackground?: VideoBackground
+  // Preferred capture devices remembered from a previous call (may be stale).
+  audioDeviceId?: string | null
+  videoDeviceId?: string | null
   send: (type: string, payload: unknown) => void
   onSpeaking?: (connId: string, speaking: boolean) => void
   onLocalStream?: (stream: MediaStream | null) => void
@@ -124,6 +127,8 @@ export class VoiceClient {
     this.iceServers = opts.iceServers
     this.noiseSuppression = opts.noiseSuppression ?? true
     this.videoBackground = opts.videoBackground ?? { id: 'none' }
+    this.audioDeviceId = opts.audioDeviceId ?? null
+    this.videoDeviceId = opts.videoDeviceId ?? null
     this.send = opts.send
     this.onSpeaking = opts.onSpeaking
     this.onLocalStream = opts.onLocalStream
@@ -134,16 +139,18 @@ export class VoiceClient {
   }
 
   async start(audioDeviceId?: string | null) {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: audioConstraints(audioDeviceId),
-    })
+    const wanted = audioDeviceId ?? this.audioDeviceId
+    const stream = await getUserMediaWithFallback(
+      (id) => ({ audio: audioConstraints(id) }),
+      wanted,
+    )
     if (this.stopped) {
       for (const track of stream.getTracks()) track.stop()
       return
     }
     this.rawStream = stream
     const rawTrack = stream.getAudioTracks()[0]
-    this.audioDeviceId = trackDeviceId(rawTrack) ?? audioDeviceId ?? null
+    this.audioDeviceId = trackDeviceId(rawTrack) ?? wanted ?? null
     const active = await this.buildActiveAudioTrack(rawTrack)
     if (this.stopped) {
       for (const track of stream.getTracks()) track.stop()
@@ -432,9 +439,10 @@ export class VoiceClient {
 
   async startCamera() {
     if (this.stopped || !this.localStream || this.cameraTrack) return
-    const cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: videoConstraints(this.videoDeviceId, this.videoBackground.id !== 'none'),
-    })
+    const cameraStream = await getUserMediaWithFallback(
+      (id) => ({ video: videoConstraints(id, this.videoBackground.id !== 'none') }),
+      this.videoDeviceId,
+    )
     const rawTrack = cameraStream.getVideoTracks()[0]
     if (!rawTrack) {
       for (const mediaTrack of cameraStream.getTracks()) mediaTrack.stop()
@@ -1037,6 +1045,27 @@ async function configureScreenSender(sender: RTCRtpSender) {
     await sender.setParameters(parameters)
   } catch (error) {
     console.warn('Could not apply screen share bitrate limit', error)
+  }
+}
+
+// Acquire media for a preferred deviceId, but survive a stale one. A remembered
+// device that's since been unplugged makes the `{ exact }` constraint throw
+// OverconstrainedError; retry once without the pin so the call still connects on
+// whatever device is available rather than failing the whole join.
+async function getUserMediaWithFallback(
+  build: (deviceId: string | null) => MediaStreamConstraints,
+  deviceId: string | null,
+): Promise<MediaStream> {
+  try {
+    return await navigator.mediaDevices.getUserMedia(build(deviceId))
+  } catch (error) {
+    // OverconstrainedError isn't reliably a DOMException across browsers, and a
+    // vanished device can surface as NotFoundError — match on name, not type.
+    const name = (error as { name?: string } | null)?.name
+    if (deviceId && (name === 'OverconstrainedError' || name === 'NotFoundError')) {
+      return await navigator.mediaDevices.getUserMedia(build(null))
+    }
+    throw error
   }
 }
 

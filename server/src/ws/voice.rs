@@ -18,6 +18,16 @@ use uuid::Uuid;
 const MAX_PARTICIPANTS: usize = 8;
 const MAX_CAMERAS: usize = 4;
 const MAX_SCREENS: usize = 1;
+/// Distinct, saturated hues assigned to participants as their annotation
+/// (pen) color; readable over arbitrary shared-screen content.
+const ANNOTATION_PALETTE: [&str; 12] = [
+    "#ef4444", "#f97316", "#f59e0b", "#84cc16", "#22c55e", "#14b8a6", "#06b6d4", "#3b82f6",
+    "#8b5cf6", "#d946ef", "#ec4899", "#f43f5e",
+];
+/// Wire caps for a relayed annotation stroke.
+const MAX_ANNOTATION_STROKE_ID: usize = 64;
+const MAX_ANNOTATION_POINTS: usize = 128;
+const MAX_ANNOTATION_SIZE: f64 = 0.02;
 const MAX_TRANSCRIPT_PHRASES: usize = 50;
 const MAX_PHRASE_CHARS: usize = 500;
 const PHRASE_STREAK_THRESHOLD: u32 = 3;
@@ -37,6 +47,8 @@ pub struct VoiceParticipant {
     pub hand_raised: bool,
     /// Unix epoch milliseconds when the hand was raised; `None` while lowered.
     pub hand_raised_at: Option<i64>,
+    /// CSS hex color assigned at join for this participant's pen annotations.
+    pub annotation_color: String,
     pub joined_at: DateTime<Utc>,
 }
 
@@ -203,6 +215,8 @@ pub struct VoiceRoom {
     pub meeting_starting: bool,
     pub attendance_ids: HashMap<Uuid, Uuid>,
     pub poll: Option<CallPoll>,
+    /// Whether the current sharer permits others to draw over the shared screen.
+    pub annotations_allowed: bool,
 }
 
 pub type VoiceRooms = Mutex<HashMap<Uuid, VoiceRoom>>;
@@ -228,7 +242,7 @@ pub async fn snapshot_for(state: &SharedState, user_id: Uuid, guest: Option<&Gue
         .into_iter()
         .collect(),
     };
-    let mut rooms: Vec<(Uuid, Vec<VoiceParticipant>, Option<Uuid>, Option<CallPoll>)> = {
+    let mut rooms: Vec<(Uuid, Vec<VoiceParticipant>, Option<Uuid>, Option<CallPoll>, bool)> = {
         let guard = state.voice_rooms.lock().unwrap();
         guard
             .iter()
@@ -248,13 +262,14 @@ pub async fn snapshot_for(state: &SharedState, user_id: Uuid, guest: Option<&Gue
                     participants,
                     room.active_meeting_id,
                     room.poll.clone(),
+                    room.annotations_allowed,
                 )
             })
             .collect()
     };
-    rooms.sort_by_key(|(channel_id, _, _, _)| *channel_id);
+    rooms.sort_by_key(|(channel_id, _, _, _, _)| *channel_id);
     let mut snapshots = Vec::with_capacity(rooms.len());
-    for (channel_id, participants, active_meeting_id, poll) in rooms {
+    for (channel_id, participants, active_meeting_id, poll, annotations_allowed) in rooms {
         let poll = match poll {
             Some(poll) => build_call_poll(state, &poll).await.ok(),
             None => None,
@@ -264,6 +279,7 @@ pub async fn snapshot_for(state: &SharedState, user_id: Uuid, guest: Option<&Gue
             "participants": participants,
             "active_meeting_id": active_meeting_id,
             "poll": poll,
+            "annotations_allowed": annotations_allowed,
         }));
     }
     json!(snapshots)
@@ -345,6 +361,9 @@ pub async fn handle_voice_event(
             handle_poll_vote(state, user_id, conn_id, display_name, guest, &payload, tx).await
         }
         "voice.poll_close" => handle_poll_close(state, user_id, conn_id, &payload, tx).await,
+        "voice.annotate_allow" => handle_annotate_allow(state, conn_id, &payload, tx).await,
+        "voice.annotate" => handle_annotate(state, user_id, conn_id, &payload, tx).await,
+        "voice.annotate_clear" => handle_annotate_clear(state, conn_id, &payload, tx).await,
         _ => {}
     }
 }
@@ -814,18 +833,21 @@ async fn handle_poll_close(
 }
 
 pub async fn cleanup_conn(state: &SharedState, user_id: Uuid, conn_id: Uuid) {
-    let removed: Vec<(Uuid, VoiceParticipant, Option<Uuid>, bool, bool)> = {
+    let removed: Vec<(Uuid, VoiceParticipant, Option<Uuid>, bool, bool, bool)> = {
         let mut guard = state.voice_rooms.lock().unwrap();
         let mut removed = Vec::new();
         for (channel_id, room) in guard.iter_mut() {
             if let Some(participant) = room.participants.remove(&conn_id) {
                 room.attendance_ids.remove(&conn_id);
+                // Losing the sharer's conn ends the share, so revoke annotations.
+                let annotations_reset = reset_annotations_if_screen_gone(room);
                 removed.push((
                     *channel_id,
                     participant,
                     room.active_meeting_id,
                     room.participants.is_empty(),
                     room.participants.is_empty() && room.poll.is_some(),
+                    annotations_reset,
                 ));
             }
         }
@@ -833,7 +855,7 @@ pub async fn cleanup_conn(state: &SharedState, user_id: Uuid, conn_id: Uuid) {
         removed
     };
 
-    for (channel_id, participant, meeting_id, room_ended, poll_ended) in removed {
+    for (channel_id, participant, meeting_id, room_ended, poll_ended, annotations_reset) in removed {
         debug_assert_eq!(participant.user_id, user_id);
         let left_at = Utc::now();
         if let Some(meeting_id) = meeting_id {
@@ -849,14 +871,18 @@ pub async fn cleanup_conn(state: &SharedState, user_id: Uuid, conn_id: Uuid) {
         if poll_ended {
             broadcast_null_poll(state, channel_id, &[participant.user_id]).await;
         }
+        if annotations_reset {
+            broadcast_annotate_state(state, channel_id, false, &[participant.user_id]).await;
+        }
         broadcast_participant_left(state, channel_id, conn_id, user_id).await;
     }
 }
 
 pub async fn remove_member_from_room(state: &SharedState, channel_id: Uuid, user_id: Uuid) {
-    let (mut removed, meeting_id, room_ended, poll_ended): (
+    let (mut removed, meeting_id, room_ended, poll_ended, annotations_reset): (
         Vec<VoiceParticipant>,
         Option<Uuid>,
+        bool,
         bool,
         bool,
     ) = {
@@ -877,13 +903,15 @@ pub async fn remove_member_from_room(state: &SharedState, channel_id: Uuid, user
         for conn_id in &conn_ids {
             room.attendance_ids.remove(conn_id);
         }
+        // Evicting the sharer ends the share, so revoke annotations.
+        let annotations_reset = reset_annotations_if_screen_gone(room);
         let meeting_id = room.active_meeting_id;
         let room_ended = room.participants.is_empty();
         let poll_ended = room_ended && room.poll.is_some();
         if room_ended {
             guard.remove(&channel_id);
         }
-        (removed, meeting_id, room_ended, poll_ended)
+        (removed, meeting_id, room_ended, poll_ended, annotations_reset)
     };
     removed.sort_by_key(|participant| participant.conn_id);
 
@@ -903,6 +931,9 @@ pub async fn remove_member_from_room(state: &SharedState, channel_id: Uuid, user
     if poll_ended {
         broadcast_null_poll(state, channel_id, &extra).await;
     }
+    if annotations_reset {
+        broadcast_annotate_state(state, channel_id, false, &extra).await;
+    }
     let targets = voice_targets(state, channel_id, &extra).await;
     for participant in removed {
         let event = participant_left_event(channel_id, participant.conn_id, participant.user_id);
@@ -911,15 +942,22 @@ pub async fn remove_member_from_room(state: &SharedState, channel_id: Uuid, user
 }
 
 pub async fn close_room(state: &SharedState, channel_id: Uuid) {
-    let (mut removed, meeting_id, had_poll): (Vec<VoiceParticipant>, Option<Uuid>, bool) = {
+    let (mut removed, meeting_id, had_poll, had_annotations): (
+        Vec<VoiceParticipant>,
+        Option<Uuid>,
+        bool,
+        bool,
+    ) = {
         let mut guard = state.voice_rooms.lock().unwrap();
         match guard.remove(&channel_id) {
             Some(room) => {
                 let had_poll = room.poll.is_some();
+                let had_annotations = room.annotations_allowed;
                 (
                     room.participants.into_values().collect(),
                     room.active_meeting_id,
                     had_poll,
+                    had_annotations,
                 )
             }
             None => return,
@@ -941,6 +979,9 @@ pub async fn close_room(state: &SharedState, channel_id: Uuid) {
     let extra: Vec<Uuid> = removed.iter().map(|p| p.user_id).collect();
     if had_poll {
         broadcast_null_poll(state, channel_id, &extra).await;
+    }
+    if had_annotations {
+        broadcast_annotate_state(state, channel_id, false, &extra).await;
     }
     let targets = voice_targets(state, channel_id, &extra).await;
     for participant in removed {
@@ -1010,10 +1051,12 @@ async fn handle_join(
                 room_participants(room),
                 room.active_meeting_id,
                 room.poll.clone(),
+                room.annotations_allowed,
             )
         } else if room.participants.len() >= MAX_PARTICIPANTS {
             JoinResult::Full
         } else {
+            let annotation_color = pick_annotation_color(room, conn_id);
             let participant = VoiceParticipant {
                 conn_id,
                 user_id,
@@ -1026,6 +1069,7 @@ async fn handle_join(
                 screen_stream_id: None,
                 hand_raised: false,
                 hand_raised_at: None,
+                annotation_color,
                 joined_at: Utc::now(),
             };
             room.participants.insert(conn_id, participant.clone());
@@ -1034,6 +1078,7 @@ async fn handle_join(
                 room_participants(room),
                 room.active_meeting_id,
                 room.poll.clone(),
+                room.annotations_allowed,
             )
         }
     };
@@ -1043,12 +1088,30 @@ async fn handle_join(
             send_error(tx, channel_id, "room_full");
             return;
         }
-        JoinResult::Existing(participants, active_meeting_id, poll) => {
-            send_state(state, tx, channel_id, participants, active_meeting_id, poll).await;
+        JoinResult::Existing(participants, active_meeting_id, poll, annotations_allowed) => {
+            send_state(
+                state,
+                tx,
+                channel_id,
+                participants,
+                active_meeting_id,
+                poll,
+                annotations_allowed,
+            )
+            .await;
             return;
         }
-        JoinResult::Joined(participant, participants, active_meeting_id, poll) => {
-            send_state(state, tx, channel_id, participants, active_meeting_id, poll).await;
+        JoinResult::Joined(participant, participants, active_meeting_id, poll, annotations_allowed) => {
+            send_state(
+                state,
+                tx,
+                channel_id,
+                participants,
+                active_meeting_id,
+                poll,
+                annotations_allowed,
+            )
+            .await;
             participant
         }
     };
@@ -1092,7 +1155,7 @@ async fn handle_leave(
     let Some(channel_id) = channel_id(payload) else {
         return;
     };
-    let (participant, meeting_id, room_ended, poll_ended) = {
+    let (participant, meeting_id, room_ended, poll_ended, annotations_reset) = {
         let mut guard = state.voice_rooms.lock().unwrap();
         let Some(room) = guard.get_mut(&channel_id) else {
             send_error(tx, channel_id, "not_in_room");
@@ -1100,13 +1163,15 @@ async fn handle_leave(
         };
         let removed = room.participants.remove(&conn_id);
         room.attendance_ids.remove(&conn_id);
+        // A departing sharer ends the share, so revoke annotations.
+        let annotations_reset = removed.is_some() && reset_annotations_if_screen_gone(room);
         let meeting_id = room.active_meeting_id;
         let room_ended = room.participants.is_empty();
         let poll_ended = room_ended && room.poll.is_some();
         if room_ended {
             guard.remove(&channel_id);
         }
-        (removed, meeting_id, room_ended, poll_ended)
+        (removed, meeting_id, room_ended, poll_ended, annotations_reset)
     };
 
     let Some(participant) = participant else {
@@ -1126,6 +1191,9 @@ async fn handle_leave(
     }
     if poll_ended {
         broadcast_null_poll(state, channel_id, &[user_id]).await;
+    }
+    if annotations_reset {
+        broadcast_annotate_state(state, channel_id, false, &[user_id]).await;
     }
     broadcast_participant_left(state, channel_id, conn_id, user_id).await;
 }
@@ -1668,11 +1736,17 @@ async fn handle_screen(state: &SharedState, conn_id: Uuid, payload: &Value, tx: 
         .and_then(Value::as_str)
         .map(str::to_string);
 
-    let result = {
+    let (result, annotations_reset) = {
         let mut guard = state.voice_rooms.lock().unwrap();
         match guard.get_mut(&channel_id) {
-            Some(room) => update_screen(room, conn_id, enabled, stream_id),
-            None => ScreenUpdateResult::Missing,
+            Some(room) => {
+                let result = update_screen(room, conn_id, enabled, stream_id);
+                // Ending the share revokes any annotation permission it granted.
+                let reset = matches!(result, ScreenUpdateResult::Updated(_))
+                    && reset_annotations_if_screen_gone(room);
+                (result, reset)
+            }
+            None => (ScreenUpdateResult::Missing, false),
         }
     };
 
@@ -1689,6 +1763,9 @@ async fn handle_screen(state: &SharedState, conn_id: Uuid, payload: &Value, tx: 
     };
 
     broadcast_participant_updated(state, channel_id, participant).await;
+    if annotations_reset {
+        broadcast_annotate_state(state, channel_id, false, &[]).await;
+    }
 }
 
 enum ScreenUpdateResult {
@@ -1724,6 +1801,221 @@ fn update_screen(
     participant.screen_on = enabled;
     participant.screen_stream_id = if enabled { stream_id } else { None };
     ScreenUpdateResult::Updated(participant.clone())
+}
+
+/// Pick a pen color for a joining participant: prefer a palette hue not already
+/// used in the room, else derive a stable index from the conn_id bytes (avoids
+/// pulling in a rand crate for the fallback).
+fn pick_annotation_color(room: &VoiceRoom, conn_id: Uuid) -> String {
+    let used: HashSet<&str> = room
+        .participants
+        .values()
+        .map(|participant| participant.annotation_color.as_str())
+        .collect();
+    if let Some(color) = ANNOTATION_PALETTE
+        .iter()
+        .find(|color| !used.contains(**color))
+    {
+        return (*color).to_string();
+    }
+    let index = conn_id
+        .as_bytes()
+        .iter()
+        .fold(0usize, |acc, byte| acc.wrapping_add(*byte as usize));
+    ANNOTATION_PALETTE[index % ANNOTATION_PALETTE.len()].to_string()
+}
+
+/// When a room has no active screen share but still permits annotations, revoke
+/// the permission. Returns `true` when it flipped from allowed to denied (the
+/// caller must broadcast the reset). Callable while holding the rooms lock.
+fn reset_annotations_if_screen_gone(room: &mut VoiceRoom) -> bool {
+    if room.annotations_allowed
+        && !room
+            .participants
+            .values()
+            .any(|participant| participant.screen_on)
+    {
+        room.annotations_allowed = false;
+        true
+    } else {
+        false
+    }
+}
+
+async fn broadcast_annotate_state(
+    state: &SharedState,
+    channel_id: Uuid,
+    allowed: bool,
+    extra: &[Uuid],
+) {
+    let targets = voice_targets(state, channel_id, extra).await;
+    let event = envelope(
+        "voice.annotate_state",
+        json!({
+            "channel_id": channel_id.to_string(),
+            "allowed": allowed,
+        }),
+    );
+    state.hub.broadcast(event, targets).await;
+}
+
+async fn handle_annotate_allow(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &WsSender) {
+    let Some(channel_id) = channel_id(payload) else {
+        return;
+    };
+    let Some(allowed) = payload.get("allowed").and_then(Value::as_bool) else {
+        return;
+    };
+    let changed = {
+        let mut guard = state.voice_rooms.lock().unwrap();
+        let Some(room) = guard.get_mut(&channel_id) else {
+            send_error(tx, channel_id, "annotate_denied");
+            return;
+        };
+        // Only the participant holding the single screen-share slot may toggle.
+        let is_sharer = room
+            .participants
+            .get(&conn_id)
+            .is_some_and(|participant| participant.screen_on);
+        if !is_sharer {
+            send_error(tx, channel_id, "annotate_denied");
+            return;
+        }
+        if room.annotations_allowed == allowed {
+            // Idempotent: no state change, no broadcast.
+            None
+        } else {
+            room.annotations_allowed = allowed;
+            Some(allowed)
+        }
+    };
+    if let Some(allowed) = changed {
+        broadcast_annotate_state(state, channel_id, allowed, &[]).await;
+    }
+}
+
+async fn handle_annotate(
+    state: &SharedState,
+    user_id: Uuid,
+    conn_id: Uuid,
+    payload: &Value,
+    tx: &WsSender,
+) {
+    let Some(channel_id) = channel_id(payload) else {
+        return;
+    };
+    let Some(stroke_id) = payload.get("stroke_id").and_then(Value::as_str) else {
+        return;
+    };
+    if stroke_id.chars().count() > MAX_ANNOTATION_STROKE_ID {
+        return;
+    }
+    let Some(kind) = payload.get("kind").and_then(Value::as_str) else {
+        return;
+    };
+    if !matches!(kind, "start" | "points" | "end") {
+        return;
+    }
+    let Some(raw_points) = payload.get("points").and_then(Value::as_array) else {
+        return;
+    };
+    if raw_points.len() > MAX_ANNOTATION_POINTS {
+        return;
+    }
+    let mut points: Vec<[f64; 2]> = Vec::with_capacity(raw_points.len());
+    for pair in raw_points {
+        let Some(pair) = pair.as_array().filter(|pair| pair.len() == 2) else {
+            return;
+        };
+        let (Some(x), Some(y)) = (pair[0].as_f64(), pair[1].as_f64()) else {
+            return;
+        };
+        if !x.is_finite() || !y.is_finite() {
+            return;
+        }
+        points.push([x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)]);
+    }
+    let size = match payload.get("size") {
+        None | Some(Value::Null) => None,
+        Some(value) => {
+            let Some(size) = value.as_f64() else {
+                return;
+            };
+            if !size.is_finite() || size <= 0.0 {
+                return;
+            }
+            Some(size.min(MAX_ANNOTATION_SIZE))
+        }
+    };
+
+    let color = {
+        let guard = state.voice_rooms.lock().unwrap();
+        let Some(room) = guard.get(&channel_id) else {
+            send_error(tx, channel_id, "not_in_room");
+            return;
+        };
+        let Some(participant) = room.participants.get(&conn_id) else {
+            send_error(tx, channel_id, "not_in_room");
+            return;
+        };
+        let has_screen = room
+            .participants
+            .values()
+            .any(|participant| participant.screen_on);
+        // Drawing needs an active share, and either open permission or that the
+        // sender is the sharer (who may always draw on their own screen).
+        if !has_screen || (!room.annotations_allowed && !participant.screen_on) {
+            send_error(tx, channel_id, "annotate_denied");
+            return;
+        }
+        participant.annotation_color.clone()
+    };
+
+    let mut body = json!({
+        "channel_id": channel_id.to_string(),
+        "conn_id": conn_id.to_string(),
+        "user_id": user_id.to_string(),
+        "color": color,
+        "stroke_id": stroke_id,
+        "kind": kind,
+        "points": points,
+    });
+    if let Some(size) = size {
+        body["size"] = json!(size);
+    }
+    let targets = voice_targets(state, channel_id, &[]).await;
+    state
+        .hub
+        .broadcast(envelope("voice.annotate", body), targets)
+        .await;
+}
+
+async fn handle_annotate_clear(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &WsSender) {
+    let Some(channel_id) = channel_id(payload) else {
+        return;
+    };
+    let is_sharer = {
+        let guard = state.voice_rooms.lock().unwrap();
+        guard
+            .get(&channel_id)
+            .and_then(|room| room.participants.get(&conn_id))
+            .is_some_and(|participant| participant.screen_on)
+    };
+    if !is_sharer {
+        send_error(tx, channel_id, "annotate_denied");
+        return;
+    }
+    let targets = voice_targets(state, channel_id, &[]).await;
+    state
+        .hub
+        .broadcast(
+            envelope(
+                "voice.annotate_clear",
+                json!({ "channel_id": channel_id.to_string() }),
+            ),
+            targets,
+        )
+        .await;
 }
 
 async fn broadcast_participant_updated(
@@ -1796,12 +2088,13 @@ async fn handle_signal(
 
 enum JoinResult {
     Full,
-    Existing(Vec<VoiceParticipant>, Option<Uuid>, Option<CallPoll>),
+    Existing(Vec<VoiceParticipant>, Option<Uuid>, Option<CallPoll>, bool),
     Joined(
         VoiceParticipant,
         Vec<VoiceParticipant>,
         Option<Uuid>,
         Option<CallPoll>,
+        bool,
     ),
 }
 
@@ -1829,6 +2122,7 @@ async fn send_state(
     participants: Vec<VoiceParticipant>,
     active_meeting_id: Option<Uuid>,
     poll: Option<CallPoll>,
+    annotations_allowed: bool,
 ) {
     let poll = match poll {
         Some(poll) => build_call_poll(state, &poll).await.ok(),
@@ -1841,6 +2135,7 @@ async fn send_state(
             "participants": participants,
             "active_meeting_id": active_meeting_id,
             "poll": poll,
+            "annotations_allowed": annotations_allowed,
         }),
     );
     let _ = tx.send(Message::Text(event.to_string()));
@@ -1926,6 +2221,7 @@ mod tests {
             screen_stream_id: None,
             hand_raised: false,
             hand_raised_at: None,
+            annotation_color: ANNOTATION_PALETTE[0].to_string(),
             joined_at: Utc::now(),
         }
     }
@@ -1959,6 +2255,7 @@ mod tests {
             },
             hand_raised: false,
             hand_raised_at: None,
+            annotation_color: ANNOTATION_PALETTE[0].to_string(),
             joined_at: Utc::now(),
         }
     }
