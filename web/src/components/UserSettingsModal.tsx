@@ -31,8 +31,18 @@ import { Avatar } from './Avatar'
 import { AvatarCropper } from './AvatarCropper'
 import { ChatLayoutPicker } from './ChatLayoutChooser'
 import { VoiceTriggerEditor } from './VoiceTriggerEditor'
+import { setAudioAuraPreference, useAudioAuraPreference } from '../lib/meetingEffects'
+import { AudioAuraPreview } from './voice/AudioAuraAvatar'
 
-type Tab = 'profile' | 'chat' | 'security' | 'encryption' | 'workspace' | 'accounts' | 'about'
+type Tab =
+  | 'profile'
+  | 'chat'
+  | 'meetings'
+  | 'security'
+  | 'encryption'
+  | 'workspace'
+  | 'accounts'
+  | 'about'
 
 export function UserSettingsModal({
   onClose,
@@ -237,6 +247,9 @@ export function UserSettingsModal({
         <TabBtn active={tab === 'chat'} onClick={() => setTab('chat')}>
           Chat
         </TabBtn>
+        <TabBtn active={tab === 'meetings'} onClick={() => setTab('meetings')}>
+          Meetings
+        </TabBtn>
         <TabBtn active={tab === 'accounts'} onClick={() => setTab('accounts')}>
           Accounts
         </TabBtn>
@@ -341,6 +354,8 @@ export function UserSettingsModal({
             Applies to 1:1 conversations. Channels always use the classic layout.
           </p>
         </div>
+      ) : tab === 'meetings' ? (
+        <MeetingEffectsSettings userId={me.id} />
       ) : tab === 'accounts' ? (
         <AccountsTab />
       ) : tab === 'security' ? (
@@ -1191,6 +1206,56 @@ function SoundSettingsSection() {
           </span>
         </div>
       </div>
+    </div>
+  )
+}
+
+function MeetingEffectsSettings({ userId }: { userId: string }) {
+  const preference = useAudioAuraPreference(userId)
+  const enabled = preference === true
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+          Speaking effects
+        </div>
+        <p className="mt-1 text-xs leading-5 text-[var(--color-text-faint)]">
+          Optional visual effects shown during calls. Your microphone audio stays on device.
+        </p>
+      </div>
+      <label className="group flex cursor-pointer items-center gap-4 overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-panel-2)] p-4 transition-colors hover:border-[#796cff]/45">
+        <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-[radial-gradient(circle,#796cff22,transparent_70%)]">
+          <AudioAuraPreview size={46} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-[var(--color-text)]">Audio Aura</span>
+            <span className="rounded-full bg-[#796cff]/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.16em] text-[#a99fff]">
+              Advanced
+            </span>
+          </span>
+          <span id="audio-aura-setting-description" className="mt-1 block text-xs leading-5 text-[var(--color-text-faint)]">
+            Speaking volume drives avatar bounce, plasma glow, and orbit speed.
+          </span>
+          <span className="mt-1 block text-[10px] font-medium text-[var(--color-text-dim)]">
+            {preference === null ? 'Not decided — you will be asked once in a call.' : enabled ? 'On' : 'Off'}
+          </span>
+        </span>
+        <span className="relative flex h-7 w-12 shrink-0 items-center rounded-full bg-[var(--color-border)] p-1 transition-colors has-[:checked]:bg-[#796cff]">
+          <input
+            type="checkbox"
+            checked={enabled}
+            aria-describedby="audio-aura-setting-description"
+            onChange={(event) => setAudioAuraPreference(userId, event.target.checked)}
+            className="peer sr-only"
+          />
+          <span className="h-5 w-5 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-5" />
+        </span>
+      </label>
+      <p className="text-[11px] leading-5 text-[var(--color-text-faint)]">
+        Honors your system’s reduced-motion preference by replacing movement with a static glow.
+      </p>
     </div>
   )
 }

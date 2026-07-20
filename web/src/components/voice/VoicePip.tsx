@@ -9,11 +9,13 @@ import {
   supportsElementPip,
 } from '../../lib/pip'
 import { useStore } from '../../store'
-import { Avatar } from '../Avatar'
+import { useAudioAuraPreference } from '../../lib/meetingEffects'
+import { AudioAuraAvatar } from './AudioAuraAvatar'
 import { MicActivityIcon } from './MicActivityIcon'
 
 type PipParticipant = {
   userId: string
+  connIds: string[]
   muted: boolean
   speaking: boolean
   handRaised: boolean
@@ -186,6 +188,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
   const remoteScreenStreams = useStore((s) => s.voice.remoteScreenStreams)
   const myConnId = useStore((s) => s.myConnId)
   const me = useStore((s) => s.me)
+  const audioAuraEnabled = useAudioAuraPreference(me?.id) === true
   const users = useStore((s) => s.users)
   const channel = useStore((s) =>
     s.channels.find((candidate) => candidate.id === channelId),
@@ -201,6 +204,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
     for (const [connId, entry] of Object.entries(room ?? {})) {
       const existing = byUser.get(entry.user_id)
       if (existing) {
+        existing.connIds.push(connId)
         existing.muted = existing.muted && entry.muted
         existing.speaking = existing.speaking || Boolean(speaking[connId])
         if (entry.hand_raised) {
@@ -218,6 +222,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
       } else {
         byUser.set(entry.user_id, {
           userId: entry.user_id,
+          connIds: [connId],
           muted: entry.muted,
           speaking: Boolean(speaking[connId]),
           handRaised: entry.hand_raised,
@@ -294,11 +299,20 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
                   <div
                     key={participant.userId}
                     title={name}
-                    className={`shrink-0 rounded-full ${
-                      participant.speaking ? 'ring-2 ring-[#4fbf9f]' : ''
+                    className={`shrink-0 ${
+                      participant.speaking && !audioAuraEnabled
+                        ? 'rounded-full ring-2 ring-[#4fbf9f]'
+                        : ''
                     }`}
                   >
-                    <Avatar id={participant.userId} name={name} size={28} />
+                    <AudioAuraAvatar
+                      userId={participant.userId}
+                      name={name}
+                      size={28}
+                      connIds={participant.connIds}
+                      speaking={participant.speaking}
+                      enabled={audioAuraEnabled}
+                    />
                   </div>
                 )
               })}
@@ -326,6 +340,8 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
                 muted={participant.muted}
                 speaking={participant.speaking}
                 handRaised={participant.handRaised}
+                connIds={participant.connIds}
+                audioAuraEnabled={audioAuraEnabled}
               />
             )
           })}
@@ -384,6 +400,8 @@ function PipTile({
   muted,
   speaking,
   handRaised,
+  connIds,
+  audioAuraEnabled,
 }: {
   userId: string
   name: string
@@ -392,6 +410,8 @@ function PipTile({
   muted: boolean
   speaking: boolean
   handRaised: boolean
+  connIds: string[]
+  audioAuraEnabled: boolean
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const hasVideo = Boolean(stream?.getVideoTracks().length)
@@ -419,7 +439,14 @@ function PipTile({
         />
       ) : (
         <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,var(--color-panel-2),var(--color-panel))]">
-          <Avatar id={userId} name={name} size={44} />
+          <AudioAuraAvatar
+            userId={userId}
+            name={name}
+            size={44}
+            connIds={connIds}
+            speaking={speaking}
+            enabled={audioAuraEnabled}
+          />
         </div>
       )}
       <div className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-black/80 to-transparent px-2 pb-1.5 pt-5 text-[11px] font-medium text-white">

@@ -61,6 +61,7 @@ type SpeakingDetector = {
   samples: Uint8Array<ArrayBuffer>
   speaking: boolean
   lastAboveThreshold: number
+  level: number
 }
 
 const SPEAKING_THRESHOLD = 0.04
@@ -200,6 +201,16 @@ export class VoiceClient {
       start = end
     }
     return true
+  }
+
+  // Smoothed 0..1 speech energy for audio-reactive UI. Reading this is cheap:
+  // the detector loop already calculates RMS for local and remote microphones.
+  getVoiceLevel(connIds: readonly string[]): number {
+    let level = 0
+    for (const connId of connIds) {
+      level = Math.max(level, this.speakingDetectors.get(connId)?.level ?? 0)
+    }
+    return level
   }
 
   async setAudioInput(deviceId: string) {
@@ -983,6 +994,7 @@ export class VoiceClient {
       samples: new Uint8Array(analyser.fftSize),
       speaking: false,
       lastAboveThreshold: 0,
+      level: 0,
     })
 
     if (this.speakingFrame === null) this.speakingFrame = requestAnimationFrame(this.detectSpeaking)
@@ -1011,6 +1023,9 @@ export class VoiceClient {
         sumSquares += centered * centered
       }
       const rms = Math.sqrt(sumSquares / detector.samples.length)
+      const normalized = Math.min(1, Math.max(0, (rms - 0.018) / 0.16)) ** 0.72
+      const smoothing = normalized > detector.level ? 0.42 : 0.13
+      detector.level += (normalized - detector.level) * smoothing
       if (rms >= SPEAKING_THRESHOLD) detector.lastAboveThreshold = now
       const speaking =
         rms >= SPEAKING_THRESHOLD ||

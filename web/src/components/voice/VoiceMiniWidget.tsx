@@ -8,7 +8,8 @@ import {
 } from 'react'
 import { channelLabel } from '../../lib/util'
 import { useStore } from '../../store'
-import { Avatar } from '../Avatar'
+import { useAudioAuraPreference } from '../../lib/meetingEffects'
+import { AudioAuraAvatar } from './AudioAuraAvatar'
 import { MicActivityIcon } from './MicActivityIcon'
 
 const CORNER_KEY = 'sharp.voiceWidgetCorner'
@@ -17,7 +18,7 @@ const DRAG_THRESHOLD = 5
 
 type Corner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 type Position = { left: number; top: number }
-type MiniParticipant = { userId: string; speaking: boolean }
+type MiniParticipant = { userId: string; connIds: string[]; speaking: boolean }
 
 type DragState = {
   pointerId: number
@@ -59,6 +60,7 @@ export function VoiceMiniWidget() {
   const myConnId = useStore((s) => s.myConnId)
   const users = useStore((s) => s.users)
   const me = useStore((s) => s.me)
+  const audioAuraEnabled = useAudioAuraPreference(me?.id) === true
   const channel = useStore((s) =>
     s.channels.find((candidate) => candidate.id === channelId),
   )
@@ -76,10 +78,12 @@ export function VoiceMiniWidget() {
     for (const [connId, entry] of Object.entries(room ?? {})) {
       const existing = byUser.get(entry.user_id)
       if (existing) {
+        existing.connIds.push(connId)
         existing.speaking = existing.speaking || Boolean(speaking[connId])
       } else {
         byUser.set(entry.user_id, {
           userId: entry.user_id,
+          connIds: [connId],
           speaking: Boolean(speaking[connId]),
         })
       }
@@ -245,11 +249,20 @@ export function VoiceMiniWidget() {
             <div
               key={participant.userId}
               className={`voice-speaker-avatar rounded-[11px] border-2 border-[var(--color-panel)] ${
-                participant.speaking ? 'is-speaking ring-2 ring-[#4fbf9f]' : ''
+                participant.speaking && !audioAuraEnabled
+                  ? 'is-speaking ring-2 ring-[#4fbf9f]'
+                  : ''
               }`}
               title={name}
             >
-              <Avatar id={participant.userId} name={name} size={34} />
+              <AudioAuraAvatar
+                userId={participant.userId}
+                name={name}
+                size={34}
+                connIds={participant.connIds}
+                speaking={participant.speaking}
+                enabled={audioAuraEnabled}
+              />
             </div>
           )
         })}

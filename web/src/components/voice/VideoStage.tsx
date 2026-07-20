@@ -12,7 +12,6 @@ import {
   VIDEO_BACKGROUND_OPTIONS,
   type VideoBackground,
 } from '../../lib/videoBackgrounds'
-import { Avatar } from '../Avatar'
 import { VoiceMiniWidget } from './VoiceMiniWidget'
 import { CallChatRail } from './CallChatRail'
 import { VoiceDuckSuggest } from './VoiceDuckSuggest'
@@ -21,6 +20,8 @@ import { MicActivityIcon } from './MicActivityIcon'
 import { AnnotationOverlay } from './AnnotationOverlay'
 import { CallPollOverlay } from '../CallPollOverlay'
 import { CreatePollModal } from '../CreatePollModal'
+import { useAudioAuraPreference, setAudioAuraPreference } from '../../lib/meetingEffects'
+import { AudioAuraAvatar, AudioAuraPreview } from './AudioAuraAvatar'
 
 type StageParticipant = {
   userId: string
@@ -99,6 +100,8 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
   const remoteScreenStreams = useStore((s) => s.voice.remoteScreenStreams)
   const myConnId = useStore((s) => s.myConnId)
   const me = useStore((s) => s.me)
+  const audioAuraPreference = useAudioAuraPreference(me?.id)
+  const audioAuraEnabled = audioAuraPreference === true
   const users = useStore((s) => s.users)
   const isGuest = useStore((s) => s.isGuest)
   const channel = useStore((s) => s.channels.find((candidate) => candidate.id === channelId))
@@ -284,7 +287,16 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
     ? resolveName(otherSharer.userId, otherSharer.displayName)
     : ''
 
+  const audioAuraPrompt =
+    me && audioAuraPreference === null ? (
+      <AudioAuraConsentPrompt
+        onAccept={() => setAudioAuraPreference(me.id, true)}
+        onDismiss={() => setAudioAuraPreference(me.id, false)}
+      />
+    ) : null
+
   const notesConsentPrompt =
+    audioAuraPreference !== null &&
     activeMeetingId &&
     !transcribing &&
     handledNotesMeetingId !== activeMeetingId &&
@@ -303,6 +315,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
     return (
       <>
         {pip.portal}
+        {audioAuraPrompt}
         {notesConsentPrompt}
         <button
           type="button"
@@ -331,6 +344,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
           </button>
         ) : null}
         {pollCreatorOpen ? <CreatePollModal mode="call" onClose={() => setPollCreatorOpen(false)} /> : null}
+        {audioAuraPrompt}
         {notesConsentPrompt}
       </>
     )
@@ -375,6 +389,8 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
                   transcribing={participant.transcribing}
                   speaking={participant.speaking}
                   handRaised={participant.handRaised}
+                  connIds={participant.connIds}
+                  audioAuraEnabled={audioAuraEnabled}
                   size={40}
                 />
               )
@@ -397,6 +413,8 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
                   transcribing={participant.transcribing}
                   speaking={participant.speaking}
                   handRaised={participant.handRaised}
+                  connIds={participant.connIds}
+                  audioAuraEnabled={audioAuraEnabled}
                   compact
                 />
               </li>
@@ -433,6 +451,8 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
               transcribing={participant.transcribing}
               speaking={participant.speaking}
               handRaised={participant.handRaised}
+              connIds={participant.connIds}
+              audioAuraEnabled={audioAuraEnabled}
               compact={stageMode === 'compact'}
             />
           </div>
@@ -457,6 +477,8 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
             transcribing={participant.transcribing}
             speaking={participant.speaking}
             handRaised={participant.handRaised}
+            connIds={participant.connIds}
+            audioAuraEnabled={audioAuraEnabled}
             size={avatarSize}
           />
         )
@@ -584,6 +606,8 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
         )}
       </section>
       {pollCreatorOpen ? <CreatePollModal mode="call" onClose={() => setPollCreatorOpen(false)} /> : null}
+      {audioAuraPrompt}
+      {notesConsentPrompt}
       </>
     )
   }
@@ -760,6 +784,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
       <CallPollOverlay mode={stageMode} />
     </section>
     {pollCreatorOpen ? <CreatePollModal mode="call" onClose={() => setPollCreatorOpen(false)} /> : null}
+    {audioAuraPrompt}
     {notesConsentPrompt}
     </>
   )
@@ -770,6 +795,74 @@ function PollControlIcon() {
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
       <path d="M5 20V10M12 20V4M19 20v-7" />
     </svg>
+  )
+}
+
+function AudioAuraConsentPrompt({
+  onAccept,
+  onDismiss,
+}: {
+  onAccept: () => void
+  onDismiss: () => void
+}) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onDismiss()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onDismiss])
+
+  return (
+    <aside
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="audio-aura-prompt-title"
+      aria-describedby="audio-aura-prompt-description"
+      className="fixed bottom-5 left-1/2 z-[72] w-[min(34rem,calc(100vw-2rem))] -translate-x-1/2 overflow-hidden rounded-[1.4rem] border border-[#796cff]/40 bg-[var(--color-panel)] shadow-[0_28px_90px_-24px_rgba(0,0,0,0.95)]"
+      style={{ bottom: 'max(1.25rem, var(--safe-bottom))' }}
+    >
+      <div className="h-0.5 w-full bg-[linear-gradient(90deg,#4fbf9f,#62d8ff,#796cff,#ff6fae,#ffd166)]" />
+      <div className="grid grid-cols-[auto_1fr] items-center gap-4 p-4 sm:p-5">
+        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[radial-gradient(circle,#796cff22,transparent_70%)]">
+          <AudioAuraPreview size={48} />
+        </div>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-[#796cff]/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-[#a99fff]">
+              Advanced
+            </span>
+            <h2 id="audio-aura-prompt-title" className="text-sm font-semibold">
+              Let your voice move
+            </h2>
+          </div>
+          <p
+            id="audio-aura-prompt-description"
+            className="mt-1.5 text-xs leading-5 text-[var(--color-text-dim)]"
+          >
+            Audio Aura makes your avatar bounce, glow, and orbit with your live speaking volume.
+            It is off until you choose it.
+          </p>
+          <div className="mt-4 flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="min-h-11 rounded-xl px-3.5 py-2 text-xs font-medium text-[var(--color-text-faint)] outline-none hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+            >
+              Skip — keep avatars still
+            </button>
+            <button
+              type="button"
+              onClick={onAccept}
+              autoFocus
+              className="min-h-11 rounded-xl bg-[#796cff] px-4 py-2 text-xs font-semibold text-white outline-none shadow-[0_10px_28px_-14px_#796cff] hover:bg-[#897dff] focus-visible:ring-2 focus-visible:ring-[#a99fff] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-panel)]"
+            >
+              Turn on Audio Aura
+            </button>
+          </div>
+        </div>
+      </div>
+    </aside>
   )
 }
 
@@ -837,6 +930,8 @@ function AudioTile({
   transcribing,
   speaking,
   handRaised,
+  connIds,
+  audioAuraEnabled,
   size,
 }: {
   userId: string
@@ -847,16 +942,27 @@ function AudioTile({
   transcribing: boolean
   speaking: boolean
   handRaised: boolean
+  connIds: string[]
+  audioAuraEnabled: boolean
   size: number
 }) {
   return (
     <li className="flex w-24 flex-col items-center gap-2 text-center sm:w-28">
       <div
-        className={`relative rounded-full ${
-          speaking ? 'ring-2 ring-[#4fbf9f] ring-offset-2 ring-offset-[var(--color-ink)]' : ''
+        className={`relative ${
+          speaking && !audioAuraEnabled
+            ? 'rounded-full ring-2 ring-[#4fbf9f] ring-offset-2 ring-offset-[var(--color-ink)]'
+            : ''
         }`}
       >
-        <Avatar id={userId} name={name} size={size} />
+        <AudioAuraAvatar
+          userId={userId}
+          name={name}
+          size={size}
+          connIds={connIds}
+          speaking={speaking}
+          enabled={audioAuraEnabled}
+        />
         {handRaised && (
           <span
             className="absolute -right-0.5 -top-0.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-[var(--color-ink)] bg-amber-400 text-[#3a2a00]"
@@ -903,6 +1009,8 @@ function VideoTile({
   transcribing,
   speaking,
   handRaised,
+  connIds,
+  audioAuraEnabled,
   compact,
 }: {
   userId: string
@@ -914,6 +1022,8 @@ function VideoTile({
   transcribing: boolean
   speaking: boolean
   handRaised: boolean
+  connIds: string[]
+  audioAuraEnabled: boolean
   compact: boolean
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -944,7 +1054,14 @@ function VideoTile({
         />
       ) : (
         <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,var(--color-panel-2),var(--color-panel))]">
-          <Avatar id={userId} name={name} size={compact ? 48 : 64} />
+          <AudioAuraAvatar
+            userId={userId}
+            name={name}
+            size={compact ? 48 : 64}
+            connIds={connIds}
+            speaking={speaking}
+            enabled={audioAuraEnabled}
+          />
         </div>
       )}
       <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/75 to-transparent px-3 pb-2.5 pt-6 text-sm font-medium text-white">

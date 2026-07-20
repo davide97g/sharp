@@ -1406,6 +1406,122 @@ body {
   .voice-mini-widget:hover { transform: translateY(-3px) rotate(-1deg) scale(1.035); box-shadow: 0 24px 54px -24px var(--color-accent); }
 }
 
+/* Audio Aura: microphone energy becomes avatar physics, never layout movement. */
+@keyframes sharp-aura-spectrum {
+  to { transform: rotate(1turn); }
+}
+@keyframes sharp-aura-orbit {
+  to { transform: rotate(1turn); }
+}
+@keyframes sharp-aura-preview-beat {
+  0%, 100% { transform: translate3d(0, -1px, 0) scale(1.05) rotate(-1deg); }
+  48% { transform: translate3d(0, -5px, 0) scale(1.14) rotate(1.8deg); }
+}
+.voice-aura-avatar {
+  position: relative;
+  isolation: isolate;
+  flex: none;
+  transform: translateZ(0);
+}
+.voice-aura-avatar-body {
+  position: relative;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  transform: translate3d(0, var(--voice-lift), 0) scale(var(--voice-scale)) rotate(var(--voice-tilt));
+  transition: transform 110ms cubic-bezier(0.22, 1, 0.36, 1), filter 160ms ease-out;
+  will-change: transform;
+}
+.voice-aura-avatar.is-enabled.is-speaking .voice-aura-avatar-body {
+  filter: saturate(1.16) brightness(1.05);
+}
+.voice-aura-halo,
+.voice-aura-echo,
+.voice-aura-orbit {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+}
+.voice-aura-halo {
+  inset: -5px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from 45deg,
+    #4fbf9f,
+    #62d8ff 22%,
+    #796cff 45%,
+    #ff6fae 67%,
+    #ffd166 83%,
+    #4fbf9f
+  );
+  box-shadow:
+    0 0 var(--voice-glow) color-mix(in srgb, #796cff 62%, transparent),
+    0 0 var(--voice-glow) color-mix(in srgb, #4fbf9f 60%, transparent);
+  filter: blur(2px);
+  transform: scale(var(--voice-ring-scale));
+  transition: opacity 160ms ease-out, transform 110ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.voice-aura-echo {
+  inset: -9px;
+  border: 2px solid color-mix(in srgb, #62d8ff 78%, transparent);
+  border-radius: inherit;
+  box-shadow: inset 0 0 12px color-mix(in srgb, #ff6fae 45%, transparent);
+  transform: scale(var(--voice-ring-scale));
+  transition: opacity 160ms ease-out, transform 110ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.voice-aura-avatar.is-enabled.is-speaking .voice-aura-halo {
+  opacity: var(--voice-aura-opacity);
+  animation: sharp-aura-spectrum var(--voice-orbit-duration) linear infinite;
+}
+.voice-aura-avatar.is-enabled.is-speaking .voice-aura-echo {
+  opacity: var(--voice-aura-opacity);
+}
+.voice-aura-orbit {
+  z-index: 4;
+  inset: 50%;
+  opacity: var(--voice-aura-opacity);
+  animation: sharp-aura-orbit var(--voice-orbit-duration) linear infinite reverse;
+}
+.voice-aura-orbit i {
+  position: absolute;
+  left: -2px;
+  top: -2px;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0 7px 2px currentColor;
+}
+.voice-aura-orbit i:nth-child(1) {
+  color: #62d8ff;
+  transform: rotate(15deg) translateX(calc(50% + var(--voice-orbit-radius)));
+}
+.voice-aura-orbit i:nth-child(2) {
+  color: #ff6fae;
+  transform: rotate(142deg) translateX(calc(50% + var(--voice-orbit-radius)));
+}
+.voice-aura-orbit i:nth-child(3) {
+  color: #ffd166;
+  transform: rotate(264deg) translateX(calc(50% + var(--voice-orbit-radius)));
+}
+.voice-aura-avatar.is-preview .voice-aura-avatar-body {
+  animation: sharp-aura-preview-beat 920ms cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-aura-avatar-body {
+    transform: none;
+    transition: none;
+  }
+  .voice-aura-avatar.is-enabled.is-speaking .voice-aura-halo,
+  .voice-aura-avatar.is-enabled.is-speaking .voice-aura-orbit,
+  .voice-aura-avatar.is-preview .voice-aura-avatar-body {
+    animation: none;
+  }
+  .voice-aura-orbit { display: none; }
+}
+
 /* Notification sheen; huddle start gets a stronger one-time heartbeat. */
 @keyframes sharp-toast-sheen {
   from { transform: translateX(-160%) skewX(-18deg); opacity: 0; }
