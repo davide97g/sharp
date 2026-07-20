@@ -4,9 +4,14 @@
 # has NO caddy and publishes NO host ports. Route traffic via Dokploy's
 # "Domains" tab (one domain per service):
 #
-#   sharp.davideghiotto.it          -> service `landing`, port 80
-#   app.sharp.davideghiotto.it      -> service `web`,     port 80
-#   server.sharp.davideghiotto.it   -> service `sharp`,   port 3000  (websockets work out of the box)
+#   sharp.davideghiotto.it          -> service `landing`,   port 80
+#   app.sharp.davideghiotto.it      -> service `web`,       port 80
+#   server.sharp.davideghiotto.it   -> service `sharp`,     port 3000  (websockets work out of the box)
+#
+# The `db-studio` (Drizzle Gateway) DB admin UI is deliberately NOT routed to a
+# public domain — full read/write DB access must not sit on the open internet.
+# It binds to the VPS loopback only (127.0.0.1:4983); reach it via an SSH tunnel.
+# See "Database UI" in deploy/DOKPLOY.md.
 #
 # The web SPA is a separate static image that talks cross-origin to the API host
 # (baked in via API_URL below). Server CORS is permissive + auth is a Bearer token,
@@ -150,6 +155,36 @@ services:
       - traefik.http.routers.sharp-maint.service=sharp-maint
       - traefik.http.services.sharp-maint.loadbalancer.server.port=80
 
+  # Drizzle Gateway: the official SELF-HOSTED Drizzle Studio — full DB admin UI
+  # (browse tables, run SQL, edit data), behind its own master-password login.
+  #
+  # PRIVATE ONLY — NOT routed to a public domain. The port is bound to the VPS
+  # loopback (127.0.0.1:4983), so it is unreachable from the internet even though
+  # the container is running. Access it from your laptop via an SSH tunnel:
+  #   ssh -N -L 4983:127.0.0.1:4983 <user>@<vps-host>
+  #   then open http://127.0.0.1:4983, log in with MASTERPASS.
+  # Add the DB connection INSIDE the UI (persists in the volume):
+  #   host = postgres   port = 5432   user = sharp   db = sharp
+  #   password = <POSTGRES_PASSWORD>   (reached over the `default` network)
+  db-studio:
+    image: ghcr.io/drizzle-team/gateway:latest
+    restart: unless-stopped
+    environment:
+      PORT: "4983"
+      STORE_PATH: /app        # volume mount below; holds session + saved DBs
+      MASTERPASS: ${MASTERPASS:?set MASTERPASS in the Environment tab}
+    volumes:
+      - drizzle_gateway:/app
+    # Loopback-only publish: reachable from the VPS itself (for the SSH tunnel),
+    # never from the public internet. Do NOT change to 0.0.0.0.
+    ports:
+      - "127.0.0.1:4983:4983"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - default          # to reach the Postgres service by name (no Traefik route)
+
 networks:
   dokploy-network:
     external: true
@@ -157,3 +192,4 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  drizzle_gateway:

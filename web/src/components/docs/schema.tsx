@@ -1,6 +1,7 @@
-import { BlockNoteSchema, defaultInlineContentSpecs } from '@blocknote/core'
-import { createReactInlineContentSpec } from '@blocknote/react'
+import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs } from '@blocknote/core'
+import { createReactBlockSpec, createReactInlineContentSpec } from '@blocknote/react'
 import { navigateTo } from '../../lib/nav'
+import { BoardEmbed } from './BoardEmbed'
 
 // Custom inline content: @person mention. Props serialize to XML attributes
 // (userId, name) that the server scans for doc-mention bridging.
@@ -53,7 +54,31 @@ export const DocLinkSpec = createReactInlineContentSpec(
   },
 )
 
+// Custom block: an embedded, fully interactive board. `docId` ('' = unbound)
+// points at the board `docs` row this block mirrors. Content is 'none' (atom
+// block); the server's compaction only reads known tags, so it ignores this.
+export const BoardEmbedSpec = createReactBlockSpec(
+  {
+    type: 'boardembed',
+    propSchema: { docId: { default: '' } },
+    content: 'none',
+  },
+  {
+    render: ({ block, editor }) => (
+      <BoardEmbed
+        docId={block.props.docId}
+        onBind={(docId) => editor.updateBlock(block, { props: { docId } })}
+        onRemove={() => editor.removeBlocks([block])}
+      />
+    ),
+  },
+)
+
 export const docSchema = BlockNoteSchema.create({
+  blockSpecs: {
+    ...defaultBlockSpecs,
+    boardembed: BoardEmbedSpec(),
+  },
   inlineContentSpecs: {
     ...defaultInlineContentSpecs,
     mention: MentionSpec,

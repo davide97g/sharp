@@ -603,6 +603,18 @@ rendered as tiles in columns. One view in v1: grouped by a status single-select.
   hand-rolled `useBoardDnd` (Pointer Events, no `@dnd-kit`). Colors resolve from an 8-key
   categorical palette (`web/src/lib/boardColors.ts`) into `--board-*` CSS tokens; keys, not
   hex, are stored in the Y.Doc. No heavy dependency, so the board chunk is not lazy-loaded.
+- **Embedding in docs**: the doc editor's `/` slash menu has a **Board** item (group Media)
+  that inserts a custom BlockNote block `boardembed` (`propSchema: { docId }`, content
+  `none` — `web/src/components/docs/BoardEmbed.tsx`, spec wired in `docs/schema.tsx`).
+  Unbound (`docId=''`) it renders an inline picker: search existing boards (channel list +
+  `/docs/search`, board-filtered) or create one in the host doc's channel; bound, it mounts
+  the full interactive `BoardEditorInner` (own `SharpDocProvider` per embed — same live
+  board as the standalone `/b/:id` view) inside a non-editable island, with
+  Customize / Open / Unlink chrome. Edit rights come from the **board's** role resolution
+  (server ROLE frame), independent of the host doc's role; no access renders an in-place
+  fallback. The block serializes to XML the compactor ignores, so embeds contribute
+  nothing to search/backlinks. Ambient context (channel, viewer, host editability) reaches
+  the block through `DocEmbedContext` provided by `DocEditorInner`.
 
 # Phase 4 — Voice + camera rooms (WebRTC mesh)
 

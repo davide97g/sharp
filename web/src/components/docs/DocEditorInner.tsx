@@ -1,13 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as Y from 'yjs'
 import { BlockNoteView } from '@blocknote/mantine'
 import '@blocknote/mantine/style.css'
+import { filterSuggestionItems } from '@blocknote/core'
 import {
   SuggestionMenuController,
+  getDefaultReactSlashMenuItems,
   useCreateBlockNote,
   type DefaultReactSuggestionItem,
 } from '@blocknote/react'
 import { docSchema } from './schema'
+import { DocEmbedContext } from './BoardEmbed'
 import { SharpDocProvider, type DocConnStatus, type DocRoleByte } from '../../lib/docSync'
 import { useStore } from '../../store'
 import { api, fetchAttachmentBlob } from '../../lib/api'
@@ -218,12 +221,46 @@ export function DocEditorInner({
     }))
   }
 
+  // --- / slash menu (defaults + Board embed) ---
+  // BlockNote's built-in slash menu is disabled (`slashMenu={false}`) so we can
+  // append a custom item; `filterSuggestionItems` reproduces the default match.
+  async function slashItems(query: string): Promise<DefaultReactSuggestionItem[]> {
+    const boardItem: DefaultReactSuggestionItem = {
+      title: 'Board',
+      subtext: 'Embed a kanban board',
+      aliases: ['board', 'kanban', 'embed'],
+      group: 'Media',
+      icon: <span style={{ fontSize: 18 }}>🗂️</span>,
+      onItemClick: () => {
+        editor.insertBlocks(
+          [{ type: 'boardembed' }],
+          editor.getTextCursorPosition().block,
+          'after',
+        )
+      },
+    }
+    // Keep the Media group contiguous — appending at the end makes the menu
+    // repeat the group label for every item run.
+    const items = [...getDefaultReactSlashMenuItems(editor)]
+    const lastMedia = items.map((i) => i.group).lastIndexOf('Media')
+    items.splice(lastMedia === -1 ? items.length : lastMedia + 1, 0, boardItem)
+    return filterSuggestionItems(items, query)
+  }
+
+  const embedCtx = useMemo(
+    () => ({ channelId, user, hostEditable: canEdit }),
+    [channelId, user, canEdit],
+  )
+
   return (
     <div className="sharp-doc">
-      <BlockNoteView editor={editor} editable={canEdit} theme="dark">
-        <SuggestionMenuController triggerCharacter="@" getItems={mentionItems} minQueryLength={0} />
-        <SuggestionMenuController triggerCharacter="[" getItems={docLinkItems} minQueryLength={0} />
-      </BlockNoteView>
+      <DocEmbedContext.Provider value={embedCtx}>
+        <BlockNoteView editor={editor} editable={canEdit} theme="dark" slashMenu={false}>
+          <SuggestionMenuController triggerCharacter="/" getItems={slashItems} />
+          <SuggestionMenuController triggerCharacter="@" getItems={mentionItems} minQueryLength={0} />
+          <SuggestionMenuController triggerCharacter="[" getItems={docLinkItems} minQueryLength={0} />
+        </BlockNoteView>
+      </DocEmbedContext.Provider>
     </div>
   )
 }

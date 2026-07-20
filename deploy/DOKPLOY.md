@@ -11,6 +11,9 @@ This is a **split deployment** across three subdomains:
 | `app.sharp.davideghiotto.it`   | `web`     | 80   | React SPA (chat UI)    |
 | `server.sharp.davideghiotto.it`| `sharp`   | 3000 | API + WebSocket server |
 
+A fourth service, `db-studio` (Drizzle Gateway — the DB admin UI), runs
+**privately with no public domain** — see [Database UI](#database-ui-drizzle-gateway).
+
 The web SPA is a separate static image that talks **cross-origin** to the API
 host. That works with no extra config: the server's CORS is permissive and auth
 is a Bearer token in `localStorage` (no cookies). The API base is baked into the
@@ -21,6 +24,7 @@ web image at build time (`API_URL` below) — change the domain there, not at ru
 - A VPS with Dokploy installed (`curl -sSL https://dokploy.com/install.sh | sh`)
 - DNS A records pointing at the VPS for all three hosts:
   `sharp.davideghiotto.it`, `app.sharp.davideghiotto.it`, `server.sharp.davideghiotto.it`
+  (the DB UI needs no DNS — it's private)
 - The sharp repo on GitHub with the **Dokploy GitHub app** installed (for auto-deploy)
 
 ## Deploy (single Compose service, 3 domains)
@@ -34,6 +38,7 @@ web image at build time (`API_URL` below) — change the domain there, not at ru
    ```env
    POSTGRES_PASSWORD=<long random string>
    JWT_SECRET=<64 random chars>              # e.g. openssl rand -hex 32
+   MASTERPASS=<long unique string>           # login for the Drizzle Gateway DB UI
    # Cloudflare R2 (S3 API) — create an R2 API token (dashboard → R2 →
    # Manage R2 API Tokens) to get the key pair. Endpoint has NO bucket suffix.
    S3_ENDPOINT=https://<account_id>.r2.cloudflarestorage.com
@@ -68,7 +73,8 @@ web image at build time (`API_URL` below) — change the domain there, not at ru
    | `app.sharp.davideghiotto.it`    | `web`     | 80             |
    | `server.sharp.davideghiotto.it` | `sharp`   | 3000           |
 
-   (WebSockets work through Traefik with no extra config.)
+   (WebSockets work through Traefik with no extra config. Do **not** add a domain
+   for `db-studio` — it stays private, see below.)
 
 6. **Deploy**. First build compiles the Rust server + builds the web & landing
    SPAs (several minutes; subsequent builds hit Docker layer cache).
@@ -84,6 +90,56 @@ web image at build time (`API_URL` below) — change the domain there, not at ru
 The desktop build ships with `VITE_API_URL` unset, so on first launch users enter
 the server URL manually: `https://server.sharp.davideghiotto.it`. Built locally &
 signed manually — not part of this Dokploy stack.
+
+## Database UI (Drizzle Gateway)
+
+The `db-studio` service runs **Drizzle Gateway** — the official self-hosted
+Drizzle Studio, a full web DB admin (browse tables, run SQL, edit rows).
+
+It is deliberately **private: no public domain, no Traefik route.** Full
+read/write database access must never sit on the open internet gated by a single
+password. Instead the container publishes its port to the **VPS loopback only**
+(`127.0.0.1:4983`), so it is unreachable from outside the host — you reach it
+through an SSH tunnel from your laptop.
+
+**Access it:**
+
+1. Open a tunnel (keep it running in a terminal):
+
+   ```bash
+   ssh -N -L 4983:127.0.0.1:4983 <user>@<vps-host>
+   ```
+
+2. Browse to `http://127.0.0.1:4983` and log in with **MASTERPASS**.
+3. Add the database connection **inside the UI** (persists in the
+   `drizzle_gateway` volume — do this once):
+
+   | Field    | Value                      |
+   | -------- | -------------------------- |
+   | Host     | `postgres`                 |
+   | Port     | `5432`                     |
+   | User     | `sharp`                    |
+   | Database | `sharp`                    |
+   | Password | your `POSTGRES_PASSWORD`   |
+   | SSL      | off (same private network) |
+
+   `db-studio` reaches Postgres by service name over the internal `default`
+   network.
+
+**Set `MASTERPASS`** in the Environment tab (a long, unique value):
+
+```env
+MASTERPASS=<long unique string>
+```
+
+> **Why not a public domain?** With a public route the only barrier to your
+> entire database is one password — a permanent brute-force / leak target. The
+> loopback + SSH-tunnel model means an attacker must first hold an SSH session on
+> the VPS, so the DB UI has effectively zero standing internet exposure.
+>
+> **Upgrade path:** install Tailscale/WireGuard on the VPS and reach the tunnel
+> over the tailnet instead of SSH. **Do not** change the port binding to
+> `0.0.0.0` or add a Domains-tab entry for `db-studio` — that re-exposes it.
 
 ## Auto-deploy on push
 
