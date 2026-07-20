@@ -802,7 +802,12 @@ Server → client:
   prevents self-echo across the user's devices and tabs.
 - ICE candidates are trickled through `voice.signal` as they become available.
 - Camera capture uses ideal 640×360 at 20 fps (24 fps maximum), with an approximate
-  500 kbps outgoing-sender cap to constrain mesh upload cost.
+  500 kbps outgoing-sender cap to constrain mesh upload cost. When a background effect
+  (blur/wallpaper) is active the camera is retuned to ideal 1280×720 at 24 fps (30 fps
+  maximum) and the sender cap rises to ~1.2 Mbps — the composited frame (sharp person
+  edge over a detailed backdrop) needs the extra resolution and bits to avoid smearing.
+  Toggling the effect mid-call retunes the live track via `applyConstraints` and
+  reapplies the matching cap.
 - Screen-share tracks are published under a **separate `MediaStream`** (distinct from the
   camera/mic stream) whose id the sharer advertises out-of-band as `screen_stream_id` in the
   `voice.screen` message. Receivers classify each inbound track by comparing

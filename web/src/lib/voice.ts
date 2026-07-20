@@ -63,6 +63,10 @@ type SpeakingDetector = {
 const SPEAKING_THRESHOLD = 0.04
 const SPEAKING_HYSTERESIS_MS = 150
 const VIDEO_MAX_BITRATE = 500_000
+// Composited backgrounds (sharp person edge over a detailed wallpaper) are much
+// harder to encode than a natural webcam frame, and the effect runs at 720p —
+// give those senders a bigger budget so the frame doesn't smear.
+const VIDEO_EFFECT_MAX_BITRATE = 1_200_000
 const SCREEN_MAX_BITRATE = 2_500_000
 
 export class VoiceClient {
@@ -385,7 +389,7 @@ export class VoiceClient {
     if (deviceId === trackDeviceId(this.rawCameraTrack)) return
 
     const cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: videoConstraints(deviceId),
+      video: videoConstraints(deviceId, this.videoBackground.id !== 'none'),
     })
     const nextRaw = cameraStream.getVideoTracks()[0]
     if (!nextRaw) {
@@ -429,7 +433,7 @@ export class VoiceClient {
   async startCamera() {
     if (this.stopped || !this.localStream || this.cameraTrack) return
     const cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: videoConstraints(this.videoDeviceId),
+      video: videoConstraints(this.videoDeviceId, this.videoBackground.id !== 'none'),
     })
     const rawTrack = cameraStream.getVideoTracks()[0]
     if (!rawTrack) {
@@ -459,7 +463,7 @@ export class VoiceClient {
     this.localStream.addTrack(published)
     for (const peer of this.peers.values()) {
       const sender = peer.pc.addTrack(published, this.localStream)
-      void configureVideoSender(sender)
+      void configureVideoSender(sender, this.cameraBitrate())
     }
     this.onLocalStream?.(this.localStream)
   }
@@ -481,6 +485,14 @@ export class VoiceClient {
     const rawTrack = this.rawCameraTrack
     const prevPublished = this.cameraTrack
     const prevProcessor = this.blurProcessor
+    // Retune the live camera to the quality tier of the new mode (720p with an
+    // effect, 360p without) before rebuilding the pipeline around it. Best-effort:
+    // a camera that can't do 720p keeps whatever it delivers.
+    try {
+      await rawTrack.applyConstraints(cameraQuality(background.id !== 'none'))
+    } catch (error) {
+      console.warn('Could not retune camera resolution for background change', error)
+    }
     const { track: published, processor } = await this.makeCameraProcessor(rawTrack)
     // Bail if anything changed under us: call ended, camera stopped/switched, or a
     // newer toggle superseded this one.
@@ -507,6 +519,10 @@ export class VoiceClient {
     prevProcessor?.stop()
     if (prevPublished !== rawTrack) prevPublished.stop()
     this.onLocalStream?.(this.localStream)
+  }
+
+  private cameraBitrate(): number {
+    return this.videoBackground.id === 'none' ? VIDEO_MAX_BITRATE : VIDEO_EFFECT_MAX_BITRATE
   }
 
   // Derives the track to publish from a raw camera track. Effect off uses raw track.
@@ -572,12 +588,12 @@ export class VoiceClient {
           )
         if (sender) {
           await sender.replaceTrack(track)
-          if (kind === 'video') void configureVideoSender(sender)
+          if (kind === 'video') void configureVideoSender(sender, this.cameraBitrate())
           return
         }
         if (this.localStream) {
           const added = peer.pc.addTrack(track, this.localStream)
-          if (kind === 'video') void configureVideoSender(added)
+          if (kind === 'video') void configureVideoSender(added, this.cameraBitrate())
         }
       }),
     )
@@ -645,7 +661,7 @@ export class VoiceClient {
 
     for (const track of this.localStream.getTracks()) {
       const sender = pc.addTrack(track, this.localStream)
-      if (track.kind === 'video') void configureVideoSender(sender)
+      if (track.kind === 'video') void configureVideoSender(sender, this.cameraBitrate())
     }
 
     // Late joiner: publish our ongoing screen share to the new peer.
@@ -1001,11 +1017,11 @@ export class VoiceClient {
   }
 }
 
-async function configureVideoSender(sender: RTCRtpSender) {
+async function configureVideoSender(sender: RTCRtpSender, maxBitrate: number) {
   try {
     const parameters = sender.getParameters()
     if (!parameters.encodings.length) parameters.encodings.push({})
-    parameters.encodings[0].maxBitrate = VIDEO_MAX_BITRATE
+    parameters.encodings[0].maxBitrate = maxBitrate
     await sender.setParameters(parameters)
   } catch (error) {
     console.warn('Could not apply camera bitrate limit', error)
@@ -1039,12 +1055,17 @@ function audioConstraints(deviceId?: string | null): MediaTrackConstraints {
   return base
 }
 
-function videoConstraints(deviceId?: string | null): MediaTrackConstraints {
-  const base: MediaTrackConstraints = {
-    width: { ideal: 640 },
-    height: { ideal: 360 },
-    frameRate: { ideal: 20, max: 24 },
-  }
+// Camera quality tiers. Plain camera stays at 360p to keep mesh upload cheap;
+// background effects capture at 720p because the composited output is upscaled
+// hard on the stage and 360p input makes the whole frame look soft.
+function cameraQuality(highRes: boolean): MediaTrackConstraints {
+  return highRes
+    ? { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24, max: 30 } }
+    : { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 20, max: 24 } }
+}
+
+function videoConstraints(deviceId?: string | null, highRes = false): MediaTrackConstraints {
+  const base = cameraQuality(highRes)
   if (deviceId) return { ...base, deviceId: { exact: deviceId } }
   return { ...base, facingMode: 'user' }
 }

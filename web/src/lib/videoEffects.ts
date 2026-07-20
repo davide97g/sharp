@@ -14,10 +14,15 @@ import type { ImageSegmenter, ImageSegmenterResult } from '@mediapipe/tasks-visi
 const WASM_BASE = new URL('/mediapipe/wasm', window.location.origin).toString()
 const MODEL_URL = new URL('/mediapipe/selfie_segmenter.tflite', window.location.origin).toString()
 
-// Output canvas capture frame rate — aligned with the camera constraints in
-// voice.ts (ideal 20, max 24).
-const OUTPUT_FPS = 24
-const BLUR_PX = 12
+// Output canvas capture frame rate — aligned with the effect-tier camera
+// constraints in voice.ts (ideal 24, max 30).
+const OUTPUT_FPS = 30
+// Backdrop blur strength, expressed as a fraction of frame height so the look
+// is identical at 360p and 720p (12px at 360p, 24px at 720p).
+const BLUR_FRACTION = 1 / 30
+// Feather the segmentation mask edge as it's upscaled to the frame — the model
+// mask is low-res, and a hard edge reads as a jagged cutout halo.
+const MASK_FEATHER_FRACTION = 1 / 320
 // Draw the blurred backdrop slightly larger than the frame so the blur's edge
 // bleed (transparent fringe) never shows as letterboxing at the borders.
 const BACKDROP_SCALE = 1.05
@@ -98,6 +103,7 @@ export class BackgroundBlurProcessor {
       this.dispose()
       throw new Error('Canvas 2D context is unavailable for camera backgrounds.')
     }
+    ctx.imageSmoothingQuality = 'high'
     this.canvas = canvas
     this.ctx = ctx
 
@@ -116,6 +122,9 @@ export class BackgroundBlurProcessor {
       this.dispose()
       throw new Error('Could not capture the processed video stream.')
     }
+    // Canvas tracks default to no hint; tell the encoder to treat this like a
+    // regular camera feed instead of guessing from the synthetic content.
+    outputTrack.contentHint = 'motion'
 
     // Prime one frame so the returned track isn't blank on first paint.
     this.renderFrame()
@@ -153,9 +162,11 @@ export class BackgroundBlurProcessor {
 
     // Cheap resolution-change handling: resize the output canvas to match the
     // live frame if the camera renegotiated its size.
+    // Resizing the canvas resets all context state, so restore smoothing quality.
     if (canvas.width !== vw || canvas.height !== vh) {
       canvas.width = vw
       canvas.height = vh
+      ctx.imageSmoothingQuality = 'high'
     }
 
     let result: ImageSegmenterResult
@@ -188,20 +199,21 @@ export class BackgroundBlurProcessor {
 
     ctx.save()
     ctx.clearRect(0, 0, canvas.width, canvas.height)
-    // 1. Lay down the person mask (alpha = person probability), scaled to frame.
+    // 1. Lay down the person mask (alpha = person probability), scaled to frame,
+    //    lightly feathered so the low-res mask edge blends instead of stair-stepping.
     ctx.globalCompositeOperation = 'source-over'
-    ctx.filter = 'none'
+    ctx.filter = `blur(${Math.max(1, Math.round(canvas.width * MASK_FEATHER_FRACTION))}px)`
     ctx.drawImage(maskCanvas, 0, 0, canvas.width, canvas.height)
     // 2. Keep the sharp video only where the mask is opaque (the person).
     ctx.globalCompositeOperation = 'source-in'
+    ctx.filter = 'none'
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
     // 3. Fill everything behind with the selected background.
     ctx.globalCompositeOperation = 'destination-over'
     if (this.background.kind === 'image' && this.backgroundImage) {
-      ctx.filter = 'none'
       drawImageCover(ctx, this.backgroundImage, canvas.width, canvas.height)
     } else {
-      ctx.filter = `blur(${BLUR_PX}px)`
+      ctx.filter = `blur(${Math.round(canvas.height * BLUR_FRACTION)}px)`
       const dw = canvas.width * BACKDROP_SCALE
       const dh = canvas.height * BACKDROP_SCALE
       ctx.drawImage(video, (canvas.width - dw) / 2, (canvas.height - dh) / 2, dw, dh)
