@@ -1,11 +1,12 @@
-// Google-Meet-style camera background blur, fully self-hosted (no CDN). The
+// Camera background segmentation, fully self-hosted (no CDN). The
 // MediaPipe selfie segmenter + its wasm fileset live under /public/mediapipe and
 // are loaded lazily — this module (and the ~11MB wasm) is only imported the first
-// time a user turns blur on, keeping the main bundle lean like the tldraw editor.
+// time a user selects blur or a wallpaper, keeping the main bundle lean like the
+// tldraw editor.
 //
-// The processor takes the raw camera track, runs a per-frame segmentation, and
-// composites the sharp person over a blurred copy of the frame onto a canvas whose
-// captureStream() output track is what actually gets published to peers.
+// The processor takes the raw camera track, runs per-frame segmentation, then
+// composites the person over blur or a wallpaper. canvas.captureStream() output
+// is what peers receive, so backgrounds work for every participant automatically.
 import type { ImageSegmenter, ImageSegmenterResult } from '@mediapipe/tasks-vision'
 
 // Absolute asset paths (served from origin root, like the service worker). The
@@ -54,21 +55,32 @@ export class BackgroundBlurProcessor {
   private maskPixels: Uint8ClampedArray | null = null
   private maskDims = { width: 0, height: 0 }
   private output: MediaStream | null = null
+  private backgroundImage: HTMLImageElement | null = null
+  private background: { kind: 'blur' } | { kind: 'image'; url: string } = { kind: 'blur' }
   private rafHandle: number | null = null
   private rvfcHandle: number | null = null
   private stopped = false
 
   // Builds the pipeline and returns the processed (canvas) video track. Throws on
   // any init failure so the caller can fall back to the raw track.
-  async start(rawTrack: MediaStreamTrack): Promise<MediaStreamTrack> {
+  async start(
+    rawTrack: MediaStreamTrack,
+    background: { kind: 'blur' } | { kind: 'image'; url: string } = { kind: 'blur' },
+  ): Promise<MediaStreamTrack> {
     const settings = rawTrack.getSettings()
     const width = settings.width ?? 640
     const height = settings.height ?? 360
 
-    this.segmenter = await createSegmenter()
+    this.background = background
+    const [segmenter, backgroundImage] = await Promise.all([
+      createSegmenter(),
+      background.kind === 'image' ? loadImage(background.url) : Promise.resolve(null),
+    ])
+    this.segmenter = segmenter
+    this.backgroundImage = backgroundImage
     if (this.stopped) {
       this.dispose()
-      throw new Error('Background blur was stopped during init.')
+      throw new Error('Camera background was stopped during init.')
     }
 
     const video = document.createElement('video')
@@ -84,7 +96,7 @@ export class BackgroundBlurProcessor {
     const ctx = canvas.getContext('2d')
     if (!ctx) {
       this.dispose()
-      throw new Error('Canvas 2D context is unavailable for background blur.')
+      throw new Error('Canvas 2D context is unavailable for camera backgrounds.')
     }
     this.canvas = canvas
     this.ctx = ctx
@@ -93,7 +105,7 @@ export class BackgroundBlurProcessor {
     const maskCtx = maskCanvas.getContext('2d')
     if (!maskCtx) {
       this.dispose()
-      throw new Error('Canvas 2D context is unavailable for background blur.')
+      throw new Error('Canvas 2D context is unavailable for camera backgrounds.')
     }
     this.maskCanvas = maskCanvas
     this.maskCtx = maskCtx
@@ -183,13 +195,17 @@ export class BackgroundBlurProcessor {
     // 2. Keep the sharp video only where the mask is opaque (the person).
     ctx.globalCompositeOperation = 'source-in'
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-    // 3. Fill everything behind with a blurred, slightly-enlarged copy so the blur
-    //    edge bleed doesn't reveal transparent borders.
+    // 3. Fill everything behind with the selected background.
     ctx.globalCompositeOperation = 'destination-over'
-    ctx.filter = `blur(${BLUR_PX}px)`
-    const dw = canvas.width * BACKDROP_SCALE
-    const dh = canvas.height * BACKDROP_SCALE
-    ctx.drawImage(video, (canvas.width - dw) / 2, (canvas.height - dh) / 2, dw, dh)
+    if (this.background.kind === 'image' && this.backgroundImage) {
+      ctx.filter = 'none'
+      drawImageCover(ctx, this.backgroundImage, canvas.width, canvas.height)
+    } else {
+      ctx.filter = `blur(${BLUR_PX}px)`
+      const dw = canvas.width * BACKDROP_SCALE
+      const dh = canvas.height * BACKDROP_SCALE
+      ctx.drawImage(video, (canvas.width - dw) / 2, (canvas.height - dh) / 2, dw, dh)
+    }
     ctx.restore()
   }
 
@@ -240,6 +256,7 @@ export class BackgroundBlurProcessor {
       /* already closed */
     }
     this.segmenter = null
+    this.backgroundImage = null
     this.canvas = null
     this.ctx = null
     this.maskCanvas = null
@@ -247,4 +264,24 @@ export class BackgroundBlurProcessor {
     this.maskPixels = null
     this.maskDims = { width: 0, height: 0 }
   }
+}
+
+async function loadImage(url: string): Promise<HTMLImageElement> {
+  const image = new Image()
+  image.decoding = 'async'
+  image.src = url
+  await image.decode()
+  return image
+}
+
+function drawImageCover(
+  context: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  width: number,
+  height: number,
+) {
+  const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight)
+  const drawWidth = image.naturalWidth * scale
+  const drawHeight = image.naturalHeight * scale
+  context.drawImage(image, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight)
 }

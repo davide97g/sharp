@@ -1,6 +1,11 @@
 import { create } from 'zustand'
 import { api, ApiRequestError, clearToken, setSessionToken, setToken } from './lib/api'
 import { VoiceClient } from './lib/voice'
+import {
+  loadVideoBackground,
+  saveVideoBackground,
+  type VideoBackground,
+} from './lib/videoBackgrounds'
 import { isSpeechSupported, PhraseRecognizer } from './lib/speech'
 import { WsClient } from './lib/ws'
 import { cmpId } from './lib/util'
@@ -144,7 +149,7 @@ type VoiceState = {
   muted: boolean
   noiseSuppression: boolean
   noiseSuppressionAvailable: boolean
-  blurEnabled: boolean
+  videoBackground: VideoBackground
   handRaised: boolean
   transcribing: boolean
   roastArmed: boolean
@@ -389,7 +394,7 @@ type State = {
   leaveVoice: () => void
   toggleVoiceMute: () => void
   toggleNoiseSuppression: () => Promise<void>
-  toggleVoiceBlur: () => void
+  setVoiceVideoBackground: (background: VideoBackground) => Promise<void>
   toggleVoiceHand: () => void
   toggleTranscription: () => void
   toggleVoiceCamera: () => void
@@ -487,25 +492,15 @@ function storedNoiseSuppression(): boolean {
   }
 }
 
-// Background blur is opt-in: default OFF unless the user turned it on before.
-const VIDEO_BLUR_KEY = 'sharp.videoBlur'
-
-function storedVideoBlur(): boolean {
-  try {
-    return window.localStorage.getItem(VIDEO_BLUR_KEY) === '1'
-  } catch {
-    return false
-  }
-}
-
 function emptyVoiceState(): VoiceState {
+  const videoBackground = loadVideoBackground()
   return {
     channelId: null,
     status: 'idle',
     muted: false,
     noiseSuppression: storedNoiseSuppression(),
     noiseSuppressionAvailable: true,
-    blurEnabled: storedVideoBlur(),
+    videoBackground,
     handRaised: false,
     transcribing: false,
     roastArmed: false,
@@ -1448,6 +1443,7 @@ export const useStore = create<State>((set, get) => ({
       return
     }
 
+    const videoBackground = loadVideoBackground(me.id)
     set({
       callPoll: null,
       voice: {
@@ -1456,7 +1452,7 @@ export const useStore = create<State>((set, get) => ({
         muted: false,
         noiseSuppression: storedNoiseSuppression(),
         noiseSuppressionAvailable: true,
-        blurEnabled: storedVideoBlur(),
+        videoBackground,
         handRaised: false,
         transcribing: false,
         roastArmed: false,
@@ -1492,7 +1488,7 @@ export const useStore = create<State>((set, get) => ({
         myUserId: me.id,
         iceServers: config.ice_servers,
         noiseSuppression: get().voice.noiseSuppression,
-        blurBackground: get().voice.blurEnabled,
+        videoBackground: get().voice.videoBackground,
         send: (type, payload) => get().ws!.send(type, payload),
         onSpeaking: (connId, speaking) => {
           set((s) => {
@@ -1632,21 +1628,26 @@ export const useStore = create<State>((set, get) => ({
     await client.setNoiseSuppression(next)
   },
 
-  // Purely local camera effect — no WS event. Persisted so the next call remembers
-  // it; if the camera is live the client swaps the published track in place.
-  toggleVoiceBlur() {
-    const next = !get().voice.blurEnabled
-    try {
-      window.localStorage.setItem(VIDEO_BLUR_KEY, next ? '1' : '0')
-    } catch {
-      // ignore persistence failures (private mode etc.)
+  // Purely local camera effect — no WS event. Persisted per user; live cameras
+  // swap their published track in place without dropping the call.
+  async setVoiceVideoBackground(background) {
+    const userId = get().me?.id
+    if (userId && !saveVideoBackground(userId, background)) {
+      toastError('Background applied, but this browser could not save it.')
     }
-    set((s) => ({ voice: { ...s.voice, blurEnabled: next } }))
+    set((s) => ({
+      voice: {
+        ...s.voice,
+        videoBackground: background,
+      },
+    }))
     const { client } = get().voice
     if (!client) return
-    void client.setBackgroundBlur(next).catch(() => {
-      toastError('Could not toggle background blur.')
-    })
+    try {
+      await client.setVideoBackground(background)
+    } catch {
+      toastError('Could not change camera background.')
+    }
   },
 
   toggleVoiceHand() {

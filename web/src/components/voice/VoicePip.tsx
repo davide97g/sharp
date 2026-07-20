@@ -179,7 +179,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
   const muted = useStore((s) => s.voice.muted)
   const handRaised = useStore((s) => s.voice.handRaised)
   const cameraStatus = useStore((s) => s.voice.cameraStatus)
-  const blurEnabled = useStore((s) => s.voice.blurEnabled)
+  const videoBackground = useStore((s) => s.voice.videoBackground)
   const localStream = useStore((s) => s.voice.localStream)
   const remoteStreams = useStore((s) => s.voice.remoteStreams)
   const localScreenStream = useStore((s) => s.voice.localScreenStream)
@@ -193,7 +193,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
   const toggleVoiceMute = useStore((s) => s.toggleVoiceMute)
   const toggleVoiceHand = useStore((s) => s.toggleVoiceHand)
   const toggleVoiceCamera = useStore((s) => s.toggleVoiceCamera)
-  const toggleVoiceBlur = useStore((s) => s.toggleVoiceBlur)
+  const setVoiceVideoBackground = useStore((s) => s.setVoiceVideoBackground)
   const leaveVoice = useStore((s) => s.leaveVoice)
 
   const participants = useMemo(() => {
@@ -356,11 +356,17 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
           <CameraIcon off={cameraStatus === 'off'} />
         </PipControl>
         <PipControl
-          label={blurEnabled ? 'Turn off background blur' : 'Blur my background'}
-          active={blurEnabled}
-          onClick={toggleVoiceBlur}
+          label={
+            videoBackground.id === 'none' ? 'Blur my background' : 'Turn off camera background'
+          }
+          active={videoBackground.id !== 'none'}
+          onClick={() =>
+            void setVoiceVideoBackground({
+              id: videoBackground.id === 'none' ? 'blur' : 'none',
+            })
+          }
         >
-          <BlurIcon off={!blurEnabled} />
+          <BlurIcon off={videoBackground.id === 'none'} />
         </PipControl>
         <PipControl label="Leave call" danger onClick={leaveVoice}>
           <LeaveIcon />

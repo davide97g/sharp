@@ -1,4 +1,5 @@
 import type { VoiceParticipant, VoiceSignalPayload } from './types'
+import { videoBackgroundImageUrl, type VideoBackground } from './videoBackgrounds'
 // RNNoise worklet script + wasm resolved to bundled asset URLs (no CDN). These
 // are just URL strings; the worklet/wasm code is emitted as separate assets and
 // the loader/node classes are dynamically imported only when NS is first used.
@@ -12,7 +13,7 @@ type VoiceClientOpts = {
   myUserId: string
   iceServers: RTCIceServer[]
   noiseSuppression?: boolean
-  blurBackground?: boolean
+  videoBackground?: VideoBackground
   send: (type: string, payload: unknown) => void
   onSpeaking?: (connId: string, speaking: boolean) => void
   onLocalStream?: (stream: MediaStream | null) => void
@@ -102,15 +103,15 @@ export class VoiceClient {
   private nsUnavailable = false
   private nsLoad: Promise<RnnoiseModule> | null = null
 
-  // Background blur (MediaPipe selfie segmentation). rawCameraTrack is the live
+  // Camera background (MediaPipe selfie segmentation). rawCameraTrack is the live
   // camera from getUserMedia (owns the 'ended' listener and the real deviceId);
   // cameraTrack is what actually gets published — the raw track when blur is off,
-  // the processor's canvas output when blur is on. blurOp guards against
+  // the processor's canvas output when an effect is on. backgroundOp guards against
   // overlapping toggles/device-switches racing each other across awaits.
-  private blurEnabled: boolean
+  private videoBackground: VideoBackground
   private rawCameraTrack: MediaStreamTrack | null = null
   private blurProcessor: import('./videoEffects').BackgroundBlurProcessor | null = null
-  private blurOp = 0
+  private backgroundOp = 0
 
   constructor(opts: VoiceClientOpts) {
     this.channelId = opts.channelId
@@ -118,7 +119,7 @@ export class VoiceClient {
     this.myUserId = opts.myUserId
     this.iceServers = opts.iceServers
     this.noiseSuppression = opts.noiseSuppression ?? true
-    this.blurEnabled = opts.blurBackground ?? false
+    this.videoBackground = opts.videoBackground ?? { id: 'none' }
     this.send = opts.send
     this.onSpeaking = opts.onSpeaking
     this.onLocalStream = opts.onLocalStream
@@ -463,13 +464,18 @@ export class VoiceClient {
     this.onLocalStream?.(this.localStream)
   }
 
-  // Live blur toggle without dropping the call: rebuild the published track around
+  // Live background change without dropping the call: rebuild the published track around
   // the same raw camera and swap it into localStream + every sender. Persisting the
   // flag alone (no camera live) applies it on the next startCamera.
-  async setBackgroundBlur(enabled: boolean) {
-    if (this.blurEnabled === enabled) return
-    this.blurEnabled = enabled
-    const op = ++this.blurOp
+  async setVideoBackground(background: VideoBackground) {
+    if (
+      this.videoBackground.id === background.id &&
+      this.videoBackground.customUrl === background.customUrl
+    ) {
+      return
+    }
+    this.videoBackground = background
+    const op = ++this.backgroundOp
     if (this.stopped || !this.localStream || !this.cameraTrack || !this.rawCameraTrack) return
 
     const rawTrack = this.rawCameraTrack
@@ -480,7 +486,7 @@ export class VoiceClient {
     // newer toggle superseded this one.
     if (
       this.stopped ||
-      this.blurOp !== op ||
+      this.backgroundOp !== op ||
       this.rawCameraTrack !== rawTrack ||
       !this.localStream ||
       !this.cameraTrack
@@ -503,20 +509,24 @@ export class VoiceClient {
     this.onLocalStream?.(this.localStream)
   }
 
-  // Derives the track to publish from a raw camera track. Blur off → the raw track
-  // itself. Blur on → the segmentation processor's canvas output; on any init
+  // Derives the track to publish from a raw camera track. Effect off uses raw track.
+  // Blur/wallpaper uses the segmentation processor's canvas output; on any init
   // failure it warns and falls back to the raw track so the call never breaks.
   private async makeCameraProcessor(
     rawTrack: MediaStreamTrack,
   ): Promise<{ track: MediaStreamTrack; processor: import('./videoEffects').BackgroundBlurProcessor | null }> {
-    if (!this.blurEnabled) return { track: rawTrack, processor: null }
+    if (this.videoBackground.id === 'none') return { track: rawTrack, processor: null }
     try {
       const { BackgroundBlurProcessor } = await import('./videoEffects')
       const processor = new BackgroundBlurProcessor()
-      const track = await processor.start(rawTrack)
+      const imageUrl = videoBackgroundImageUrl(this.videoBackground)
+      const track = await processor.start(
+        rawTrack,
+        imageUrl ? { kind: 'image', url: imageUrl } : { kind: 'blur' },
+      )
       return { track, processor }
     } catch (error) {
-      console.warn('Could not start background blur; publishing the raw camera', error)
+      console.warn('Could not start camera background; publishing the raw camera', error)
       return { track: rawTrack, processor: null }
     }
   }
@@ -530,7 +540,7 @@ export class VoiceClient {
     this.rawCameraTrack = null
     this.blurProcessor = null
     // Invalidate any in-flight startCamera/toggle so it aborts on wake.
-    this.blurOp++
+    this.backgroundOp++
     raw?.removeEventListener('ended', this.handleCameraEnded)
     if (published) {
       this.localStream?.removeTrack(published)

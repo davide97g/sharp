@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { isSpeechSupported } from '../../lib/speech'
@@ -6,6 +7,11 @@ import { useIsMobile } from '../../lib/useMediaQuery'
 import { useStore, type VoiceStageMode } from '../../store'
 import { channelLabel } from '../../lib/util'
 import { toastError, toastSuccess } from '../../lib/toast'
+import {
+  prepareCustomVideoBackground,
+  VIDEO_BACKGROUND_OPTIONS,
+  type VideoBackground,
+} from '../../lib/videoBackgrounds'
 import { Avatar } from '../Avatar'
 import { VoiceMiniWidget } from './VoiceMiniWidget'
 import { CallChatRail } from './CallChatRail'
@@ -504,7 +510,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
                   <PipIcon />
                 </button>
               )}
-              {!isGuest && channel?.is_member && (
+              {!isMobile && !isGuest && channel?.is_member && (
                 <button
                   type="button"
                   aria-label={chatOpen ? 'Hide chat' : 'Show chat'}
@@ -565,7 +571,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
 
         <CallPollOverlay mode="full" />
 
-        {!isGuest && channel?.is_member && (
+        {!isMobile && !isGuest && channel?.is_member && (
           <div
             className="shrink-0 overflow-hidden border-l border-[var(--color-border)] bg-[var(--color-ink)] transition-[width] duration-200 ease-out motion-reduce:transition-none"
             style={{ width: chatOpen ? 380 : 0 }}
@@ -1114,8 +1120,10 @@ function ScreenTile({
   stream: MediaStream | null
   local: boolean
 }) {
+  const tileRef = useRef<HTMLElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const hasVideo = Boolean(stream?.getVideoTracks().length)
+  const [fullScreen, setFullScreen] = useState(false)
 
   useEffect(() => {
     const video = videoRef.current
@@ -1124,8 +1132,33 @@ function ScreenTile({
     if (hasVideo) void video.play().catch(() => {})
   }, [hasVideo, stream])
 
+  useEffect(() => {
+    function onFullscreenChange() {
+      setFullScreen(document.fullscreenElement === tileRef.current)
+    }
+    document.addEventListener('fullscreenchange', onFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange)
+  }, [])
+
+  async function toggleFullScreen() {
+    if (document.fullscreenElement === tileRef.current) {
+      await document.exitFullscreen()
+      return
+    }
+    if (tileRef.current?.requestFullscreen) {
+      await tileRef.current.requestFullscreen()
+      return
+    }
+    ;(videoRef.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null)
+      ?.webkitEnterFullscreen?.()
+  }
+
   return (
-    <article className="relative flex h-full w-full overflow-hidden rounded-2xl border border-[var(--color-border)] bg-black">
+    <article
+      ref={tileRef}
+      className="group relative flex h-full w-full overflow-hidden rounded-2xl border border-[var(--color-border)] bg-black"
+      onDoubleClick={() => void toggleFullScreen()}
+    >
       {hasVideo ? (
         // Never mirrored; object-contain keeps the whole surface visible. Muted —
         // remote system/tab audio plays via the engine's hidden screenAudio element.
@@ -1143,6 +1176,17 @@ function ScreenTile({
           Waiting for screen…
         </div>
       )}
+      {hasVideo ? (
+        <button
+          type="button"
+          aria-label={fullScreen ? 'Exit shared screen full screen' : 'View shared screen full screen'}
+          title={fullScreen ? 'Exit full screen' : 'View full screen'}
+          onClick={() => void toggleFullScreen()}
+          className="absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-black/60 text-white shadow-lg backdrop-blur-sm outline-none hover:bg-black/80 focus-visible:ring-2 focus-visible:ring-white"
+        >
+          {fullScreen ? <ReduceIcon /> : <FullscreenIcon />}
+        </button>
+      ) : null}
       <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/75 to-transparent px-3 pb-2.5 pt-6 text-sm font-medium text-white">
         <ScreenShareIcon />
         <span className="truncate">{local ? 'Your screen' : `${name}'s screen`}</span>
@@ -1171,7 +1215,7 @@ function StageControlsBar({
   const transcribing = useStore((s) => s.voice.transcribing)
   const voiceStatus = useStore((s) => s.voice.status)
   const cameraStatus = useStore((s) => s.voice.cameraStatus)
-  const blurEnabled = useStore((s) => s.voice.blurEnabled)
+  const videoBackground = useStore((s) => s.voice.videoBackground)
   const screenStatus = useStore((s) => s.voice.screenStatus)
   const audioDeviceId = useStore((s) => s.voice.audioDeviceId)
   const videoDeviceId = useStore((s) => s.voice.videoDeviceId)
@@ -1184,7 +1228,6 @@ function StageControlsBar({
   const toggleVoiceHand = useStore((s) => s.toggleVoiceHand)
   const toggleTranscription = useStore((s) => s.toggleTranscription)
   const toggleVoiceCamera = useStore((s) => s.toggleVoiceCamera)
-  const toggleVoiceBlur = useStore((s) => s.toggleVoiceBlur)
   const toggleVoiceScreen = useStore((s) => s.toggleVoiceScreen)
   const setVoiceAudioDevice = useStore((s) => s.setVoiceAudioDevice)
   const setVoiceVideoDevice = useStore((s) => s.setVoiceVideoDevice)
@@ -1194,7 +1237,7 @@ function StageControlsBar({
     (noiseSuppression && noiseSuppressionAvailable) ||
     handRaised ||
     transcribing ||
-    blurEnabled ||
+    videoBackground.id !== 'none' ||
     screenStatus !== 'off'
 
   if (isMobile) {
@@ -1306,14 +1349,7 @@ function StageControlsBar({
       >
         <CameraIcon off={cameraStatus === 'off'} />
       </DeviceControl>
-      <CallControl
-        label={blurEnabled ? 'Turn off background blur' : 'Blur my background'}
-        active={blurEnabled}
-        disabled={voiceStatus !== 'connected'}
-        onClick={toggleVoiceBlur}
-      >
-        <BlurIcon off={!blurEnabled} />
-      </CallControl>
+      <VideoBackgroundControl disabled={voiceStatus !== 'connected'} />
       <CallControl
         label={
           someoneElseSharing
@@ -1353,7 +1389,6 @@ function MobileCallMoreSheet({
   const handRaised = useStore((s) => s.voice.handRaised)
   const transcribing = useStore((s) => s.voice.transcribing)
   const voiceStatus = useStore((s) => s.voice.status)
-  const blurEnabled = useStore((s) => s.voice.blurEnabled)
   const screenStatus = useStore((s) => s.voice.screenStatus)
   const audioDeviceId = useStore((s) => s.voice.audioDeviceId)
   const videoDeviceId = useStore((s) => s.voice.videoDeviceId)
@@ -1364,7 +1399,6 @@ function MobileCallMoreSheet({
   const toggleNoiseSuppression = useStore((s) => s.toggleNoiseSuppression)
   const toggleVoiceHand = useStore((s) => s.toggleVoiceHand)
   const toggleTranscription = useStore((s) => s.toggleTranscription)
-  const toggleVoiceBlur = useStore((s) => s.toggleVoiceBlur)
   const toggleVoiceScreen = useStore((s) => s.toggleVoiceScreen)
   const setVoiceAudioDevice = useStore((s) => s.setVoiceAudioDevice)
   const setVoiceVideoDevice = useStore((s) => s.setVoiceVideoDevice)
@@ -1377,7 +1411,7 @@ function MobileCallMoreSheet({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[80]" role="dialog" aria-modal="true" aria-label="Call controls">
       <button
         type="button"
@@ -1438,13 +1472,6 @@ function MobileCallMoreSheet({
             onClick={toggleVoiceHand}
           />
           <SheetAction
-            label={blurEnabled ? 'Background blur on' : 'Blur background'}
-            active={blurEnabled}
-            disabled={voiceStatus !== 'connected'}
-            icon={<BlurIcon off={!blurEnabled} />}
-            onClick={toggleVoiceBlur}
-          />
-          <SheetAction
             label={
               someoneElseSharing
                 ? `${otherSharerName} is sharing`
@@ -1457,6 +1484,10 @@ function MobileCallMoreSheet({
             icon={<ScreenShareIcon />}
             onClick={() => void toggleVoiceScreen()}
           />
+        </div>
+
+        <div className="border-t border-[var(--color-border)] px-3 py-3">
+          <VideoBackgroundPicker disabled={voiceStatus !== 'connected'} />
         </div>
 
         {mics.length > 0 && (
@@ -1481,6 +1512,183 @@ function MobileCallMoreSheet({
         )}
         <div className="h-[max(0.75rem,env(safe-area-inset-bottom,0px))]" />
       </div>
+    </div>,
+    document.body,
+  )
+}
+
+function VideoBackgroundControl({ disabled }: { disabled: boolean }) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const background = useStore((s) => s.voice.videoBackground)
+
+  useEffect(() => {
+    if (!open) return
+    function onPointerDown(event: MouseEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', onPointerDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div ref={rootRef} className="relative flex">
+      <CallControl
+        label="Choose camera background"
+        active={background.id !== 'none' || open}
+        disabled={disabled}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <BackgroundIcon />
+      </CallControl>
+      {open ? (
+        <div
+          role="dialog"
+          aria-label="Camera background"
+          className="absolute bottom-full right-0 z-50 mb-2 w-[23rem] rounded-2xl border border-[var(--color-border)] bg-[var(--color-panel)] p-3 shadow-2xl"
+        >
+          <VideoBackgroundPicker disabled={disabled} onPick={() => setOpen(false)} />
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function VideoBackgroundPicker({
+  disabled,
+  onPick,
+}: {
+  disabled: boolean
+  onPick?: () => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
+  const background = useStore((s) => s.voice.videoBackground)
+  const setBackground = useStore((s) => s.setVoiceVideoBackground)
+
+  function choose(next: VideoBackground) {
+    void setBackground(next)
+    onPick?.()
+  }
+
+  async function upload(file: File | undefined) {
+    if (!file) return
+    setUploading(true)
+    try {
+      const customUrl = await prepareCustomVideoBackground(file)
+      await setBackground({ id: 'custom', customUrl })
+      toastSuccess('Camera background updated')
+      onPick?.()
+    } catch (error) {
+      toastError(error instanceof Error ? error.message : 'Could not use that image.')
+    } finally {
+      setUploading(false)
+      if (inputRef.current) inputRef.current.value = ''
+    }
+  }
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-[var(--color-text)]">Camera background</h3>
+          <p className="mt-0.5 text-[11px] text-[var(--color-text-faint)]">
+            Your choice appears behind you for everyone.
+          </p>
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Camera background">
+        {VIDEO_BACKGROUND_OPTIONS.map((option) => {
+          const selected = background.id === option.id
+          return (
+            <button
+              key={option.id}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              disabled={disabled}
+              onClick={() => choose({ id: option.id })}
+              className={`group/background overflow-hidden rounded-xl border text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:opacity-45 ${
+                selected
+                  ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
+                  : 'border-[var(--color-border)] bg-[var(--color-panel-2)] hover:border-[var(--color-text-faint)]'
+              }`}
+            >
+              <BackgroundPreview option={option} />
+              <span className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium text-[var(--color-text)]">
+                <span className="truncate">{option.label}</span>
+                {selected ? <span className="ml-auto text-[var(--color-accent-hover)]"><CheckIcon /></span> : null}
+              </span>
+            </button>
+          )
+        })}
+        <button
+          type="button"
+          role="radio"
+          aria-checked={background.id === 'custom'}
+          disabled={disabled || uploading}
+          onClick={() => inputRef.current?.click()}
+          className={`overflow-hidden rounded-xl border text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:opacity-45 ${
+            background.id === 'custom'
+              ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
+              : 'border-[var(--color-border)] bg-[var(--color-panel-2)] hover:border-[var(--color-text-faint)]'
+          }`}
+        >
+          <div className="relative aspect-video overflow-hidden bg-[var(--color-ink)]">
+            {background.customUrl ? (
+              <img src={background.customUrl} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <span className="flex h-full items-center justify-center text-[var(--color-text-dim)]">
+                <UploadIcon />
+              </span>
+            )}
+          </div>
+          <span className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium text-[var(--color-text)]">
+            <span className="truncate">{uploading ? 'Preparing…' : 'Upload'}</span>
+            {background.id === 'custom' ? <span className="ml-auto text-[var(--color-accent-hover)]"><CheckIcon /></span> : null}
+          </span>
+        </button>
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="sr-only"
+        onChange={(event) => void upload(event.target.files?.[0])}
+      />
+    </div>
+  )
+}
+
+function BackgroundPreview({
+  option,
+}: {
+  option: (typeof VIDEO_BACKGROUND_OPTIONS)[number]
+}) {
+  if (option.imageUrl) {
+    return (
+      <div className="aspect-video overflow-hidden bg-[var(--color-ink)]">
+        <img src={option.imageUrl} alt="" className="h-full w-full object-cover" />
+      </div>
+    )
+  }
+  if (option.id === 'blur') {
+    return (
+      <div className="relative aspect-video overflow-hidden bg-[url('/wallpapers/studio.svg')] bg-cover bg-center">
+        <div className="absolute inset-[-12px] bg-inherit blur-[7px]" />
+      </div>
+    )
+  }
+  return (
+    <div className="relative aspect-video overflow-hidden bg-[var(--color-ink)]">
+      <div className="absolute left-1/2 top-1/2 h-px w-12 -translate-x-1/2 -translate-y-1/2 -rotate-12 bg-[var(--color-text-faint)]" />
     </div>
   )
 }
@@ -1995,12 +2203,11 @@ function CameraIcon({ off }: { off: boolean }) {
   )
 }
 
-// Person silhouette on a dotted (blurred) backdrop; slashed when blur is off.
-function BlurIcon({ off }: { off: boolean }) {
+function BackgroundIcon() {
   return (
     <svg
-      width="17"
-      height="17"
+      width="18"
+      height="18"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -2009,10 +2216,29 @@ function BlurIcon({ off }: { off: boolean }) {
       strokeLinejoin="round"
       aria-hidden
     >
-      <circle cx="12" cy="8" r="3.2" />
-      <path d="M6 20a6 6 0 0 1 12 0" />
-      <path d="M3.5 5h0M7 3.5h0M12 3h0M17 3.5h0M20.5 5h0M21.5 9.5h0M21.5 14.5h0M2.5 9.5h0M2.5 14.5h0" />
-      {off && <path d="m3 3 18 18" />}
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="8.5" cy="9" r="1.5" />
+      <path d="m4 17 4.5-4.5 3.5 3 2.5-2.5 5.5 5" />
+    </svg>
+  )
+}
+
+function UploadIcon() {
+  return (
+    <svg
+      width="19"
+      height="19"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 16V4" />
+      <path d="m7 9 5-5 5 5" />
+      <path d="M5 20h14" />
     </svg>
   )
 }
