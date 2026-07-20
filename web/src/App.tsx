@@ -19,6 +19,9 @@ import { ChannelDocs } from './components/docs/ChannelDocs'
 import { DocEditor } from './components/docs/DocEditor'
 import { CanvasHome } from './components/canvas/CanvasHome'
 import { ChannelCanvases } from './components/canvas/ChannelCanvases'
+import { BoardHome } from './components/board/BoardHome'
+import { ChannelBoards } from './components/board/ChannelBoards'
+import { BoardEditor } from './components/board/BoardEditor'
 import { MeetingsHome } from './components/meetings/MeetingsHome'
 import { MeetingDetailView } from './components/meetings/MeetingDetailView'
 import { CalendarView } from './components/calendar/CalendarView'
@@ -132,12 +135,16 @@ export function App() {
               chat mode (channel sidebar stays put). */}
           <Route path="c/:channelId/docs" element={<ChannelDocs />} />
           <Route path="c/:channelId/canvas" element={<ChannelCanvases />} />
+          <Route path="c/:channelId/board" element={<ChannelBoards />} />
           <Route path="search" element={<SearchResults />} />
           <Route path="docs" element={<DocsHome />} />
           <Route path="docs/c/:channelId" element={<ChannelDocs />} />
           <Route path="d/:docId" element={<DocEditor />} />
           <Route path="canvas" element={<CanvasHome />} />
           <Route path="canvas/c/:channelId" element={<ChannelCanvases />} />
+          <Route path="board" element={<BoardHome />} />
+          <Route path="board/c/:channelId" element={<ChannelBoards />} />
+          <Route path="b/:docId" element={<BoardEditor />} />
           <Route path="meetings" element={<MeetingsHome />} />
           <Route path="meetings/:meetingId" element={<MeetingDetailView />} />
           <Route path="calendar" element={<CalendarView />} />

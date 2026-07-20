@@ -313,9 +313,9 @@ fn validate_override_role(role: &str) -> AppResult<()> {
 }
 
 fn validate_kind(kind: &str) -> AppResult<()> {
-    if !matches!(kind, "doc" | "canvas") {
+    if !matches!(kind, "doc" | "canvas" | "board") {
         return Err(AppError::Validation(
-            "kind must be 'doc' or 'canvas'".to_string(),
+            "kind must be 'doc', 'canvas' or 'board'".to_string(),
         ));
     }
     Ok(())
@@ -905,8 +905,12 @@ pub async fn create_mention(
     let ev = envelope("doc.mention", json!({ "mention": mention }));
     state.hub.broadcast(ev, vec![target]).await;
 
-    // Web push for offline recipients (canvases live under /x/, docs under /d/).
-    let prefix = if mention.doc.kind == "canvas" { "x" } else { "d" };
+    // Web push for offline recipients (canvases live under /x/, boards under /b/, docs under /d/).
+    let prefix = match mention.doc.kind.as_str() {
+        "canvas" => "x",
+        "board" => "b",
+        _ => "d",
+    };
     let title = format!("{} mentioned you", mention.from_user.display_name);
     let doc_title = if mention.doc.title.is_empty() {
         "Untitled".to_string()

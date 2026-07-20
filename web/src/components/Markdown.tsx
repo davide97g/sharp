@@ -12,8 +12,8 @@ import { PollCard } from './PollCard'
 const MEET_TOKEN = /\[\[meet:([0-9a-f-]{36})\|([^|\]]*)\|([^\]]*)\]\]/g
 const POLL_TOKEN = /\[\[poll:([0-9a-f-]{36})(?:\|([^\]]*))?\]\]/g
 
-// Resource-chip matcher: [[doc:<uuid>|<title>]] or [[canvas:<uuid>|<title>]].
-const RESOURCE_TOKEN = /\[\[(doc|canvas):([0-9a-f-]{36})\|([^\]]*)\]\]/g
+// Resource-chip matcher: [[doc|canvas|board:<uuid>|<title>]].
+const RESOURCE_TOKEN = /\[\[(doc|canvas|board):([0-9a-f-]{36})\|([^\]]*)\]\]/g
 // Fallback single-word mention (when the name isn't in the known directory).
 const WORD_MENTION = /^[\w][\w-]*/
 
@@ -22,20 +22,22 @@ function ResourceChip({
   id,
   title,
 }: {
-  kind: 'doc' | 'canvas'
+  kind: 'doc' | 'canvas' | 'board'
   id: string
   title: string
 }) {
+  const prefix = kind === 'canvas' ? 'x' : kind === 'board' ? 'b' : 'd'
+  const emoji = kind === 'canvas' ? '🎨' : kind === 'board' ? '🗂️' : '📄'
   return (
     <button
       type="button"
       onClick={(e) => {
         e.stopPropagation()
-        navigateTo(`/${kind === 'canvas' ? 'x' : 'd'}/${id}`)
+        navigateTo(`/${prefix}/${id}`)
       }}
       className="mx-0.5 inline-flex items-center gap-1 rounded border border-[var(--color-border)] bg-[var(--color-panel-2)] px-1.5 py-0.5 align-baseline text-[0.85em] font-medium text-[var(--color-accent-hover)] hover:border-[var(--color-accent)]"
     >
-      <span>{kind === 'canvas' ? '🎨' : '📄'}</span>
+      <span>{emoji}</span>
       <span>{title || 'Untitled'}</span>
     </button>
   )
@@ -172,7 +174,7 @@ function highlightString(
     out.push(
       <ResourceChip
         key={`${keyPrefix}-r${i}`}
-        kind={m[1] as 'doc' | 'canvas'}
+        kind={m[1] as 'doc' | 'canvas' | 'board'}
         id={m[2]}
         title={m[3]}
       />,

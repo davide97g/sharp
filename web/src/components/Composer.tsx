@@ -30,7 +30,7 @@ type Pending = {
 type PickItem =
   | { kind: 'user'; id: string; name: string }
   | { kind: 'all' } // @all — broadcast mention to everyone in the channel
-  | { kind: 'doc' | 'canvas'; id: string; title: string; channelName?: string }
+  | { kind: 'doc' | 'canvas' | 'board'; id: string; title: string; channelName?: string }
   | { kind: 'emoji'; id: string; name: string; native: string; shortcode: string }
 
 type Trigger = { type: '@' | '#' | ':'; start: number; query: string }
@@ -216,12 +216,12 @@ export function Composer({
       try {
         const toItem = (d: {
           id: string
-          kind: 'doc' | 'canvas'
+          kind: 'doc' | 'canvas' | 'board'
           title: string
           channel_name?: string
           channelName?: string
         }): PickItem => ({
-          kind: d.kind === 'canvas' ? 'canvas' : 'doc',
+          kind: d.kind,
           id: d.id,
           title: d.title || 'Untitled',
           channelName: d.channel_name ?? d.channelName,
@@ -304,6 +304,7 @@ export function Composer({
         break
       case 'doc':
       case 'canvas':
+      case 'board':
         token = `[[${item.kind}:${item.id}|${item.title || 'Untitled'}]] `
         break
       default: {
@@ -600,7 +601,7 @@ export function Composer({
                 ? 'People'
                 : trigger?.type === ':'
                   ? 'Emoji'
-                  : 'Docs & canvases'}
+                  : 'Docs, canvases & boards'}
             </span>
             <span className="text-[10px] text-[var(--color-text-faint)]">↑↓ · ↵/⇥ · esc</span>
           </div>
@@ -645,7 +646,7 @@ export function Composer({
                 </>
               ) : (
                 <>
-                  <span>{r.kind === 'canvas' ? '🎨' : '📄'}</span>
+                  <span>{r.kind === 'canvas' ? '🎨' : r.kind === 'board' ? '🗂️' : '📄'}</span>
                   <span className="min-w-0 flex-1 truncate">{r.title}</span>
                   {r.channelName && (
                     <span className="shrink-0 text-[11px] text-[var(--color-text-faint)]">

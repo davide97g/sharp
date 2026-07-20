@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 
-type Tab = 'chat' | 'docs' | 'canvas'
+type Tab = 'chat' | 'docs' | 'canvas' | 'board'
 
 // Slack-style tab strip shown at the top of a channel/DM pane. Switches between
 // the chat message view and the channel's docs / canvas galleries while staying
@@ -13,6 +13,7 @@ export function ChannelTabs({ channelId, active }: { channelId: string; active: 
     { key: 'chat', label: 'Messages', to: `/c/${channelId}`, icon: <ChatIcon /> },
     { key: 'docs', label: 'Docs', to: `/c/${channelId}/docs`, icon: <DocIcon /> },
     { key: 'canvas', label: 'Canvas', to: `/c/${channelId}/canvas`, icon: <CanvasIcon /> },
+    { key: 'board', label: 'Board', to: `/c/${channelId}/board`, icon: <BoardIcon /> },
   ]
 
   return (
@@ -65,6 +66,16 @@ function CanvasIcon() {
       <rect x="4" y="4" width="7" height="7" rx="1" />
       <circle cx="16.5" cy="7.5" r="3.5" />
       <path d="M7.5 21 3 14h9z" />
+    </svg>
+  )
+}
+
+function BoardIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="4" y="4" width="4" height="16" rx="1" />
+      <rect x="10" y="4" width="4" height="11" rx="1" />
+      <rect x="16" y="4" width="4" height="7" rx="1" />
     </svg>
   )
 }

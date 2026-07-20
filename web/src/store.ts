@@ -403,9 +403,10 @@ type State = {
   loadChannelTrash: (channelId: string) => Promise<void>
   createDoc: (
     channelId: string,
-    input?: { title?: string; icon?: string; kind?: 'doc' | 'canvas' },
+    input?: { title?: string; icon?: string; kind?: 'doc' | 'canvas' | 'board' },
   ) => Promise<Doc>
   createCanvas: (channelId: string, input?: { title?: string; icon?: string }) => Promise<Doc>
+  createBoard: (channelId: string, input?: { title?: string; icon?: string }) => Promise<Doc>
   fetchDoc: (id: string) => Promise<Doc>
   patchDoc: (
     id: string,
@@ -1829,6 +1830,10 @@ export const useStore = create<State>((set, get) => ({
     return get().createDoc(channelId, { ...input, kind: 'canvas' })
   },
 
+  async createBoard(channelId, input = {}) {
+    return get().createDoc(channelId, { ...input, kind: 'board' })
+  },
+
   async fetchDoc(id) {
     const doc = await api.getDoc(id)
     set((s) => ({ docMeta: { ...s.docMeta, [id]: doc } }))
@@ -2660,7 +2665,8 @@ export const useStore = create<State>((set, get) => ({
           return { mentions, unreadMentionCount: countUnread(mentions) }
         })
         // Toast unless the user is already looking at the mentioned doc.
-        const prefix = mention.doc.kind === 'canvas' ? 'x' : 'd'
+        const prefix =
+          mention.doc.kind === 'canvas' ? 'x' : mention.doc.kind === 'board' ? 'b' : 'd'
         const deepLink = `/${prefix}/${mention.doc.id}`
         const viewing =
           typeof window !== 'undefined' &&

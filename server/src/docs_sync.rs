@@ -484,18 +484,18 @@ async fn compact_doc(state: &SharedState, doc_id: Uuid) -> AppResult<bool> {
         return Ok(false);
     }
 
-    // Canvas docs store a tldraw Yjs store (a Y.Map), not a blocknote XML fragment,
+    // Canvas and board docs store non-blocknote Yjs state (a tldraw / kanban Y.Map),
     // so merge the update log but skip content_text / doc_link extraction (blocknote-only).
-    let is_canvas = sqlx::query("SELECT kind FROM docs WHERE id = $1")
+    let skip_extraction = sqlx::query("SELECT kind FROM docs WHERE id = $1")
         .bind(doc_id)
         .fetch_optional(&state.pool)
         .await?
         .map(|r| r.try_get::<String, _>("kind"))
         .transpose()?
-        .map(|k| k == "canvas")
+        .map(|k| k == "canvas" || k == "board")
         .unwrap_or(false);
 
-    let (merged, extracted) = if is_canvas {
+    let (merged, extracted) = if skip_extraction {
         (merge_state(blobs).await?, None)
     } else {
         let (merged, text, links) = compact_state(blobs).await?;

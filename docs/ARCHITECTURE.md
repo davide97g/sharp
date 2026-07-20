@@ -333,8 +333,8 @@ docs are Yjs CRDTs. Both are served by the same single binary — no sidecar.
 docs(
   id uuid PK default gen_random_uuid(),
   channel_id uuid NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-  kind text NOT NULL default 'doc'            -- 'doc' (blocknote) | 'canvas' (tldraw); migration 0006
-    CHECK (kind IN ('doc','canvas')),
+  kind text NOT NULL default 'doc'            -- 'doc' (blocknote) | 'canvas' (tldraw, migration 0006) | 'board' (kanban, migration 0021)
+    CHECK (kind IN ('doc','canvas','board')),
   title text NOT NULL default '',            -- shown as 'Untitled' when empty
   icon text NOT NULL default '',              -- emoji, may be empty
   created_by uuid REFERENCES users(id),
@@ -402,7 +402,7 @@ Doc-mention IDs are `bigint` → **serialized as strings** (same invariant as me
 ```ts
 DocRole = 'owner'|'editor'|'viewer'|'none'
 Doc = {
-  id: string, channel_id: string, kind: 'doc'|'canvas', title: string, icon: string,
+  id: string, channel_id: string, kind: 'doc'|'canvas'|'board', title: string, icon: string,
   created_by: string|null, created_at: string, updated_at: string,
   deleted_at: string|null,
   everyone_role: 'editor'|'viewer'|'none'|'inherit',
@@ -411,7 +411,7 @@ Doc = {
 }
 DocMention = {
   id: string,
-  doc: { id: string, kind: 'doc'|'canvas', title: string, icon: string, channel_id: string },
+  doc: { id: string, kind: 'doc'|'canvas'|'board', title: string, icon: string, channel_id: string },
   from_user: { id: string, display_name: string },
   created_at: string, read_at: string|null
 }
@@ -423,7 +423,7 @@ DocMention = {
 |---|---|---|
 | GET | `/channels/{id}/docs` | → `{docs: Doc[]}` (not trashed, `my_role != none`, updated_at desc) |
 | GET | `/channels/{id}/docs/trash` | → `{docs: Doc[]}` (trashed, same visibility) |
-| POST | `/channels/{id}/docs` | `{title?, icon?, kind?}` → `201 Doc` (channel owner/editor; `kind` defaults `'doc'`, or `'canvas'` for a whiteboard) |
+| POST | `/channels/{id}/docs` | `{title?, icon?, kind?}` → `201 Doc` (channel owner/editor; `kind` defaults `'doc'`, or `'canvas'` for a whiteboard, or `'board'` for a kanban) |
 | GET | `/docs/{id}` | → `Doc` |
 | PATCH | `/docs/{id}` | `{title?, icon?, everyone_role?}` → `Doc` (title/icon: editor+; everyone_role: owner; empty body → 422) |
 | DELETE | `/docs/{id}` | → `204` (editor+; soft — sets `deleted_at`) |
@@ -436,7 +436,7 @@ DocMention = {
 | POST | `/docs/{id}/mentions` | `{user_id}` → `204` (editor+; no self-mentions; not on trashed docs; target must be able to see the doc; dedup: skipped if an unread mention of the same user in the same doc exists) |
 | GET | `/mentions` | → `{mentions: DocMention[]}` (mine, unread first then newest, limit 50) |
 | POST | `/mentions/read` | `{ids: string[]}` → `204` (marks mine read) |
-| GET | `/docs/search?q=&limit=20&doc_id=` | → `{results: (Doc & {channel_name: string, snippet: string})[]}` (docs I can see, FTS + title ILIKE; optional `doc_id` scopes to one doc; `snippet` is a `ts_headline` over `content_text` with `<<`/`>>` markers, empty for canvases) |
+| GET | `/docs/search?q=&limit=20&doc_id=` | → `{results: (Doc & {channel_name: string, snippet: string})[]}` (docs I can see, FTS + title ILIKE; optional `doc_id` scopes to one doc; `snippet` is a `ts_headline` over `content_text` with `<<`/`>>` markers, empty for canvases and boards) |
 
 Validation: title ≤ 200 chars; icon ≤ 16 chars; mention POST is idempotent.
 
@@ -488,11 +488,15 @@ fills (1024 frames) is evicted from the room.
 
 ## Content bridging
 
-- **Doc chips in chat**: message content may contain `[[doc:<uuid>|<title>]]`. The
-  composer opens a doc picker on typing `[[` (searches `/docs/search`); the renderer
-  replaces the token with a clickable doc chip navigating to `/d/<uuid>`. Plain text
+- **Doc chips in chat**: message content may contain `[[doc:<uuid>|<title>]]`,
+  `[[canvas:<uuid>|<title>]]`, or `[[board:<uuid>|<title>]]`. The
+  composer opens a doc picker on typing `[[` (searches `/docs/search`; boards are excluded
+  from this autocomplete in v1); the renderer
+  replaces the token with a clickable chip navigating to `/d/<uuid>` (doc), `/x/<uuid>`
+  (canvas), or `/b/<uuid>` (board, 🗂️). Plain text
   otherwise — search and the API are unaffected. A "Share to channel" action on a doc
-  posts such a message via the normal messages endpoint.
+  posts such a message via the normal messages endpoint. `notify.rs` strips these resource
+  tokens when building notification previews.
 - **Doc links in docs**: custom BlockNote inline content `doclink` with props
   `{docId, title}`, inserted via a `[`-triggered picker inside the editor (BlockNote
   suggestion menus key on a single character). Serialized into
@@ -502,17 +506,21 @@ fills (1024 frames) is evicted from the room.
   `{userId, name}`, inserted via `@` suggestion menu (channel members). On insert the
   client calls `POST /docs/{id}/mentions`; the server persists it and emits `doc.mention`.
   Delivery mirrors chat: recipients online get toast + OS popup (unless DND / already
-  viewing the doc); offline recipients get **web push** (deep-links to `/d/` or `/x/` by
-  doc kind). Push payloads carry an explicit `path` the service worker navigates to.
+  viewing the doc); offline recipients get **web push** (deep-links by doc kind: `/d/`
+  doc, `/x/` canvas, `/b/` board). Push payloads carry an explicit `path` the service
+  worker navigates to.
 
 ## Web UI (docs mode)
 
-- **Mode rail**: thin far-left rail with three icons — Chat (`#`), Docs, and Canvas —
-  switching between the chat, docs, and canvas UIs. Routes: chat keeps `/`, `/c/:channelId`;
+- **Mode rail**: thin far-left rail with icons — Chat (`#`), Docs, Canvas, and Board (🗂️) —
+  switching between the chat, docs, canvas, and board UIs. Routes: chat keeps `/`, `/c/:channelId`;
   docs adds `/docs` (home: recent docs + my mentions inbox), `/docs/c/:channelId` (channel
-  doc list + trash), `/d/:docId` (editor); canvas adds `/canvas`, `/x/:docId`. Each rail
+  doc list + trash), `/d/:docId` (editor); canvas adds `/canvas`, `/x/:docId`; board adds
+  `/board` (home), `/board/c/:channelId` (channel board list + trash), `/b/:docId` (editor),
+  plus an in-channel `/c/:channelId/board` gallery. Each rail
   icon carries its own unread badge: Chat = unread chat notifications; Docs = unread
-  mentions on `kind:'doc'` docs; Canvas = unread mentions on `kind:'canvas'` docs.
+  mentions on `kind:'doc'` docs; Canvas = unread mentions on `kind:'canvas'` docs; Board =
+  unread mentions on `kind:'board'` docs.
 - **Docs sidebar**: channels (member ones) with their doc lists, new-doc button, trash
   section per channel, mentions inbox link.
 - **Editor page**: emoji icon + borderless title input (debounced PATCH), BlockNote
@@ -549,6 +557,52 @@ doc REST surface, the per-channel + per-doc role model, trash/restore, and the
 - **Web**: a third **Canvas** mode in the rail; `web/src/components/canvas/` mirrors
   `components/docs/` (Home / channel list / sidebar / editor). The tldraw editor chunk is
   lazy-loaded, and tldraw assets are **self-hosted** (bundled by Vite) — no CDN dependency.
+
+# Phase 3.5 — Boards (Notion-style kanban)
+
+Collaborative kanban boards, the third doc kind — built on the same Phase 2 doc foundation
+as canvas: a board **is a `docs` row with `kind = 'board'`** (migration
+`0021_board_kind.sql`). It reuses the doc REST surface, the per-channel + per-doc role
+model, trash/restore, mentions, and the `/api/v1/docs/{id}/sync` WebSocket **unchanged**.
+Cards are lightweight items (not docs/pages): a title plus configurable properties,
+rendered as tiles in columns. One view in v1: grouped by a status single-select.
+
+- **Sync**: the doc-sync socket is content-agnostic (raw Yjs v1 bytes + `yrs` merge); the
+  server never interprets board content. All board logic is client-side Yjs, in one Y.Doc
+  per board:
+  - `ydoc.getMap('board')` — schema/meta: `properties: Y.Array<Y.Map>` — each
+    `{ id, type: 'select'|'multiSelect'|'date'|'assignee', name, options?: Y.Array<Y.Map{id,label,color}> }`
+    where `color` is a **palette key** (`"blue"`), never a hex value. The status
+    property's option order **is** the column order (no separate structure).
+    `groupByPropertyId` names the select that drives columns (fixed to the seeded Status
+    in v1, stored for future-proofing).
+  - `ydoc.getMap('cards')` — cardId → `Y.Map{ id, title, description, order, values: Y.Map }`.
+    `values` is keyed by propertyId: select → optionId; multiSelect → `Y.Array<optionId>`;
+    date → `YYYY-MM-DD`; assignee → userId. A card's column is derived from
+    `values[groupByPropertyId]`; a missing/dangling optionId falls into a synthetic
+    leftmost "No status" column.
+  - **Ordering** is via fractional-index strings (`web/src/lib/fracIndex.ts` `between()`,
+    base-62; cardId tie-break); a move is a single-field write. LWW per field (Y.Map
+    default). Deleting a column removes the option only — cards fall to uncategorized, no
+    cascade.
+  - **Seeding** is client-side, gated on the provider being `synced` (never over server
+    state) and guarded by an empty-map check inside one transaction (first writer wins):
+    Status select with Todo (gray) / In progress (blue) / Done (green).
+- **Compaction**: `compact_doc` still merges the update log for boards, but — like canvases
+  — **skips the blocknote text/link extraction**, so `content_text` stays empty and no
+  `doc_links` are written: boards have title-only search and no backlinks.
+- **Wire**: `Doc.kind` (and `DocMention.doc.kind`) is `'doc'|'canvas'|'board'`; `POST
+  /channels/{id}/docs` accepts `kind: 'board'` (server `validate_kind` whitelists it).
+  `doc.created`/`doc.updated` carry `kind`, so clients route to `/b/:id`.
+- **Bridging**: `[[board:<uuid>|<title>]]` chips render a 🗂️ chip navigating to
+  `/b/<uuid>`; board mentions deep-link (inbox + push) to `/b/`. Boards are excluded from
+  the chat `[[` doc-link autocomplete in v1.
+- **Web**: a fourth **Board** mode in the rail; `web/src/components/board/` mirrors
+  `components/canvas/` (Home / channel list / sidebar / editor), plus board-specific
+  `BoardColumn` / `BoardCard` / `CardPanel` / `PropertyControls` / `CustomizePanel` and a
+  hand-rolled `useBoardDnd` (Pointer Events, no `@dnd-kit`). Colors resolve from an 8-key
+  categorical palette (`web/src/lib/boardColors.ts`) into `--board-*` CSS tokens; keys, not
+  hex, are stored in the Y.Doc. No heavy dependency, so the board chunk is not lazy-loaded.
 
 # Phase 4 — Voice + camera rooms (WebRTC mesh)
 
@@ -835,7 +889,9 @@ the supported video target; Tauri camera behavior and Linux/Windows WebViews are
 
 ~~Files/uploads (S3/MinIO)~~ (shipped) → ~~notifications~~ (shipped) → ~~Phase 2 docs~~
 (shipped: BlockNote+Yjs+yrs, in-binary) → ~~Phase 3 canvas~~ (shipped: tldraw on the same
-doc/sync/permission foundation — see the Phase 3 section above) → ~~Phase 4 voice~~ (shipped:
+doc/sync/permission foundation — see the Phase 3 section above) → ~~Phase 3.5 boards~~
+(shipped: Notion-style kanban as a third doc kind — see the Phase 3.5 section above) →
+~~Phase 4 voice~~ (shipped:
 WebRTC mesh — see the Phase 4 section) → ~~Phase 5 calendar~~ (shipped: Google Calendar pull
 sync + native scheduled meetings — see the Phase 5 section below) → multi-workspace. Chat
 stays append-only. (File uploads + notifications: see the section below.)

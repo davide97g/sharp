@@ -462,7 +462,7 @@ export type MeetingEndedPayload = {
 // --- Phase 2: Docs ---
 
 export type DocRole = 'owner' | 'editor' | 'viewer' | 'none'
-export type DocKind = 'doc' | 'canvas'
+export type DocKind = 'doc' | 'canvas' | 'board'
 
 export type Doc = {
   id: string

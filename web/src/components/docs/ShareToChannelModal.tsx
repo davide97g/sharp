@@ -41,7 +41,7 @@ export function ShareToChannelModal({ doc, onClose }: { doc: Doc; onClose: () =>
   }
 
   return (
-    <Modal title={`Share ${doc.kind === 'canvas' ? 'canvas' : 'doc'} to a channel`} onClose={onClose}>
+    <Modal title={`Share ${doc.kind === 'canvas' ? 'canvas' : doc.kind === 'board' ? 'board' : 'doc'} to a channel`} onClose={onClose}>
       <input
         autoFocus
         value={q}

@@ -239,7 +239,7 @@ export function SearchPalette() {
       })
       navigate(`/c/${row.data.channel_id}`)
     } else {
-      navigate(`${row.data.kind === 'canvas' ? '/x' : '/d'}/${row.data.id}`)
+      navigate(`${row.data.kind === 'canvas' ? '/x' : row.data.kind === 'board' ? '/b' : '/d'}/${row.data.id}`)
     }
   }
 
@@ -249,7 +249,8 @@ export function SearchPalette() {
       if (ch?.kind === 'dm') return `DM · ${channelLabel(ch)}`
       return `#${row.data.channel_name}`
     }
-    const tag = row.data.kind === 'canvas' ? '🎨 Canvas' : '📄 Doc'
+    const tag =
+      row.data.kind === 'canvas' ? '🎨 Canvas' : row.data.kind === 'board' ? '🗂️ Board' : '📄 Doc'
     return `${tag} · #${row.data.channel_name}`
   }
 
@@ -350,7 +351,7 @@ export function SearchPalette() {
                     />
                   ) : (
                     <span className="flex h-7 w-7 items-center justify-center text-lg">
-                      {row.data.icon || (row.data.kind === 'canvas' ? '🎨' : '📄')}
+                      {row.data.icon || (row.data.kind === 'canvas' ? '🎨' : row.data.kind === 'board' ? '🗂️' : '📄')}
                     </span>
                   )}
                   <div className="min-w-0 flex-1">

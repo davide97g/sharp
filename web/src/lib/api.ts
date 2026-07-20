@@ -666,7 +666,7 @@ export const api = {
   },
   createDoc(
     channelId: string,
-    input: { title?: string; icon?: string; kind?: 'doc' | 'canvas' } = {},
+    input: { title?: string; icon?: string; kind?: 'doc' | 'canvas' | 'board' } = {},
   ) {
     return request<Doc>(`/channels/${channelId}/docs`, {
       method: 'POST',

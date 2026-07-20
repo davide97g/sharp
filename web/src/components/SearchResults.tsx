@@ -116,10 +116,10 @@ export function SearchResults() {
             {docs.map((d) => (
               <button
                 key={d.id}
-                onClick={() => navigate(`${d.kind === 'canvas' ? '/x' : '/d'}/${d.id}`)}
+                onClick={() => navigate(`${d.kind === 'canvas' ? '/x' : d.kind === 'board' ? '/b' : '/d'}/${d.id}`)}
                 className="flex w-full items-start gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] p-3 text-left transition hover:border-[var(--color-accent)]"
               >
-                <span className="text-xl">{d.icon || (d.kind === 'canvas' ? '🎨' : '📄')}</span>
+                <span className="text-xl">{d.icon || (d.kind === 'canvas' ? '🎨' : d.kind === 'board' ? '🗂️' : '📄')}</span>
                 <div className="min-w-0 flex-1">
                   <div className="mb-0.5 flex items-center gap-2">
                     <span className="truncate font-semibold">{d.title || 'Untitled'}</span>

@@ -103,7 +103,8 @@ fn truncate_chars(s: &str, max: usize) -> String {
 
 /// Replace resource chips with a readable icon + title so notification previews
 /// don't leak raw tokens: `[[doc:<uuid>|Title]]` → "📄 Title",
-/// `[[canvas:<uuid>|Title]]` → "🎨 Title", and the scheduled-meeting card
+/// `[[canvas:<uuid>|Title]]` → "🎨 Title", `[[board:<uuid>|Title]]` → "🗂️ Title",
+/// and the scheduled-meeting card
 /// `[[meet:<uuid>|Title|<start_iso>]]` → "📅 Title" and
 /// `[[poll:<uuid>|Question]]` → "📊 Question".
 fn strip_resource_tokens(text: &str) -> String {
@@ -114,6 +115,8 @@ fn strip_resource_tokens(text: &str) -> String {
         let after = &rest[start + 2..];
         let icon = if after.starts_with("canvas:") {
             Some("🎨")
+        } else if after.starts_with("board:") {
+            Some("🗂️")
         } else if after.starts_with("doc:") {
             Some("📄")
         } else if after.starts_with("meet:") {
