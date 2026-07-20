@@ -131,21 +131,7 @@ async fn handle_client_event(
     // Guests are voice-only: they may ping and send voice events, and only for
     // the single channel their token is bound to. Anything else is dropped.
     if let Some(g) = guest {
-        let voice_event = matches!(
-            event_type,
-            "voice.join"
-                | "voice.leave"
-                | "voice.mute"
-                | "voice.camera"
-                | "voice.screen"
-                | "voice.signal"
-                | "voice.transcribe"
-                | "voice.phrase"
-                | "voice.hand"
-                | "voice.poll_create"
-                | "voice.poll_vote"
-                | "voice.poll_close"
-        );
+        let voice_event = is_client_voice_event(event_type);
         if event_type != "ping" && !voice_event {
             return;
         }
@@ -198,21 +184,7 @@ async fn handle_client_event(
                 }
             }
         }
-        "voice.join" | "voice.leave" | "voice.mute" | "voice.transcribe" | "voice.phrase"
-        | "voice.camera" | "voice.screen" | "voice.signal" | "voice.hand" => {
-            voice::handle_voice_event(
-                state,
-                user_id,
-                conn_id,
-                display_name,
-                guest,
-                event_type,
-                payload,
-                tx,
-            )
-            .await;
-        }
-        "voice.poll_create" | "voice.poll_vote" | "voice.poll_close" => {
+        voice_event if is_client_voice_event(voice_event) => {
             voice::handle_voice_event(
                 state,
                 user_id,
@@ -226,5 +198,47 @@ async fn handle_client_event(
             .await;
         }
         _ => {}
+    }
+}
+
+/// Voice events accepted by the main WebSocket session and forwarded to the
+/// voice handler. Keep this single allowlist for registered and guest callers
+/// so feature events cannot be silently dropped before voice-level validation.
+fn is_client_voice_event(event_type: &str) -> bool {
+    matches!(
+        event_type,
+        "voice.join"
+            | "voice.leave"
+            | "voice.mute"
+            | "voice.camera"
+            | "voice.screen"
+            | "voice.signal"
+            | "voice.transcribe"
+            | "voice.phrase"
+            | "voice.hand"
+            | "voice.poll_create"
+            | "voice.poll_vote"
+            | "voice.poll_close"
+            | "voice.annotate_allow"
+            | "voice.annotate"
+            | "voice.annotate_clear"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_client_voice_event;
+
+    #[test]
+    fn annotation_events_reach_voice_handler() {
+        assert!(is_client_voice_event("voice.annotate_allow"));
+        assert!(is_client_voice_event("voice.annotate"));
+        assert!(is_client_voice_event("voice.annotate_clear"));
+    }
+
+    #[test]
+    fn unrelated_events_do_not_reach_voice_handler() {
+        assert!(!is_client_voice_event("typing"));
+        assert!(!is_client_voice_event("voice.unknown"));
     }
 }
