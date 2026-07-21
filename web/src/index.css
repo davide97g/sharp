@@ -1448,6 +1448,14 @@ body {
 .voice-speaker-avatar { transition: transform var(--motion-snap) var(--motion-spring), filter var(--motion-snap) ease; }
 .voice-speaker-avatar.is-speaking { animation: sharp-speaking-ring 720ms ease-in-out infinite; }
 .voice-stage { transform-origin: bottom right; animation: sharp-stage-in 360ms var(--motion-spring) both; }
+
+/* Live call poll: quiet entrance + the same green "live" pulse as speaking. */
+@keyframes sharp-poll-live {
+  0% { box-shadow: 0 0 0 0 rgba(79, 191, 159, 0.55); }
+  70%, 100% { box-shadow: 0 0 0 6px rgba(79, 191, 159, 0); }
+}
+.call-poll-pop { animation: sharp-fade-in 160ms ease-out; }
+.call-poll-live-dot { background: #4fbf9f; animation: sharp-poll-live 1.6s ease-out infinite; }
 @media (hover: hover) and (pointer: fine) {
   .voice-channel-button:hover,
   .voice-live-tile:hover { transform: translateY(-1px) scale(1.055); }
@@ -2200,6 +2208,8 @@ html[data-splash-done] .login-brand-copy {
   .voice-mini-widget,
   .voice-speaker-avatar,
   .voice-stage,
+  .call-poll-pop,
+  .call-poll-live-dot,
   .notify-toast,
   .notify-toast::after,
   .jump-messages-cta,
