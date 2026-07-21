@@ -32,6 +32,7 @@ import { markAllDeviceSetsChanged, markDeviceSetChanged } from './lib/e2ee/trust
 import { restoreBackup } from './lib/e2ee/backup'
 import { toastError, toastInfo, toastNotify } from './lib/toast'
 import { navigateTo } from './lib/nav'
+import { notificationPath } from './lib/types'
 import {
   disablePush,
   enableNotifications,
@@ -111,6 +112,17 @@ import type {
   PollUpdatedPayload,
   PollDeletedPayload,
   VoicePollStatePayload,
+  Project,
+  ProjectCreatedPayload,
+  ProjectUpdatedPayload,
+  Task,
+  TaskCommentPayload,
+  TaskCreatedPayload,
+  TaskDeletedPayload,
+  TaskDetail,
+  TaskLabel,
+  TaskUpdateInput,
+  TaskUpdatedPayload,
   SharpyConversation,
   SharpyMessage,
   SharpySource,
@@ -306,6 +318,16 @@ type State = {
   // local-day key (YYYY-MM-DD) the agenda is focused on
   calendarSelectedDate: string | null
 
+  // --- tasks (Phase 7) ---
+  projects: Project[]
+  taskLabels: TaskLabel[]
+  // per-project task lists, sorted by sort_order (board/list views read these)
+  tasksByProject: Record<string, Task[]>
+  myTasks: Task[]
+  // detail cache for open peeks; WS events patch entries that are present
+  taskDetails: Record<string, TaskDetail>
+  activeProjectId: string | null
+
   // ws
   ws: WsClient | null
 
@@ -497,6 +519,16 @@ type State = {
   setCalendarSelectedDate: (dayKey: string | null) => void
   joinScheduledMeeting: (joinPath: string | null) => void
 
+  // tasks actions
+  loadProjects: () => Promise<void>
+  loadTaskLabels: () => Promise<void>
+  loadProjectTasks: (projectId: string) => Promise<void>
+  loadMyTasks: () => Promise<void>
+  loadTaskDetail: (taskId: string) => Promise<TaskDetail>
+  setActiveProject: (projectId: string | null) => void
+  // optimistic field update: applies locally, PATCHes, refetches on failure
+  patchTask: (taskId: string, patch: TaskUpdateInput) => Promise<void>
+
   // notifications + preferences
   loadInboxAndPrefs: () => Promise<void>
   loadMoreNotifications: () => Promise<void>
@@ -516,6 +548,19 @@ type State = {
 
   applyWsEvent: (env: WsEnvelope) => void
   totalUnread: () => number
+}
+
+// sort_order is a fractional-index string; id tie-break keeps order stable.
+function sortTasks(list: Task[]): Task[] {
+  return [...list].sort((a, b) =>
+    a.sort_order < b.sort_order
+      ? -1
+      : a.sort_order > b.sort_order
+        ? 1
+        : a.id < b.id
+          ? -1
+          : 1,
+  )
 }
 
 function emptyChannelMessages(): ChannelMessages {
@@ -621,6 +666,12 @@ export const useStore = create<State>((set, get) => ({
   voiceRooms: {},
   activeMeetings: {},
   voice: emptyVoiceState(),
+  projects: [],
+  taskLabels: [],
+  tasksByProject: {},
+  myTasks: [],
+  taskDetails: {},
+  activeProjectId: null,
   calendarConnections: [],
   calendarItems: [],
   calendarRange: null,
@@ -667,6 +718,10 @@ export const useStore = create<State>((set, get) => ({
         for (const channelId of Object.keys(get().channelVoiceTriggers)) {
           void get().loadChannelVoiceTriggers(channelId).catch(() => {})
         }
+        void get().loadProjects()
+        void get().loadMyTasks()
+        const activeProject = get().activeProjectId
+        if (activeProject) void get().loadProjectTasks(activeProject)
       },
     })
     set({ ws })
@@ -680,6 +735,9 @@ export const useStore = create<State>((set, get) => ({
     await get().refetchDirectory()
     get().loadMentions()
     void get().initSharpy()
+    void get().loadProjects()
+    void get().loadTaskLabels()
+    void get().loadMyTasks()
     await get().loadInboxAndPrefs()
     set({ ready: true })
 
@@ -2113,6 +2171,79 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
+  // --- tasks (Phase 7) ---
+
+  async loadProjects() {
+    try {
+      const res = await api.tasks.projects()
+      set({ projects: res.projects })
+    } catch (e) {
+      if (e instanceof Error) toastError(e.message)
+    }
+  },
+
+  async loadTaskLabels() {
+    try {
+      const res = await api.tasks.labels()
+      set({ taskLabels: res.labels })
+    } catch {
+      /* non-fatal */
+    }
+  },
+
+  async loadProjectTasks(projectId) {
+    try {
+      const res = await api.tasks.list(projectId)
+      set((s) => ({
+        tasksByProject: { ...s.tasksByProject, [projectId]: res.tasks },
+      }))
+    } catch (e) {
+      if (e instanceof Error) toastError(e.message)
+    }
+  },
+
+  async loadMyTasks() {
+    try {
+      const res = await api.tasks.mine()
+      set({ myTasks: res.tasks })
+    } catch {
+      /* non-fatal */
+    }
+  },
+
+  async loadTaskDetail(taskId) {
+    const detail = await api.tasks.get(taskId)
+    set((s) => ({ taskDetails: { ...s.taskDetails, [taskId]: detail } }))
+    return detail
+  },
+
+  setActiveProject(projectId) {
+    set({ activeProjectId: projectId })
+  },
+
+  async patchTask(taskId, patch) {
+    // Optimistic: merge scalar fields into every cached copy, then PATCH. The
+    // authoritative task comes back on the task.updated broadcast.
+    set((s) => {
+      const apply = (t: Task): Task => (t.id === taskId ? { ...t, ...patch } as Task : t)
+      const tasksByProject = Object.fromEntries(
+        Object.entries(s.tasksByProject).map(([pid, list]) => [
+          pid,
+          sortTasks(list.map(apply)),
+        ]),
+      )
+      return { tasksByProject, myTasks: s.myTasks.map(apply) }
+    })
+    try {
+      await api.tasks.update(taskId, patch)
+    } catch (e) {
+      if (e instanceof Error) toastError(e.message)
+      const pid = get().activeProjectId
+      if (pid) void get().loadProjectTasks(pid)
+      void get().loadMyTasks()
+    }
+  },
+
   async loadCalendar(from, to) {
     try {
       const res = await api.calendar.events(from, to)
@@ -3005,20 +3136,108 @@ export const useStore = create<State>((set, get) => ({
           const title =
             notification.kind === 'dm'
               ? notification.actor.display_name
-              : `${notification.actor.display_name} in #${notification.channel_name}`
-          const cid = notification.channel_id
+              : notification.kind === 'task_assigned'
+                ? `${notification.actor.display_name} assigned you ${notification.task_identifier ?? 'a task'}`
+                : notification.kind === 'task_comment'
+                  ? `${notification.actor.display_name} commented on ${notification.task_identifier ?? 'a task'}`
+                  : `${notification.actor.display_name} in #${notification.channel_name}`
+          const path = notificationPath(notification)
           const preview = gifPreviewText(notification.preview)
           toastNotify(preview || 'sent you a message', {
             title,
             initial: notification.actor.display_name.trim().charAt(0).toUpperCase() || '?',
-            onClick: cid ? () => navigateToChannel(cid) : undefined,
+            onClick: () => navigateTo(path),
           })
           playNotifySound()
           void showOsNotification(title, preview, {
-            deepLink: `/c/${cid}`,
-            tag: `sharp-${cid}`,
+            deepLink: path,
+            tag: notification.task_id
+              ? `sharp-task-${notification.task_id}`
+              : `sharp-${notification.channel_id}`,
           })
         }
+        break
+      }
+      case 'project.created':
+      case 'project.updated': {
+        const { project } = env.payload as ProjectCreatedPayload | ProjectUpdatedPayload
+        set((s) => ({
+          projects: s.projects.some((p) => p.id === project.id)
+            ? s.projects.map((p) => (p.id === project.id ? project : p))
+            : [...s.projects, project],
+        }))
+        break
+      }
+      case 'task.created':
+      case 'task.updated': {
+        const { task } = env.payload as TaskCreatedPayload | TaskUpdatedPayload
+        set((s) => {
+          const list = s.tasksByProject[task.project_id]
+          const tasksByProject = list
+            ? {
+                ...s.tasksByProject,
+                [task.project_id]: sortTasks([
+                  ...list.filter((t) => t.id !== task.id),
+                  task,
+                ]),
+              }
+            : s.tasksByProject
+          const stateOf = s.projects
+            .find((p) => p.id === task.project_id)
+            ?.states.find((st) => st.id === task.state_id)
+          const open =
+            !stateOf || (stateOf.type !== 'completed' && stateOf.type !== 'canceled')
+          let myTasks = s.myTasks.filter((t) => t.id !== task.id)
+          if (s.me && task.assignee_id === s.me.id && open) myTasks = [task, ...myTasks]
+          const detail = s.taskDetails[task.id]
+          const taskDetails = detail
+            ? { ...s.taskDetails, [task.id]: { ...detail, ...task } }
+            : s.taskDetails
+          return { tasksByProject, myTasks, taskDetails }
+        })
+        break
+      }
+      case 'task.deleted': {
+        const { task_id, project_id } = env.payload as TaskDeletedPayload
+        set((s) => {
+          const list = s.tasksByProject[project_id]
+          const taskDetails = { ...s.taskDetails }
+          delete taskDetails[task_id]
+          return {
+            tasksByProject: list
+              ? {
+                  ...s.tasksByProject,
+                  [project_id]: list.filter((t) => t.id !== task_id),
+                }
+              : s.tasksByProject,
+            myTasks: s.myTasks.filter((t) => t.id !== task_id),
+            taskDetails,
+          }
+        })
+        break
+      }
+      case 'task.comment.created':
+      case 'task.comment.updated':
+      case 'task.comment.deleted': {
+        const { comment } = env.payload as TaskCommentPayload
+        set((s) => {
+          const detail = s.taskDetails[comment.task_id]
+          if (!detail) return {}
+          const comments =
+            env.type === 'task.comment.created'
+              ? [...detail.comments.filter((c) => c.id !== comment.id), comment]
+              : detail.comments.map((c) => (c.id === comment.id ? comment : c))
+          return {
+            taskDetails: {
+              ...s.taskDetails,
+              [comment.task_id]: { ...detail, comments },
+            },
+          }
+        })
+        break
+      }
+      case 'task.labels.changed': {
+        void get().loadTaskLabels()
         break
       }
       case 'poll.created':

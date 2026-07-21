@@ -6,7 +6,7 @@ import { Avatar } from './Avatar'
 import { UserSettingsModal } from './UserSettingsModal'
 import type { Channel } from '../lib/types'
 
-type Mode = 'chat' | 'docs' | 'canvas' | 'board' | 'meetings' | 'calendar'
+type Mode = 'chat' | 'docs' | 'canvas' | 'board' | 'tasks' | 'meetings' | 'calendar'
 
 export function CompactSidebar({ mode }: { mode: Mode }) {
   const channels = useStore((s) => s.channels)
@@ -55,7 +55,7 @@ export function CompactSidebar({ mode }: { mode: Mode }) {
       </div>
 
       <nav
-        aria-label={`${mode === 'chat' ? 'Chat' : mode === 'docs' ? 'Docs' : mode === 'canvas' ? 'Canvas' : mode === 'board' ? 'Board' : mode === 'calendar' ? 'Calendar' : 'Meetings'} sidebar`}
+        aria-label={`${mode === 'chat' ? 'Chat' : mode === 'docs' ? 'Docs' : mode === 'canvas' ? 'Canvas' : mode === 'board' ? 'Board' : mode === 'tasks' ? 'Tasks' : mode === 'calendar' ? 'Calendar' : 'Meetings'} sidebar`}
         className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto px-2 py-3"
       >
         <button
@@ -77,11 +77,13 @@ export function CompactSidebar({ mode }: { mode: Mode }) {
                   ? '/canvas'
                   : mode === 'board'
                     ? '/board'
-                    : mode === 'calendar'
-                      ? '/calendar'
-                      : '/meetings'
+                    : mode === 'tasks'
+                      ? '/tasks'
+                      : mode === 'calendar'
+                        ? '/calendar'
+                        : '/meetings'
             }
-            label={`${mode === 'docs' ? 'Docs' : mode === 'canvas' ? 'Canvas' : mode === 'board' ? 'Board' : mode === 'calendar' ? 'Calendar' : 'Meetings'} home`}
+            label={`${mode === 'docs' ? 'Docs' : mode === 'canvas' ? 'Canvas' : mode === 'board' ? 'Board' : mode === 'tasks' ? 'Tasks' : mode === 'calendar' ? 'Calendar' : 'Meetings'} home`}
             active={
               location.pathname ===
               (mode === 'docs'
@@ -90,9 +92,11 @@ export function CompactSidebar({ mode }: { mode: Mode }) {
                   ? '/canvas'
                   : mode === 'board'
                     ? '/board'
-                    : mode === 'calendar'
-                      ? '/calendar'
-                      : '/meetings')
+                    : mode === 'tasks'
+                      ? '/tasks'
+                      : mode === 'calendar'
+                        ? '/calendar'
+                        : '/meetings')
             }
           >
             <HomeIcon />
@@ -101,7 +105,7 @@ export function CompactSidebar({ mode }: { mode: Mode }) {
 
         <div className="my-2 h-px w-8 shrink-0 bg-[var(--color-border)]" />
 
-        {mode !== 'meetings' && mode !== 'calendar' && myChannels.map((channel) => (
+        {mode !== 'meetings' && mode !== 'calendar' && mode !== 'tasks' && myChannels.map((channel) => (
           <CompactChannelLink
             key={channel.id}
             channel={channel}
@@ -160,9 +164,11 @@ function CompactChannelLink({
           ? `/canvas/c/${channel.id}`
           : mode === 'board'
             ? `/board/c/${channel.id}`
-            : mode === 'calendar'
-              ? '/calendar'
-              : `/meetings?channel=${channel.id}`
+            : mode === 'tasks'
+              ? '/tasks'
+              : mode === 'calendar'
+                ? '/calendar'
+                : `/meetings?channel=${channel.id}`
   const unread = channel.unread_count > 0
 
   return (
@@ -278,6 +284,14 @@ function ModeIcon({ mode }: { mode: Mode }) {
         <rect x="4" y="4" width="4" height="16" rx="1" />
         <rect x="10" y="4" width="4" height="11" rx="1" />
         <rect x="16" y="4" width="4" height="7" rx="1" />
+      </svg>
+    )
+  }
+  if (mode === 'tasks') {
+    return (
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <circle cx="12" cy="12" r="9" />
+        <path d="m8.5 12 2.5 2.5 5-5.5" />
       </svg>
     )
   }

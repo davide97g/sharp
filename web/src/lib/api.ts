@@ -49,6 +49,13 @@ import type {
   CalendarEventsResponse,
   ScheduledMeeting,
   Poll,
+  Project,
+  Task,
+  TaskComment,
+  TaskCreateInput,
+  TaskDetail,
+  TaskLabel,
+  TaskUpdateInput,
   SharpyConversation,
   SharpyConversationDetail,
   SharpyMessage,
@@ -211,6 +218,57 @@ function uploadAttachment(
 }
 
 export const api = {
+  tasks: {
+    projects: () => request<{ projects: Project[] }>('/projects'),
+    createProject: (input: { key: string; name: string; icon?: string; channel_id?: string }) =>
+      request<Project>('/projects', { method: 'POST', body: input }),
+    updateProject: (
+      id: string,
+      input: { name?: string; icon?: string; channel_id?: string | null; archived?: boolean },
+    ) => request<Project>(`/projects/${id}`, { method: 'PATCH', body: input }),
+    list: (
+      projectId: string,
+      filters: {
+        state_type?: string
+        assignee?: string
+        label?: string
+        priority?: number
+        q?: string
+      } = {},
+    ) => {
+      const params = new URLSearchParams()
+      for (const [k, v] of Object.entries(filters)) {
+        if (v !== undefined && v !== '') params.set(k, String(v))
+      }
+      const query = params.toString()
+      return request<{ tasks: Task[] }>(
+        `/projects/${projectId}/tasks${query ? `?${query}` : ''}`,
+      )
+    },
+    create: (projectId: string, input: TaskCreateInput) =>
+      request<Task>(`/projects/${projectId}/tasks`, { method: 'POST', body: input }),
+    get: (id: string) => request<TaskDetail>(`/tasks/${id}`),
+    byKey: (identifier: string) =>
+      request<Task>(`/tasks/by-key/${encodeURIComponent(identifier)}`),
+    update: (id: string, patch: TaskUpdateInput) =>
+      request<Task>(`/tasks/${id}`, { method: 'PATCH', body: patch }),
+    delete: (id: string) => request<void>(`/tasks/${id}`, { method: 'DELETE' }),
+    mine: () => request<{ tasks: Task[] }>('/me/tasks'),
+    search: (q: string, limit = 10) =>
+      request<{ tasks: Task[] }>(`/tasks/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+    comment: (taskId: string, body: string) =>
+      request<TaskComment>(`/tasks/${taskId}/comments`, { method: 'POST', body: { body } }),
+    updateComment: (id: string, body: string) =>
+      request<TaskComment>(`/task-comments/${id}`, { method: 'PATCH', body: { body } }),
+    deleteComment: (id: string) =>
+      request<void>(`/task-comments/${id}`, { method: 'DELETE' }),
+    labels: () => request<{ labels: TaskLabel[] }>('/task-labels'),
+    createLabel: (input: { name: string; color: string }) =>
+      request<TaskLabel>('/task-labels', { method: 'POST', body: input }),
+    updateLabel: (id: string, input: { name: string; color: string }) =>
+      request<TaskLabel>(`/task-labels/${id}`, { method: 'PATCH', body: input }),
+    deleteLabel: (id: string) => request<void>(`/task-labels/${id}`, { method: 'DELETE' }),
+  },
   polls: {
     create: (
       channelId: string,

@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar'
 import { DocsSidebar } from './docs/DocsSidebar'
 import { CanvasSidebar } from './canvas/CanvasSidebar'
 import { BoardSidebar } from './board/BoardSidebar'
+import { TasksSidebar, TasksGlyph } from './tasks/TasksSidebar'
 import { MeetingsSidebar } from './meetings/MeetingsSidebar'
 import { CalendarSidebar } from './calendar/CalendarSidebar'
 import { CompactSidebar } from './CompactSidebar'
@@ -50,22 +51,27 @@ export function AppShell() {
     location.pathname.startsWith('/canvas') || location.pathname.startsWith('/x/')
   const boardMode =
     location.pathname.startsWith('/board') || location.pathname.startsWith('/b/')
+  const tasksMode =
+    location.pathname.startsWith('/tasks') || location.pathname.startsWith('/t/')
   const meetingsMode = location.pathname.startsWith('/meetings')
   const calendarMode = location.pathname.startsWith('/calendar')
   const helpMode = location.pathname.startsWith('/help')
-  const mode: 'chat' | 'docs' | 'canvas' | 'board' | 'meetings' | 'calendar' | 'help' = helpMode
-    ? 'help'
-    : calendarMode
-      ? 'calendar'
-      : meetingsMode
-        ? 'meetings'
-        : boardMode
-          ? 'board'
-          : canvasMode
-            ? 'canvas'
-            : docsMode
-              ? 'docs'
-              : 'chat'
+  const mode: 'chat' | 'docs' | 'canvas' | 'board' | 'tasks' | 'meetings' | 'calendar' | 'help' =
+    helpMode
+      ? 'help'
+      : calendarMode
+        ? 'calendar'
+        : meetingsMode
+          ? 'meetings'
+          : tasksMode
+            ? 'tasks'
+            : boardMode
+              ? 'board'
+              : canvasMode
+                ? 'canvas'
+                : docsMode
+                  ? 'docs'
+                  : 'chat'
 
   const setInboxOpen = useStore((s) => s.setInboxOpen)
 
@@ -147,6 +153,8 @@ export function AppShell() {
                   <CalendarSidebar />
                 ) : meetingsMode ? (
                   <MeetingsSidebar />
+                ) : tasksMode ? (
+                  <TasksSidebar />
                 ) : boardMode ? (
                   <BoardSidebar />
                 ) : canvasMode ? (
@@ -188,7 +196,7 @@ function ModeRail({
   sidebarOpen,
   onToggleSidebar,
 }: {
-  mode: 'chat' | 'docs' | 'canvas' | 'board' | 'meetings' | 'calendar' | 'help'
+  mode: 'chat' | 'docs' | 'canvas' | 'board' | 'tasks' | 'meetings' | 'calendar' | 'help'
   sidebarOpen: boolean
   onToggleSidebar: () => void
 }) {
@@ -303,6 +311,12 @@ function ModeRail({
             <rect x="16" y="4" width="4" height="7" rx="1" />
           </svg>
         }
+      />
+      <RailButton
+        active={mode === 'tasks'}
+        onClick={() => navigate('/tasks')}
+        title="Tasks"
+        label={<TasksGlyph size={18} />}
       />
       <RailButton
         active={mode === 'meetings'}

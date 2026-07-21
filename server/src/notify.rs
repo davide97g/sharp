@@ -25,10 +25,13 @@ use uuid::Uuid;
 const NOTIFICATION_SELECT: &str = "
     SELECT n.id, n.kind, n.actor_id, a.display_name AS actor_name, a.avatar_url AS actor_avatar,
         n.channel_id, c.kind AS channel_kind, c.name AS channel_name,
-        n.message_id, n.preview, n.created_at, n.read_at
+        n.message_id, n.preview, n.created_at, n.read_at,
+        n.task_id, (tp.key || '-' || t.number) AS task_identifier
     FROM notifications n
     JOIN users a ON a.id = n.actor_id
-    JOIN channels c ON c.id = n.channel_id
+    LEFT JOIN channels c ON c.id = n.channel_id
+    LEFT JOIN tasks t ON t.id = n.task_id
+    LEFT JOIN projects tp ON tp.id = t.project_id
 ";
 
 pub fn map_notification_row(row: &PgRow) -> AppResult<Notification> {
@@ -44,10 +47,25 @@ pub fn map_notification_row(row: &PgRow) -> AppResult<Notification> {
         channel_kind: row.try_get("channel_kind")?,
         channel_name: row.try_get("channel_name")?,
         message_id: row.try_get("message_id")?,
+        task_id: row.try_get("task_id")?,
+        task_identifier: row.try_get("task_identifier")?,
         preview: row.try_get("preview")?,
         created_at: row.try_get("created_at")?,
         read_at: row.try_get("read_at")?,
     })
+}
+
+/// Deep-link path for a notification: task page for task kinds, channel otherwise.
+pub fn notification_path(notif: &Notification) -> String {
+    if let Some(identifier) = &notif.task_identifier {
+        if let Some((key, number)) = identifier.rsplit_once('-') {
+            return format!("/t/{}/{}", key.to_lowercase(), number);
+        }
+    }
+    match notif.channel_id {
+        Some(channel_id) => format!("/c/{channel_id}"),
+        None => "/".to_string(),
+    }
 }
 
 pub async fn load_notification(pool: &PgPool, id: i64) -> AppResult<Notification> {
@@ -568,7 +586,7 @@ async fn dispatch_inner(
                         uid,
                         &title,
                         &body,
-                        notif.channel_id,
+                        notif.channel_id.unwrap_or_else(Uuid::nil),
                         &notif.kind,
                     )
                     .await;
@@ -660,7 +678,7 @@ async fn dispatch_poll_ended_inner(
                         uid,
                         &title,
                         &body,
-                        notification.channel_id,
+                        notification.channel_id.unwrap_or_else(Uuid::nil),
                         &notification.kind,
                     )
                     .await;
@@ -668,6 +686,92 @@ async fn dispatch_poll_ended_inner(
             };
             tokio::join!(web, expo);
         }
+    }
+    Ok(())
+}
+
+/// Best-effort task-assignment notification (skips self-assign upstream).
+pub async fn dispatch_task_assigned(
+    state: &SharedState,
+    task: &crate::models::Task,
+    actor_id: Uuid,
+) {
+    let Some(assignee) = task.assignee_id else { return };
+    if assignee == actor_id {
+        return;
+    }
+    let preview = format!("🎯 {} {}", task.identifier, task.title);
+    if let Err(error) =
+        dispatch_task_event(state, assignee, actor_id, task.id, "task_assigned", &preview).await
+    {
+        tracing::warn!("task-assigned notification dispatch failed: {}", error);
+    }
+}
+
+/// Best-effort task-comment notification to the task's creator + assignee.
+pub async fn dispatch_task_comment(
+    state: &SharedState,
+    task: &crate::models::Task,
+    actor_id: Uuid,
+    body: &str,
+) {
+    let mut recipients: HashSet<Uuid> = HashSet::from([task.creator_id]);
+    if let Some(assignee) = task.assignee_id {
+        recipients.insert(assignee);
+    }
+    recipients.remove(&actor_id);
+    let preview = truncate_chars(&body.replace('\n', " "), 140);
+    for uid in recipients {
+        if let Err(error) =
+            dispatch_task_event(state, uid, actor_id, task.id, "task_comment", &preview).await
+        {
+            tracing::warn!("task-comment notification dispatch failed: {}", error);
+        }
+    }
+}
+
+/// Insert + fan out one task notification: inbox row (channel-less, task-bound),
+/// `notification.created`, and push under the standard DND/visibility rules.
+async fn dispatch_task_event(
+    state: &SharedState,
+    recipient: Uuid,
+    actor_id: Uuid,
+    task_id: Uuid,
+    kind: &str,
+    preview: &str,
+) -> AppResult<()> {
+    let row = sqlx::query(
+        "INSERT INTO notifications (user_id, kind, actor_id, task_id, preview)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id",
+    )
+    .bind(recipient)
+    .bind(kind)
+    .bind(actor_id)
+    .bind(task_id)
+    .bind(preview)
+    .fetch_one(&state.pool)
+    .await?;
+    let notif = load_notification(&state.pool, row.try_get("id")?).await?;
+
+    let ev = envelope("notification.created", json!({ "notification": &notif }));
+    state.hub.broadcast(ev, vec![recipient]).await;
+
+    if !is_dnd(&state.pool, recipient).await {
+        let web_allowed = !state.hub.has_visible_session(recipient).await;
+        let expo_allowed = !state.hub.is_online(recipient);
+        let (title, body) = push::title_and_body(&notif);
+        let web = async {
+            if web_allowed {
+                push::send_to_user(state, recipient, &notif).await;
+            }
+        };
+        let expo = async {
+            if expo_allowed {
+                expo_push::send_to_user(state, recipient, &title, &body, Uuid::nil(), &notif.kind)
+                    .await;
+            }
+        };
+        tokio::join!(web, expo);
     }
     Ok(())
 }
@@ -685,26 +789,35 @@ mod push {
     };
 
     pub fn title_and_body(notif: &Notification) -> (String, String) {
+        let channel = notif.channel_name.as_deref().unwrap_or("channel");
+        let task = notif.task_identifier.as_deref().unwrap_or("a task");
         // Title/body shaped for the service worker.
         let title = match notif.kind.as_str() {
             "dm" => notif.actor.display_name.clone(),
-            "poll_ended" => format!("Poll ended in #{}", notif.channel_name),
-            _ => format!("{} in #{}", notif.actor.display_name, notif.channel_name),
+            "poll_ended" => format!("Poll ended in #{channel}"),
+            "task_assigned" => format!("{} assigned you {task}", notif.actor.display_name),
+            "task_comment" => format!("{} commented on {task}", notif.actor.display_name),
+            _ => format!("{} in #{channel}", notif.actor.display_name),
         };
         (title, notif.preview.clone())
     }
 
     pub async fn send_to_user(state: &SharedState, user_id: Uuid, notif: &Notification) {
         let (title, body) = title_and_body(notif);
+        let tag = match (&notif.task_id, &notif.channel_id) {
+            (Some(task_id), _) => format!("sharp-task-{task_id}"),
+            (None, Some(channel_id)) => format!("sharp-{channel_id}"),
+            (None, None) => "sharp".to_string(),
+        };
         let payload = json!({
             "title": title,
             "body": body,
-            "channel_id": notif.channel_id.to_string(),
+            "channel_id": notif.channel_id.map(|id| id.to_string()),
             "message_id": notif.message_id.map(|id| id.to_string()),
             "notification_id": notif.id.to_string(),
             "kind": notif.kind,
-            "tag": format!("sharp-{}", notif.channel_id),
-            "path": format!("/c/{}", notif.channel_id),
+            "tag": tag,
+            "path": crate::notify::notification_path(notif),
             "timestamp": notif.created_at.timestamp_millis(),
         })
         .to_string();

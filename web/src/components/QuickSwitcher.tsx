@@ -10,6 +10,7 @@ type Item =
   | { kind: 'channel'; id: string; label: string; sub: string; icon: string }
   | { kind: 'user'; id: string; label: string; sub: string; icon: string }
   | { kind: 'doc'; id: string; label: string; sub: string; icon: string; docKind: DocKind }
+  | { kind: 'task'; id: string; label: string; sub: string; icon: string; path: string }
 
 export function QuickSwitcher() {
   const open = useStore((s) => s.quickSwitcherOpen)
@@ -82,16 +83,64 @@ export function QuickSwitcher() {
     return [...chanItems, ...userItems, ...docItems]
   }, [channels, users, me, online, docsByChannel])
 
+  const projects = useStore((s) => s.projects)
+  const tasksByProject = useStore((s) => s.tasksByProject)
+  const myTasks = useStore((s) => s.myTasks)
+
+  // Loaded tasks are matchable by identifier or title ("SHARP-12", "login flake").
+  const taskItems = useMemo<Item[]>(() => {
+    const seen = new Set<string>()
+    const out: Item[] = []
+    for (const t of [...myTasks, ...Object.values(tasksByProject).flat()]) {
+      if (seen.has(t.id)) continue
+      seen.add(t.id)
+      const at = t.identifier.lastIndexOf('-')
+      out.push({
+        kind: 'task',
+        id: t.id,
+        label: `${t.identifier} ${t.title}`,
+        sub: 'Task',
+        icon: '🎯',
+        path: `/t/${t.identifier.slice(0, at).toLowerCase()}/${t.number}`,
+      })
+    }
+    return out
+  }, [myTasks, tasksByProject])
+
   const filtered = useMemo(() => {
     const query = q.trim()
+    const all = [...items, ...taskItems]
     if (!query) return items.slice(0, 20)
-    return items
-      .map((it) => ({ it, score: fuzzyScore(query, it.label) }))
-      .filter((x) => x.score >= 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 20)
-      .map((x) => x.it)
-  }, [items, q])
+    // Exact identifier prefix (e.g. "SHARP-12") jumps straight to tasks even if
+    // that task list isn't loaded yet: synthesize a jump item from the keys.
+    const identifierMatch = /^([A-Za-z][A-Za-z0-9]{1,5})-(\d+)$/.exec(query)
+    const synthesized: Item[] = []
+    if (identifierMatch) {
+      const key = identifierMatch[1].toUpperCase()
+      if (projects.some((p) => p.key === key)) {
+        const identifier = `${key}-${identifierMatch[2]}`
+        if (!taskItems.some((t) => t.label.startsWith(`${identifier} `))) {
+          synthesized.push({
+            kind: 'task',
+            id: identifier,
+            label: identifier,
+            sub: 'Open task',
+            icon: '🎯',
+            path: `/t/${key.toLowerCase()}/${identifierMatch[2]}`,
+          })
+        }
+      }
+    }
+    return [
+      ...synthesized,
+      ...all
+        .map((it) => ({ it, score: fuzzyScore(query, it.label) }))
+        .filter((x) => x.score >= 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 20 - synthesized.length)
+        .map((x) => x.it),
+    ]
+  }, [items, taskItems, projects, q])
 
   useEffect(() => {
     setSel(0)
@@ -106,6 +155,8 @@ export function QuickSwitcher() {
     setOpen(false)
     if (it.kind === 'channel') {
       navigate(`/c/${it.id}`)
+    } else if (it.kind === 'task') {
+      navigate(it.path)
     } else if (it.kind === 'doc') {
       navigate(`${it.docKind === 'canvas' ? '/x' : '/d'}/${it.id}`)
     } else {

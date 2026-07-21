@@ -24,6 +24,7 @@ use uuid::Uuid;
 const MAX_MESSAGES: usize = 12;
 const DOC_CANDIDATES: usize = 30;
 const MAX_DOCS: usize = 8;
+const MAX_TASKS: usize = 6;
 const HISTORY_LIMIT: i64 = 20;
 /// Cap message content injected into the prompt so a few long messages can't
 /// blow the context budget.
@@ -57,6 +58,12 @@ pub enum SharpySource {
         doc_id: Uuid,
         title: String,
         doc_kind: String,
+        snippet: String,
+    },
+    Task {
+        task_id: Uuid,
+        identifier: String,
+        title: String,
         snippet: String,
     },
 }
@@ -280,6 +287,37 @@ async fn retrieve(state: &SharedState, user_id: Uuid, query_vec: &Vector) -> App
             author,
             snippet: snippet_of(&content),
             created_at,
+        });
+    }
+
+    // Tasks: workspace-visible, so any registered caller may see every hit.
+    let task_rows = sqlx::query(
+        "SELECT t.id, (p.key || '-' || t.number) AS identifier, t.title, e.content
+         FROM task_embeddings e
+         JOIN tasks t ON t.id = e.task_id AND t.deleted_at IS NULL
+         JOIN projects p ON p.id = t.project_id
+         ORDER BY e.embedding <=> $1
+         LIMIT $2",
+    )
+    .bind(query_vec)
+    .bind(MAX_TASKS as i64)
+    .fetch_all(&state.pool)
+    .await?;
+
+    for row in &task_rows {
+        let task_id: Uuid = row.try_get("id")?;
+        let identifier: String = row.try_get("identifier")?;
+        let title: String = row.try_get("title")?;
+        let content: String = row.try_get("content")?;
+
+        let n = sources.len() + 1;
+        let context_content: String = content.chars().take(CONTEXT_CONTENT_CAP).collect();
+        lines.push(format!("[{n}] task {identifier}: {context_content}"));
+        sources.push(SharpySource::Task {
+            task_id,
+            identifier,
+            title,
+            snippet: snippet_of(&content),
         });
     }
 
@@ -688,7 +726,61 @@ pub async fn embed_tick(state: &SharedState) -> anyhow::Result<()> {
         }
     }
 
-    // 2) Doc backlog (hash-driven).
+    // 2) Task backlog (hash-driven; content = identifier + title + state +
+    //    assignee + description + comments, so property changes re-embed).
+    let task_rows = sqlx::query(
+        "SELECT id, content, md5(content) AS hash FROM (
+           SELECT t.id,
+                  (p.key || '-' || t.number || ' ' || t.title
+                   || E'\nstate: ' || s.name
+                   || coalesce(E'\nassignee: ' || u.display_name, '')
+                   || CASE WHEN t.description <> '' THEN E'\n' || t.description ELSE '' END
+                   || coalesce(E'\ncomments:\n' || cm.agg, '')) AS content,
+                  e.content_hash
+           FROM tasks t
+           JOIN projects p ON p.id = t.project_id
+           JOIN task_states s ON s.id = t.state_id
+           LEFT JOIN users u ON u.id = t.assignee_id
+           LEFT JOIN LATERAL (
+             SELECT string_agg(c.body, E'\n' ORDER BY c.id) AS agg
+             FROM task_comments c WHERE c.task_id = t.id AND c.deleted_at IS NULL
+           ) cm ON true
+           LEFT JOIN task_embeddings e ON e.task_id = t.id
+           WHERE t.deleted_at IS NULL
+         ) x
+         WHERE x.content_hash IS NULL OR x.content_hash <> md5(x.content)
+         LIMIT 16",
+    )
+    .fetch_all(&state.pool)
+    .await?;
+
+    if !task_rows.is_empty() {
+        let mut ids: Vec<Uuid> = Vec::with_capacity(task_rows.len());
+        let mut contents: Vec<String> = Vec::with_capacity(task_rows.len());
+        let mut inputs: Vec<String> = Vec::with_capacity(task_rows.len());
+        for row in &task_rows {
+            ids.push(row.try_get("id")?);
+            let content: String = row.try_get("content")?;
+            inputs.push(content.chars().take(6000).collect());
+            contents.push(content);
+        }
+        let vectors = ai::embed(&cfg, &inputs).await?;
+        for ((task_id, content), embedding) in ids.into_iter().zip(contents).zip(vectors) {
+            sqlx::query(
+                "INSERT INTO task_embeddings (task_id, content, content_hash, embedding)
+                 VALUES ($1, $2, md5($2), $3)
+                 ON CONFLICT (task_id) DO UPDATE
+                 SET content = $2, content_hash = md5($2), embedding = $3, embedded_at = now()",
+            )
+            .bind(task_id)
+            .bind(&content)
+            .bind(Vector::from(embedding))
+            .execute(&state.pool)
+            .await?;
+        }
+    }
+
+    // 3) Doc backlog (hash-driven).
     let doc_rows = sqlx::query(
         "SELECT d.id, d.title, d.content_text, md5(d.content_text) AS hash
          FROM docs d

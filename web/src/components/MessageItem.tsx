@@ -8,6 +8,7 @@ import { AttachmentList } from './Attachments'
 import { fmtTime } from '../lib/util'
 import { gifPreviewText } from '../lib/gif'
 import { LockIcon } from './icons'
+import { CreateTaskFromMessage } from './tasks/CreateTaskFromMessage'
 
 export const REACTION_PALETTE = ['👍', '✅', '👀', '❤️', '😂', '🎉']
 
@@ -24,7 +25,7 @@ function scrollToMessage(id: string) {
 
 // Uniform thin line icons for the hover toolbar — monochrome so the row of
 // actions reads as one clean set (emoji rendered in mismatched colors/weights).
-function Icon({ name }: { name: 'react' | 'reply' | 'thread' | 'edit' | 'trash' }) {
+function Icon({ name }: { name: 'react' | 'reply' | 'thread' | 'edit' | 'trash' | 'task' }) {
   const p = {
     width: 15,
     height: 15,
@@ -49,6 +50,13 @@ function Icon({ name }: { name: 'react' | 'reply' | 'thread' | 'edit' | 'trash' 
         <svg {...p}>
           <polyline points="9 16 4 11 9 6" />
           <path d="M4 11h9a6 6 0 0 1 6 6v1" />
+        </svg>
+      )
+    case 'task':
+      return (
+        <svg {...p}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="m8.5 12 2.5 2.5 5-5.5" />
         </svg>
       )
     case 'thread':
@@ -187,6 +195,7 @@ export function MessageItem({
 
   const [editing, setEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [taskModal, setTaskModal] = useState(false)
   const displayContent = message.encrypted ? message.decryptedText : message.content
   const [draft, setDraft] = useState(typeof displayContent === 'string' ? displayContent : '')
   const [freshOnMount] = useState(() => Date.now() - Date.parse(message.created_at) < 8000)
@@ -198,6 +207,11 @@ export function MessageItem({
   const isMine = me?.id === message.user.id
   const isDeleted = !!message.deleted_at
   const canEdit = isMine && (!message.encrypted || typeof message.decryptedText === 'string')
+  // A task can be created from any readable message (encrypted needs plaintext).
+  const canTask = !message.encrypted || typeof message.decryptedText === 'string'
+  const taskModalEl = taskModal ? (
+    <CreateTaskFromMessage message={message} onClose={() => setTaskModal(false)} />
+  ) : null
 
   useEffect(() => {
     if (editing) {
@@ -432,6 +446,11 @@ export function MessageItem({
               <ToolbarBtn title="Reply (R)" onClick={() => setReplyTarget(message.channel_id, message)}>
                 <Icon name="reply" />
               </ToolbarBtn>
+              {canTask && (
+                <ToolbarBtn title="Create task" onClick={() => setTaskModal(true)}>
+                  <Icon name="task" />
+                </ToolbarBtn>
+              )}
               {canEdit && (
                 <ToolbarBtn title="Edit" onClick={() => setEditing(true)}>
                   <Icon name="edit" />
@@ -458,6 +477,7 @@ export function MessageItem({
             </div>
           )}
         </div>
+        {taskModalEl}
       </div>
     )
   }
@@ -654,6 +674,11 @@ export function MessageItem({
               <Icon name="thread" />
             </ToolbarBtn>
           )}
+          {canTask && (
+            <ToolbarBtn title="Create task" onClick={() => setTaskModal(true)}>
+              <Icon name="task" />
+            </ToolbarBtn>
+          )}
           {canEdit && (
             <ToolbarBtn title="Edit" onClick={() => setEditing(true)}>
               <Icon name="edit" />
@@ -679,6 +704,7 @@ export function MessageItem({
             ))}
         </div>
       )}
+      {taskModalEl}
     </div>
   )
 }

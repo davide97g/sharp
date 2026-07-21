@@ -131,18 +131,22 @@ pub struct VoiceTrigger {
     pub created_at: DateTime<Utc>,
 }
 
-/// An inbox notification (mention / dm / reply).
+/// An inbox notification. Message kinds (mention/dm/reply/poll_ended) carry a
+/// channel; task kinds (task_assigned/task_comment) carry a task instead.
 #[derive(Debug, Clone, Serialize)]
 pub struct Notification {
     #[serde(serialize_with = "ser_i64_string")]
     pub id: i64,
     pub kind: String,
     pub actor: MessageUser,
-    pub channel_id: Uuid,
-    pub channel_kind: String,
-    pub channel_name: String,
+    pub channel_id: Option<Uuid>,
+    pub channel_kind: Option<String>,
+    pub channel_name: Option<String>,
     #[serde(serialize_with = "ser_opt_i64_string")]
     pub message_id: Option<i64>,
+    pub task_id: Option<Uuid>,
+    /// `KEY-123`, resolved at load time; the client derives the deep link from it.
+    pub task_identifier: Option<String>,
     pub preview: String,
     pub created_at: DateTime<Utc>,
     pub read_at: Option<DateTime<Utc>>,
@@ -203,4 +207,112 @@ pub struct DocSearchResult {
     pub channel_name: String,
     /// Match-centered snippet with `<<`/`>>` markers; empty for canvases (no content_text).
     pub snippet: String,
+}
+
+/// A tracker project (Phase 7). Workspace-visible; `key` prefixes identifiers (SHARP-123).
+#[derive(Debug, Clone, Serialize)]
+pub struct Project {
+    pub id: Uuid,
+    pub key: String,
+    pub name: String,
+    pub icon: String,
+    pub channel_id: Option<Uuid>,
+    pub created_by: Uuid,
+    pub archived_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub states: Vec<TaskState>,
+    pub open_count: i64,
+}
+
+/// A workflow state. `type` drives automation (GitHub, completed_at); names are cosmetic.
+#[derive(Debug, Clone, Serialize)]
+pub struct TaskState {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub name: String,
+    pub color: String,
+    #[serde(rename = "type")]
+    pub state_type: String,
+    pub position: i32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TaskLabel {
+    pub id: Uuid,
+    pub name: String,
+    pub color: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TaskGithubLink {
+    pub id: Uuid,
+    pub kind: String,
+    pub repo: String,
+    #[serde(rename = "ref")]
+    pub git_ref: String,
+    pub url: String,
+    pub title: String,
+    pub state: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// The list/board task payload — complete enough that clients never refetch on drag.
+#[derive(Debug, Clone, Serialize)]
+pub struct Task {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub number: i64,
+    /// `{project.key}-{number}`, precomputed server-side for chips/search.
+    pub identifier: String,
+    pub title: String,
+    pub description: String,
+    pub state_id: Uuid,
+    pub priority: i16,
+    pub assignee_id: Option<Uuid>,
+    pub creator_id: Uuid,
+    pub parent_id: Option<Uuid>,
+    pub due_date: Option<chrono::NaiveDate>,
+    pub sort_order: String,
+    #[serde(serialize_with = "ser_opt_i64_string")]
+    pub source_message_id: Option<i64>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub label_ids: Vec<Uuid>,
+    pub github_links: Vec<TaskGithubLink>,
+    pub comment_count: i64,
+    pub sub_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TaskComment {
+    pub id: Uuid,
+    pub task_id: Uuid,
+    pub author: MessageUser,
+    pub body: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub deleted: bool,
+}
+
+/// One activity-feed entry; `actor` is None for automation (GitHub).
+#[derive(Debug, Clone, Serialize)]
+pub struct TaskActivity {
+    #[serde(serialize_with = "ser_i64_string")]
+    pub id: i64,
+    pub task_id: Uuid,
+    pub actor: Option<MessageUser>,
+    pub kind: String,
+    pub payload: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Full task detail: the task plus comments, activity, and sub-tasks.
+#[derive(Debug, Clone, Serialize)]
+pub struct TaskDetail {
+    #[serde(flatten)]
+    pub task: Task,
+    pub comments: Vec<TaskComment>,
+    pub activity: Vec<TaskActivity>,
+    pub sub_tasks: Vec<Task>,
 }

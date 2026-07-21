@@ -2778,6 +2778,7 @@ dependencies = [
  "dotenvy",
  "futures-util",
  "hkdf",
+ "hmac",
  "jsonwebtoken",
  "mime_guess",
  "object_store",

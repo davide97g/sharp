@@ -12,10 +12,34 @@ import { PollCard } from './PollCard'
 const MEET_TOKEN = /\[\[meet:([0-9a-f-]{36})\|([^|\]]*)\|([^\]]*)\]\]/g
 const POLL_TOKEN = /\[\[poll:([0-9a-f-]{36})(?:\|([^\]]*))?\]\]/g
 
-// Resource-chip matcher: [[doc|canvas|board:<uuid>|<title>]].
-const RESOURCE_TOKEN = /\[\[(doc|canvas|board):([0-9a-f-]{36})\|([^\]]*)\]\]/g
+// Resource-chip matcher: [[doc|canvas|board:<uuid>|<title>]] and the task chip
+// [[task:<identifier>|<title>]] (identifier = KEY-123, the stable public id).
+const RESOURCE_TOKEN =
+  /\[\[(doc|canvas|board):([0-9a-f-]{36})\|([^\]]*)\]\]|\[\[task:([A-Z0-9]{2,7}-\d+)\|([^\]]*)\]\]/g
+// Bare task identifiers (SHARP-123) in plain text auto-linkify when the key
+// matches a known project.
+const IDENTIFIER = /\b([A-Z][A-Z0-9]{1,5})-(\d+)\b/g
 // Fallback single-word mention (when the name isn't in the known directory).
 const WORD_MENTION = /^[\w][\w-]*/
+
+function TaskChip({ identifier, title }: { identifier: string; title?: string }) {
+  const at = identifier.lastIndexOf('-')
+  const path = `/t/${identifier.slice(0, at).toLowerCase()}/${identifier.slice(at + 1)}`
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation()
+        navigateTo(path)
+      }}
+      className="mx-0.5 inline-flex items-center gap-1 rounded border border-[var(--color-border)] bg-[var(--color-panel-2)] px-1.5 py-0.5 align-baseline text-[0.85em] font-medium text-[var(--color-accent-hover)] hover:border-[var(--color-accent)]"
+    >
+      <span aria-hidden>🎯</span>
+      <span className="font-mono">{identifier}</span>
+      {title && <span className="max-w-48 truncate font-normal">{title}</span>}
+    </button>
+  )
+}
 
 function ResourceChip({
   kind,
@@ -86,6 +110,44 @@ function queryNodes(text: string, keyPrefix: string, re: RegExp | null): ReactNo
   )
 }
 
+/** Auto-linkify bare identifiers (SHARP-123) whose key is a known project. */
+function linkifyIdentifiers(
+  text: string,
+  keyPrefix: string,
+  names: string[],
+  projectKeys: Set<string>,
+  re: RegExp | null,
+): ReactNode[] {
+  if (projectKeys.size === 0) return highlightMentions(text, keyPrefix, names, re)
+  const out: ReactNode[] = []
+  let last = 0
+  let m: RegExpExecArray | null
+  let i = 0
+  IDENTIFIER.lastIndex = 0
+  while ((m = IDENTIFIER.exec(text)) !== null) {
+    if (!projectKeys.has(m[1])) continue
+    if (m.index > last) {
+      out.push(
+        <Fragment key={`${keyPrefix}-i${i}`}>
+          {highlightMentions(text.slice(last, m.index), `${keyPrefix}-i${i}`, names, re)}
+        </Fragment>,
+      )
+    }
+    out.push(<TaskChip key={`${keyPrefix}-tk${i}`} identifier={m[0]} />)
+    last = m.index + m[0].length
+    i++
+  }
+  if (out.length === 0) return highlightMentions(text, keyPrefix, names, re)
+  if (last < text.length) {
+    out.push(
+      <Fragment key={`${keyPrefix}-i${i}`}>
+        {highlightMentions(text.slice(last), `${keyPrefix}-i${i}`, names, re)}
+      </Fragment>,
+    )
+  }
+  return out
+}
+
 function highlightMentions(
   text: string,
   keyPrefix: string,
@@ -151,11 +213,12 @@ function highlightMentions(
   return out
 }
 
-/** Split a text run on resource chips, highlighting mentions in the gaps. */
+/** Split a text run on resource/task chips, linkifying identifiers + mentions in the gaps. */
 function highlightString(
   text: string,
   keyPrefix: string,
   names: string[],
+  projectKeys: Set<string>,
   re: RegExp | null,
 ): ReactNode[] {
   const out: ReactNode[] = []
@@ -163,29 +226,35 @@ function highlightString(
   let m: RegExpExecArray | null
   RESOURCE_TOKEN.lastIndex = 0
   let i = 0
+  const gap = (slice: string, prefix: string) =>
+    linkifyIdentifiers(slice, prefix, names, projectKeys, re)
   while ((m = RESOURCE_TOKEN.exec(text)) !== null) {
     if (m.index > last) {
       out.push(
         <Fragment key={`${keyPrefix}-t${i}`}>
-          {highlightMentions(text.slice(last, m.index), `${keyPrefix}-t${i}`, names, re)}
+          {gap(text.slice(last, m.index), `${keyPrefix}-t${i}`)}
         </Fragment>,
       )
     }
-    out.push(
-      <ResourceChip
-        key={`${keyPrefix}-r${i}`}
-        kind={m[1] as 'doc' | 'canvas' | 'board'}
-        id={m[2]}
-        title={m[3]}
-      />,
-    )
+    if (m[4]) {
+      out.push(<TaskChip key={`${keyPrefix}-r${i}`} identifier={m[4]} title={m[5]} />)
+    } else {
+      out.push(
+        <ResourceChip
+          key={`${keyPrefix}-r${i}`}
+          kind={m[1] as 'doc' | 'canvas' | 'board'}
+          id={m[2]}
+          title={m[3]}
+        />,
+      )
+    }
     last = m.index + m[0].length
     i++
   }
   if (last < text.length) {
     out.push(
       <Fragment key={`${keyPrefix}-t${i}`}>
-        {highlightMentions(text.slice(last), `${keyPrefix}-t${i}`, names, re)}
+        {gap(text.slice(last), `${keyPrefix}-t${i}`)}
       </Fragment>,
     )
   }
@@ -196,14 +265,16 @@ function processChildren(
   children: ReactNode,
   keyPrefix: string,
   names: string[],
+  projectKeys: Set<string>,
   re: RegExp | null,
 ): ReactNode {
-  if (typeof children === 'string') return highlightString(children, keyPrefix, names, re)
+  if (typeof children === 'string')
+    return highlightString(children, keyPrefix, names, projectKeys, re)
   if (Array.isArray(children)) {
     return children.map((c, i) =>
       typeof c === 'string' ? (
         <Fragment key={`${keyPrefix}-${i}`}>
-          {highlightString(c, `${keyPrefix}-${i}`, names, re)}
+          {highlightString(c, `${keyPrefix}-${i}`, names, projectKeys, re)}
         </Fragment>
       ) : (
         c
@@ -213,8 +284,9 @@ function processChildren(
   return children
 }
 
-function makeComponents(names: string[], re: RegExp | null): Components {
-  const p = (children: ReactNode, prefix: string) => processChildren(children, prefix, names, re)
+function makeComponents(names: string[], projectKeys: Set<string>, re: RegExp | null): Components {
+  const p = (children: ReactNode, prefix: string) =>
+    processChildren(children, prefix, names, projectKeys, re)
   return {
     p: ({ children }) => <p>{p(children, 'p')}</p>,
     li: ({ children }) => <li>{p(children, 'li')}</li>,
@@ -311,8 +383,13 @@ export function Markdown({
         .sort((a, b) => b.length - a.length),
     [users],
   )
+  const projects = useStore((s) => s.projects)
+  const projectKeys = useMemo(() => new Set(projects.map((p) => p.key)), [projects])
   const re = useMemo(() => buildHighlightRe(highlight), [highlight])
-  const components = useMemo(() => makeComponents(names, re), [names, re])
+  const components = useMemo(
+    () => makeComponents(names, projectKeys, re),
+    [names, projectKeys, re],
+  )
   // Collect card tokens (GIF + meeting) in document order, then slice the text
   // between them into markdown runs.
   type Tok =

@@ -31,6 +31,8 @@ pub struct Config {
     pub google: Option<GoogleConfig>,
     /// WebAuthn relying-party configuration. `None` keeps passkeys disabled.
     pub webauthn: Option<WebauthnConfig>,
+    /// GitHub task sync. `None` when `GITHUB_WEBHOOK_SECRET` is unset — inert.
+    pub github: Option<GithubConfig>,
 }
 
 #[derive(Clone)]
@@ -95,6 +97,14 @@ pub struct WebauthnConfig {
     /// Exact browser origins allowed to complete ceremonies.
     pub origins: Vec<String>,
     pub rp_name: String,
+}
+
+#[derive(Clone)]
+pub struct GithubConfig {
+    /// Shared secret for `X-Hub-Signature-256` webhook verification.
+    pub webhook_secret: String,
+    /// `owner/name` allowlist; empty = accept any repo that signs correctly.
+    pub repos: Vec<String>,
 }
 
 fn env_opt(key: &str) -> Option<String> {
@@ -252,6 +262,20 @@ impl Config {
             _ => return Err("WEBAUTHN_RP_ID and WEBAUTHN_ORIGINS must be set together".to_string()),
         };
 
+        let github = env_opt("GITHUB_WEBHOOK_SECRET").map(|webhook_secret| GithubConfig {
+            webhook_secret,
+            repos: env_opt("GITHUB_REPOS")
+                .map(|repos| {
+                    repos
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|repo| !repo.is_empty())
+                        .map(str::to_lowercase)
+                        .collect()
+                })
+                .unwrap_or_default(),
+        });
+
         Ok(Config {
             database_url,
             jwt_secret,
@@ -270,6 +294,7 @@ impl Config {
             ai,
             google,
             webauthn,
+            github,
         })
     }
 }

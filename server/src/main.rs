@@ -454,6 +454,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             post(routes::notifications::expo_unregister),
         )
         .route("/search", get(routes::search::search))
+        // --- Tasks (Linear-lite planner) ---
+        .route(
+            "/projects",
+            get(routes::tasks::list_projects).post(routes::tasks::create_project),
+        )
+        .route("/projects/:id", patch(routes::tasks::update_project))
+        .route(
+            "/projects/:id/tasks",
+            get(routes::tasks::list_tasks).post(routes::tasks::create_task),
+        )
+        .route("/tasks/search", get(routes::tasks::search_tasks))
+        .route(
+            "/tasks/by-key/:identifier",
+            get(routes::tasks::get_task_by_key),
+        )
+        .route(
+            "/tasks/:id",
+            get(routes::tasks::get_task)
+                .patch(routes::tasks::update_task)
+                .delete(routes::tasks::delete_task),
+        )
+        .route(
+            "/tasks/:id/comments",
+            post(routes::tasks::create_comment),
+        )
+        .route(
+            "/task-comments/:id",
+            patch(routes::tasks::update_comment).delete(routes::tasks::delete_comment),
+        )
+        .route("/me/tasks", get(routes::tasks::my_tasks))
+        .route(
+            "/task-labels",
+            get(routes::tasks::list_labels).post(routes::tasks::create_label),
+        )
+        .route(
+            "/task-labels/:id",
+            patch(routes::tasks::update_label).delete(routes::tasks::delete_label),
+        )
+        .route(
+            "/integrations/github/webhook",
+            post(routes::github::webhook),
+        )
         // --- Sharpy AI assistant ---
         .route("/sharpy/status", get(routes::sharpy::status))
         .route(

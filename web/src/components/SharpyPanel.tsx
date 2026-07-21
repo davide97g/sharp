@@ -312,16 +312,26 @@ function SourceChips({ sources }: { sources: SharpySource[] }) {
         const label =
           src.kind === 'message'
             ? `#${src.channel_name} · ${src.author}`
-            : src.title
+            : src.kind === 'task'
+              ? `${src.identifier} ${src.title}`
+              : src.title
+        const taskAt = src.kind === 'task' ? src.identifier.lastIndexOf('-') : -1
         const to =
           src.kind === 'message'
             ? `/c/${src.channel_id}`
-            : src.doc_kind === 'canvas'
-              ? `/x/${src.doc_id}`
-              : src.doc_kind === 'board'
-                ? `/b/${src.doc_id}`
-                : `/d/${src.doc_id}`
-        const key = src.kind === 'message' ? `m-${src.message_id}-${i}` : `d-${src.doc_id}-${i}`
+            : src.kind === 'task'
+              ? `/t/${src.identifier.slice(0, taskAt).toLowerCase()}/${src.identifier.slice(taskAt + 1)}`
+              : src.doc_kind === 'canvas'
+                ? `/x/${src.doc_id}`
+                : src.doc_kind === 'board'
+                  ? `/b/${src.doc_id}`
+                  : `/d/${src.doc_id}`
+        const key =
+          src.kind === 'message'
+            ? `m-${src.message_id}-${i}`
+            : src.kind === 'task'
+              ? `t-${src.task_id}-${i}`
+              : `d-${src.doc_id}-${i}`
         return (
           <button
             key={key}

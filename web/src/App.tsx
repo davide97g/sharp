@@ -22,6 +22,8 @@ import { ChannelCanvases } from './components/canvas/ChannelCanvases'
 import { BoardHome } from './components/board/BoardHome'
 import { ChannelBoards } from './components/board/ChannelBoards'
 import { BoardEditor } from './components/board/BoardEditor'
+import { TasksHome } from './components/tasks/TasksHome'
+import { ProjectView } from './components/tasks/ProjectView'
 import { MeetingsHome } from './components/meetings/MeetingsHome'
 import { MeetingDetailView } from './components/meetings/MeetingDetailView'
 import { CalendarView } from './components/calendar/CalendarView'
@@ -145,6 +147,9 @@ export function App() {
           <Route path="board" element={<BoardHome />} />
           <Route path="board/c/:channelId" element={<ChannelBoards />} />
           <Route path="b/:docId" element={<BoardEditor />} />
+          <Route path="tasks" element={<TasksHome />} />
+          <Route path="t/:key" element={<ProjectView />} />
+          <Route path="t/:key/:num" element={<ProjectView />} />
           <Route path="meetings" element={<MeetingsHome />} />
           <Route path="meetings/:meetingId" element={<MeetingDetailView />} />
           <Route path="calendar" element={<CalendarView />} />
