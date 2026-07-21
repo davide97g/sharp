@@ -250,6 +250,7 @@ export function BoardEditorInner({
           <BoardCard
             card={ghostCard}
             properties={snapshot.properties}
+            groupByPropertyId={snapshot.groupByPropertyId}
             members={members}
             canEdit={false}
             dragging={false}

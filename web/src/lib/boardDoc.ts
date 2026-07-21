@@ -19,7 +19,13 @@ export type BoardProperty = {
   type: BoardPropertyType
   name: string
   options?: BoardOption[]
+  // Whether this property renders as a chip on the card in the column view.
+  // Undefined is treated as visible (the default); the group-by select is never
+  // shown as a chip regardless, since the column already expresses it.
+  showOnCard?: boolean
 }
+
+export type ChecklistItem = { id: string; text: string; done: boolean }
 
 export type BoardCardData = {
   id: string
@@ -27,6 +33,7 @@ export type BoardCardData = {
   description: string
   order: string
   values: Record<string, string | string[]>
+  checklist: ChecklistItem[]
 }
 
 export type BoardSnapshot = {
@@ -130,7 +137,18 @@ function propertyToPlain(prop: Y.Map<unknown>): BoardProperty {
   }
   const opts = optionsArray(prop)
   if (opts) out.options = opts.map(optionToPlain)
+  const show = prop.get('showOnCard')
+  if (typeof show === 'boolean') out.showOnCard = show
   return out
+}
+
+function checklistToPlain(arr: Y.Array<Y.Map<unknown>> | undefined): ChecklistItem[] {
+  if (!arr) return []
+  return arr.map((m) => ({
+    id: m.get('id') as string,
+    text: (m.get('text') as string) ?? '',
+    done: m.get('done') === true,
+  }))
 }
 
 function valuesToPlain(values: Y.Map<unknown> | undefined): Record<string, string | string[]> {
@@ -154,6 +172,7 @@ export function readSnapshot(ydoc: Y.Doc): BoardSnapshot {
       description: (card.get('description') as string) ?? '',
       order: (card.get('order') as string) ?? '',
       values: valuesToPlain(card.get('values') as Y.Map<unknown> | undefined),
+      checklist: checklistToPlain(card.get('checklist') as Y.Array<Y.Map<unknown>> | undefined),
     })
   })
   return {
@@ -283,6 +302,14 @@ export function renameProperty(ydoc: Y.Doc, propertyId: string, name: string): v
   })
 }
 
+// Toggle whether this property shows as a chip on cards in the column view.
+export function setPropertyCardVisibility(ydoc: Y.Doc, propertyId: string, show: boolean): void {
+  ydoc.transact(() => {
+    const prop = findProperty(ydoc, propertyId)
+    if (prop) prop.set('showOnCard', show)
+  })
+}
+
 export function deleteProperty(ydoc: Y.Doc, propertyId: string): void {
   const { board } = getBoardMaps(ydoc)
   ydoc.transact(() => {
@@ -381,5 +408,75 @@ export function moveOption(
     opts.delete(from, 1)
     const dest = Math.max(0, Math.min(toIndex, opts.length))
     opts.insert(dest, [clone])
+  })
+}
+
+// ---- checklist mutations ---------------------------------------------------
+//
+// A card's checklist is a lazily-created Y.Array of Y.Map { id, text, done }
+// under the card's 'checklist' key. Items keep insertion order.
+
+function checklistArray(card: Y.Map<unknown>, create = false): Y.Array<Y.Map<unknown>> | undefined {
+  let arr = card.get('checklist') as Y.Array<Y.Map<unknown>> | undefined
+  if (!arr && create) {
+    arr = new Y.Array<Y.Map<unknown>>()
+    card.set('checklist', arr)
+  }
+  return arr
+}
+
+function buildChecklistItem(text: string): Y.Map<unknown> {
+  const m = new Y.Map<unknown>()
+  m.set('id', uid())
+  m.set('text', text)
+  m.set('done', false)
+  return m
+}
+
+export function addChecklistItem(ydoc: Y.Doc, cardId: string, text: string): void {
+  const { cards } = getBoardMaps(ydoc)
+  ydoc.transact(() => {
+    const card = cards.get(cardId) as Y.Map<unknown> | undefined
+    if (!card) return
+    const arr = checklistArray(card, true)!
+    arr.push([buildChecklistItem(text)])
+  })
+}
+
+export function updateChecklistItem(
+  ydoc: Y.Doc,
+  cardId: string,
+  itemId: string,
+  args: { text?: string; done?: boolean },
+): void {
+  const { cards } = getBoardMaps(ydoc)
+  ydoc.transact(() => {
+    const card = cards.get(cardId) as Y.Map<unknown> | undefined
+    if (!card) return
+    const arr = checklistArray(card)
+    if (!arr) return
+    for (const it of arr) {
+      if (it.get('id') === itemId) {
+        if (args.text !== undefined) it.set('text', args.text)
+        if (args.done !== undefined) it.set('done', args.done)
+        break
+      }
+    }
+  })
+}
+
+export function deleteChecklistItem(ydoc: Y.Doc, cardId: string, itemId: string): void {
+  const { cards } = getBoardMaps(ydoc)
+  ydoc.transact(() => {
+    const card = cards.get(cardId) as Y.Map<unknown> | undefined
+    if (!card) return
+    const arr = checklistArray(card)
+    if (!arr) return
+    for (let i = 0; i < arr.length; i++) {
+      if (arr.get(i).get('id') === itemId) {
+        arr.delete(i, 1)
+        break
+      }
+    }
   })
 }

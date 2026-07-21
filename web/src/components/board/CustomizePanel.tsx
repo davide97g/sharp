@@ -8,9 +8,11 @@ import {
   deleteOption,
   deleteProperty,
   renameProperty,
+  setPropertyCardVisibility,
   updateOption,
 } from '../../lib/boardDoc'
 import { nextColor } from '../../lib/boardColors'
+import { EyeIcon, EyeOffIcon } from '../icons'
 import { SelectOptionEditor } from './SelectOptionEditor'
 
 const TYPE_LABEL: Record<BoardPropertyType, string> = {
@@ -50,6 +52,7 @@ export function CustomizePanel({
         {properties.map((p) => {
           const isGroupBy = p.id === groupByPropertyId
           const hasOptions = p.type === 'select' || p.type === 'multiSelect'
+          const shownOnCard = p.showOnCard !== false
           return (
             <div key={p.id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] p-3">
               <div className="flex items-center gap-2">
@@ -72,16 +75,32 @@ export function CustomizePanel({
                     </svg>
                   </span>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => deleteProperty(ydoc, p.id)}
-                    aria-label="Delete property"
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[#e05a7d]"
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-                    </svg>
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setPropertyCardVisibility(ydoc, p.id, !shownOnCard)}
+                      aria-label={shownOnCard ? 'Hide on cards' : 'Show on cards'}
+                      aria-pressed={shownOnCard}
+                      title={shownOnCard ? 'Shown on cards — click to hide' : 'Hidden from cards — click to show'}
+                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md hover:bg-[var(--color-panel)] ${
+                        shownOnCard
+                          ? 'text-[var(--color-text-dim)] hover:text-[var(--color-text)]'
+                          : 'text-[var(--color-text-faint)] hover:text-[var(--color-text-dim)]'
+                      }`}
+                    >
+                      {shownOnCard ? <EyeIcon /> : <EyeOffIcon />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteProperty(ydoc, p.id)}
+                      aria-label="Delete property"
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[#e05a7d]"
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                      </svg>
+                    </button>
+                  </>
                 )}
               </div>
 

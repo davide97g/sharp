@@ -73,6 +73,7 @@ export function BoardColumn({
         key={card.id}
         card={card}
         properties={properties}
+        groupByPropertyId={groupByPropertyId}
         members={members}
         canEdit={canEdit}
         dragging={card.id === dnd.dragCardId}

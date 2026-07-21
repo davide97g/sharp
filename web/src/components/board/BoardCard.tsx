@@ -25,6 +25,7 @@ function isOverdue(d: Date): boolean {
 export type BoardCardProps = {
   card: BoardCardData
   properties: BoardProperty[]
+  groupByPropertyId: string | null
   members: ChannelMember[] | undefined
   canEdit: boolean
   dragging: boolean
@@ -37,6 +38,7 @@ export type BoardCardProps = {
 function BoardCardImpl({
   card,
   properties,
+  groupByPropertyId,
   members,
   canEdit,
   dragging,
@@ -50,17 +52,23 @@ function BoardCardImpl({
     [registerCard, card.id],
   )
 
-  // Chips: multi-select tags, then due-date chips (skip the status select — it
-  // is expressed by the column).
-  const tags: { key: string; label: string; color: string }[] = []
+  // Chips shown on the card: single-select + multi-select tags, then due-date
+  // chips, then the assignee avatar. A property is shown only when its
+  // card-visibility toggle is on (undefined = on); the group-by select is never
+  // shown as a chip because the column already expresses it.
+  const chips: { key: string; label: string; color: string }[] = []
   const dates: { key: string; label: string; overdue: boolean }[] = []
   let assigneeId: string | null = null
   for (const p of properties) {
+    if (p.showOnCard === false || p.id === groupByPropertyId) continue
     const v = card.values[p.id]
-    if (p.type === 'multiSelect' && Array.isArray(v)) {
+    if (p.type === 'select' && typeof v === 'string' && v) {
+      const opt = p.options?.find((o) => o.id === v)
+      if (opt) chips.push({ key: p.id, label: opt.label, color: opt.color })
+    } else if (p.type === 'multiSelect' && Array.isArray(v)) {
       for (const optId of v) {
         const opt = p.options?.find((o) => o.id === optId)
-        if (opt) tags.push({ key: `${p.id}:${optId}`, label: opt.label, color: opt.color })
+        if (opt) chips.push({ key: `${p.id}:${optId}`, label: opt.label, color: opt.color })
       }
     } else if (p.type === 'date' && typeof v === 'string' && v) {
       const d = parseDate(v)
@@ -71,7 +79,11 @@ function BoardCardImpl({
   }
 
   const assignee = assigneeId ? members?.find((m) => m.id === assigneeId) : undefined
-  const hasMeta = tags.length > 0 || dates.length > 0 || !!assigneeId
+  const total = card.checklist.length
+  const done = card.checklist.reduce((n, i) => n + (i.done ? 1 : 0), 0)
+  const complete = total > 0 && done === total
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0
+  const hasMeta = chips.length > 0 || dates.length > 0 || !!assigneeId
 
   return (
     <div
@@ -93,7 +105,7 @@ function BoardCardImpl({
 
       {hasMeta && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          {tags.map((t) => {
+          {chips.map((t) => {
             const c = colorOf(t.color)
             return (
               <span
@@ -126,6 +138,37 @@ function BoardCardImpl({
               {assignee ? initials(assignee.display_name) : '?'}
             </span>
           )}
+        </div>
+      )}
+
+      {total > 0 && (
+        <div className="mt-2 flex items-center gap-2" title={`${done} of ${total} done`}>
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke={complete ? 'var(--board-green-fg)' : 'var(--color-text-faint)'}
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="shrink-0"
+            aria-hidden
+          >
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+          <div className="h-1 flex-1 overflow-hidden rounded-full bg-[var(--color-panel)]">
+            <div
+              className="h-full rounded-full transition-[width] duration-300"
+              style={{
+                width: `${pct}%`,
+                backgroundColor: complete ? 'var(--board-green-fg)' : 'var(--color-accent)',
+              }}
+            />
+          </div>
+          <span className="shrink-0 text-[10px] font-medium tabular-nums text-[var(--color-text-faint)]">
+            {done}/{total}
+          </span>
         </div>
       )}
     </div>

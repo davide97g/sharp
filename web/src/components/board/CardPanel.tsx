@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import * as Y from 'yjs'
-import type { BoardCardData, BoardProperty } from '../../lib/boardDoc'
-import { deleteCard, setCardValue, updateCardField } from '../../lib/boardDoc'
+import type { BoardCardData, BoardProperty, ChecklistItem } from '../../lib/boardDoc'
+import {
+  addChecklistItem,
+  deleteCard,
+  deleteChecklistItem,
+  setCardValue,
+  updateCardField,
+  updateChecklistItem,
+} from '../../lib/boardDoc'
 import type { ChannelMember } from '../../lib/types'
 import { AssigneeControl, DateControl, MultiSelectControl, SelectControl } from './PropertyControls'
 
@@ -26,6 +33,16 @@ export function CardPanel({
   const descFocused = useRef(false)
   const titleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const descTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const titleRef = useRef<HTMLTextAreaElement>(null)
+
+  // Grow the title textarea to fit its content so long, wrapped titles aren't
+  // clipped to a single line.
+  useEffect(() => {
+    const el = titleRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [title])
 
   // Mirror remote edits when the field isn't being typed in locally.
   useEffect(() => {
@@ -74,6 +91,7 @@ export function CardPanel({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
           <textarea
+            ref={titleRef}
             value={title}
             onChange={(e) => onTitle(e.target.value)}
             onFocus={() => (titleFocused.current = true)}
@@ -84,7 +102,7 @@ export function CardPanel({
             readOnly={!canEdit}
             rows={1}
             placeholder="Untitled"
-            className="mb-5 w-full resize-none bg-transparent text-xl font-bold leading-tight text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:outline-none"
+            className="mb-5 w-full resize-none overflow-hidden break-words bg-transparent text-xl font-bold leading-tight text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:outline-none"
           />
 
           <div className="space-y-3">
@@ -117,6 +135,8 @@ export function CardPanel({
               className="w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm leading-relaxed text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none"
             />
           </div>
+
+          <Checklist items={card.checklist} cardId={card.id} ydoc={ydoc} canEdit={canEdit} />
         </div>
 
         {canEdit && (
@@ -186,4 +206,157 @@ function PropertyControl({
         />
       )
   }
+}
+
+function Checklist({
+  items,
+  cardId,
+  ydoc,
+  canEdit,
+}: {
+  items: ChecklistItem[]
+  cardId: string
+  ydoc: Y.Doc
+  canEdit: boolean
+}) {
+  const [draft, setDraft] = useState('')
+  const total = items.length
+  const done = items.reduce((n, i) => n + (i.done ? 1 : 0), 0)
+  const complete = total > 0 && done === total
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0
+
+  function add() {
+    const text = draft.trim()
+    if (!text) return
+    addChecklistItem(ydoc, cardId, text)
+    setDraft('')
+  }
+
+  // Nothing to show and can't add: hide the section entirely.
+  if (total === 0 && !canEdit) return null
+
+  return (
+    <div className="mt-6">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-xs font-medium text-[var(--color-text-faint)]">Checklist</div>
+        {total > 0 && (
+          <div className="text-[11px] font-medium tabular-nums text-[var(--color-text-faint)]">
+            {done}/{total}
+          </div>
+        )}
+      </div>
+
+      {total > 0 && (
+        <div
+          className="mb-3 h-1.5 overflow-hidden rounded-full bg-[var(--color-panel-2)]"
+          role="progressbar"
+          aria-valuenow={pct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label={`Checklist ${done} of ${total} done`}
+        >
+          <div
+            className="h-full rounded-full transition-[width] duration-300"
+            style={{
+              width: `${pct}%`,
+              backgroundColor: complete ? 'var(--board-green-fg)' : 'var(--color-accent)',
+            }}
+          />
+        </div>
+      )}
+
+      <div className="space-y-0.5">
+        {items.map((item) => (
+          <ChecklistRow
+            key={item.id}
+            item={item}
+            canEdit={canEdit}
+            onToggle={() => updateChecklistItem(ydoc, cardId, item.id, { done: !item.done })}
+            onText={(text) => updateChecklistItem(ydoc, cardId, item.id, { text })}
+            onDelete={() => deleteChecklistItem(ydoc, cardId, item.id)}
+          />
+        ))}
+      </div>
+
+      {canEdit && (
+        <div className="mt-1 flex items-center gap-2 pl-0.5">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="shrink-0 text-[var(--color-text-faint)]" aria-hidden>
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                add()
+              }
+            }}
+            onBlur={add}
+            placeholder="Add an item"
+            className="min-w-0 flex-1 bg-transparent py-1 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:outline-none"
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ChecklistRow({
+  item,
+  canEdit,
+  onToggle,
+  onText,
+  onDelete,
+}: {
+  item: ChecklistItem
+  canEdit: boolean
+  onToggle: () => void
+  onText: (text: string) => void
+  onDelete: () => void
+}) {
+  return (
+    <div className="group/item flex items-center gap-2 rounded-md px-0.5 hover:bg-[var(--color-panel-2)]">
+      <button
+        type="button"
+        onClick={onToggle}
+        disabled={!canEdit}
+        role="checkbox"
+        aria-checked={item.done}
+        aria-label={item.done ? 'Mark not done' : 'Mark done'}
+        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-[5px] border transition-colors ${
+          item.done
+            ? 'border-transparent bg-[var(--color-accent)] text-white'
+            : 'border-[var(--color-border)] text-transparent hover:border-[var(--color-accent)]'
+        } ${canEdit ? '' : 'cursor-default'}`}
+      >
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M20 6 9 17l-5-5" />
+        </svg>
+      </button>
+      <input
+        value={item.text}
+        onChange={(e) => onText(e.target.value)}
+        readOnly={!canEdit}
+        placeholder="Item"
+        className={`min-w-0 flex-1 bg-transparent py-1 text-sm focus:outline-none ${
+          item.done
+            ? 'text-[var(--color-text-faint)] line-through'
+            : 'text-[var(--color-text)]'
+        } placeholder:text-[var(--color-text-faint)]`}
+      />
+      {canEdit && (
+        <button
+          type="button"
+          onClick={onDelete}
+          aria-label="Delete item"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--color-text-faint)] opacity-0 hover:text-[#e05a7d] focus:opacity-100 group-hover/item:opacity-100"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
+      )}
+    </div>
+  )
 }
