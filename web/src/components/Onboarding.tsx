@@ -2,20 +2,17 @@ import { useEffect, useState } from 'react'
 import type { ChatLayout } from '../lib/types'
 import { useStore } from '../store'
 import { isTauri } from '../lib/desktopAuth'
-import {
-  getThemeChoice,
-  markOnboardingDone,
-  setThemeChoice,
-  type ThemeChoice,
-} from '../lib/onboarding'
+import { markOnboardingDone } from '../lib/onboarding'
+import { getThemePreset, setThemePreset, type ThemePreset } from '../lib/theme'
 import { ChatLayoutPicker } from './ChatLayoutChooser'
 import { NotificationSetup } from './NotificationSetup'
+import { ThemePicker } from './ThemePicker'
 
 const STEPS = ['Chat style', 'Notifications', 'Appearance'] as const
 
 /**
  * First-login onboarding: a full-screen, skippable stepper.
- * 1. chat style  2. notification permission + DND  3. theme (setup choice only)
+ * 1. chat style  2. notification permission + DND  3. theme preset
  * Rendered app-wide by AppShell until the client has completed or skipped it.
  */
 export function Onboarding({ onClose }: { onClose: () => void }) {
@@ -29,8 +26,8 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
   const dnd = useStore((s) => s.dnd)
   const setDnd = useStore((s) => s.setDnd)
 
-  // step 3 — theme (persisted, applied later)
-  const [theme, setTheme] = useState<ThemeChoice>(() => getThemeChoice())
+  // step 3 — theme (applied live as you pick)
+  const [theme, setTheme] = useState<ThemePreset>(() => getThemePreset())
 
   const [finishing, setFinishing] = useState(false)
 
@@ -54,7 +51,7 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
   async function finish() {
     if (finishing) return
     setFinishing(true)
-    setThemeChoice(theme)
+    setThemePreset(theme)
     try {
       await setChatLayout(layout)
     } catch {
@@ -62,6 +59,11 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
     }
     markOnboardingDone()
     onClose()
+  }
+
+  function pickTheme(preset: ThemePreset) {
+    setTheme(preset)
+    setThemePreset(preset)
   }
 
   const isLast = step === STEPS.length - 1
@@ -102,30 +104,32 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
               }`}
             >
               <span
-                className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] ${
-                  i <= step
+                className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] ${
+                  i === step
                     ? 'bg-[var(--color-accent)] text-white'
-                    : 'border border-[var(--color-border)]'
+                    : i < step
+                      ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]'
+                      : 'bg-[var(--color-panel)]'
                 }`}
               >
-                {i < step ? '✓' : i + 1}
+                {i + 1}
               </span>
               <span className="hidden sm:inline">{label}</span>
             </div>
             {i < STEPS.length - 1 && (
-              <span className="h-px w-4 bg-[var(--color-border)] sm:w-6" />
+              <div className="hidden h-px w-6 bg-[var(--color-border)] sm:block" />
             )}
           </div>
         ))}
       </div>
 
-      {/* step body */}
-      <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-4 sm:px-6">
-        <div className="w-full max-w-xl animate-in pb-6">
+      {/* body */}
+      <div className="flex flex-1 items-start justify-center overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
+        <div className="w-full max-w-lg">
           {step === 0 && (
             <StepShell
-              title="How should chats look?"
-              subtitle="Pick a style for your direct messages. You can change it anytime in Settings."
+              title="How should DMs look?"
+              subtitle="Pick a layout for 1:1 conversations. You can change this anytime in Settings."
             >
               <ChatLayoutPicker value={layout} onChange={setLayout} />
             </StepShell>
@@ -134,17 +138,17 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
           {step === 1 && (
             <StepShell
               title="Stay in the loop"
-              subtitle="Get notified about direct messages, mentions, and replies — even when sharp isn't focused."
+              subtitle="Enable notifications so you don’t miss DMs and mentions."
             >
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-4">
                 <NotificationSetup />
-                <label className="flex min-h-14 items-center justify-between gap-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-4">
-                  <div className="min-w-0">
+                <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] px-4 py-3">
+                  <div>
                     <div className="text-sm font-semibold text-[var(--color-text)]">
                       Do not disturb
                     </div>
                     <div className="text-[11px] text-[var(--color-text-faint)]">
-                      Keep inbox items but silence push and pop-ups.
+                      Keep inbox updates, but silence push and toasts.
                     </div>
                   </div>
                   <input
@@ -166,22 +170,9 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
           {step === 2 && (
             <StepShell
               title="Pick your look"
-              subtitle="Choose a theme to start with. Light mode is coming soon — your choice is saved for when it lands."
+              subtitle="Choose a theme. You can change this anytime in Settings → Appearance."
             >
-              <div className="flex gap-3">
-                <ThemeCard
-                  theme="dark"
-                  title="Dark"
-                  selected={theme === 'dark'}
-                  onSelect={() => setTheme('dark')}
-                />
-                <ThemeCard
-                  theme="light"
-                  title="Light"
-                  selected={theme === 'light'}
-                  onSelect={() => setTheme('light')}
-                />
-              </div>
+              <ThemePicker value={theme} onChange={pickTheme} />
             </StepShell>
           )}
         </div>
@@ -223,64 +214,5 @@ function StepShell({
       <p className="mt-1 mb-5 text-sm text-[var(--color-text-dim)]">{subtitle}</p>
       {children}
     </div>
-  )
-}
-
-// A tiny non-interactive mockup of each theme.
-function ThemeCard({
-  theme,
-  title,
-  selected,
-  onSelect,
-}: {
-  theme: ThemeChoice
-  title: string
-  selected: boolean
-  onSelect: () => void
-}) {
-  const dark = theme === 'dark'
-  const bg = dark ? '#0e0e11' : '#f5f5f7'
-  const panel = dark ? '#1c1c22' : '#ffffff'
-  const line = dark ? '#33333d' : '#d9d9de'
-  const text = dark ? '#e6e6ea' : '#1a1a1f'
-  return (
-    <button
-      onClick={onSelect}
-      className={`flex-1 rounded-xl border p-2 text-left transition ${
-        selected
-          ? 'border-[var(--color-accent)] ring-2 ring-[var(--color-accent-soft)]'
-          : 'border-[var(--color-border)] hover:border-[var(--color-text-faint)]'
-      }`}
-    >
-      <div
-        className="flex flex-col gap-1.5 rounded-lg p-3"
-        style={{ backgroundColor: bg }}
-      >
-        <div
-          className="h-3 w-1/2 rounded"
-          style={{ backgroundColor: '#7c6cff' }}
-        />
-        {[0.9, 0.7].map((w, i) => (
-          <div
-            key={i}
-            className="rounded px-2 py-1.5"
-            style={{ backgroundColor: panel, border: `1px solid ${line}`, width: `${w * 100}%` }}
-          >
-            <div
-              className="h-1.5 w-3/4 rounded"
-              style={{ backgroundColor: text, opacity: 0.5 }}
-            />
-          </div>
-        ))}
-      </div>
-      <div className="mt-2 px-1 text-sm font-semibold text-[var(--color-text)]">
-        {title}
-        {theme === 'light' && (
-          <span className="ml-1 text-[11px] font-normal text-[var(--color-text-faint)]">
-            (soon)
-          </span>
-        )}
-      </div>
-    </button>
   )
 }

@@ -9,6 +9,7 @@ mod error;
 mod expo_push;
 mod gif;
 mod google_oauth;
+mod livekit;
 mod models;
 mod notify;
 mod passkeys;
@@ -271,6 +272,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/users", get(routes::users::list_users))
         .route("/users/:id/avatar", get(routes::users::get_avatar))
+        .route("/me/nicknames", get(routes::users::list_nicknames))
+        .route(
+            "/users/:id/nickname",
+            put(routes::users::set_nickname).delete(routes::users::delete_nickname),
+        )
         .route(
             "/e2ee/devices",
             get(routes::e2ee::list_devices).post(routes::e2ee::put_device),
@@ -287,6 +293,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(routes::gifs::get_settings).put(routes::gifs::put_settings),
         )
         .route("/voice/config", get(routes::voice::voice_config))
+        .route(
+            "/voice/transcriptions",
+            post(routes::voice::transcribe_audio).layer(DefaultBodyLimit::max(6 * 1024 * 1024)),
+        )
         .route(
             "/voice/triggers",
             get(routes::voice_triggers::list_personal)

@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
-import { isSpeechSupported } from '../../lib/speech'
+import { isTranscriptionSupported } from '../../lib/speech'
 import { useIsMobile } from '../../lib/useMediaQuery'
 import { useStore, type VoiceStageMode } from '../../store'
+import { displayNameFor } from '../../lib/displayName'
 import { channelLabel } from '../../lib/util'
 import { toastError, toastSuccess } from '../../lib/toast'
 import {
@@ -41,14 +42,13 @@ type MediaDeviceOption = {
   label: string
 }
 
-// Adaptive video grid: how many columns for N tiles so everything fits and
-// partial last rows can be centered. 1→1, 2→2, 3→3 across, 4→2x2, else √n.
+// Adaptive video grid capped at four columns for readable 4×4 camera rooms.
 function gridColsFor(count: number): number {
   if (count <= 1) return 1
   if (count === 2) return 2
   if (count === 3) return 3
   if (count === 4) return 2
-  return Math.ceil(Math.sqrt(count))
+  return Math.min(4, Math.ceil(Math.sqrt(count)))
 }
 
 // Earliest of two raise timestamps (a user with multiple conns keeps the oldest).
@@ -87,6 +87,7 @@ const STAGE_SIZE: Record<
 export function VideoStage({ roomName: roomNameOverride }: { roomName?: string } = {}) {
   const { token: currentLinkToken } = useParams<{ token?: string }>()
   const channelId = useStore((s) => s.voice.channelId)
+  const voiceStatus = useStore((s) => s.voice.status)
   const stageMode = useStore((s) => s.voice.stageMode)
   const room = useStore((s) => (channelId ? s.voiceRooms[channelId] : undefined))
   const activeMeetingId = useStore((s) =>
@@ -94,6 +95,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
   )
   const speaking = useStore((s) => s.voice.speaking)
   const transcribing = useStore((s) => s.voice.transcribing)
+  const transcriptionAvailable = useStore((s) => s.voice.transcriptionAvailable)
   const localStream = useStore((s) => s.voice.localStream)
   const remoteStreams = useStore((s) => s.voice.remoteStreams)
   const localScreenStream = useStore((s) => s.voice.localScreenStream)
@@ -103,6 +105,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
   const audioAuraPreference = useAudioAuraPreference(me?.id)
   const audioAuraEnabled = audioAuraPreference === true
   const users = useStore((s) => s.users)
+  const nicknames = useStore((s) => s.nicknames)
   const isGuest = useStore((s) => s.isGuest)
   const channel = useStore((s) => s.channels.find((candidate) => candidate.id === channelId))
   const toggleTranscription = useStore((s) => s.toggleTranscription)
@@ -271,14 +274,14 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
     return shares
   }, [room, myConnId, localScreenStream, remoteScreenStreams])
 
-  // Name resolution: prefer the directory entry (members), then our own name,
-  // then the server-filled display_name carried on the voice room (covers guests
-  // who aren't in the directory), finally a generic fallback.
+  // Name resolution: personal nickname → directory → self → room payload → fallback.
   const resolveName = (userId: string, roomName?: string): string =>
-    users[userId]?.display_name ??
-    (me?.id === userId ? me.display_name : undefined) ??
-    roomName ??
-    'Participant'
+    displayNameFor(userId, {
+      nicknames,
+      users,
+      fallback:
+        (me?.id === userId ? me.display_name : undefined) ?? roomName ?? 'Participant',
+    })
 
   const activeScreen = screenShares[0] ?? null
   const otherSharer = screenShares.find((share) => !share.local)
@@ -300,7 +303,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
     activeMeetingId &&
     !transcribing &&
     handledNotesMeetingId !== activeMeetingId &&
-    isSpeechSupported() ? (
+    transcriptionAvailable && isTranscriptionSupported() ? (
       <NotesConsentPrompt
         onAccept={() => {
           setHandledNotesMeetingId(activeMeetingId)
@@ -315,6 +318,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
     return (
       <>
         {pip.portal}
+        <CallConnectionNotice status={voiceStatus} />
         {audioAuraPrompt}
         {notesConsentPrompt}
         <button
@@ -331,6 +335,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
     return (
       <>
         <VoiceMiniWidget />
+        <CallConnectionNotice status={voiceStatus} />
         <CallPollOverlay mode="mini" />
         {!isGuest ? (
           <button
@@ -352,10 +357,14 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
 
   const roomName = roomNameOverride ?? (channel
     ? channel.kind === 'dm'
-      ? channel.dm_user?.display_name ?? channelLabel(channel)
+      ? channelLabel(channel, nicknames)
       : `# ${channel.name}`
     : 'Meet')
   const anyCamera = participants.some((p) => p.cameraConnId)
+  const mobileFocus =
+    participants.find((participant) => participant.speaking && participant.cameraConnId) ??
+    participants.find((participant) => participant.cameraConnId) ??
+    participants[0]
   const avatarSize = stageMode === 'compact' ? 56 : 88
   const cols = gridColsFor(participants.length)
   const headerBtnClass =
@@ -423,10 +432,68 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
         </ul>
       )}
     </div>
+  ) : isMobile && anyCamera && mobileFocus ? (
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      <div className="min-h-0 flex-1">
+        <VideoTile
+          userId={mobileFocus.userId}
+          name={resolveName(mobileFocus.userId, mobileFocus.displayName)}
+          guest={mobileFocus.guest}
+          stream={
+            mobileFocus.cameraConnId === myConnId
+              ? localStream
+              : mobileFocus.cameraConnId
+                ? remoteStreams[mobileFocus.cameraConnId]
+                : null
+          }
+          local={mobileFocus.cameraConnId === myConnId}
+          muted={mobileFocus.muted}
+          transcribing={mobileFocus.transcribing}
+          speaking={mobileFocus.speaking}
+          handRaised={mobileFocus.handRaised}
+          connIds={mobileFocus.connIds}
+          audioAuraEnabled={audioAuraEnabled}
+          compact={false}
+        />
+      </div>
+      <ul
+        aria-label="Other call participants"
+        className="flex shrink-0 snap-x gap-2 overflow-x-auto pb-1"
+      >
+        {participants
+          .filter((participant) => participant.userId !== mobileFocus.userId)
+          .map((participant) => {
+            const local = participant.cameraConnId === myConnId
+            const stream = local
+              ? localStream
+              : participant.cameraConnId
+                ? remoteStreams[participant.cameraConnId]
+                : null
+            return (
+              <li key={participant.userId} className="w-32 shrink-0 snap-start">
+                <VideoTile
+                  userId={participant.userId}
+                  name={resolveName(participant.userId, participant.displayName)}
+                  guest={participant.guest}
+                  stream={stream}
+                  local={local}
+                  muted={participant.muted}
+                  transcribing={participant.transcribing}
+                  speaking={participant.speaking}
+                  handRaised={participant.handRaised}
+                  connIds={participant.connIds}
+                  audioAuraEnabled={audioAuraEnabled}
+                  compact
+                />
+              </li>
+            )
+          })}
+      </ul>
+    </div>
   ) : anyCamera ? (
     // Adaptive grid via flex-wrap: `cols` tiles per row (see gridColsFor) sized to
     // fill the row width, so a partial final row stays centered.
-    <div className="flex h-full flex-wrap content-center items-center justify-center gap-3">
+    <div className="flex h-full flex-wrap content-center items-center justify-center gap-3 overflow-y-auto py-1">
       {participants.map((participant) => {
         const local = participant.cameraConnId === myConnId
         const stream = local
@@ -502,6 +569,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
         aria-label={`${roomName} huddle`}
         className="voice-stage fixed inset-0 z-[60] flex bg-black text-[var(--color-text)]"
       >
+        <CallConnectionNotice status={voiceStatus} />
         <div className="relative flex min-w-0 flex-1 flex-col">
           <header
             className="flex h-14 shrink-0 items-center gap-3 px-5"
@@ -693,6 +761,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
             : { right: 16, bottom: 16 }),
       }}
     >
+      <CallConnectionNotice status={voiceStatus} />
       <header
         className={`flex h-11 shrink-0 items-center gap-2 border-b border-[var(--color-border)] px-3 ${
           dragging ? 'cursor-grabbing' : 'cursor-grab'
@@ -1391,6 +1460,24 @@ function screenBtnClass(active: boolean): string {
   }`
 }
 
+function CallConnectionNotice({
+  status,
+}: {
+  status: 'idle' | 'connecting' | 'connected' | 'reconnecting'
+}) {
+  if (status === 'connected' || status === 'idle') return null
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="pointer-events-none fixed left-1/2 z-[90] -translate-x-1/2 rounded-full border border-white/15 bg-black/85 px-3 py-1.5 text-xs font-medium text-white shadow-xl backdrop-blur-md"
+      style={{ top: 'max(0.75rem, var(--safe-top))' }}
+    >
+      {status === 'reconnecting' ? 'Reconnecting call…' : 'Connecting call…'}
+    </div>
+  )
+}
+
 function StageControlsBar({
   mics,
   cameras,
@@ -1409,6 +1496,7 @@ function StageControlsBar({
   const noiseSuppressionAvailable = useStore((s) => s.voice.noiseSuppressionAvailable)
   const handRaised = useStore((s) => s.voice.handRaised)
   const transcribing = useStore((s) => s.voice.transcribing)
+  const transcriptionAvailable = useStore((s) => s.voice.transcriptionAvailable)
   const voiceStatus = useStore((s) => s.voice.status)
   const cameraStatus = useStore((s) => s.voice.cameraStatus)
   const videoBackground = useStore((s) => s.voice.videoBackground)
@@ -1508,7 +1596,7 @@ function StageControlsBar({
       >
         <NoiseSuppressionIcon off={!noiseSuppression || !noiseSuppressionAvailable} />
       </CallControl>
-      {isSpeechSupported() && (
+      {transcriptionAvailable && isTranscriptionSupported() && (
         <CallControl
           label={
             transcribing
@@ -1584,6 +1672,7 @@ function MobileCallMoreSheet({
   const noiseSuppressionAvailable = useStore((s) => s.voice.noiseSuppressionAvailable)
   const handRaised = useStore((s) => s.voice.handRaised)
   const transcribing = useStore((s) => s.voice.transcribing)
+  const transcriptionAvailable = useStore((s) => s.voice.transcriptionAvailable)
   const voiceStatus = useStore((s) => s.voice.status)
   const screenStatus = useStore((s) => s.voice.screenStatus)
   const audioDeviceId = useStore((s) => s.voice.audioDeviceId)
@@ -1645,7 +1734,7 @@ function MobileCallMoreSheet({
             icon={<NoiseSuppressionIcon off={!noiseSuppression || !noiseSuppressionAvailable} />}
             onClick={() => void toggleNoiseSuppression()}
           />
-          {isSpeechSupported() && (
+          {transcriptionAvailable && isTranscriptionSupported() && (
             <SheetAction
               label={
                 transcribing

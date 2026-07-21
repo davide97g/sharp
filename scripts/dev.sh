@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # sharp — one-command local dev environment.
-# Boots Postgres+Redis (Docker), the Rust server (:3000) and the web app (:5173).
+# Boots dependencies (Docker), the Rust server (:3000), and the web app (:5173).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -10,7 +10,7 @@ for bin in docker cargo bun; do
   command -v "$bin" >/dev/null || { echo "error: '$bin' is required (install it first)"; exit 1; }
 done
 
-echo "==> starting postgres + redis (docker)"
+echo "==> starting postgres + redis + minio + livekit (docker)"
 docker compose -f deploy/docker-compose.dev.yml up -d
 
 echo "==> waiting for postgres"
@@ -22,6 +22,10 @@ export DATABASE_URL="postgres://sharp:sharp@localhost:5432/sharp"
 export REDIS_URL="redis://localhost:6379"
 export JWT_SECRET="dev-only-secret-do-not-use-in-prod"
 export RUST_LOG="${RUST_LOG:-info}"
+export LIVEKIT_URL="ws://localhost:7880"
+export LIVEKIT_INTERNAL_URL="http://localhost:7880"
+export LIVEKIT_API_KEY="devkey"
+export LIVEKIT_API_SECRET="secret"
 
 # File uploads -> local MinIO (from docker-compose.dev.yml).
 export S3_ENDPOINT="http://localhost:9000"

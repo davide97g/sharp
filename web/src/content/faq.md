@@ -16,7 +16,7 @@ Direct messages, mentions, and replies appear in the inbox. Depending on your de
 
 ## Are calls recorded?
 
-Calls are peer-to-peer and media is not relayed through the sharp server. Meeting notes use optional speech transcription. Each participant is asked before their microphone transcript is shared, and declining does not prevent joining the call.
+Calls are not recorded by default. Media is transport-encrypted and relayed through your self-hosted LiveKit SFU; it is not end-to-end encrypted from that SFU. Meeting notes use optional speech transcription. Each participant is asked before their microphone transcript is shared, and declining does not prevent joining the call.
 
 ## Can guests join calls?
 

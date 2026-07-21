@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { displayNameFor } from '../../lib/displayName'
 import { channelLabel } from '../../lib/util'
 import { useStore } from '../../store'
 import { useAudioAuraPreference } from '../../lib/meetingEffects'
@@ -59,6 +60,7 @@ export function VoiceMiniWidget() {
   const remoteScreenStreams = useStore((s) => s.voice.remoteScreenStreams)
   const myConnId = useStore((s) => s.myConnId)
   const users = useStore((s) => s.users)
+  const nicknames = useStore((s) => s.nicknames)
   const me = useStore((s) => s.me)
   const audioAuraEnabled = useAudioAuraPreference(me?.id) === true
   const channel = useStore((s) =>
@@ -110,7 +112,7 @@ export function VoiceMiniWidget() {
 
   const roomName = channel
     ? channel.kind === 'dm'
-      ? channel.dm_user?.display_name ?? channelLabel(channel)
+      ? channelLabel(channel, nicknames)
       : `# ${channel.name}`
     : 'Call'
 
@@ -242,9 +244,12 @@ export function VoiceMiniWidget() {
 
       <div className="flex flex-col items-center -space-y-2" aria-label="Call participants">
         {visibleParticipants.map((participant) => {
-          const name =
-            users[participant.userId]?.display_name ??
-            (me?.id === participant.userId ? me.display_name : 'Participant')
+          const name = displayNameFor(participant.userId, {
+            nicknames,
+            users,
+            fallback:
+              me?.id === participant.userId ? me.display_name : 'Participant',
+          })
           return (
             <div
               key={participant.userId}

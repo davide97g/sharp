@@ -106,6 +106,12 @@ export function Composer({
   const gifEnabled = useStore((s) => s.gifConfig)?.enabled ?? false
   // Quote-reply applies to the main channel composer only (not the thread composer).
   const activeReply = useStore((s) => (parentId ? null : s.replyTargets[channel.id] ?? null))
+  const replyAuthorName = useStore((s) => {
+    if (!activeReply) return null
+    return (
+      s.nicknames[activeReply.user.id]?.trim() || activeReply.user.display_name
+    )
+  })
 
   // --- @ people / # resource / : emoji picker state ---
   const [trigger, setTrigger] = useState<Trigger | null>(null)
@@ -175,16 +181,24 @@ export function Composer({
     if (trigger.type === '@') {
       const st = useStore.getState()
       const memberIds = new Set((st.members[channel.id] ?? []).map((u) => u.id))
+      const label = (u: { id: string; display_name: string }) =>
+        st.nicknames[u.id]?.trim() || u.display_name
       const people = Object.values(st.users)
-        .filter((u) => !ql || u.display_name.toLowerCase().includes(ql))
+        .filter((u) => {
+          if (!ql) return true
+          const nick = st.nicknames[u.id]?.toLowerCase() ?? ''
+          return (
+            u.display_name.toLowerCase().includes(ql) || nick.includes(ql)
+          )
+        })
         .sort((a, b) => {
           const am = memberIds.has(a.id) ? 0 : 1
           const bm = memberIds.has(b.id) ? 0 : 1
           if (am !== bm) return am - bm
-          return a.display_name.localeCompare(b.display_name)
+          return label(a).localeCompare(label(b))
         })
         .slice(0, 8)
-        .map<PickItem>((u) => ({ kind: 'user', id: u.id, name: u.display_name }))
+        .map<PickItem>((u) => ({ kind: 'user', id: u.id, name: label(u) }))
       // `@all` (notify everyone) ranks after matching people, and stays offered
       // even when fully typed — it only leaves once picked (Tab/Enter/click).
       if (channel.kind !== 'dm' && 'all'.startsWith(ql)) {
@@ -236,7 +250,12 @@ export function Composer({
           const st = useStore.getState()
           const chName: Record<string, string> = {}
           for (const c of st.channels)
-            chName[c.id] = c.kind === 'dm' ? c.dm_user?.display_name ?? '' : c.name
+            chName[c.id] =
+              c.kind === 'dm'
+                ? (c.dm_user?.id && st.nicknames[c.dm_user.id]?.trim()) ||
+                  c.dm_user?.display_name ||
+                  ''
+                : c.name
           const recent = Object.values(st.docsByChannel)
             .flat()
             .filter((d) => !d.deleted_at)
@@ -681,7 +700,7 @@ export function Composer({
           <div className="mb-2 flex items-stretch gap-2 rounded-lg border-l-2 border-[var(--color-accent)] bg-[var(--color-panel-2)] py-1.5 pl-2.5 pr-2">
             <div className="min-w-0 flex-1">
               <div className="text-[11px] font-semibold text-[var(--color-accent-hover)]">
-                Replying to {activeReply.user.display_name}
+                Replying to {replyAuthorName}
               </div>
               <div className="truncate text-xs text-[var(--color-text-dim)]">
                 {activeReply.deleted_at

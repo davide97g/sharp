@@ -8,6 +8,7 @@ import { useStore } from '../../store'
 
 export function MeetingsSidebar() {
   const channels = useStore((state) => state.channels)
+  const nicknames = useStore((state) => state.nicknames)
   const activeMeetings = useStore((state) => state.activeMeetings)
   const [meetings, setMeetings] = useState<MeetingListItem[]>([])
   const [search, setSearch] = useState('')
@@ -64,7 +65,7 @@ export function MeetingsSidebar() {
         >
           <option value="">Filter by channel…</option>
           {channels.filter((channel) => channel.is_member).map((channel) => (
-            <option key={channel.id} value={channel.id}>{channelLabel(channel)}</option>
+            <option key={channel.id} value={channel.id}>{channelLabel(channel, nicknames)}</option>
           ))}
         </select>
       </div>

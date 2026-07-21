@@ -230,7 +230,13 @@ export type NotificationsResponse = {
   unread_count: number
 }
 export type VapidResponse = { public_key: string | null }
-export type IceConfigResponse = { ice_servers: RTCIceServer[] }
+export type VoiceConfigResponse = {
+  provider: 'livekit'
+  available: boolean
+  server_url: string | null
+  transcription: boolean
+}
+export type TranscriptionResponse = { text: string }
 
 // --- Public guest call links ---
 export type VoiceLinkResponse = { token: string | null }
@@ -285,6 +291,13 @@ export type VoiceRoomSnapshot = {
   poll: CallPoll | null
   // Whether non-sharers may currently draw on the active screen share.
   annotations_allowed: boolean
+  // Present only in the private voice.state response to the joining connection.
+  media?: {
+    provider: 'livekit'
+    server_url: string
+    participant_token: string
+    participant_identity: string
+  }
 }
 
 export type PollVoter = {
@@ -452,15 +465,6 @@ export type VoiceParticipantLeftPayload = {
 export type VoiceParticipantUpdatedPayload = {
   channel_id: string
   participant: VoiceParticipant
-}
-export type VoiceSignalPayload = {
-  channel_id: string
-  from_user: string
-  from_conn: string
-  to_user: string
-  to_conn: string
-  kind: 'offer' | 'answer' | 'candidate'
-  data: unknown
 }
 export type VoiceErrorPayload = { channel_id: string; code: string }
 // Screen-share annotation relays (server -> client).

@@ -20,6 +20,43 @@
 # Dokploy setup: see deploy/DOKPLOY.md
 
 services:
+  livekit:
+    image: livekit/livekit-server:v1.13.1
+    restart: unless-stopped
+    environment:
+      LIVEKIT_CONFIG: |
+        port: 7880
+        log_level: info
+        prometheus_port: 6789
+        rtc:
+          tcp_port: 7881
+          port_range_start: 50000
+          port_range_end: 50100
+          use_external_ip: true
+        keys:
+          ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
+        turn:
+          enabled: true
+          domain: ${MEDIA_DOMAIN}
+          udp_port: 3478
+          tls_port: 5349
+          cert_file: /etc/livekit/tls.crt
+          key_file: /etc/livekit/tls.key
+          ttl_seconds: 300
+    volumes:
+      - ${LIVEKIT_TURN_CERT_FILE}:/etc/livekit/tls.crt:ro
+      - ${LIVEKIT_TURN_KEY_FILE}:/etc/livekit/tls.key:ro
+    expose:
+      - "7880"
+    ports:
+      - "7881:7881/tcp"
+      - "3478:3478/udp"
+      - "5349:5349/tcp"
+      - "50000-50100:50000-50100/udp"
+    networks:
+      - dokploy-network
+      - default
+
   postgres:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
@@ -52,6 +89,10 @@ services:
       DATABASE_URL: postgres://sharp:${POSTGRES_PASSWORD}@postgres:5432/sharp
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET}
+      LIVEKIT_URL: wss://${MEDIA_DOMAIN}
+      LIVEKIT_INTERNAL_URL: http://livekit:7880
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
       SHARP_DISABLE_SIGNUP: ${SHARP_DISABLE_SIGNUP:-false}
       WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-}
       WEBAUTHN_ORIGINS: ${WEBAUTHN_ORIGINS:-}
@@ -86,6 +127,10 @@ services:
       AI_BASE_URL: ${AI_BASE_URL:-https://api.openai.com/v1}
       AI_CHAT_MODEL: ${AI_CHAT_MODEL:-gpt-4o-mini}
       AI_EMBED_MODEL: ${AI_EMBED_MODEL:-text-embedding-3-small}
+      # Optional separate live-transcription provider; each setting falls back to AI_*.
+      # TRANSCRIBE_API_KEY: ${TRANSCRIBE_API_KEY:-}
+      # TRANSCRIBE_BASE_URL: ${TRANSCRIBE_BASE_URL:-https://api.openai.com/v1}
+      # TRANSCRIBE_MODEL: ${TRANSCRIBE_MODEL:-gpt-4o-mini-transcribe}
       # Google Calendar (Phase 5) — optional. Leave unset to disable calendar sync.
       # GOOGLE_REDIRECT_URI must exactly match a redirect registered on the OAuth
       # client and point at the API subdomain (split deploy):
@@ -96,6 +141,8 @@ services:
     expose:
       - "3000"
     depends_on:
+      livekit:
+        condition: service_started
       postgres:
         condition: service_healthy
     networks:

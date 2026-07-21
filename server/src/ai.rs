@@ -1,9 +1,10 @@
-use crate::config::AiConfig;
+use crate::config::{AiConfig, TranscribeConfig};
 use anyhow::{anyhow, bail};
 use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::OnceLock;
+use std::time::Duration;
 
 /// OpenAI-compatible chat/embeddings client. Shared connection pool, like
 /// `deepseek.rs`.
@@ -35,6 +36,43 @@ struct EmbedData {
     #[serde(default)]
     index: usize,
     embedding: Vec<f32>,
+}
+
+#[derive(Deserialize)]
+struct TranscriptionResponse {
+    text: String,
+}
+
+/// Transcribe one encoded audio segment through an OpenAI-compatible
+/// `/audio/transcriptions` endpoint.
+pub async fn transcribe(
+    cfg: &TranscribeConfig,
+    bytes: Vec<u8>,
+    mime: &str,
+    filename: &str,
+) -> anyhow::Result<String> {
+    let file = reqwest::multipart::Part::bytes(bytes)
+        .file_name(filename.to_string())
+        .mime_str(mime)?;
+    let form = reqwest::multipart::Form::new()
+        .part("file", file)
+        .text("model", cfg.model.clone())
+        .text("response_format", "json");
+    let url = format!(
+        "{}/audio/transcriptions",
+        cfg.base_url.trim_end_matches('/')
+    );
+    let response = client()
+        .post(url)
+        .bearer_auth(&cfg.api_key)
+        .multipart(form)
+        .timeout(Duration::from_secs(30))
+        .send()
+        .await?
+        .error_for_status()?
+        .json::<TranscriptionResponse>()
+        .await?;
+    Ok(response.text)
 }
 
 /// Embed a batch of inputs. Returns one vector per input, in input order.

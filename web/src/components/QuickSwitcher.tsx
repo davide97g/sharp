@@ -14,6 +14,7 @@ type Item =
 
 export function QuickSwitcher() {
   const open = useStore((s) => s.quickSwitcherOpen)
+  const nicknames = useStore((s) => s.nicknames)
   const setOpen = useStore((s) => s.setQuickSwitcher)
   const channels = useStore((s) => s.channels)
   const users = useStore((s) => s.users)
@@ -43,7 +44,7 @@ export function QuickSwitcher() {
         ? {
             kind: 'channel',
             id: c.id,
-            label: channelLabel(c),
+            label: channelLabel(c, nicknames),
             sub: 'Direct message',
             icon: online.has(c.dm_user?.id ?? '') ? '🟢' : '💬',
           }
@@ -63,12 +64,12 @@ export function QuickSwitcher() {
       .map((u) => ({
         kind: 'user',
         id: u.id,
-        label: u.display_name,
+        label: nicknames[u.id]?.trim() || u.display_name,
         sub: 'Open direct message',
         icon: online.has(u.id) ? '🟢' : '👤',
       }))
     const chanName: Record<string, string> = {}
-    for (const c of channels) chanName[c.id] = c.kind === 'dm' ? channelLabel(c) : c.name
+    for (const c of channels) chanName[c.id] = c.kind === 'dm' ? channelLabel(c, nicknames) : c.name
     const docItems: Item[] = Object.values(docsByChannel)
       .flat()
       .filter((d) => !d.deleted_at)
@@ -81,7 +82,7 @@ export function QuickSwitcher() {
         docKind: d.kind,
       }))
     return [...chanItems, ...userItems, ...docItems]
-  }, [channels, users, me, online, docsByChannel])
+  }, [channels, users, me, online, docsByChannel, nicknames])
 
   const projects = useStore((s) => s.projects)
   const tasksByProject = useStore((s) => s.tasksByProject)

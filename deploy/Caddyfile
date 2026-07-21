@@ -13,6 +13,13 @@
 	reverse_proxy sharp:3000
 }
 
+# LiveKit signaling/API. WebRTC media itself uses the host UDP range, RTC TCP,
+# and TURN ports directly rather than traversing this HTTP proxy.
+{$MEDIA_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy host.docker.internal:7880
+}
+
 # --- Landing: the static Astro site (built to ../landing/dist, mounted at /srv/landing). ---
 {$LANDING_DOMAIN} {
 	encode zstd gzip

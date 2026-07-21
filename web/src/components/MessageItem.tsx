@@ -3,9 +3,11 @@ import type { Message, ReplyPreview } from '../lib/types'
 import { useStore } from '../store'
 import { useCoarsePointer } from '../lib/useMediaQuery'
 import { Avatar } from './Avatar'
+import { UserChip } from './UserCard'
 import { Markdown } from './Markdown'
 import { AttachmentList } from './Attachments'
 import { fmtTime } from '../lib/util'
+import { useDisplayName } from '../lib/displayName'
 import { gifPreviewText } from '../lib/gif'
 import { LockIcon } from './icons'
 import { CreateTaskFromMessage } from './tasks/CreateTaskFromMessage'
@@ -84,6 +86,19 @@ function Icon({ name }: { name: 'react' | 'reply' | 'thread' | 'edit' | 'trash' 
   }
 }
 
+function QuotedAuthorName({
+  userId,
+  fallback,
+}: {
+  userId: string
+  fallback: string
+}) {
+  const name = useDisplayName(userId, fallback)
+  return (
+    <div className="text-[11px] font-semibold text-[var(--color-accent-hover)]">{name}</div>
+  )
+}
+
 // The quoted-message chip rendered above a reply's own content.
 function QuotedReply({ reply }: { reply: ReplyPreview }) {
   const decryptedText = useStore((state) => {
@@ -108,9 +123,7 @@ function QuotedReply({ reply }: { reply: ReplyPreview }) {
       className="mb-1 flex w-full items-stretch gap-2 rounded-md border-l-2 border-[var(--color-accent)] bg-black/15 px-2 py-1 text-left transition hover:bg-black/25"
     >
       <div className="min-w-0">
-        <div className="text-[11px] font-semibold text-[var(--color-accent-hover)]">
-          {reply.user.display_name}
-        </div>
+        <QuotedAuthorName userId={reply.user.id} fallback={reply.user.display_name} />
         <div className="truncate text-xs text-[var(--color-text-dim)]">
           {preview}
         </div>
@@ -141,6 +154,7 @@ export function MessageItem({
   const setActiveMessage = useStore((s) => s.setActiveMessage)
   const setPaletteFor = useStore((s) => s.setPaletteFor)
   const coarsePointer = useCoarsePointer()
+  const authorName = useDisplayName(message.user.id, message.user.display_name)
 
   // Palette open + "actioned" (keyboard/mouse target) come from the store so a
   // global shortcut handler can drive whichever message is hovered.
@@ -511,16 +525,22 @@ export function MessageItem({
             {fmtTime(message.created_at)}
           </span>
         ) : (
-          <Avatar id={message.user.id} name={message.user.display_name} size={36} online={online} />
+          <UserChip userId={message.user.id} fallbackName={message.user.display_name}>
+            <Avatar id={message.user.id} name={message.user.display_name} size={36} online={online} />
+          </UserChip>
         )}
       </div>
 
       <div className="min-w-0 flex-1">
         {!grouped && (
           <div className="flex items-baseline gap-2">
-            <span className="text-sm font-semibold text-[var(--color-text)]">
-              {message.user.display_name}
-            </span>
+            <UserChip
+              userId={message.user.id}
+              fallbackName={message.user.display_name}
+              className="text-sm font-semibold text-[var(--color-text)] hover:underline"
+            >
+              {authorName}
+            </UserChip>
             <span className="text-[11px] text-[var(--color-text-faint)]">
               {message.encrypted && (
                 <span className="mr-1 inline-flex align-[-1px]" title="End-to-end encrypted">

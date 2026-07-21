@@ -1,4 +1,5 @@
 use crate::gif;
+use crate::livekit::{self, MediaCredentials, MAX_CAMERAS, MAX_PARTICIPANTS};
 use crate::routes::gifs;
 use crate::routes::meetings::{self, LiveAttendee};
 use crate::routes::messages;
@@ -15,8 +16,6 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
-const MAX_PARTICIPANTS: usize = 8;
-const MAX_CAMERAS: usize = 4;
 const MAX_SCREENS: usize = 1;
 /// Distinct, saturated hues assigned to participants as their annotation
 /// (pen) color; readable over arbitrary shared-screen content.
@@ -353,7 +352,6 @@ pub async fn handle_voice_event(
         "voice.camera" => handle_camera(state, conn_id, &payload, tx).await,
         "voice.screen" => handle_screen(state, conn_id, &payload, tx).await,
         "voice.hand" => handle_hand(state, conn_id, &payload, tx).await,
-        "voice.signal" => handle_signal(state, user_id, conn_id, &payload, tx).await,
         "voice.poll_create" => {
             handle_poll_create(state, user_id, conn_id, display_name, guest, &payload, tx).await
         }
@@ -857,6 +855,9 @@ pub async fn cleanup_conn(state: &SharedState, user_id: Uuid, conn_id: Uuid) {
 
     for (channel_id, participant, meeting_id, room_ended, poll_ended, annotations_reset) in removed {
         debug_assert_eq!(participant.user_id, user_id);
+        if let Some(config) = state.config.livekit.as_ref() {
+            livekit::remove_participant(config, channel_id, participant.conn_id).await;
+        }
         let left_at = Utc::now();
         if let Some(meeting_id) = meeting_id {
             if let Err(error) =
@@ -916,6 +917,11 @@ pub async fn remove_member_from_room(state: &SharedState, channel_id: Uuid, user
     removed.sort_by_key(|participant| participant.conn_id);
 
     let left_at = Utc::now();
+    if let Some(config) = state.config.livekit.as_ref() {
+        for participant in &removed {
+            livekit::remove_participant(config, channel_id, participant.conn_id).await;
+        }
+    }
     if let Some(meeting_id) = meeting_id {
         for participant in &removed {
             let _ = meetings::close_live_attendee(state, meeting_id, participant.conn_id, left_at)
@@ -966,6 +972,11 @@ pub async fn close_room(state: &SharedState, channel_id: Uuid) {
     removed.sort_by_key(|participant| participant.conn_id);
 
     let left_at = Utc::now();
+    if let Some(config) = state.config.livekit.as_ref() {
+        for participant in &removed {
+            livekit::remove_participant(config, channel_id, participant.conn_id).await;
+        }
+    }
     if let Some(meeting_id) = meeting_id {
         for participant in &removed {
             let _ = meetings::close_live_attendee(state, meeting_id, participant.conn_id, left_at)
@@ -1043,6 +1054,26 @@ async fn handle_join(
         },
     }
 
+    let Some(livekit_config) = state.config.livekit.as_ref() else {
+        send_error(tx, channel_id, "media_unavailable");
+        return;
+    };
+    let media = match livekit::join_credentials(
+        livekit_config,
+        channel_id,
+        conn_id,
+        user_id,
+        display_name,
+        guest.is_some(),
+    ) {
+        Ok(media) => media,
+        Err(error) => {
+            tracing::error!("LiveKit join token generation failed: {}", error);
+            send_error(tx, channel_id, "media_unavailable");
+            return;
+        }
+    };
+
     let result = {
         let mut guard = state.voice_rooms.lock().unwrap();
         let room = guard.entry(channel_id).or_default();
@@ -1097,6 +1128,7 @@ async fn handle_join(
                 active_meeting_id,
                 poll,
                 annotations_allowed,
+                &media,
             )
             .await;
             return;
@@ -1110,6 +1142,7 @@ async fn handle_join(
                 active_meeting_id,
                 poll,
                 annotations_allowed,
+                &media,
             )
             .await;
             participant
@@ -1179,6 +1212,9 @@ async fn handle_leave(
         return;
     };
     debug_assert_eq!(participant.user_id, user_id);
+    if let Some(config) = state.config.livekit.as_ref() {
+        livekit::remove_participant(config, channel_id, conn_id).await;
+    }
     let left_at = Utc::now();
     if let Some(meeting_id) = meeting_id {
         if let Err(error) = meetings::close_live_attendee(state, meeting_id, conn_id, left_at).await
@@ -1692,6 +1728,29 @@ async fn handle_camera(state: &SharedState, conn_id: Uuid, payload: &Value, tx: 
         CameraUpdateResult::Updated(participant) => participant,
     };
 
+    if let Some(config) = state.config.livekit.as_ref() {
+        if let Err(error) = livekit::set_publish_permissions(
+            config,
+            channel_id,
+            conn_id,
+            participant.camera_on,
+            participant.screen_on,
+        )
+        .await
+        {
+            tracing::warn!("LiveKit camera permission update failed: {}", error);
+            if enabled {
+                let mut guard = state.voice_rooms.lock().unwrap();
+                if let Some(room) = guard.get_mut(&channel_id) {
+                    let _ = update_camera(room, conn_id, false);
+                }
+                send_error(tx, channel_id, "media_unavailable");
+                return;
+            }
+            send_error(tx, channel_id, "media_unavailable");
+        }
+    }
+
     broadcast_participant_updated(state, channel_id, participant).await;
 }
 
@@ -1755,6 +1814,29 @@ async fn handle_screen(state: &SharedState, conn_id: Uuid, payload: &Value, tx: 
         }
         ScreenUpdateResult::Updated(participant) => participant,
     };
+
+    if let Some(config) = state.config.livekit.as_ref() {
+        if let Err(error) = livekit::set_publish_permissions(
+            config,
+            channel_id,
+            conn_id,
+            participant.camera_on,
+            participant.screen_on,
+        )
+        .await
+        {
+            tracing::warn!("LiveKit screen permission update failed: {}", error);
+            if enabled {
+                let mut guard = state.voice_rooms.lock().unwrap();
+                if let Some(room) = guard.get_mut(&channel_id) {
+                    let _ = update_screen_with_annotations(room, conn_id, false, None);
+                }
+                send_error(tx, channel_id, "media_unavailable");
+                return;
+            }
+            send_error(tx, channel_id, "media_unavailable");
+        }
+    }
 
     broadcast_participant_updated(state, channel_id, participant).await;
     if let Some(allowed) = annotation_state_changed {
@@ -2062,58 +2144,6 @@ async fn broadcast_participant_updated(
     state.hub.broadcast(event, targets).await;
 }
 
-async fn handle_signal(
-    state: &SharedState,
-    user_id: Uuid,
-    conn_id: Uuid,
-    payload: &Value,
-    tx: &WsSender,
-) {
-    let Some(channel_id) = channel_id(payload) else {
-        return;
-    };
-    let in_room = {
-        let guard = state.voice_rooms.lock().unwrap();
-        guard
-            .get(&channel_id)
-            .is_some_and(|room| room.participants.contains_key(&conn_id))
-    };
-    if !in_room {
-        send_error(tx, channel_id, "not_in_room");
-        return;
-    }
-
-    let Some(to_user) = uuid_field(payload, "to_user") else {
-        return;
-    };
-    let Some(to_conn) = uuid_field(payload, "to_conn") else {
-        return;
-    };
-    let Some(kind) = payload.get("kind").and_then(Value::as_str) else {
-        return;
-    };
-    if !matches!(kind, "offer" | "answer" | "candidate") {
-        return;
-    }
-    let Some(data) = payload.get("data").filter(|data| data.is_object()).cloned() else {
-        return;
-    };
-
-    let event = envelope(
-        "voice.signal",
-        json!({
-            "channel_id": channel_id.to_string(),
-            "from_user": user_id.to_string(),
-            "from_conn": conn_id.to_string(),
-            "to_user": to_user.to_string(),
-            "to_conn": to_conn.to_string(),
-            "kind": kind,
-            "data": data,
-        }),
-    );
-    state.hub.broadcast(event, vec![to_user]).await;
-}
-
 enum JoinResult {
     Full,
     Existing(Vec<VoiceParticipant>, Option<Uuid>, Option<CallPoll>, bool),
@@ -2151,6 +2181,7 @@ async fn send_state(
     active_meeting_id: Option<Uuid>,
     poll: Option<CallPoll>,
     annotations_allowed: bool,
+    media: &MediaCredentials,
 ) {
     let poll = match poll {
         Some(poll) => build_call_poll(state, &poll).await.ok(),
@@ -2164,6 +2195,7 @@ async fn send_state(
             "active_meeting_id": active_meeting_id,
             "poll": poll,
             "annotations_allowed": annotations_allowed,
+            "media": media,
         }),
     );
     let _ = tx.send(Message::Text(event.to_string()));
@@ -2381,8 +2413,10 @@ mod tests {
     }
 
     #[test]
-    fn fifth_camera_is_rejected_until_slot_is_released() {
-        let mut room = room_with(&[true, true, true, true, false]);
+    fn seventeenth_camera_is_rejected_until_slot_is_released() {
+        let mut camera_states = vec![true; MAX_CAMERAS];
+        camera_states.push(false);
+        let mut room = room_with(&camera_states);
         let waiting = room
             .participants
             .values()
@@ -2421,7 +2455,9 @@ mod tests {
 
     #[test]
     fn removing_participant_releases_camera_slot() {
-        let mut room = room_with(&[true, true, true, true, false]);
+        let mut camera_states = vec![true; MAX_CAMERAS];
+        camera_states.push(false);
+        let mut room = room_with(&camera_states);
         let active = room
             .participants
             .values()

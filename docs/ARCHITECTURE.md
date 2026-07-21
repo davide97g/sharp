@@ -45,6 +45,17 @@ users(
   created_at timestamptz NOT NULL default now()
 )
 
+-- Personal nicknames: viewer-only overrides for other users' names (emoji OK).
+-- Canonical display_name is unchanged; clients resolve at render time.
+user_nicknames(
+  viewer_id uuid REFERENCES users(id) ON DELETE CASCADE,
+  target_user_id uuid REFERENCES users(id) ON DELETE CASCADE,
+  nickname text NOT NULL,                -- trim; 1–80 Unicode chars
+  updated_at timestamptz NOT NULL default now(),
+  PRIMARY KEY (viewer_id, target_user_id),
+  CHECK (viewer_id <> target_user_id)
+)
+
 channels(
   id uuid PK default gen_random_uuid(),
   name text NOT NULL,                    -- for dm: generated, not shown
@@ -148,6 +159,9 @@ ReplyPreview = { id: string, user: { id, display_name, avatar_url }, content: st
 | PATCH | `/me` | `{display_name?}` → `User` (emits `user.updated`) |
 | POST | `/me/avatar` | multipart `file` (raster image, ≤ MAX_UPLOAD_MB) → `User` (stores to `avatars/{uid}`, bumps `avatar_url?v=`, emits `user.updated`) |
 | DELETE | `/me/avatar` | → `User` (clears avatar, emits `user.updated`) |
+| GET | `/me/nicknames` | → `{nicknames: Record<userId, string>}` — personal overrides the caller has set for other users |
+| PUT | `/users/{id}/nickname` | `{nickname}` → `204` (trim; empty clears; max 80 Unicode chars; emoji OK; cannot target self) |
+| DELETE | `/users/{id}/nickname` | → `204` (clears the caller's override for that user) |
 | GET | `/users` | → `{users: User[], online_user_ids: string[]}` |
 | GET | `/users/{id}/avatar` | → image bytes (any authed user; `?v=` cache-buster) |
 | GET | `/channels` | → `{channels: Channel[]}` (public ∪ my private/dm) |
@@ -616,14 +630,17 @@ rendered as tiles in columns. One view in v1: grouped by a status single-select.
   nothing to search/backlinks. Ambient context (channel, viewer, host editability) reaches
   the block through `DocEmbedContext` provided by `DocEditorInner`.
 
-# Phase 4 — Voice + camera rooms (WebRTC mesh)
+# Phase 4 — Voice + camera rooms (LiveKit SFU)
 
-Ephemeral P2P-mesh WebRTC audio rooms with optional webcam video on channels, DMs, and
-standalone meets.
-Browsers connect directly; the server does signaling, media-state coordination, and buffering
-of member-submitted speech-recognition phrases for roast GIF suggestions and durable voice-trigger
-matching. Registered users may keep private trigger phrases, while channels/DMs share a trigger
-vocabulary. No media passes through the server and there is no SFU.
+Ephemeral WebRTC audio rooms with optional webcam video on channels, DMs, and standalone
+meets. Browsers publish one copy of each track to a self-hosted LiveKit SFU; LiveKit forwards
+only subscribed simulcast layers. The Sharp server owns admission, 25-participant / 16-camera /
+1-screen capacity, short-lived LiveKit credentials, media publish permissions, media-state
+coordination, and buffering of participant-submitted provider-transcribed phrases. Registered
+users may keep private trigger phrases, while channels/DMs share a trigger vocabulary. Media is
+encrypted in transport with WebRTC DTLS-SRTP, but is not end-to-end encrypted from the SFU.
+Opted-in transcription sends short VAD-segmented audio chunks through an authenticated Sharp
+proxy to an OpenAI-compatible transcription provider.
 
 ## Principles
 
@@ -633,10 +650,10 @@ vocabulary. No media passes through the server and there is no SFU.
 - **Ephemeral media state, durable notes**: WebRTC rooms remain in server memory. Once a
   participant opts into meeting notes, attendance, opted-in transcript phrases, generated
   notes, and action items are persisted in Postgres.
-- **P2P mesh media**: every eligible participant connects directly to every other eligible
-  participant. The server relays signaling messages only and never handles media.
-- **Capacity**: the server enforces a maximum of **8 audio participants**, **4 active
-  cameras**, and **1 screen share** per room (all server-authoritative). A rejected fifth
+- **SFU media**: every participant opens one LiveKit connection. LiveKit forwards media using
+  adaptive subscriptions, dynacast, and camera simulcast; Sharp never handles RTP packets.
+- **Capacity**: Sharp and LiveKit enforce a maximum of **25 participants**, **16 active
+  cameras**, and **1 screen share** per room (all server-authoritative). A rejected seventeenth
   camera stays connected by audio; a rejected second screen share is non-fatal.
 - **Web camera scope**: webcam video and screen sharing are supported in the browser client.
   Broadcast, recording, virtual backgrounds, mobile support, and desktop-specific camera
@@ -648,8 +665,8 @@ All ids are strings in JSON (UUIDs). A WebSocket connection id is the peer ident
 
 ```ts
 VoiceParticipant = { conn_id: string, user_id: string, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null, hand_raised: boolean, hand_raised_at: number | null, annotation_color: string, joined_at: string }
-VoiceRoomSnapshot = { channel_id: string, participants: VoiceParticipant[], active_meeting_id: string | null, annotations_allowed: boolean }
-VoiceSignalKind = 'offer'|'answer'|'candidate'
+MediaCredentials = { provider: 'livekit', server_url: string, participant_token: string, participant_identity: string }
+VoiceRoomSnapshot = { channel_id: string, participants: VoiceParticipant[], active_meeting_id: string | null, annotations_allowed: boolean, media?: MediaCredentials }
 ```
 
 ## Main-WS event additions (existing `/api/v1/ws` socket)
@@ -676,8 +693,6 @@ Client → server:
 - `voice.hand` `{channel_id, raised: boolean}` — raise or lower the participant's hand.
   Idempotent (a request that matches the current state is a no-op with no broadcast).
   Guests may send it. Unmuting via `voice.mute` also lowers a raised hand automatically.
-- `voice.signal` `{channel_id, to_user, to_conn, kind: "offer"|"answer"|"candidate", data: object}`
-  — `data` is SDP `{type,sdp}` for an offer/answer, or `RTCIceCandidateInit` for a candidate.
 - `voice.poll_create` `{room_id, question, options, multi, expires_at?}`
 - `voice.poll_vote` `{room_id, poll_id, option_ids}` — an empty option list retracts the vote.
 - `voice.poll_close` `{room_id, poll_id}` — creator only.
@@ -707,8 +722,9 @@ Server → client:
   `display_name` is filled server-side for everyone (users from the `users` table,
   guests from their token) so clients can render names without `/users` access; `guest`
   marks public voice-link joiners.
-- `voice.state` `{channel_id, participants: VoiceParticipant[], active_meeting_id, poll, annotations_allowed}` — sent only to the joining
-  connection immediately after a successful join.
+- `voice.state` `{channel_id, participants: VoiceParticipant[], active_meeting_id, poll, annotations_allowed, media}` — sent only to the joining
+  connection immediately after a successful join. `media` contains a 60-second, room-bound
+  LiveKit participant token and public SFU URL; it is never broadcast to other connections.
 - `voice.participant_joined` `{channel_id, participant: VoiceParticipant}` — broadcast to
   the room audience (see broadcast targeting below).
 - `voice.participant_left` `{channel_id, conn_id, user_id}` — broadcast to the room
@@ -722,9 +738,6 @@ Server → client:
 - `voice.trigger_fired` `{channel_id, user_id, display_name, phrase}` — broadcast to the room
   audience after a registered speaker's matched trigger successfully auto-posts a GIF. `phrase`
   is the stored trigger phrase, not the full transcription utterance.
-- `voice.signal` `{channel_id, from_user, from_conn, to_user, to_conn, kind, data}` —
-  delivered to `to_user`'s connections; receivers filter on
-  `to_conn === my conn_id`.
 - `voice.poll_state` `{room_id, poll: CallPoll|null}` — complete current call-poll state after
   create, vote, close, or expiry. `voice.state` and the `hello.voice_rooms` snapshots also carry
   the current `poll`.
@@ -739,7 +752,7 @@ Server → client:
   after they join.
 - `voice.annotate_clear` `{channel_id}` — relay of the sharer's clear-all to the room audience.
 - `voice.error`
-  `{channel_id, code: "room_full"|"camera_full"|"screen_taken"|"not_member"|"not_in_room"|"link_revoked"|"annotate_denied"}`
+  `{channel_id, code: "room_full"|"camera_full"|"screen_taken"|"media_unavailable"|"not_member"|"not_in_room"|"link_revoked"|"annotate_denied"}`
   — sent only to the offending connection. `camera_full` and `screen_taken` do not end the
   audio call. `link_revoked` is sent to a guest whose voice link no longer matches the
   channel's current token (the link was regenerated or removed).
@@ -749,7 +762,7 @@ Server → client:
 - `voice.join`: registered users may enter through channel owner/editor membership,
   standalone-call ownership, or a matching `link_token`. A registered link visitor remains
   a registered participant. Guests skip membership and instead verify the JWT's bound link
-  against the room's current token. Then check the 8-participant cap and send `voice.error`
+  against the room's current token. Then check the 25-participant cap and send `voice.error`
   with `code: "room_full"`
   to the sender only when full. Insert the participant with `muted=false, camera_on=false`
   and its resolved `display_name`/`guest`, reply with `voice.state` on the sender's tx only,
@@ -762,7 +775,7 @@ Server → client:
   targets the **union** of the channel's member ids and the user-ids currently in the room's
   participant map (computed at broadcast time; `participant_left` additionally includes the
   just-removed user's id). This is required so guests — who are not channel members — receive
-  participant events. `voice.signal` targets an explicit `to_user` and is unchanged.
+  participant events.
 - `voice.leave`: remove the sender's conn from the room, drop the room when empty, and
   broadcast `voice.participant_left`.
 - `voice.mute`: update the participant's flag and broadcast `voice.participant_updated`. When
@@ -799,15 +812,14 @@ Server → client:
   Standalone rooms have no channel messages, so personal matches there abort silently.
 - `voice.camera`: require an active room participant; atomically reserve/release a camera
   slot and broadcast the complete participant state. Enabling is rejected with `camera_full`
-  when four slots are already reserved. Repeated requests are idempotent.
+  when 16 slots are already reserved. After reservation, Sharp updates the participant's
+  LiveKit publish permissions. A permission-update failure rolls back an enable and returns
+  `media_unavailable`. Repeated requests are idempotent.
 - `voice.screen`: require an active room participant; atomically reserve/release the single
   screen-share slot and broadcast the complete participant state. On enable, store
   `screen_stream_id` from the request's `stream_id`; on disable, clear it to `null`. Enabling
   is rejected with `screen_taken` when another participant already holds the slot. Repeated
   requests are idempotent (state unchanged → re-broadcast current state).
-- `voice.signal`: the sender must be a participant of `channel_id`; otherwise send
-  `voice.error` with `code: "not_in_room"`. Relay with
-  `hub.broadcast(envelope, vec![to_user])`, adding `from_user` and `from_conn`.
 - Screen-share annotations: each participant is assigned an `annotation_color` at join —
   a hue from a fixed 12-color palette, preferring one unused by current room participants,
   otherwise derived from the conn_id bytes (no rand dependency). `voice.annotate_allow`
@@ -827,29 +839,21 @@ Server → client:
   conns from the room (all conns for channel delete), with `voice.participant_left`
   broadcasts.
 
-## Mesh topology and signaling
+## SFU topology and media lifecycle
 
-- Peer identity is the WS connection id (`conn_id`, a UUID string). A user may have
-  multiple connections, and each is a distinct mesh peer. The main WS `hello` event tells
-  the client its own `conn_id`.
-- The lexicographically smaller `conn_id` creates the initial offer. Peers then use WebRTC
-  perfect negotiation for camera track addition/removal; the larger `conn_id` is the polite
-  peer, making simultaneous toggles deterministic and glare-safe.
-- A client never creates a peer connection to a conn whose `user_id` equals its own, which
-  prevents self-echo across the user's devices and tabs.
-- ICE candidates are trickled through `voice.signal` as they become available.
-- Camera capture uses ideal 640×360 at 20 fps (24 fps maximum), with an approximate
-  500 kbps outgoing-sender cap to constrain mesh upload cost. When a background effect
-  (blur/wallpaper) is active the camera is retuned to ideal 1280×720 at 24 fps (30 fps
-  maximum) and the sender cap rises to ~1.2 Mbps — the composited frame (sharp person
-  edge over a detailed backdrop) needs the extra resolution and bits to avoid smearing.
-  Toggling the effect mid-call retunes the live track via `applyConstraints` and
-  reapplies the matching cap.
-- Screen-share tracks are published under a **separate `MediaStream`** (distinct from the
-  camera/mic stream) whose id the sharer advertises out-of-band as `screen_stream_id` in the
-  `voice.screen` message. Receivers classify each inbound track by comparing
-  `event.streams[0].id` against the participant's advertised `screen_stream_id`, so a
-  simultaneous camera + screen sharer's two video tracks route to the correct surface.
+- LiveKit identity equals the Sharp WS connection id (`conn_id`). Multiple tabs/devices remain
+  distinct participants and receive separate room-scoped tokens.
+- `voice.join` first performs Sharp authorization/capacity checks, then returns short-lived
+  LiveKit credentials in the private `voice.state`. Tokens allow room join, subscribe, and
+  microphone publish only. Camera/screen publish permission is granted after Sharp reserves
+  that slot, preventing clients from bypassing server caps.
+- Client uses one `livekit-client` `Room` with adaptive stream, dynacast, and 720p camera
+  simulcast layers (180p/360p/720p). Screen share uses its own LiveKit source with a 2.5 Mbps
+  ceiling. LiveKit track source metadata routes microphone, camera, screen video, and screen
+  audio; no application SDP/ICE signaling exists.
+- Reconnecting media keeps the call overlay alive and shows connection state. An unrecoverable
+  disconnect leaves Sharp's room; normal leave and server eviction also remove the LiveKit
+  participant best-effort.
 
 ## Web camera UI and lifecycle
 
@@ -866,12 +870,16 @@ Server → client:
 - Camera stays active while the voice session is open across channel / docs / canvas
   navigation. Leaving the call, logout, page unload, or WebSocket reconnection stops local
   tracks. Permission/device failure releases the reserved slot and leaves audio connected.
+- Live transcription does not use the browser Web Speech API. A separate selected/default mic
+  capture uses hand-rolled RMS VAD, records 300 ms–15 s Opus WebM segments (MP4 fallback), and
+  serially posts them to the server proxy. Mute pauses this capture; leaving releases it fully.
 
 ## REST API addition — base `/api/v1`
 
 | Method | Path | Body → Response |
 |---|---|---|
-| GET | `/voice/config` | (any valid token — **user OR guest**) → `{"ice_servers": [{"urls": ["stun:..."]}, {"urls": ["turn:..."], "username": "...", "credential": "..."}]}`; the TURN entry is present only when configured. This is the only endpoint guests may use successfully; trigger-management endpoints return 403 to guests and other REST endpoints reject guest tokens with 401. |
+| GET | `/voice/config` | (any valid token — **user OR guest**) → `{"provider":"livekit","available":true,"server_url":"wss://media.example.com","transcription":true}`. `available=false` and no URL when LiveKit is unconfigured; `transcription` is true iff a transcription API key resolved. Participant tokens are returned only by private `voice.state`, never this endpoint. |
+| POST | `/voice/transcriptions` | (any valid token — **user OR room-bound guest**) raw encoded audio body with its MediaRecorder `Content-Type` (`audio/webm;codecs=opus` or `audio/mp4`), max 6 MiB → `{"text": string}`. The server wraps it as OpenAI-compatible multipart (`file`, `model`, `response_format=json`) and never exposes the provider key; `501 not_configured` when disabled. |
 | GET | `/voice/triggers` | (registered user only; guest → 403) → `{triggers: VoiceTrigger[]}` containing only the caller's private personal triggers. |
 | POST | `/voice/triggers` | (registered user only; guest → 403) `{phrase}` → `201 VoiceTrigger`; normalizes lowercase/trim/single spaces, requires 2..=80 normalized characters, duplicate → 409. |
 | DELETE | `/voice/triggers/{id}` | (registered user only; guest → 403) → `204` for the caller's personal trigger; 404 when absent or owned by someone else. |
@@ -901,13 +909,13 @@ receives a limited guest JWT bound to that room — no chat, no other REST.
   `link` (the token used to join). User tokens omit `guest` (defaults to `false` on decode),
   so existing tokens keep working.
 - **Guest restrictions**: most REST endpoints use `AuthUser`, which rejects tokens with
-  `guest: true` (401). `/voice/config` and voice-trigger management use `VoiceConfigAuth` to
-  distinguish both token kinds; config succeeds for guests while trigger management returns
-  403. On the main WS, a guest may only send `ping`
+  `guest: true` (401). `/voice/config`, `/voice/transcriptions`, and voice-trigger management use
+  `VoiceConfigAuth` to distinguish both token kinds; config/transcription succeed for guests
+  while trigger management returns 403. On the main WS, a guest may only send `ping`
   plus `voice.join`, `voice.leave`, `voice.mute`, `voice.camera`, `voice.screen`,
-  `voice.hand`, and `voice.signal`, and only when the event's `channel_id` matches its bound
-  channel. Member-only
-  `voice.transcribe` and `voice.phrase`, plus all other events, are silently dropped. Guest
+  `voice.hand`, `voice.transcribe`, and `voice.phrase`, and only when the event's
+  `channel_id` matches its bound channel. Remaining guest permissions are enforced by the
+  voice handlers. Guest
   connect/disconnect does **not** emit presence.
 - **Revocation at join**: `voice.join` re-checks the guest token's `link` against the
   channel's current `voice_link_token`. If an owner/editor has regenerated (or the link was removed),
@@ -916,9 +924,15 @@ receives a limited guest JWT bound to that room — no chat, no other REST.
 
 ## Server configuration
 
-- `STUN_URLS` — optional, comma-separated; default `stun:stun.l.google.com:19302`
-- `TURN_URL`, `TURN_USERNAME`, `TURN_PASSWORD` — optional; TURN is offered only when all
-  three are set
+- `LIVEKIT_URL`, `LIVEKIT_INTERNAL_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` — optional
+  as a group; calls are disabled when all are absent and startup fails when only some are set.
+  `LIVEKIT_URL` is browser-facing (`wss://media.example.com`); `LIVEKIT_INTERNAL_URL` is the
+  server-to-LiveKit HTTP API. API credentials never reach the browser.
+- `TRANSCRIBE_API_KEY` — optional; falls back to `AI_API_KEY`. Transcription is disabled when
+  neither key resolves.
+- `TRANSCRIBE_BASE_URL` — optional OpenAI-compatible base; falls back to `AI_BASE_URL`, then
+  `https://api.openai.com/v1`.
+- `TRANSCRIBE_MODEL` — optional; default `gpt-4o-mini-transcribe` (no chat-model fallback).
 
 ## Multi-replica behavior
 
@@ -946,7 +960,7 @@ the supported video target; Tauri camera behavior and Linux/Windows WebViews are
 doc/sync/permission foundation — see the Phase 3 section above) → ~~Phase 3.5 boards~~
 (shipped: Notion-style kanban as a third doc kind — see the Phase 3.5 section above) →
 ~~Phase 4 voice~~ (shipped:
-WebRTC mesh — see the Phase 4 section) → ~~Phase 5 calendar~~ (shipped: Google Calendar pull
+LiveKit SFU — see the Phase 4 section) → ~~Phase 5 calendar~~ (shipped: Google Calendar pull
 sync + native scheduled meetings — see the Phase 5 section below) → multi-workspace. Chat
 stays append-only. (File uploads + notifications: see the section below.)
 
@@ -1053,6 +1067,7 @@ attachments as blobs with the `Authorization` header.
 Triggers, computed on message create:
 - **dm** — any message in a `dm` channel notifies the other member(s).
 - **mention** — `@Display Name` matching a channel member (longest match wins) notifies them.
+  Also matches personal nicknames the **author** has set for those members (`user_nicknames`).
   `@all` (word-boundary match, case-insensitive) notifies every other channel member with
   kind `mention`; not applicable in DMs. The composer suggests `@all` in the `@` picker
   after matching people (hidden in DMs).

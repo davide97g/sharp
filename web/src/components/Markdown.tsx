@@ -374,15 +374,19 @@ export function Markdown({
   highlight?: string
 }) {
   const users = useStore((s) => s.users)
-  // Known display names, longest-first, for greedy multi-word mention matching.
-  const names = useMemo(
-    () =>
-      Object.values(users)
-        .map((u) => u.display_name)
-        .filter(Boolean)
-        .sort((a, b) => b.length - a.length),
-    [users],
-  )
+  const nicknames = useStore((s) => s.nicknames)
+  // Known display names + personal nicknames, longest-first, for greedy
+  // multi-word mention matching (mirrors server mention detection).
+  const names = useMemo(() => {
+    const set = new Set<string>()
+    for (const u of Object.values(users)) {
+      if (u.display_name) set.add(u.display_name)
+    }
+    for (const nick of Object.values(nicknames)) {
+      if (nick.trim()) set.add(nick.trim())
+    }
+    return [...set].sort((a, b) => b.length - a.length)
+  }, [users, nicknames])
   const projects = useStore((s) => s.projects)
   const projectKeys = useMemo(() => new Set(projects.map((p) => p.key)), [projects])
   const re = useMemo(() => buildHighlightRe(highlight), [highlight])

@@ -3,8 +3,9 @@
 //!
 //! Triggers (per the product contract):
 //!   - `dm`      — any message in a DM channel notifies the other member(s)
-//!   - `mention` — `@Display Name` matching a channel member notifies them;
-//!     `@all` notifies every other channel member
+//!   - `mention` — `@Display Name` (or the author's personal nickname for that
+//!     member) matching a channel member notifies them; `@all` notifies every
+//!     other channel member
 //!   - `reply`   — a thread reply notifies the parent message's author
 //!
 //! Muted channels produce no notification at all. Do-Not-Disturb keeps the inbox
@@ -23,12 +24,16 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 const NOTIFICATION_SELECT: &str = "
-    SELECT n.id, n.kind, n.actor_id, a.display_name AS actor_name, a.avatar_url AS actor_avatar,
+    SELECT n.id, n.kind, n.actor_id,
+        COALESCE(nn.nickname, a.display_name) AS actor_name,
+        a.avatar_url AS actor_avatar,
         n.channel_id, c.kind AS channel_kind, c.name AS channel_name,
         n.message_id, n.preview, n.created_at, n.read_at,
         n.task_id, (tp.key || '-' || t.number) AS task_identifier
     FROM notifications n
     JOIN users a ON a.id = n.actor_id
+    LEFT JOIN user_nicknames nn
+        ON nn.viewer_id = n.user_id AND nn.target_user_id = n.actor_id
     LEFT JOIN channels c ON c.id = n.channel_id
     LEFT JOIN tasks t ON t.id = n.task_id
     LEFT JOIN projects tp ON tp.id = t.project_id
@@ -302,8 +307,9 @@ fn contains_all_mention(content: &str) -> bool {
     false
 }
 
-/// Channel members mentioned by `@Display Name` in `content`, excluding `author`.
-/// Longest display name wins so "@Ann Marie" beats "@Ann".
+/// Channel members mentioned by `@Display Name` (or the author's personal
+/// nickname for that member) in `content`, excluding `author`.
+/// Longest name wins so "@Ann Marie" beats "@Ann".
 async fn mentioned_ids(
     pool: &PgPool,
     channel_id: Uuid,
@@ -314,8 +320,11 @@ async fn mentioned_ids(
         return Ok(Vec::new());
     }
     let rows = sqlx::query(
-        "SELECT cm.user_id, u.display_name
-         FROM channel_members cm JOIN users u ON u.id = cm.user_id
+        "SELECT cm.user_id, u.display_name, nn.nickname
+         FROM channel_members cm
+         JOIN users u ON u.id = cm.user_id
+         LEFT JOIN user_nicknames nn
+           ON nn.viewer_id = $2 AND nn.target_user_id = cm.user_id
          WHERE cm.channel_id = $1 AND cm.user_id <> $2",
     )
     .bind(channel_id)
@@ -323,12 +332,23 @@ async fn mentioned_ids(
     .fetch_all(pool)
     .await?;
 
-    let mut members: Vec<(Uuid, String)> = Vec::with_capacity(rows.len());
+    // One entry per alias (canonical display_name + author's nickname).
+    let mut members: Vec<(Uuid, String)> = Vec::with_capacity(rows.len() * 2);
     for row in &rows {
         let id: Uuid = row.try_get("user_id")?;
         let name: String = row.try_get("display_name")?;
         if !name.trim().is_empty() {
             members.push((id, name.to_lowercase()));
+        }
+        let nickname: Option<String> = row.try_get("nickname")?;
+        if let Some(nick) = nickname {
+            let nick = nick.trim();
+            if !nick.is_empty() {
+                let lower = nick.to_lowercase();
+                if !members.iter().any(|(uid, n)| *uid == id && *n == lower) {
+                    members.push((id, lower));
+                }
+            }
         }
     }
     // Longest first for greedy longest-match.

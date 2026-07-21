@@ -8,6 +8,16 @@
 # App: http://localhost:3000
 
 services:
+  livekit:
+    image: livekit/livekit-server:v1.13.1
+    restart: unless-stopped
+    command: --dev --bind 0.0.0.0
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "3478:3478/udp"
+      - "50000-50100:50000-50100/udp"
+
   postgres:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
@@ -57,6 +67,10 @@ services:
       DATABASE_URL: postgres://sharp:sharp@postgres:5432/sharp
       REDIS_URL: redis://redis:6379
       JWT_SECRET: local-dev-secret
+      LIVEKIT_URL: ws://localhost:7880
+      LIVEKIT_INTERNAL_URL: http://livekit:7880
+      LIVEKIT_API_KEY: devkey
+      LIVEKIT_API_SECRET: secret
       SHARP_DISABLE_SIGNUP: "false"
       WEBAUTHN_RP_ID: "localhost"
       WEBAUTHN_ORIGINS: "http://localhost:5173,http://localhost:3000"
@@ -73,6 +87,10 @@ services:
       AI_BASE_URL: ${AI_BASE_URL:-https://api.openai.com/v1}
       AI_CHAT_MODEL: ${AI_CHAT_MODEL:-gpt-4o-mini}
       AI_EMBED_MODEL: ${AI_EMBED_MODEL:-text-embedding-3-small}
+      # Optional separate live-transcription provider; each setting falls back to AI_*.
+      # TRANSCRIBE_API_KEY: ${TRANSCRIBE_API_KEY:-}
+      # TRANSCRIBE_BASE_URL: ${TRANSCRIBE_BASE_URL:-https://api.openai.com/v1}
+      # TRANSCRIBE_MODEL: ${TRANSCRIBE_MODEL:-gpt-4o-mini-transcribe}
       # Google Calendar (Phase 5) — optional. Set to a Google OAuth client with
       # redirect http://localhost:3000/api/v1/calendar/google/callback to test sync.
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
@@ -83,6 +101,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      livekit:
+        condition: service_started
 
 volumes:
   pg_local_data:

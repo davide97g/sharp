@@ -64,6 +64,7 @@ function messageSnippet(result: SearchResult, query: string): string {
 
 export function SearchPalette() {
   const open = useStore((s) => s.searchOpen)
+  const nicknames = useStore((s) => s.nicknames)
   const setOpen = useStore((s) => s.setSearchOpen)
   const setFocus = useStore((s) => s.setFocus)
   const channels = useStore((s) => s.channels)
@@ -93,7 +94,7 @@ export function SearchPalette() {
         return {
           type: 'channel',
           id: c.id,
-          label: c.kind === 'dm' ? channelLabel(c) : `#${c.name}`,
+          label: c.kind === 'dm' ? channelLabel(c, nicknames) : `#${c.name}`,
           isDm: c.kind === 'dm',
         }
       return { type: 'channel', id: chan[1], label: 'this chat', isDm: false }
@@ -163,7 +164,7 @@ export function SearchPalette() {
           setLocalMsgs(
             rows.map((row) => {
               const channel = channels.find((item) => item.id === row.channelId)
-              return localSearchResult(row, channel ? channelLabel(channel) : 'Direct message')
+              return localSearchResult(row, channel ? channelLabel(channel, nicknames) : 'Direct message')
             }),
           )
         }),
@@ -246,7 +247,7 @@ export function SearchPalette() {
   function locationLabel(row: Row): string {
     if (row.kind === 'message') {
       const ch = channels.find((c) => c.id === row.data.channel_id)
-      if (ch?.kind === 'dm') return `DM · ${channelLabel(ch)}`
+      if (ch?.kind === 'dm') return `DM · ${channelLabel(ch, nicknames)}`
       return `#${row.data.channel_name}`
     }
     const tag =

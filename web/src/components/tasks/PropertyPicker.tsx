@@ -211,18 +211,22 @@ export function AssigneePicker({
   onPick: (userId: string | null) => void
 }) {
   const users = useStore((s) => s.users)
+  const nicknames = useStore((s) => s.nicknames)
   const [open, setOpen] = useState(false)
   const current = assigneeId ? users[assigneeId] : null
+  const currentLabel = current
+    ? nicknames[current.id]?.trim() || current.display_name
+    : null
   const UNASSIGNED = '__none__'
   return (
     <PickerShell
       open={open}
       setOpen={setOpen}
       trigger={
-        current ? (
+        current && currentLabel ? (
           <>
             <Avatar id={current.id} name={current.display_name} size={16} />
-            <span>{current.display_name}</span>
+            <span>{currentLabel}</span>
           </>
         ) : (
           <>
@@ -240,10 +244,14 @@ export function AssigneePicker({
         items={[
           { id: UNASSIGNED, label: 'Unassigned', selected: !assigneeId },
           ...Object.values(users)
-            .sort((a, b) => a.display_name.localeCompare(b.display_name))
             .map((u) => ({
+              u,
+              label: nicknames[u.id]?.trim() || u.display_name,
+            }))
+            .sort((a, b) => a.label.localeCompare(b.label))
+            .map(({ u, label }) => ({
               id: u.id,
-              label: u.display_name,
+              label,
               icon: <Avatar id={u.id} name={u.display_name} size={16} />,
               selected: u.id === assigneeId,
             })),

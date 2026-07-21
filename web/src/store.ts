@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { api, ApiRequestError, clearToken, setSessionToken, setToken } from './lib/api'
-import { VoiceClient } from './lib/voice'
+import type { VoiceClient } from './lib/voice'
 import { annotations } from './lib/annotations'
 import {
   loadVideoBackground,
@@ -12,7 +12,7 @@ import {
   saveVoiceAudioDevice,
   saveVoiceVideoDevice,
 } from './lib/voicePrefs'
-import { isSpeechSupported, PhraseRecognizer } from './lib/speech'
+import { isTranscriptionSupported, PhraseRecognizer } from './lib/speech'
 import { WsClient } from './lib/ws'
 import { cmpId } from './lib/util'
 import { gifPreviewText } from './lib/gif'
@@ -90,7 +90,6 @@ import type {
   VoiceParticipantLeftPayload,
   VoiceParticipantUpdatedPayload,
   VoiceRoomSnapshot,
-  VoiceSignalPayload,
   VoiceStatePayload,
   VoiceTrigger,
   VoiceTriggerCreatedPayload,
@@ -170,13 +169,14 @@ export type VoiceStageMode = 'expanded' | 'compact' | 'mini' | 'full'
 
 type VoiceState = {
   channelId: string | null
-  status: 'idle' | 'connecting' | 'connected'
+  status: 'idle' | 'connecting' | 'connected' | 'reconnecting'
   muted: boolean
   noiseSuppression: boolean
   noiseSuppressionAvailable: boolean
   videoBackground: VideoBackground
   handRaised: boolean
   transcribing: boolean
+  transcriptionAvailable: boolean
   roastArmed: boolean
   speaking: Record<string, boolean>
   cameraStatus: 'off' | 'starting' | 'on'
@@ -218,6 +218,8 @@ type State = {
 
   // directory
   users: Record<string, User>
+  // Personal nicknames the signed-in user has set for others (targetId → nickname).
+  nicknames: Record<string, string>
   online: Set<string>
   myConnId: string | null
 
@@ -342,6 +344,8 @@ type State = {
   rejoinGuestCall: () => void
   logout: () => void
   refetchDirectory: () => Promise<void>
+  setNickname: (userId: string, nickname: string) => Promise<void>
+  clearNickname: (userId: string) => Promise<void>
   refreshGifConfig: () => Promise<void>
   resetDuckActivity: (channelId: string) => void
   refreshDmEncryption: (userId?: string) => Promise<void>
@@ -450,6 +454,7 @@ type State = {
     channelId: string,
     opts?: { stageMode?: VoiceStageMode; linkToken?: string },
   ) => Promise<void>
+  connectVoiceMedia: (payload: VoiceStatePayload) => Promise<void>
   leaveVoice: () => void
   toggleVoiceMute: () => void
   toggleNoiseSuppression: () => Promise<void>
@@ -588,6 +593,7 @@ function emptyVoiceState(): VoiceState {
     videoBackground,
     handRaised: false,
     transcribing: false,
+    transcriptionAvailable: false,
     roastArmed: false,
     speaking: {},
     cameraStatus: 'off',
@@ -614,6 +620,7 @@ export const useStore = create<State>((set, get) => ({
   guestRevoked: false,
   guestPendingJoin: false,
   users: {},
+  nicknames: {},
   online: new Set(),
   myConnId: null,
   channels: [],
@@ -820,6 +827,7 @@ export const useStore = create<State>((set, get) => ({
       guestRevoked: false,
       guestPendingJoin: false,
       users: {},
+      nicknames: {},
       online: new Set(),
       myConnId: null,
       channels: [],
@@ -1708,6 +1716,7 @@ export const useStore = create<State>((set, get) => ({
         videoBackground,
         handRaised: false,
         transcribing: false,
+        transcriptionAvailable: false,
         roastArmed: false,
         speaking: {},
         cameraStatus: 'off',
@@ -1724,127 +1733,197 @@ export const useStore = create<State>((set, get) => ({
         annotating: false,
       },
     })
-    // Fresh annotation engine for this call; wire outgoing batches to the ws.
     annotations.reset()
     annotations.setSend(
       (payload) => get().ws?.send('voice.annotate', { channel_id: channelId, ...payload }),
       myConnId,
     )
 
-    let client: VoiceClient | null = null
     try {
       const config = await api.voice.config()
       const pending = get().voice
-      if (
-        pending.channelId !== channelId ||
-        pending.status !== 'connecting' ||
-        pending.client
-      ) {
+      if (pending.channelId !== channelId || pending.status !== 'connecting' || pending.client) {
         return
       }
-
-      client = new VoiceClient({
-        channelId,
-        myConnId,
-        myUserId: me.id,
-        iceServers: config.ice_servers,
-        noiseSuppression: get().voice.noiseSuppression,
-        videoBackground: get().voice.videoBackground,
-        audioDeviceId: devicePrefs.audioDeviceId,
-        videoDeviceId: devicePrefs.videoDeviceId,
-        send: (type, payload) => get().ws!.send(type, payload),
-        onSpeaking: (connId, speaking) => {
-          set((s) => {
-            if (s.voice.client !== client) return {}
-            return {
-              voice: {
-                ...s.voice,
-                speaking: { ...s.voice.speaking, [connId]: speaking },
-              },
-            }
-          })
-        },
-        onLocalStream: (stream) => {
-          set((s) => {
-            const activeClient = s.voice.client
-            if (!activeClient || activeClient !== client) return {}
-            return {
-              voice: {
-                ...s.voice,
-                localStream: stream,
-                cameraStatus: stream ? 'on' : 'off',
-                videoDeviceId: activeClient.getVideoDeviceId() ?? s.voice.videoDeviceId,
-              },
-            }
-          })
-        },
-        onRemoteStream: (connId, stream) => {
-          set((s) => {
-            if (s.voice.client !== client) return {}
-            const remoteStreams = { ...s.voice.remoteStreams }
-            if (stream?.getVideoTracks().length) remoteStreams[connId] = stream
-            else delete remoteStreams[connId]
-            return { voice: { ...s.voice, remoteStreams } }
-          })
-        },
-        onLocalScreen: (stream) => {
-          set((s) => {
-            if (s.voice.client !== client) return {}
-            return {
-              voice: {
-                ...s.voice,
-                localScreenStream: stream,
-                screenStatus: stream ? 'on' : 'off',
-              },
-            }
-          })
-        },
-        onRemoteScreen: (connId, stream) => {
-          set((s) => {
-            if (s.voice.client !== client) return {}
-            const remoteScreenStreams = { ...s.voice.remoteScreenStreams }
-            if (stream?.getVideoTracks().length) remoteScreenStreams[connId] = stream
-            else delete remoteScreenStreams[connId]
-            return { voice: { ...s.voice, remoteScreenStreams } }
-          })
-        },
-        onNoiseSuppression: (available) => {
-          set((s) => {
-            if (s.voice.client !== client) return {}
-            return { voice: { ...s.voice, noiseSuppressionAvailable: available } }
-          })
-        },
-      })
-      set((s) => ({ voice: { ...s.voice, client } }))
-
-      await client.start()
-      const active = get().voice
-      const startedClient = active.client
-      if (active.channelId !== channelId || !startedClient || startedClient !== client) {
-        client.stop()
-        return
-      }
-      set((s) => ({
-        voice: {
-          ...s.voice,
-          audioDeviceId: startedClient.getAudioDeviceId(),
-        },
+      if (!config.available) throw new Error('Video calls are not configured on this server.')
+      set((state) => ({
+        voice: { ...state.voice, transcriptionAvailable: config.transcription },
       }))
-      get().ws?.send('voice.join', {
+      ws.send('voice.join', {
         channel_id: channelId,
         ...(opts?.linkToken ? { link_token: opts.linkToken } : {}),
       })
-    } catch (e) {
-      client?.stop()
-      const active = get().voice
-      if (
-        active.channelId === channelId &&
-        (client === null ? active.client === null : active.client === client)
-      ) {
+    } catch (error) {
+      if (get().voice.channelId === channelId) {
+        annotations.reset()
+        annotations.setSend(null, null)
         set({ voice: emptyVoiceState(), callPoll: null })
       }
-      if (e instanceof Error) toastError(e.message)
-      else toastError('Could not join the voice room.')
+      toastError(error instanceof Error ? error.message : 'Could not join the voice room.')
+    }
+  },
+
+  async connectVoiceMedia(payload) {
+    const media = payload.media
+    const current = get()
+    const { me, myConnId } = current
+    if (
+      !media ||
+      !me ||
+      !myConnId ||
+      media.participant_identity !== myConnId ||
+      current.voice.channelId !== payload.channel_id ||
+      current.voice.status !== 'connecting' ||
+      current.voice.client
+    ) {
+      return
+    }
+
+    let VoiceClientImpl: typeof import('./lib/voice').VoiceClient
+    try {
+      const voiceModule = await import('./lib/voice')
+      VoiceClientImpl = voiceModule.VoiceClient
+    } catch {
+      if (get().voice.channelId === payload.channel_id && !get().voice.client) {
+        get().ws?.send('voice.leave', { channel_id: payload.channel_id })
+        annotations.reset()
+        annotations.setSend(null, null)
+        set({ voice: emptyVoiceState(), callPoll: null })
+        toastError('Could not load call media.')
+      }
+      return
+    }
+    const latest = get()
+    if (
+      latest.voice.channelId !== payload.channel_id ||
+      latest.voice.status !== 'connecting' ||
+      latest.voice.client
+    ) {
+      return
+    }
+
+    let client: VoiceClient | null = null
+    client = new VoiceClientImpl({
+      channelId: payload.channel_id,
+      myConnId,
+      serverUrl: media.server_url,
+      participantToken: media.participant_token,
+      noiseSuppression: current.voice.noiseSuppression,
+      videoBackground: current.voice.videoBackground,
+      audioDeviceId: current.voice.audioDeviceId,
+      videoDeviceId: current.voice.videoDeviceId,
+      send: (type, eventPayload) => get().ws?.send(type, eventPayload),
+      onSpeaking: (connId, speaking) => {
+        set((state) => {
+          if (state.voice.client !== client) return {}
+          return {
+            voice: {
+              ...state.voice,
+              speaking: { ...state.voice.speaking, [connId]: speaking },
+            },
+          }
+        })
+      },
+      onLocalStream: (stream) => {
+        set((state) => {
+          const activeClient = state.voice.client
+          if (!activeClient || activeClient !== client) return {}
+          return {
+            voice: {
+              ...state.voice,
+              localStream: stream,
+              cameraStatus: stream ? 'on' : 'off',
+              videoDeviceId: activeClient.getVideoDeviceId() ?? state.voice.videoDeviceId,
+            },
+          }
+        })
+      },
+      onRemoteStream: (connId, stream) => {
+        set((state) => {
+          if (state.voice.client !== client) return {}
+          const remoteStreams = { ...state.voice.remoteStreams }
+          if (stream?.getVideoTracks().length) remoteStreams[connId] = stream
+          else delete remoteStreams[connId]
+          return { voice: { ...state.voice, remoteStreams } }
+        })
+      },
+      onLocalScreen: (stream) => {
+        set((state) => {
+          if (state.voice.client !== client) return {}
+          return {
+            voice: {
+              ...state.voice,
+              localScreenStream: stream,
+              screenStatus: stream ? 'on' : 'off',
+            },
+          }
+        })
+      },
+      onRemoteScreen: (connId, stream) => {
+        set((state) => {
+          if (state.voice.client !== client) return {}
+          const remoteScreenStreams = { ...state.voice.remoteScreenStreams }
+          if (stream?.getVideoTracks().length) remoteScreenStreams[connId] = stream
+          else delete remoteScreenStreams[connId]
+          return { voice: { ...state.voice, remoteScreenStreams } }
+        })
+      },
+      onNoiseSuppression: (available) => {
+        set((state) => {
+          if (state.voice.client !== client) return {}
+          return { voice: { ...state.voice, noiseSuppressionAvailable: available } }
+        })
+      },
+      onConnectionState: (connectionState) => {
+        if (get().voice.client !== client) return
+        if (connectionState === 'disconnected') {
+          get().ws?.send('voice.leave', { channel_id: payload.channel_id })
+          client?.stop()
+          annotations.reset()
+          annotations.setSend(null, null)
+          set({ voice: emptyVoiceState(), callPoll: null })
+          toastError('Call media disconnected. Rejoin the call to continue.')
+          return
+        }
+        set((state) => ({
+          voice: {
+            ...state.voice,
+            status: connectionState,
+          },
+        }))
+      },
+    })
+    set((state) => ({ voice: { ...state.voice, client } }))
+
+    try {
+      await client.start()
+      const active = get().voice
+      if (active.channelId !== payload.channel_id || active.client !== client) {
+        client.stop()
+        return
+      }
+      set((state) => ({
+        voice: {
+          ...state.voice,
+          status: 'connected',
+          audioDeviceId: client?.getAudioDeviceId() ?? state.voice.audioDeviceId,
+        },
+      }))
+      client.syncPeers(payload.participants)
+      playVoiceJoinSound()
+    } catch (error) {
+      client.stop()
+      if (get().voice.client === client) {
+        get().ws?.send('voice.leave', { channel_id: payload.channel_id })
+        annotations.reset()
+        annotations.setSend(null, null)
+        set({ voice: emptyVoiceState(), callPoll: null })
+        toastError(
+          error instanceof Error && error.message
+            ? error.message
+            : 'Could not connect to call media.',
+        )
+      }
     }
   },
 
@@ -1926,7 +2005,12 @@ export const useStore = create<State>((set, get) => ({
 
   toggleTranscription() {
     const { voice, ws } = get()
-    if (!isSpeechSupported() || !voice.channelId || voice.status !== 'connected') {
+    if (
+      !voice.transcriptionAvailable ||
+      !isTranscriptionSupported() ||
+      !voice.channelId ||
+      voice.status !== 'connected'
+    ) {
       return
     }
 
@@ -1940,19 +2024,24 @@ export const useStore = create<State>((set, get) => ({
 
     stopVoiceRecognizer()
     const recognizer = new PhraseRecognizer({
+      deviceId: voice.audioDeviceId,
       onPhrase: (text) => {
         const current = get()
         if (!current.voice.transcribing || current.voice.channelId !== channelId) return
         current.ws?.send('voice.phrase', { channel_id: channelId, text })
       },
-      onError: () => {
+      onError: (error) => {
         if (voiceRecognizer !== recognizer) return
         voiceRecognizer = null
         const current = get()
         if (!current.voice.transcribing || current.voice.channelId !== channelId) return
         set((s) => ({ voice: { ...s.voice, transcribing: false } }))
         current.ws?.send('voice.transcribe', { channel_id: channelId, enabled: false })
-        toastError('Speech recognition permission was denied.')
+        toastError(
+          error === 'not-allowed'
+            ? 'Microphone permission was denied for live transcription.'
+            : 'Live transcription service is unavailable.',
+        )
       },
     })
     voiceRecognizer = recognizer
@@ -2312,7 +2401,11 @@ export const useStore = create<State>((set, get) => ({
 
   async loadInboxAndPrefs() {
     try {
-      const [inbox, prefs] = await Promise.all([api.notifications(), api.prefs()])
+      const [inbox, prefs, nickRes] = await Promise.all([
+        api.notifications(),
+        api.prefs(),
+        api.nicknames(),
+      ])
       set({
         notifications: inbox.notifications,
         notifUnread: inbox.unread_count,
@@ -2320,9 +2413,45 @@ export const useStore = create<State>((set, get) => ({
         dnd: prefs.dnd,
         mutedChannels: new Set(prefs.muted_channel_ids),
         chatLayout: prefs.chat_layout,
+        nicknames: nickRes.nicknames ?? {},
       })
     } catch (e) {
       if (e instanceof Error) toastError(e.message)
+    }
+  },
+
+  async setNickname(userId, nickname) {
+    const trimmed = nickname.trim()
+    if (!trimmed) {
+      await get().clearNickname(userId)
+      return
+    }
+    const prev = get().nicknames
+    set({ nicknames: { ...prev, [userId]: trimmed } })
+    try {
+      await api.setNickname(userId, trimmed)
+    } catch (e) {
+      set({ nicknames: prev })
+      if (e instanceof Error) toastError(e.message)
+      throw e
+    }
+  },
+
+  async clearNickname(userId) {
+    const prev = get().nicknames
+    if (!(userId in prev)) {
+      await api.deleteNickname(userId).catch(() => {})
+      return
+    }
+    const next = { ...prev }
+    delete next[userId]
+    set({ nicknames: next })
+    try {
+      await api.deleteNickname(userId)
+    } catch (e) {
+      set({ nicknames: prev })
+      if (e instanceof Error) toastError(e.message)
+      throw e
     }
   },
 
@@ -2554,7 +2683,6 @@ export const useStore = create<State>((set, get) => ({
             ? {
                 voice: {
                   ...s.voice,
-                  status: 'connected' as const,
                   speaking: {},
                   annotationsAllowed: p.annotations_allowed,
                 },
@@ -2572,7 +2700,7 @@ export const useStore = create<State>((set, get) => ({
             )
           }
         }
-        if (joiningThisRoom) playVoiceJoinSound()
+        if (joiningThisRoom) void get().connectVoiceMedia(p)
         break
       }
       case 'voice.participant_joined': {
@@ -2790,16 +2918,6 @@ export const useStore = create<State>((set, get) => ({
         const p = env.payload as VoiceTriggerFiredPayload
         if (get().voice.channelId === p.channel_id) {
           toastInfo(`🎙️ ${p.display_name} triggered “${p.phrase}”`)
-        }
-        break
-      }
-      case 'voice.signal': {
-        const p = env.payload as VoiceSignalPayload
-        const active = get().voice
-        if (active.channelId === p.channel_id && active.client) {
-          void active.client.onSignal(p).catch((error) => {
-            console.error('Failed to handle voice signal', error)
-          })
         }
         break
       }
@@ -3440,11 +3558,13 @@ function voiceErrorMessage(code: string): string {
     case 'not_in_room':
       return 'You are no longer in this voice room.'
     case 'camera_full':
-      return 'Four cameras are already active. You are still connected by audio.'
+      return 'Sixteen cameras are already active. You are still connected by audio.'
     case 'screen_taken':
       return 'Someone else is already sharing their screen.'
     case 'link_revoked':
       return 'This call link is no longer valid.'
+    case 'media_unavailable':
+      return 'Call media is unavailable. Check the LiveKit service, then rejoin.'
     default:
       return `Voice error: ${code}`
   }

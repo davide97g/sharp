@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Modal } from './Modal'
 import { Avatar } from './Avatar'
+import { UserChip } from './UserCard'
 import { useStore } from '../store'
 import { toastError } from '../lib/toast'
 import { channelLabel, visibleEmail } from '../lib/util'
@@ -16,6 +17,7 @@ export function ChannelSettingsModal({
   onClose: () => void
 }) {
   const channel = useStore((s) => s.channels.find((c) => c.id === channelId))
+  const nicknames = useStore((s) => s.nicknames)
   const [tab, setTab] = useState<'about' | 'members' | 'triggers'>('about')
 
   // The channel can vanish under us (deleted, or we were removed from a
@@ -27,7 +29,7 @@ export function ChannelSettingsModal({
 
   if (channel.kind === 'dm') {
     return (
-      <Modal title={channelLabel(channel)} onClose={onClose} wide>
+      <Modal title={channelLabel(channel, nicknames)} onClose={onClose} wide>
         <VoiceTriggersTab channelId={channelId} />
       </Modal>
     )
@@ -320,6 +322,7 @@ function MembersTab({ channelId }: { channelId: string }) {
   const channel = useStore((s) => s.channels.find((c) => c.id === channelId))
   const members = useStore((s) => s.members[channelId])
   const users = useStore((s) => s.users)
+  const nicknames = useStore((s) => s.nicknames)
   const me = useStore((s) => s.me)
   const loadMembers = useStore((s) => s.loadMembers)
   const addChannelMembers = useStore((s) => s.addChannelMembers)
@@ -333,9 +336,17 @@ function MembersTab({ channelId }: { channelId: string }) {
     loadMembers(channelId)
   }, [channelId, loadMembers])
 
+  const labelOf = (id: string, fallback: string) =>
+    nicknames[id]?.trim() || fallback
+
   const memberRows = useMemo(
-    () => [...(members ?? [])].sort((a, b) => a.display_name.localeCompare(b.display_name)),
-    [members],
+    () =>
+      [...(members ?? [])].sort((a, b) =>
+        labelOf(a.id, a.display_name).localeCompare(labelOf(b.id, b.display_name)),
+      ),
+    // labelOf closes over nicknames
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [members, nicknames],
   )
   const iAmOwner = channel?.my_role === 'owner'
   const ownersCount = (members ?? []).filter((member) => member.role === 'owner').length
@@ -345,10 +356,17 @@ function MembersTab({ channelId }: { channelId: string }) {
     const q = query.trim().toLowerCase()
     return Object.values(users)
       .filter((u) => !memberIds.has(u.id))
-      .filter((u) => !q || u.display_name.toLowerCase().includes(q))
-      .sort((a, b) => a.display_name.localeCompare(b.display_name))
+      .filter((u) => {
+        if (!q) return true
+        const nick = nicknames[u.id]?.toLowerCase() ?? ''
+        return u.display_name.toLowerCase().includes(q) || nick.includes(q)
+      })
+      .sort((a, b) =>
+        labelOf(a.id, a.display_name).localeCompare(labelOf(b.id, b.display_name)),
+      )
       .slice(0, 8)
-  }, [users, members, query])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [users, members, query, nicknames])
 
   async function add(userId: string) {
     setPending(userId)
@@ -414,7 +432,9 @@ function MembersTab({ channelId }: { channelId: string }) {
                   >
                     <Avatar id={u.id} name={u.display_name} size={28} />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">{u.display_name}</div>
+                      <div className="truncate text-sm font-medium">
+                        {labelOf(u.id, u.display_name)}
+                      </div>
                       {visibleEmail(u, me?.id) && (
                         <div className="truncate text-[11px] text-[var(--color-text-faint)]">
                           {visibleEmail(u, me?.id)}
@@ -445,9 +465,17 @@ function MembersTab({ channelId }: { channelId: string }) {
             const isLastOwner = u.role === 'owner' && ownersCount === 1
             return (
               <div key={u.id} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5">
-                <Avatar id={u.id} name={u.display_name} size={30} />
+                <UserChip userId={u.id} fallbackName={u.display_name}>
+                  <Avatar id={u.id} name={u.display_name} size={30} />
+                </UserChip>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">{u.display_name}</div>
+                  <UserChip
+                    userId={u.id}
+                    fallbackName={u.display_name}
+                    className="truncate text-sm font-medium hover:underline"
+                  >
+                    {labelOf(u.id, u.display_name)}
+                  </UserChip>
                   {visibleEmail(u, me?.id) && (
                     <div className="truncate text-[11px] text-[var(--color-text-faint)]">
                       {visibleEmail(u, me?.id)}

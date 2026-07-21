@@ -3,13 +3,14 @@
 > **Using Dokploy?** See [DOKPLOY.md](DOKPLOY.md) and use
 > `docker-compose.dokploy.yml` instead — Dokploy's Traefik replaces Caddy.
 
-One command brings up the whole stack: Postgres, Redis, the sharp server (API + web
-SPA in one container) and Caddy (automatic HTTPS + serving the landing page).
+One command brings up the whole stack: Postgres, Redis, LiveKit SFU, the sharp
+server (API + web SPA in one container), and Caddy.
 
 ```
 postgres ─┐
 redis ────┤
 sharp ────┼──> caddy :80/:443 ──> the internet
+livekit ──┤       └── media:7881/tcp, 3478/udp, 5349/tcp, 50000-60000/udp
 landing ──┘
 ```
 
@@ -20,6 +21,7 @@ Point A (and AAAA if you have IPv6) records at your server's IP:
 | Record            | Type | Value           |
 | ----------------- | ---- | --------------- |
 | `chat.example.com`| A    | `<your-server-ip>` |
+| `media.example.com`| A   | `<your-server-ip>` |
 | `example.com`     | A    | `<your-server-ip>` |
 
 (Use whatever hostnames you set for `SHARP_DOMAIN` / `LANDING_DOMAIN` below.)
@@ -44,7 +46,16 @@ Edit `.env` and set:
 
 - `POSTGRES_PASSWORD` — a strong password
 - `JWT_SECRET` — 64+ random chars (`openssl rand -base64 48`)
-- `SHARP_DOMAIN`, `LANDING_DOMAIN`, `ACME_EMAIL` — your domains + email for TLS
+- `SHARP_DOMAIN`, `MEDIA_DOMAIN`, `LANDING_DOMAIN`, `ACME_EMAIL` — domains + TLS email
+- `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` — SFU signing credentials
+- `LIVEKIT_TURN_CERT_FILE`, `LIVEKIT_TURN_KEY_FILE` — absolute host paths to a
+  trusted certificate/key for `MEDIA_DOMAIN`; TURN/TLS listens on 5349 because
+  Caddy owns 443
+
+Open firewall ports `7881/tcp`, `3478/udp`, `5349/tcp`, and
+`50000-60000/udp`. Strict networks allowing only TCP 443 may not connect on this
+single-IP topology; use a second public IP or dedicated media VM when that
+coverage is required.
 
 Build the landing page so Caddy can serve it (optional, only if you use the
 `landing` mount):
@@ -65,6 +76,7 @@ Check health:
 ```bash
 docker compose ps
 docker compose logs -f sharp
+docker compose logs -f livekit
 curl -s https://$SHARP_DOMAIN/api/v1/healthz   # {"status":"ok"}
 ```
 
@@ -100,6 +112,10 @@ docker compose up -d
 
 Database migrations run automatically on server startup.
 
+LiveKit media is ephemeral and needs no backup. Before certificate renewal
+expires, renew the `MEDIA_DOMAIN` files and run `docker compose restart livekit`
+so TURN/TLS reloads them.
+
 ## 7. Backups
 
 Everything durable lives in Postgres. Dump it regularly:
@@ -122,10 +138,14 @@ re-issue on migration, though Caddy will happily re-provision them.
 
 ## Local development
 
-For just Postgres + Redis on your laptop (run server/web on the host):
+For local dependencies on your laptop (run server/web on the host):
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d
 # DATABASE_URL=postgres://sharp:sharp@localhost:5432/sharp
 # REDIS_URL=redis://localhost:6379
+# LIVEKIT_URL=ws://localhost:7880
+# LIVEKIT_INTERNAL_URL=http://localhost:7880
+# LIVEKIT_API_KEY=devkey
+# LIVEKIT_API_SECRET=secret
 ```

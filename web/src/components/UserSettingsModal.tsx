@@ -30,13 +30,16 @@ import { Modal } from './Modal'
 import { Avatar } from './Avatar'
 import { AvatarCropper } from './AvatarCropper'
 import { ChatLayoutPicker } from './ChatLayoutChooser'
+import { ThemePicker } from './ThemePicker'
 import { VoiceTriggerEditor } from './VoiceTriggerEditor'
 import { setAudioAuraPreference, useAudioAuraPreference } from '../lib/meetingEffects'
 import { AudioAuraPreview } from './voice/AudioAuraAvatar'
+import { getThemePreset, setThemePreset, type ThemePreset } from '../lib/theme'
 
 type Tab =
   | 'profile'
   | 'chat'
+  | 'appearance'
   | 'meetings'
   | 'security'
   | 'encryption'
@@ -59,6 +62,7 @@ export function UserSettingsModal({
   const setChatLayout = useStore((s) => s.setChatLayout)
 
   const [tab, setTab] = useState<Tab>(initialTab ?? 'profile')
+  const [theme, setTheme] = useState<ThemePreset>(() => getThemePreset())
   const [name, setName] = useState(me?.display_name ?? '')
   const [savingName, setSavingName] = useState(false)
   const [cropFile, setCropFile] = useState<File | null>(null)
@@ -247,6 +251,9 @@ export function UserSettingsModal({
         <TabBtn active={tab === 'chat'} onClick={() => setTab('chat')}>
           Chat
         </TabBtn>
+        <TabBtn active={tab === 'appearance'} onClick={() => setTab('appearance')}>
+          Appearance
+        </TabBtn>
         <TabBtn active={tab === 'meetings'} onClick={() => setTab('meetings')}>
           Meetings
         </TabBtn>
@@ -352,6 +359,22 @@ export function UserSettingsModal({
           <ChatLayoutPicker value={chatLayout} onChange={(l) => void setChatLayout(l)} />
           <p className="text-[11px] text-[var(--color-text-faint)]">
             Applies to 1:1 conversations. Channels always use the classic layout.
+          </p>
+        </div>
+      ) : tab === 'appearance' ? (
+        <div className="flex flex-col gap-3">
+          <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+            Theme
+          </div>
+          <ThemePicker
+            value={theme}
+            onChange={(preset) => {
+              setTheme(preset)
+              setThemePreset(preset)
+            }}
+          />
+          <p className="text-[11px] text-[var(--color-text-faint)]">
+            Saved on this device. Themes change colors only — layout stays the same.
           </p>
         </div>
       ) : tab === 'meetings' ? (

@@ -22,6 +22,7 @@ export function SearchResults() {
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
   const channels = useStore((s) => s.channels)
+  const nicknames = useStore((s) => s.nicknames)
   const setFocus = useStore((s) => s.setFocus)
 
   useEffect(() => {
@@ -43,7 +44,7 @@ export function SearchResults() {
                 .filter((row) => !seen.has(row.id))
                 .map((row) => {
                   const channel = channels.find((item) => item.id === row.channelId)
-                  return localSearchResult(row, channel ? channelLabel(channel) : 'Direct message')
+                  return localSearchResult(row, channel ? channelLabel(channel, nicknames) : 'Direct message')
                 }),
             ],
           }

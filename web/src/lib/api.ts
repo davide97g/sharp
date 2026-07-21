@@ -18,7 +18,8 @@ import type {
   GifResult,
   GifSettings,
   GifSuggestResponse,
-  IceConfigResponse,
+  VoiceConfigResponse,
+  TranscriptionResponse,
   Message,
   MembersResponse,
   MessagesResponse,
@@ -217,6 +218,48 @@ function uploadAttachment(
   })
 }
 
+async function transcribeAudio(
+  audio: Blob,
+  signal?: AbortSignal,
+): Promise<TranscriptionResponse> {
+  const headers: Record<string, string> = {
+    'Content-Type': audio.type || 'audio/webm;codecs=opus',
+  }
+  const token = getToken()
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  const res = await fetch(`${apiBase()}/voice/transcriptions`, {
+    method: 'POST',
+    headers,
+    body: audio,
+    signal,
+  })
+
+  if (res.status === 401) {
+    if (!hasSessionToken()) {
+      clearToken()
+      onUnauthorized?.()
+    }
+    throw new ApiRequestError('Unauthorized', 'unauthorized', 401)
+  }
+
+  const text = await res.text()
+  let data: unknown
+  try {
+    data = text ? JSON.parse(text) : undefined
+  } catch {
+    data = undefined
+  }
+  if (!res.ok) {
+    const error = data as { error?: { code?: string; message?: string } } | undefined
+    throw new ApiRequestError(
+      error?.error?.message ?? `Request failed (${res.status})`,
+      error?.error?.code ?? 'error',
+      res.status,
+    )
+  }
+  return data as TranscriptionResponse
+}
+
 export const api = {
   tasks: {
     projects: () => request<{ projects: Project[] }>('/projects'),
@@ -333,7 +376,8 @@ export const api = {
     delete: (id: string) => request<void>(`/meetings/${id}`, { method: 'DELETE' }),
   },
   voice: {
-    config: () => request<IceConfigResponse>('/voice/config'),
+    config: () => request<VoiceConfigResponse>('/voice/config'),
+    transcribe: (audio: Blob, signal?: AbortSignal) => transcribeAudio(audio, signal),
   },
   voiceTriggers: {
     listPersonal: () => request<VoiceTriggersResponse>('/voice/triggers'),
@@ -459,6 +503,18 @@ export const api = {
   },
   updateProfile(input: { display_name?: string }) {
     return request<User>('/me', { method: 'PATCH', body: input })
+  },
+  nicknames() {
+    return request<{ nicknames: Record<string, string> }>('/me/nicknames')
+  },
+  setNickname(userId: string, nickname: string) {
+    return request<void>(`/users/${userId}/nickname`, {
+      method: 'PUT',
+      body: { nickname },
+    })
+  },
+  deleteNickname(userId: string) {
+    return request<void>(`/users/${userId}/nickname`, { method: 'DELETE' })
   },
   deleteAvatar() {
     return request<User>('/me/avatar', { method: 'DELETE' })

@@ -1,4 +1,16 @@
-import type { VoiceParticipant, VoiceSignalPayload } from './types'
+import {
+  LocalAudioTrack,
+  LocalVideoTrack,
+  Room,
+  RoomEvent,
+  Track,
+  VideoPresets,
+  type LocalTrack,
+  type RemoteParticipant,
+  type RemoteTrack,
+  type RemoteTrackPublication,
+} from 'livekit-client'
+import type { VoiceParticipant } from './types'
 import { videoBackgroundImageUrl, type VideoBackground } from './videoBackgrounds'
 // RNNoise worklet script + wasm resolved to bundled asset URLs (no CDN). These
 // are just URL strings; the worklet/wasm code is emitted as separate assets and
@@ -10,8 +22,8 @@ import rnnoiseSimdWasmUrl from '@sapphi-red/web-noise-suppressor/rnnoise_simd.wa
 type VoiceClientOpts = {
   channelId: string
   myConnId: string
-  myUserId: string
-  iceServers: RTCIceServer[]
+  serverUrl: string
+  participantToken: string
   noiseSuppression?: boolean
   videoBackground?: VideoBackground
   // Preferred capture devices remembered from a previous call (may be stale).
@@ -24,6 +36,7 @@ type VoiceClientOpts = {
   onLocalScreen?: (stream: MediaStream | null) => void
   onRemoteScreen?: (connId: string, stream: MediaStream | null) => void
   onNoiseSuppression?: (available: boolean) => void
+  onConnectionState?: (state: 'connected' | 'reconnecting' | 'disconnected') => void
 }
 
 type RnnoiseModule = {
@@ -31,28 +44,10 @@ type RnnoiseModule = {
   wasmBinary: ArrayBuffer
 }
 
-type Peer = {
-  pc: RTCPeerConnection
-  remoteUser: string
-  audio: HTMLAudioElement
+type RemoteMedia = {
   stream: MediaStream
-  // Receiver-side container for the remote screen share (separate MediaStream so a
-  // second video track never collides with the camera track).
   screenStream: MediaStream
-  // Plays the remote system/tab audio; NEVER fed to speaking detection.
-  screenAudio: HTMLAudioElement
-  // The msid the sharer advertised out-of-band via voice.screen; tracks whose
-  // origin stream id matches this are screen tracks.
-  screenStreamId: string | null
-  // track.id -> incoming event.streams[0].id, so updateRemoteScreen can reclassify
-  // a track that arrived before its metadata.
-  trackOrigins: Map<string, string>
-  pendingCandidates: RTCIceCandidateInit[]
-  polite: boolean
-  makingOffer: boolean
-  ignoreOffer: boolean
-  isSettingRemoteAnswerPending: boolean
-  negotiated: boolean
+  audioElements: Map<string, HTMLMediaElement>
 }
 
 type SpeakingDetector = {
@@ -66,7 +61,7 @@ type SpeakingDetector = {
 
 const SPEAKING_THRESHOLD = 0.04
 const SPEAKING_HYSTERESIS_MS = 150
-const VIDEO_MAX_BITRATE = 500_000
+const VIDEO_MAX_BITRATE = 1_200_000
 // Composited backgrounds (sharp person edge over a detailed wallpaper) are much
 // harder to encode than a natural webcam frame, and the effect runs at 720p —
 // give those senders a bigger budget so the frame doesn't smear.
@@ -76,8 +71,9 @@ const SCREEN_MAX_BITRATE = 2_500_000
 export class VoiceClient {
   private channelId: string
   private myConnId: string
-  private myUserId: string
-  private iceServers: RTCIceServer[]
+  private serverUrl: string
+  private participantToken: string
+  private room: Room
   private send: (type: string, payload: unknown) => void
   private onSpeaking?: (connId: string, speaking: boolean) => void
   private onLocalStream?: (stream: MediaStream | null) => void
@@ -85,14 +81,18 @@ export class VoiceClient {
   private onLocalScreen?: (stream: MediaStream | null) => void
   private onRemoteScreen?: (connId: string, stream: MediaStream | null) => void
   private onNoiseSuppression?: (available: boolean) => void
+  private onConnectionState?: VoiceClientOpts['onConnectionState']
 
   private localStream: MediaStream | null = null
   private cameraTrack: MediaStreamTrack | null = null
   private screenStream: MediaStream | null = null
-  private pendingScreen = false
   private audioDeviceId: string | null = null
   private videoDeviceId: string | null = null
-  private peers = new Map<string, Peer>()
+  private remoteMedia = new Map<string, RemoteMedia>()
+  private activeSpeakerIds = new Set<string>()
+  private microphonePublicationTrack: LocalAudioTrack | null = null
+  private cameraPublicationTrack: LocalVideoTrack | null = null
+  private screenPublicationTracks: LocalTrack[] = []
   private audioContext: AudioContext | null = null
   private speakingDetectors = new Map<string, SpeakingDetector>()
   private speakingFrame: number | null = null
@@ -124,8 +124,22 @@ export class VoiceClient {
   constructor(opts: VoiceClientOpts) {
     this.channelId = opts.channelId
     this.myConnId = opts.myConnId
-    this.myUserId = opts.myUserId
-    this.iceServers = opts.iceServers
+    this.serverUrl = opts.serverUrl
+    this.participantToken = opts.participantToken
+    this.room = new Room({
+      adaptiveStream: { pixelDensity: 1, pauseVideoInBackground: true },
+      dynacast: true,
+      disconnectOnPageLeave: true,
+      publishDefaults: {
+        simulcast: true,
+        videoEncoding: VideoPresets.h720.encoding,
+        videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
+        screenShareEncoding: { maxBitrate: SCREEN_MAX_BITRATE, maxFramerate: 30 },
+        degradationPreference: 'maintain-framerate',
+        dtx: true,
+        red: true,
+      },
+    })
     this.noiseSuppression = opts.noiseSuppression ?? true
     this.videoBackground = opts.videoBackground ?? { id: 'none' }
     this.audioDeviceId = opts.audioDeviceId ?? null
@@ -137,9 +151,16 @@ export class VoiceClient {
     this.onLocalScreen = opts.onLocalScreen
     this.onRemoteScreen = opts.onRemoteScreen
     this.onNoiseSuppression = opts.onNoiseSuppression
+    this.onConnectionState = opts.onConnectionState
+    this.bindRoomEvents()
   }
 
   async start(audioDeviceId?: string | null) {
+    await this.room.connect(this.serverUrl, this.participantToken, { autoSubscribe: true })
+    if (this.stopped) {
+      await this.room.disconnect()
+      return
+    }
     const wanted = audioDeviceId ?? this.audioDeviceId
     const stream = await getUserMediaWithFallback(
       (id) => ({ audio: audioConstraints(id) }),
@@ -164,6 +185,100 @@ export class VoiceClient {
     if (active) local.addTrack(active)
     this.localStream = local
     this.startSpeakingDetection(this.myConnId, local)
+    if (active) {
+      const publication = await this.room.localParticipant.publishTrack(active, {
+        source: Track.Source.Microphone,
+        name: 'microphone',
+        stream: `camera:${this.myConnId}`,
+        dtx: true,
+        red: true,
+      })
+      this.microphonePublicationTrack = publication.track as LocalAudioTrack | null
+    }
+    this.onConnectionState?.('connected')
+  }
+
+  private bindRoomEvents() {
+    this.room
+      .on(RoomEvent.TrackSubscribed, this.handleTrackSubscribed)
+      .on(RoomEvent.TrackUnsubscribed, this.handleTrackUnsubscribed)
+      .on(RoomEvent.ParticipantDisconnected, (participant) => {
+        this.removePeer(participant.identity)
+      })
+      .on(RoomEvent.ActiveSpeakersChanged, (participants) => {
+        const next = new Set(participants.map((participant) => participant.identity))
+        for (const identity of this.activeSpeakerIds) {
+          if (!next.has(identity)) this.onSpeaking?.(identity, false)
+        }
+        for (const identity of next) {
+          if (!this.activeSpeakerIds.has(identity)) this.onSpeaking?.(identity, true)
+        }
+        this.activeSpeakerIds = next
+      })
+      .on(RoomEvent.Reconnecting, () => {
+        if (!this.stopped) this.onConnectionState?.('reconnecting')
+      })
+      .on(RoomEvent.Reconnected, () => {
+        if (!this.stopped) this.onConnectionState?.('connected')
+      })
+      .on(RoomEvent.Disconnected, () => {
+        if (!this.stopped) this.onConnectionState?.('disconnected')
+      })
+  }
+
+  private handleTrackSubscribed = (
+    track: RemoteTrack,
+    publication: RemoteTrackPublication,
+    participant: RemoteParticipant,
+  ) => {
+    if (this.stopped) return
+    const media = this.ensureRemoteMedia(participant.identity)
+    const screen =
+      publication.source === Track.Source.ScreenShare ||
+      publication.source === Track.Source.ScreenShareAudio
+    if (track.kind === Track.Kind.Audio) {
+      const element = track.attach()
+      element.autoplay = true
+      element.style.display = 'none'
+      document.body.appendChild(element)
+      media.audioElements.set(publication.trackSid, element)
+      return
+    }
+    const target = screen ? media.screenStream : media.stream
+    if (!target.getTracks().some((candidate) => candidate.id === track.mediaStreamTrack.id)) {
+      target.addTrack(track.mediaStreamTrack)
+    }
+    this.emitRemote(participant.identity, media)
+  }
+
+  private handleTrackUnsubscribed = (
+    track: RemoteTrack,
+    publication: RemoteTrackPublication,
+    participant: RemoteParticipant,
+  ) => {
+    const media = this.remoteMedia.get(participant.identity)
+    if (!media) return
+    const element = media.audioElements.get(publication.trackSid)
+    if (element) {
+      track.detach(element)
+      element.remove()
+      media.audioElements.delete(publication.trackSid)
+    }
+    media.stream.removeTrack(track.mediaStreamTrack)
+    media.screenStream.removeTrack(track.mediaStreamTrack)
+    this.emitRemote(participant.identity, media)
+  }
+
+  private ensureRemoteMedia(connId: string): RemoteMedia {
+    const existing = this.remoteMedia.get(connId)
+    if (existing) return existing
+    const media: RemoteMedia = {
+      stream: new MediaStream(),
+      screenStream: new MediaStream(),
+      audioElements: new Map(),
+    }
+    this.remoteMedia.set(connId, media)
+    return media
   }
 
   getAudioDeviceId(): string | null {
@@ -208,7 +323,13 @@ export class VoiceClient {
   getVoiceLevel(connIds: readonly string[]): number {
     let level = 0
     for (const connId of connIds) {
-      level = Math.max(level, this.speakingDetectors.get(connId)?.level ?? 0)
+      const remote = this.room.remoteParticipants.get(connId)
+      level = Math.max(
+        level,
+        connId === this.myConnId
+          ? this.speakingDetectors.get(connId)?.level ?? this.room.localParticipant.audioLevel
+          : remote?.audioLevel ?? 0,
+      )
     }
     return level
   }
@@ -480,10 +601,16 @@ export class VoiceClient {
     this.blurProcessor = processor
     this.cameraTrack = published
     this.localStream.addTrack(published)
-    for (const peer of this.peers.values()) {
-      const sender = peer.pc.addTrack(published, this.localStream)
-      void configureVideoSender(sender, this.cameraBitrate())
-    }
+    const publication = await this.room.localParticipant.publishTrack(published, {
+      source: Track.Source.Camera,
+      name: 'camera',
+      stream: `camera:${this.myConnId}`,
+      simulcast: true,
+      videoEncoding: { maxBitrate: this.cameraBitrate(), maxFramerate: 24 },
+      videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
+      degradationPreference: 'maintain-framerate',
+    })
+    this.cameraPublicationTrack = publication.track as LocalVideoTrack | null
     this.onLocalStream?.(this.localStream)
   }
 
@@ -579,9 +706,12 @@ export class VoiceClient {
     raw?.removeEventListener('ended', this.handleCameraEnded)
     if (published) {
       this.localStream?.removeTrack(published)
-      for (const peer of this.peers.values()) {
-        const sender = peer.pc.getSenders().find((candidate) => candidate.track === published)
-        if (sender) peer.pc.removeTrack(sender)
+      const publicationTrack = this.cameraPublicationTrack
+      this.cameraPublicationTrack = null
+      if (publicationTrack) {
+        void this.room.localParticipant.unpublishTrack(publicationTrack, false).catch((error) => {
+          if (!this.stopped) console.warn('Could not unpublish camera track', error)
+        })
       }
     }
     // processor.stop() also stops its canvas output track; guard the double-stop.
@@ -592,265 +722,49 @@ export class VoiceClient {
   }
 
   private async replaceSenderTrack(kind: 'audio' | 'video', track: MediaStreamTrack) {
-    // Exclude senders whose track belongs to the screen share so switching a
-    // camera/mic device doesn't hijack the screen sender (screen carries its own
-    // video and, when the OS allows, audio track).
-    const screenTrackIds = new Set(this.screenStream?.getTracks().map((t) => t.id) ?? [])
-    await Promise.all(
-      [...this.peers.values()].map(async (peer) => {
-        const sender = peer.pc
-          .getSenders()
-          .find(
-            (candidate) =>
-              candidate.track?.kind === kind &&
-              !(candidate.track && screenTrackIds.has(candidate.track.id)),
-          )
-        if (sender) {
-          await sender.replaceTrack(track)
-          if (kind === 'video') void configureVideoSender(sender, this.cameraBitrate())
-          return
-        }
-        if (this.localStream) {
-          const added = peer.pc.addTrack(track, this.localStream)
-          if (kind === 'video') void configureVideoSender(added, this.cameraBitrate())
-        }
-      }),
-    )
+    const published = kind === 'audio' ? this.microphonePublicationTrack : this.cameraPublicationTrack
+    if (published) await published.replaceTrack(track, { userProvidedTrack: true })
   }
 
   syncPeers(participants: VoiceParticipant[]) {
     if (this.stopped) return
-    const present = new Set<string>()
-    for (const participant of participants) {
-      if (
-        participant.conn_id === this.myConnId ||
-        participant.user_id === this.myUserId
-      ) {
-        continue
-      }
-      present.add(participant.conn_id)
-      this.ensurePeer(participant.conn_id, participant.user_id)
-    }
-    for (const connId of this.peers.keys()) {
+    const present = new Set(
+      participants
+        .filter((participant) => participant.conn_id !== this.myConnId)
+        .map((participant) => participant.conn_id),
+    )
+    for (const connId of this.remoteMedia.keys()) {
       if (!present.has(connId)) this.removePeer(connId)
     }
   }
 
-  ensurePeer(remoteConn: string, remoteUser: string) {
-    if (
-      this.stopped ||
-      !this.localStream ||
-      remoteConn === this.myConnId ||
-      remoteUser === this.myUserId ||
-      this.peers.has(remoteConn)
-    ) {
-      return
-    }
-
-    const pc = new RTCPeerConnection({ iceServers: this.iceServers })
-    const stream = new MediaStream()
-    const screenStream = new MediaStream()
-    const audio = document.createElement('audio')
-    audio.autoplay = true
-    audio.style.display = 'none'
-    audio.srcObject = stream
-    document.body.appendChild(audio)
-    const screenAudio = document.createElement('audio')
-    screenAudio.autoplay = true
-    screenAudio.style.display = 'none'
-    screenAudio.srcObject = screenStream
-    document.body.appendChild(screenAudio)
-    const peer: Peer = {
-      pc,
-      remoteUser,
-      audio,
-      stream,
-      screenStream,
-      screenAudio,
-      screenStreamId: null,
-      trackOrigins: new Map(),
-      pendingCandidates: [],
-      polite: this.myConnId > remoteConn,
-      makingOffer: false,
-      ignoreOffer: false,
-      isSettingRemoteAnswerPending: false,
-      negotiated: false,
-    }
-    this.peers.set(remoteConn, peer)
-
-    for (const track of this.localStream.getTracks()) {
-      const sender = pc.addTrack(track, this.localStream)
-      if (track.kind === 'video') void configureVideoSender(sender, this.cameraBitrate())
-    }
-
-    // Late joiner: publish our ongoing screen share to the new peer.
-    if (this.screenStream && !this.pendingScreen) {
-      for (const track of this.screenStream.getTracks()) {
-        const sender = pc.addTrack(track, this.screenStream)
-        if (track.kind === 'video') void configureScreenSender(sender)
-      }
-    }
-
-    pc.onicecandidate = (event) => {
-      if (!event.candidate || this.stopped || this.peers.get(remoteConn) !== peer) return
-      this.sendSignal(remoteUser, remoteConn, 'candidate', event.candidate.toJSON())
-    }
-
-    pc.ontrack = (event) => {
-      if (this.stopped || this.peers.get(remoteConn) !== peer) return
-      const originId = event.streams[0]?.id ?? null
-      if (originId) peer.trackOrigins.set(event.track.id, originId)
-      const isScreen = originId !== null && originId === peer.screenStreamId
-      const target = isScreen ? peer.screenStream : peer.stream
-      if (!target.getTracks().some((track) => track.id === event.track.id)) {
-        target.addTrack(event.track)
-      }
-      // Screen audio plays via the hidden screenAudio element (srcObject is the
-      // screenStream); only mic audio drives speaking detection.
-      if (event.track.kind === 'audio' && !isScreen) {
-        this.startSpeakingDetection(remoteConn, peer.stream)
-      }
-      event.track.addEventListener(
-        'ended',
-        () => {
-          if (this.peers.get(remoteConn) !== peer) return
-          peer.trackOrigins.delete(event.track.id)
-          peer.stream.removeTrack(event.track)
-          peer.screenStream.removeTrack(event.track)
-          this.emitRemote(remoteConn, peer)
-        },
-        { once: true },
-      )
-      this.emitRemote(remoteConn, peer)
-    }
-
-    pc.onnegotiationneeded = async () => {
-      // Let one deterministic peer make the first offer. Perfect negotiation
-      // handles later simultaneous camera changes after the connection exists.
-      if (!peer.negotiated && this.myConnId > remoteConn) return
-      try {
-        peer.makingOffer = true
-        await pc.setLocalDescription()
-        const description = pc.localDescription
-        if (
-          this.stopped ||
-          this.peers.get(remoteConn) !== peer ||
-          !description ||
-          (description.type !== 'offer' && description.type !== 'answer')
-        ) {
-          return
-        }
-        this.sendSignal(remoteUser, remoteConn, description.type, {
-          type: description.type,
-          sdp: description.sdp,
-        })
-      } catch (error) {
-        if (!this.stopped) console.error('Failed to negotiate voice peer', error)
-      } finally {
-        peer.makingOffer = false
-      }
-    }
-  }
-
-  async onSignal(payload: VoiceSignalPayload) {
-    if (
-      this.stopped ||
-      payload.to_conn !== this.myConnId ||
-      payload.channel_id !== this.channelId
-    ) {
-      return
-    }
-
-    this.ensurePeer(payload.from_conn, payload.from_user)
-    const peer = this.peers.get(payload.from_conn)
-    if (!peer) return
-
-    if (payload.kind === 'candidate') {
-      const candidate = payload.data as RTCIceCandidateInit
-      if (!peer.pc.remoteDescription) {
-        peer.pendingCandidates.push(candidate)
-        return
-      }
-      try {
-        await peer.pc.addIceCandidate(candidate)
-      } catch (error) {
-        if (!peer.ignoreOffer) throw error
-      }
-      return
-    }
-
-    const description = payload.data as RTCSessionDescriptionInit
-    const readyForOffer =
-      !peer.makingOffer &&
-      (peer.pc.signalingState === 'stable' || peer.isSettingRemoteAnswerPending)
-    const offerCollision = description.type === 'offer' && !readyForOffer
-    peer.ignoreOffer = !peer.polite && offerCollision
-    if (peer.ignoreOffer) return
-
-    peer.isSettingRemoteAnswerPending = description.type === 'answer'
-    await peer.pc.setRemoteDescription(description)
-    peer.isSettingRemoteAnswerPending = false
-    peer.negotiated = true
-    await this.flushCandidates(peer)
-
-    if (description.type === 'offer') {
-      await peer.pc.setLocalDescription()
-      if (this.stopped || this.peers.get(payload.from_conn) !== peer || !peer.pc.localDescription) {
-        return
-      }
-      this.sendSignal(payload.from_user, payload.from_conn, 'answer', {
-        type: peer.pc.localDescription.type,
-        sdp: peer.pc.localDescription.sdp,
-      })
-    }
-  }
+  // LiveKit owns peer creation. Kept as a compatibility no-op for store events
+  // that also update Sharp's participant registry.
+  ensurePeer(_remoteConn: string, _remoteUser: string) {}
 
   removePeer(connId: string) {
-    const peer = this.peers.get(connId)
-    if (!peer) return
-    this.peers.delete(connId)
-    peer.pc.onicecandidate = null
-    peer.pc.ontrack = null
-    peer.pc.onnegotiationneeded = null
-    peer.pc.close()
-    peer.audio.remove()
-    peer.screenAudio.remove()
-    for (const track of peer.stream.getTracks()) track.stop()
-    for (const track of peer.screenStream.getTracks()) track.stop()
+    const media = this.remoteMedia.get(connId)
+    if (!media) return
+    this.remoteMedia.delete(connId)
+    for (const element of media.audioElements.values()) element.remove()
+    for (const track of media.stream.getTracks()) media.stream.removeTrack(track)
+    for (const track of media.screenStream.getTracks()) media.screenStream.removeTrack(track)
     this.onRemoteStream?.(connId, null)
     this.onRemoteScreen?.(connId, null)
-    this.stopSpeakingDetection(connId)
+    if (this.activeSpeakerIds.delete(connId)) this.onSpeaking?.(connId, false)
   }
 
-  private emitRemote(connId: string, peer: Peer) {
-    this.onRemoteStream?.(connId, peer.stream.getVideoTracks().length ? peer.stream : null)
+  private emitRemote(connId: string, media: RemoteMedia) {
+    this.onRemoteStream?.(connId, media.stream.getVideoTracks().length ? media.stream : null)
     this.onRemoteScreen?.(
       connId,
-      peer.screenStream.getVideoTracks().length ? peer.screenStream : null,
+      media.screenStream.getVideoTracks().length ? media.screenStream : null,
     )
   }
 
-  // Called by the store when a participant's advertised screen msid changes. Sets
-  // the peer's screenStreamId and reclassifies any track that arrived before the
-  // metadata (in either direction), then re-emits.
-  updateRemoteScreen(connId: string, streamId: string | null) {
-    const peer = this.peers.get(connId)
-    if (!peer) return
-    peer.screenStreamId = streamId
-    for (const track of [...peer.stream.getTracks(), ...peer.screenStream.getTracks()]) {
-      const origin = peer.trackOrigins.get(track.id) ?? null
-      const shouldBeScreen = streamId !== null && origin === streamId
-      const inScreen = peer.screenStream.getTracks().some((t) => t.id === track.id)
-      if (shouldBeScreen && !inScreen) {
-        peer.stream.removeTrack(track)
-        peer.screenStream.addTrack(track)
-      } else if (!shouldBeScreen && inScreen) {
-        peer.screenStream.removeTrack(track)
-        peer.stream.addTrack(track)
-      }
-    }
-    this.emitRemote(connId, peer)
-  }
+  // Track source metadata comes from LiveKit; Sharp screen metadata remains
+  // authoritative only for UI reservation and annotation permissions.
+  updateRemoteScreen(_connId: string, _streamId: string | null) {}
 
   async acquireScreen(): Promise<string> {
     if (this.stopped) throw new Error('Call ended.')
@@ -871,7 +785,6 @@ export class VoiceClient {
     }
     videoTrack.contentHint = 'detail'
     this.screenStream = stream
-    this.pendingScreen = true
     videoTrack.addEventListener('ended', this.handleScreenEnded, { once: true })
     return stream.id
   }
@@ -879,29 +792,59 @@ export class VoiceClient {
   publishScreen() {
     const stream = this.screenStream
     if (this.stopped || !stream) return
-    this.pendingScreen = false
-    for (const peer of this.peers.values()) {
-      for (const track of stream.getTracks()) {
-        const sender = peer.pc.addTrack(track, stream)
-        if (track.kind === 'video') void configureScreenSender(sender)
+    const publish = async () => {
+      const publications = await Promise.all(
+        stream.getTracks().map((track) =>
+          this.room.localParticipant.publishTrack(track, {
+            source:
+              track.kind === 'video' ? Track.Source.ScreenShare : Track.Source.ScreenShareAudio,
+            name: track.kind === 'video' ? 'screen' : 'screen-audio',
+            stream: `screen:${this.myConnId}`,
+            simulcast: track.kind === 'video',
+            screenShareEncoding:
+              track.kind === 'video'
+                ? { maxBitrate: SCREEN_MAX_BITRATE, maxFramerate: 30 }
+                : undefined,
+            degradationPreference: track.kind === 'video' ? 'maintain-resolution' : undefined,
+          }),
+        ),
+      )
+      if (this.stopped || this.screenStream !== stream) {
+        await Promise.all(
+          publications.flatMap((publication) =>
+            publication.track
+              ? [this.room.localParticipant.unpublishTrack(publication.track, false)]
+              : [],
+          ),
+        )
+        return
       }
+      this.screenPublicationTracks = publications.flatMap((publication) =>
+        publication.track ? [publication.track] : [],
+      )
+      this.onLocalScreen?.(stream)
     }
-    this.onLocalScreen?.(stream)
+    void publish().catch((error) => {
+      if (this.stopped) return
+      console.warn('Could not publish screen share', error)
+      this.stopScreenShare()
+      this.send('voice.screen', { channel_id: this.channelId, enabled: false })
+    })
   }
 
   stopScreenShare() {
     const stream = this.screenStream
     if (!stream) return
     this.screenStream = null
-    this.pendingScreen = false
-    const trackIds = new Set(stream.getTracks().map((track) => track.id))
     for (const track of stream.getTracks()) {
       track.removeEventListener('ended', this.handleScreenEnded)
     }
-    for (const peer of this.peers.values()) {
-      for (const sender of peer.pc.getSenders()) {
-        if (sender.track && trackIds.has(sender.track.id)) peer.pc.removeTrack(sender)
-      }
+    const publicationTracks = this.screenPublicationTracks
+    this.screenPublicationTracks = []
+    for (const track of publicationTracks) {
+      void this.room.localParticipant.unpublishTrack(track, false).catch((error) => {
+        if (!this.stopped) console.warn('Could not unpublish screen track', error)
+      })
     }
     for (const track of stream.getTracks()) track.stop()
     this.onLocalScreen?.(null)
@@ -911,6 +854,8 @@ export class VoiceClient {
     for (const track of this.localStream?.getAudioTracks() ?? []) {
       track.enabled = !muted
     }
+    const publication = this.microphonePublicationTrack
+    if (publication) void (muted ? publication.mute() : publication.unmute())
   }
 
   stop() {
@@ -919,7 +864,7 @@ export class VoiceClient {
 
     this.stopCamera()
     this.stopScreenShare()
-    for (const connId of [...this.peers.keys()]) this.removePeer(connId)
+    for (const connId of [...this.remoteMedia.keys()]) this.removePeer(connId)
     this.teardownChain()
     for (const track of this.localStream?.getTracks() ?? []) track.stop()
     for (const track of this.rawStream?.getTracks() ?? []) track.stop()
@@ -937,6 +882,7 @@ export class VoiceClient {
       void this.audioContext.close().catch(() => {})
       this.audioContext = null
     }
+    void this.room.disconnect()
   }
 
   private handleCameraEnded = () => {
@@ -950,32 +896,6 @@ export class VoiceClient {
     if (this.stopped || !this.screenStream) return
     this.stopScreenShare()
     this.send('voice.screen', { channel_id: this.channelId, enabled: false })
-  }
-
-  private sendSignal(
-    toUser: string,
-    toConn: string,
-    kind: VoiceSignalPayload['kind'],
-    data: object,
-  ) {
-    this.send('voice.signal', {
-      channel_id: this.channelId,
-      to_user: toUser,
-      to_conn: toConn,
-      kind,
-      data,
-    })
-  }
-
-  private async flushCandidates(peer: Peer) {
-    const pending = peer.pendingCandidates.splice(0)
-    for (const candidate of pending) {
-      try {
-        await peer.pc.addIceCandidate(candidate)
-      } catch (error) {
-        if (!peer.ignoreOffer) throw error
-      }
-    }
   }
 
   private startSpeakingDetection(connId: string, stream: MediaStream) {
@@ -1040,29 +960,6 @@ export class VoiceClient {
   }
 }
 
-async function configureVideoSender(sender: RTCRtpSender, maxBitrate: number) {
-  try {
-    const parameters = sender.getParameters()
-    if (!parameters.encodings.length) parameters.encodings.push({})
-    parameters.encodings[0].maxBitrate = maxBitrate
-    await sender.setParameters(parameters)
-  } catch (error) {
-    console.warn('Could not apply camera bitrate limit', error)
-  }
-}
-
-async function configureScreenSender(sender: RTCRtpSender) {
-  try {
-    const parameters = sender.getParameters()
-    if (!parameters.encodings.length) parameters.encodings.push({})
-    parameters.encodings[0].maxBitrate = SCREEN_MAX_BITRATE
-    parameters.degradationPreference = 'maintain-resolution'
-    await sender.setParameters(parameters)
-  } catch (error) {
-    console.warn('Could not apply screen share bitrate limit', error)
-  }
-}
-
 // Acquire media for a preferred deviceId, but survive a stale one. A remembered
 // device that's since been unplugged makes the `{ exact }` constraint throw
 // OverconstrainedError; retry once without the pin so the call still connects on
@@ -1099,13 +996,10 @@ function audioConstraints(deviceId?: string | null): MediaTrackConstraints {
   return base
 }
 
-// Camera quality tiers. Plain camera stays at 360p to keep mesh upload cheap;
-// background effects capture at 720p because the composited output is upscaled
-// hard on the stage and 360p input makes the whole frame look soft.
-function cameraQuality(highRes: boolean): MediaTrackConstraints {
-  return highRes
-    ? { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24, max: 30 } }
-    : { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 20, max: 24 } }
+// SFU simulcast derives smaller layers for tiles while preserving a 720p source
+// for active-speaker and full-stage views.
+function cameraQuality(_highRes: boolean): MediaTrackConstraints {
+  return { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24, max: 30 } }
 }
 
 function videoConstraints(deviceId?: string | null, highRes = false): MediaTrackConstraints {

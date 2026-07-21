@@ -22,6 +22,7 @@ export function MessagePane() {
   const navigate = useNavigate()
   const isMobile = useIsMobile()
   const me = useStore((s) => s.me)
+  const nicknames = useStore((s) => s.nicknames)
   const channels = useStore((s) => s.channels)
   const channel = channels.find((c) => c.id === channelId)
   const cm = useStore((s) => (channelId ? s.byChannel[channelId] : undefined))
@@ -381,7 +382,7 @@ export function MessagePane() {
                   online={dmOnline}
                 />
               )}
-              <span className="truncate">{channelLabel(channel)}</span>
+              <span className="truncate">{channelLabel(channel, nicknames)}</span>
               {dmEncryption === true && (
                 <span className="shrink-0 text-[var(--color-text-faint)]" title="End-to-end encrypted">
                   <LockIcon />
@@ -483,7 +484,7 @@ export function MessagePane() {
           {cm?.loading && messages.length === 0 ? (
             <LoadingSkeleton />
           ) : messages.length === 0 && cm?.loaded ? (
-            <EmptyChannel name={channelLabel(channel)} isDm={isDm} />
+            <EmptyChannel name={channelLabel(channel, nicknames)} isDm={isDm} />
           ) : (
             <div className="pb-2 pt-3">
               {cm?.hasMore && (
@@ -532,7 +533,7 @@ export function MessagePane() {
       <Composer
         key={channel.id}
         channel={channel}
-        placeholder={`Message ${isDm ? channelLabel(channel) : '#' + channel.name}`}
+        placeholder={`Message ${isDm ? channelLabel(channel, nicknames) : '#' + channel.name}`}
       />
 
       {needsLayoutChoice && <ChatLayoutChooser />}

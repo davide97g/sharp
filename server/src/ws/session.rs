@@ -212,7 +212,6 @@ fn is_client_voice_event(event_type: &str) -> bool {
             | "voice.mute"
             | "voice.camera"
             | "voice.screen"
-            | "voice.signal"
             | "voice.transcribe"
             | "voice.phrase"
             | "voice.hand"

@@ -3,13 +3,14 @@
 Dokploy brings its own Traefik with automatic Let's Encrypt, so use
 `deploy/docker-compose.dokploy.yml` (no Caddy, no published ports).
 
-This is a **split deployment** across three subdomains:
+This is a **split deployment** across four subdomains:
 
 | Subdomain                      | Service   | Port | What it is             |
 | ------------------------------ | --------- | ---- | ---------------------- |
 | `sharp.davideghiotto.it`       | `landing` | 80   | Static landing page    |
 | `app.sharp.davideghiotto.it`   | `web`     | 80   | React SPA (chat UI)    |
 | `server.sharp.davideghiotto.it`| `sharp`   | 3000 | API + WebSocket server |
+| `media.sharp.davideghiotto.it` | `livekit` | 7880 | SFU signaling/API      |
 
 A fourth service, `db-studio` (Drizzle Gateway — the DB admin UI), runs
 **privately with no public domain** — see [Database UI](#database-ui-drizzle-gateway).
@@ -24,7 +25,7 @@ web image at build time (`API_URL` below) — change the domain there, not at ru
 - A VPS with Dokploy installed (`curl -sSL https://dokploy.com/install.sh | sh`)
 - DNS A records pointing at the VPS for all three hosts:
   `sharp.davideghiotto.it`, `app.sharp.davideghiotto.it`, `server.sharp.davideghiotto.it`
-  (the DB UI needs no DNS — it's private)
+  plus `media.sharp.davideghiotto.it` (the DB UI needs no DNS — it's private)
 - The sharp repo on GitHub with the **Dokploy GitHub app** installed (for auto-deploy)
 
 ## Deploy (single Compose service, 3 domains)
@@ -39,6 +40,11 @@ web image at build time (`API_URL` below) — change the domain there, not at ru
    POSTGRES_PASSWORD=<long random string>
    JWT_SECRET=<64 random chars>              # e.g. openssl rand -hex 32
    MASTERPASS=<long unique string>           # login for the Drizzle Gateway DB UI
+   MEDIA_DOMAIN=media.sharp.davideghiotto.it
+   LIVEKIT_API_KEY=sharp-livekit
+   LIVEKIT_API_SECRET=<64 random chars>
+   LIVEKIT_TURN_CERT_FILE=/absolute/host/path/fullchain.pem
+   LIVEKIT_TURN_KEY_FILE=/absolute/host/path/privkey.pem
    # Cloudflare R2 (S3 API) — create an R2 API token (dashboard → R2 →
    # Manage R2 API Tokens) to get the key pair. Endpoint has NO bucket suffix.
    S3_ENDPOINT=https://<account_id>.r2.cloudflarestorage.com
@@ -65,15 +71,17 @@ web image at build time (`API_URL` below) — change the domain there, not at ru
    domain needed). Web-push VAPID keys auto-generate and persist in Postgres
    on first startup.
 
-5. **Domains** tab — add three domains (all HTTPS on, Certificate: Let's Encrypt):
+5. **Domains** tab — add four domains (all HTTPS on, Certificate: Let's Encrypt):
 
    | Host                            | Service   | Container port |
    | ------------------------------- | --------- | -------------- |
    | `sharp.davideghiotto.it`        | `landing` | 80             |
    | `app.sharp.davideghiotto.it`    | `web`     | 80             |
    | `server.sharp.davideghiotto.it` | `sharp`   | 3000           |
+   | `media.sharp.davideghiotto.it`  | `livekit` | 7880           |
 
-   (WebSockets work through Traefik with no extra config. Do **not** add a domain
+   Open host firewall ports `7881/tcp`, `3478/udp`, `5349/tcp`, and
+   `50000-50100/udp`. WebSockets work through Traefik. Do **not** add a domain
    for `db-studio` — it stays private, see below.)
 
 6. **Deploy**. First build compiles the Rust server + builds the web & landing

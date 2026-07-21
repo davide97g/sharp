@@ -6,6 +6,7 @@ import type { Doc } from '../../lib/types'
 
 export function DocsHome() {
   const channels = useStore((s) => s.channels)
+  const nicknames = useStore((s) => s.nicknames)
   const docsByChannel = useStore((s) => s.docsByChannel)
   const docsLoaded = useStore((s) => s.docsLoaded)
   const loadChannelDocs = useStore((s) => s.loadChannelDocs)
@@ -26,9 +27,9 @@ export function DocsHome() {
 
   const channelName = useMemo(() => {
     const m: Record<string, string> = {}
-    for (const c of channels) m[c.id] = channelLabel(c)
+    for (const c of channels) m[c.id] = channelLabel(c, nicknames)
     return m
-  }, [channels])
+  }, [channels, nicknames])
 
   const recent = useMemo(() => {
     const all: Doc[] = []

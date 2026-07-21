@@ -9,6 +9,7 @@ export function EventPill({ item }: { item: CalendarItem }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const channels = useStore((s) => s.channels)
+  const nicknames = useStore((s) => s.nicknames)
   const joinScheduledMeeting = useStore((s) => s.joinScheduledMeeting)
 
   const isNative = item.source === 'native'
@@ -72,7 +73,7 @@ export function EventPill({ item }: { item: CalendarItem }) {
               </span>
               {channel && (
                 <span className="truncate rounded bg-[var(--color-panel-2)] px-1 text-[10px] text-[var(--color-text-dim)]">
-                  {channelLabel(channel)}
+                  {channelLabel(channel, nicknames)}
                 </span>
               )}
               {isNative && !channel && item.meeting.standalone_call_id && (

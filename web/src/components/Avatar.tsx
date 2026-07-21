@@ -28,10 +28,12 @@ export function Avatar({
   size?: number
   online?: boolean
 }) {
-  // Resolve the freshest name/avatar from the directory so profile edits reflect
-  // live everywhere; fall back to the props for users not in the directory.
+  // Resolve the freshest name/avatar from the directory (and personal nickname)
+  // so profile edits reflect live everywhere; fall back to the props for users
+  // not in the directory.
   const stored = useStore((s) => s.users[id])
-  const displayName = stored?.display_name ?? name
+  const nickname = useStore((s) => s.nicknames[id])
+  const displayName = nickname?.trim() || stored?.display_name || name
   const avatarUrl = stored?.avatar_url ?? null
 
   const [src, setSrc] = useState<string | null>(null)

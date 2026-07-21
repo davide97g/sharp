@@ -12,6 +12,7 @@ pub enum AppError {
     Conflict(String),
     Validation(String),
     ServiceUnavailable(String),
+    NotImplemented(String),
     RateLimited(String),
     Internal(String),
 }
@@ -26,6 +27,7 @@ impl AppError {
             AppError::Conflict(m) => (StatusCode::CONFLICT, "conflict", m),
             AppError::Validation(m) => (StatusCode::UNPROCESSABLE_ENTITY, "validation", m),
             AppError::ServiceUnavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, "unavailable", m),
+            AppError::NotImplemented(m) => (StatusCode::NOT_IMPLEMENTED, "not_configured", m),
             AppError::RateLimited(m) => (StatusCode::TOO_MANY_REQUESTS, "rate_limited", m),
             AppError::Internal(m) => (StatusCode::INTERNAL_SERVER_ERROR, "internal", m),
         }

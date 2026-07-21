@@ -53,6 +53,50 @@
   --safe-left: env(safe-area-inset-left, 0px);
 }
 
+/* Appearance presets — override the @theme surface/accent tokens. Default is
+   the unset data-theme (current purple-on-ink palette above). */
+:root[data-theme='slack'] {
+  --color-ink: #1a0f1c;
+  --color-panel: #2c1630;
+  --color-panel-2: #351c3a;
+  --color-border: #4a2a52;
+  --color-border-soft: #3a2240;
+  --color-accent: #2eb67d;
+  --color-accent-hover: #3ecf8e;
+  --color-accent-soft: #1a3d2e;
+  --color-text: #e8e0ea;
+  --color-text-dim: #b8a8bc;
+  --color-text-faint: #8a7a90;
+}
+
+:root[data-theme='teams'] {
+  --color-ink: #0f111a;
+  --color-panel: #1b1f2e;
+  --color-panel-2: #22273a;
+  --color-border: #2f3548;
+  --color-border-soft: #272c3d;
+  --color-accent: #5b5fc7;
+  --color-accent-hover: #7b7fd4;
+  --color-accent-soft: #2a2d55;
+  --color-text: #e2e4f0;
+  --color-text-dim: #a0a6c0;
+  --color-text-faint: #6e7490;
+}
+
+:root[data-theme='one-piece'] {
+  --color-ink: #0a1628;
+  --color-panel: #122640;
+  --color-panel-2: #1a3254;
+  --color-border: #2a4a6e;
+  --color-border-soft: #1e3a58;
+  --color-accent: #e85d4c;
+  --color-accent-hover: #f0c14b;
+  --color-accent-soft: #3d2818;
+  --color-text: #e8d5c4;
+  --color-text-dim: #b8a090;
+  --color-text-faint: #7a6a58;
+}
+
 :root[data-tauri-mac] {
   --titlebar-h: 28px;
 }
@@ -166,7 +210,11 @@ body {
   flex: 1;
   overflow: hidden;
   background:
-    radial-gradient(circle at 50% 37%, rgb(124 108 255 / 9%), transparent 24rem),
+    radial-gradient(
+      circle at 50% 37%,
+      color-mix(in srgb, var(--color-accent) 9%, transparent),
+      transparent 24rem
+    ),
     var(--color-ink);
 }
 
@@ -196,7 +244,7 @@ body {
   height: 4px;
   border-radius: 999px;
   background: var(--color-accent-hover);
-  box-shadow: 0 0 14px 2px rgb(124 108 255 / 46%);
+  box-shadow: 0 0 14px 2px color-mix(in srgb, var(--color-accent) 46%, transparent);
   opacity: 0.34;
   animation: home-signal-drift 8s ease-in-out infinite alternate;
 }
@@ -246,7 +294,7 @@ body {
   inset: 22%;
   border-radius: 1.25rem;
   background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-  box-shadow: 0 0 3rem rgb(124 108 255 / 13%);
+  box-shadow: 0 0 3rem color-mix(in srgb, var(--color-accent) 13%, transparent);
   transform: rotate(12deg);
 }
 
@@ -258,12 +306,12 @@ body {
   letter-spacing: -0.1em;
   color: var(--color-accent-hover);
   opacity: 0.18;
-  text-shadow: 0 0 2rem rgb(124 108 255 / 40%);
+  text-shadow: 0 0 2rem color-mix(in srgb, var(--color-accent) 40%, transparent);
 }
 
 .home-mark-orbit {
   position: absolute;
-  border: 1px solid rgb(142 128 255 / 15%);
+  border: 1px solid color-mix(in srgb, var(--color-accent-hover) 15%, transparent);
   border-radius: 50%;
 }
 
@@ -349,8 +397,8 @@ body {
 }
 
 .home-quick-action:hover {
-  border-color: rgb(124 108 255 / 15%);
-  background: rgb(124 108 255 / 6%);
+  border-color: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
   color: var(--color-text);
 }
 
@@ -407,7 +455,7 @@ body {
 
 .ask-sharpy {
   position: relative;
-  border: 1px solid rgb(142 128 255 / 18%);
+  border: 1px solid color-mix(in srgb, var(--color-accent-hover) 18%, transparent);
   border-radius: 0.85rem;
   background: rgb(23 23 28 / 72%);
   padding: 0.75rem;
@@ -419,10 +467,10 @@ body {
 }
 
 .ask-sharpy:focus-within {
-  border-color: rgb(142 128 255 / 55%);
+  border-color: color-mix(in srgb, var(--color-accent-hover) 55%, transparent);
   box-shadow:
     0 1.5rem 4rem rgb(0 0 0 / 20%),
-    0 0 0 3px rgb(124 108 255 / 9%);
+    0 0 0 3px color-mix(in srgb, var(--color-accent) 9%, transparent);
 }
 
 .ask-sharpy-label {
@@ -446,10 +494,10 @@ body {
 }
 
 .ask-sharpy-badge {
-  border: 1px solid rgb(124 108 255 / 24%);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 24%, transparent);
   border-radius: 999px;
   padding: 0.12rem 0.4rem;
-  background: rgb(124 108 255 / 8%);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
   color: var(--color-accent-hover);
   font-size: 0.54rem;
   font-weight: 700;
@@ -493,7 +541,7 @@ body {
 
 .ask-sharpy-field button:hover:not(:disabled) {
   background: var(--color-accent-hover);
-  box-shadow: 0 0 1.25rem rgb(124 108 255 / 24%);
+  box-shadow: 0 0 1.25rem color-mix(in srgb, var(--color-accent) 24%, transparent);
 }
 
 .ask-sharpy-field button:focus-visible {

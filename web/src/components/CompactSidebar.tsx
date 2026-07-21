@@ -10,6 +10,7 @@ type Mode = 'chat' | 'docs' | 'canvas' | 'board' | 'tasks' | 'meetings' | 'calen
 
 export function CompactSidebar({ mode }: { mode: Mode }) {
   const channels = useStore((s) => s.channels)
+  const nicknames = useStore((s) => s.nicknames)
   const online = useStore((s) => s.online)
   const me = useStore((s) => s.me)
   const setQuickSwitcher = useStore((s) => s.setQuickSwitcher)
@@ -40,10 +41,10 @@ export function CompactSidebar({ mode }: { mode: Mode }) {
         .sort((a, b) => {
           const aTime = a.last_message_at ?? ''
           const bTime = b.last_message_at ?? ''
-          if (aTime === bTime) return channelLabel(a).localeCompare(channelLabel(b))
+          if (aTime === bTime) return channelLabel(a, nicknames).localeCompare(channelLabel(b, nicknames))
           return aTime < bTime ? 1 : -1
         }),
-    [channels],
+    [channels, nicknames],
   )
 
   return (
@@ -194,9 +195,10 @@ function CompactDmLink({
   active: boolean
   online: boolean
 }) {
+  const nicknames = useStore((s) => s.nicknames)
   const user = channel.dm_user
   if (!user) return null
-  const label = channelLabel(channel)
+  const label = channelLabel(channel, nicknames)
 
   return (
     <NavLink

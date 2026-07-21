@@ -76,9 +76,14 @@ export function withinMinutes(a: string, b: string, minutes: number): boolean {
   return Math.abs(new Date(a).getTime() - new Date(b).getTime()) <= minutes * 60000
 }
 
-/** Human display label for a channel in lists / headers. */
-export function channelLabel(ch: Channel): string {
-  if (ch.kind === 'dm') return ch.dm_user?.display_name ?? 'Direct message'
+/** Human display label for a channel in lists / headers.
+ *  Pass `nicknames` so DM peers show the viewer's personal override. */
+export function channelLabel(ch: Channel, nicknames?: Record<string, string>): string {
+  if (ch.kind === 'dm') {
+    const id = ch.dm_user?.id
+    if (id && nicknames?.[id]?.trim()) return nicknames[id].trim()
+    return ch.dm_user?.display_name ?? 'Direct message'
+  }
   return ch.name
 }
 

@@ -33,6 +33,7 @@ export function ScheduleMeetingModal({
   meeting?: ScheduledMeeting
 }) {
   const channels = useStore((s) => s.channels)
+  const nicknames = useStore((s) => s.nicknames)
   const users = useStore((s) => s.users)
   const membersByChannel = useStore((s) => s.members)
   const loadMembers = useStore((s) => s.loadMembers)
@@ -53,7 +54,7 @@ export function ScheduleMeetingModal({
     meeting
       ? meeting.title
       : prefillChannel
-        ? `Meeting in ${channelLabel(prefillChannel)}`
+        ? `Meeting in ${channelLabel(prefillChannel, nicknames)}`
         : 'Meeting',
   )
   const [startLocal, setStartLocal] = useState(() =>
@@ -325,7 +326,7 @@ export function ScheduleMeetingModal({
                 <optgroup label="Direct messages">
                   {dmChannels.map((c) => (
                     <option key={c.id} value={`channel:${c.id}`}>
-                      {channelLabel(c)}
+                      {channelLabel(c, nicknames)}
                     </option>
                   ))}
                 </optgroup>

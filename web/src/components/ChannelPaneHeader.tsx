@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { channelLabel } from '../lib/util'
 import { Avatar } from './Avatar'
+import { UserChip } from './UserCard'
 import { LockIcon } from './icons'
 import type { Channel } from '../lib/types'
 import { deviceSetHash, fingerprintDeviceSets, getDevices } from '../lib/e2ee'
@@ -20,6 +21,7 @@ export function ChannelPaneHeader({
   actions?: React.ReactNode
 }) {
   const online = useStore((s) => s.online)
+  const nicknames = useStore((s) => s.nicknames)
   const isDm = channel.kind === 'dm'
   const encrypted = useStore((state) => state.dmEncryption[channel.id] === true)
   const me = useStore((state) => state.me)
@@ -63,14 +65,21 @@ export function ChannelPaneHeader({
         {isDm ? (
           <span className="flex items-center gap-2 font-semibold">
             {channel.dm_user && (
-              <Avatar
-                id={channel.dm_user.id}
-                name={channel.dm_user.display_name}
-                size={26}
-                online={dmOnline}
-              />
+              <UserChip
+                userId={channel.dm_user.id}
+                fallbackName={channel.dm_user.display_name}
+                className="flex items-center gap-2"
+              >
+                <Avatar
+                  id={channel.dm_user.id}
+                  name={channel.dm_user.display_name}
+                  size={26}
+                  online={dmOnline}
+                />
+                <span>{channelLabel(channel, nicknames)}</span>
+              </UserChip>
             )}
-            {channelLabel(channel)}
+            {!channel.dm_user && channelLabel(channel, nicknames)}
             {encrypted && (
               <button type="button" onClick={() => { setVerificationOpen(true); void loadVerification() }} className="shrink-0 text-[var(--color-text-faint)] hover:text-[var(--color-text)]" title="End-to-end encrypted · Verify">
                 <LockIcon />

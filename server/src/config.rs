@@ -10,7 +10,8 @@ pub struct Config {
     pub disable_signup: bool,
     /// S3-compatible object storage for file uploads. `None` = uploads disabled.
     pub s3: Option<S3Config>,
-    pub ice: IceConfig,
+    /// LiveKit SFU. `None` disables calls; partial configuration is rejected.
+    pub livekit: Option<LiveKitConfig>,
     /// Max accepted upload size in bytes.
     pub max_upload_bytes: usize,
     /// VAPID keys supplied via env (public_b64, private_pem). If absent, the server
@@ -27,6 +28,9 @@ pub struct Config {
     /// Sharpy AI assistant (OpenAI-compatible chat + embeddings). `None` when
     /// `AI_API_KEY` is unset — the whole feature is then inert.
     pub ai: Option<AiConfig>,
+    /// OpenAI-compatible live-call transcription. Falls back to the matching
+    /// `AI_*` provider settings and is inert when neither API key is set.
+    pub transcribe: Option<TranscribeConfig>,
     /// Google Calendar OAuth. `None` unless client id + secret (+ redirect) are set.
     pub google: Option<GoogleConfig>,
     /// WebAuthn relying-party configuration. `None` keeps passkeys disabled.
@@ -46,16 +50,13 @@ pub struct S3Config {
 }
 
 #[derive(Clone)]
-pub struct TurnConfig {
+pub struct LiveKitConfig {
+    /// Browser-facing WebSocket URL, normally `wss://media.example.com`.
     pub url: String,
-    pub username: String,
-    pub password: String,
-}
-
-#[derive(Clone)]
-pub struct IceConfig {
-    pub stun_urls: Vec<String>,
-    pub turn: Option<TurnConfig>,
+    /// Server API URL reachable from the Sharp container.
+    pub internal_url: String,
+    pub api_key: String,
+    pub api_secret: String,
 }
 
 #[derive(Clone)]
@@ -79,6 +80,13 @@ pub struct AiConfig {
     pub api_key: String,
     pub chat_model: String,
     pub embed_model: String,
+}
+
+#[derive(Clone)]
+pub struct TranscribeConfig {
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
 }
 
 #[derive(Clone)]
@@ -161,29 +169,25 @@ impl Config {
             _ => None,
         };
 
-        let stun_urls = env_opt("STUN_URLS")
-            .map(|urls| {
-                urls.split(',')
-                    .map(str::trim)
-                    .filter(|url| !url.is_empty())
-                    .map(str::to_string)
-                    .collect::<Vec<_>>()
-            })
-            .filter(|urls| !urls.is_empty())
-            .unwrap_or_else(|| vec!["stun:stun.l.google.com:19302".into()]);
-        let turn = match (
-            env_opt("TURN_URL"),
-            env_opt("TURN_USERNAME"),
-            env_opt("TURN_PASSWORD"),
+        let livekit = match (
+            env_opt("LIVEKIT_URL"),
+            env_opt("LIVEKIT_INTERNAL_URL"),
+            env_opt("LIVEKIT_API_KEY"),
+            env_opt("LIVEKIT_API_SECRET"),
         ) {
-            (Some(url), Some(username), Some(password)) => Some(TurnConfig {
-                url,
-                username,
-                password,
-            }),
-            _ => None,
+            (None, None, None, None) => None,
+            (Some(url), Some(internal_url), Some(api_key), Some(api_secret)) => {
+                Some(LiveKitConfig {
+                    url,
+                    internal_url,
+                    api_key,
+                    api_secret,
+                })
+            }
+            _ => {
+                return Err("LIVEKIT_URL, LIVEKIT_INTERNAL_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET must be set together".to_string());
+            }
         };
-        let ice = IceConfig { stun_urls, turn };
 
         let max_upload_bytes = env_opt("MAX_UPLOAD_MB")
             .and_then(|v| v.parse::<usize>().ok())
@@ -208,16 +212,32 @@ impl Config {
                 .unwrap_or_else(|| "https://api.deepseek.com".to_string()),
         });
 
+        let ai_api_key = env_opt("AI_API_KEY");
+        let ai_base_url =
+            env_opt("AI_BASE_URL").unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+
         // Sharpy is enabled only when an API key is present; everything else has a
         // sensible OpenAI default.
-        let ai = env_opt("AI_API_KEY").map(|api_key| AiConfig {
+        let ai = ai_api_key.clone().map(|api_key| AiConfig {
             api_key,
-            base_url: env_opt("AI_BASE_URL")
-                .unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
+            base_url: ai_base_url.clone(),
             chat_model: env_opt("AI_CHAT_MODEL").unwrap_or_else(|| "gpt-4o-mini".to_string()),
             embed_model: env_opt("AI_EMBED_MODEL")
                 .unwrap_or_else(|| "text-embedding-3-small".to_string()),
         });
+
+        // Transcription may use a separate provider (for example OpenAI or
+        // Groq while chat uses DeepSeek). Each provider setting falls back to
+        // its AI counterpart; the transcription model has its own default.
+        let transcribe =
+            env_opt("TRANSCRIBE_API_KEY")
+                .or(ai_api_key)
+                .map(|api_key| TranscribeConfig {
+                    api_key,
+                    base_url: env_opt("TRANSCRIBE_BASE_URL").unwrap_or(ai_base_url),
+                    model: env_opt("TRANSCRIBE_MODEL")
+                        .unwrap_or_else(|| "gpt-4o-mini-transcribe".to_string()),
+                });
 
         // Google Calendar OAuth is enabled only when client id + secret are both
         // present; the redirect URI is required alongside them (Google demands an
@@ -284,7 +304,7 @@ impl Config {
             web_dist,
             disable_signup,
             s3,
-            ice,
+            livekit,
             max_upload_bytes,
             vapid_env,
             vapid_subject,
@@ -292,6 +312,7 @@ impl Config {
             tenor_api_key,
             deepseek,
             ai,
+            transcribe,
             google,
             webauthn,
             github,

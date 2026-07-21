@@ -12,6 +12,7 @@ import { TypingRow } from '../TypingRow'
 // channel's messages independently of whichever channel is open on the route.
 export function CallChatRail({ channelId }: { channelId: string }) {
   const channel = useStore((s) => s.channels.find((c) => c.id === channelId))
+  const nicknames = useStore((s) => s.nicknames)
   const cm = useStore((s) => s.byChannel[channelId])
   const online = useStore((s) => s.online)
   const chatLayout = useStore((s) => s.chatLayout)
@@ -83,7 +84,7 @@ export function CallChatRail({ channelId }: { channelId: string }) {
       <header className="flex h-11 shrink-0 items-center border-b border-[var(--color-border)] px-4">
         <span className="truncate text-sm font-semibold">Chat</span>
         <span className="ml-2 truncate text-xs text-[var(--color-text-faint)]">
-          {isDm ? channelLabel(channel) : `#${channel.name}`}
+          {isDm ? channelLabel(channel, nicknames) : `#${channel.name}`}
         </span>
       </header>
 
@@ -131,7 +132,7 @@ export function CallChatRail({ channelId }: { channelId: string }) {
       <Composer
         key={channel.id}
         channel={channel}
-        placeholder={`Message ${isDm ? channelLabel(channel) : '#' + channel.name}`}
+        placeholder={`Message ${isDm ? channelLabel(channel, nicknames) : '#' + channel.name}`}
       />
     </div>
   )

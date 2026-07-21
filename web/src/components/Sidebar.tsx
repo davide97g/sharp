@@ -12,6 +12,7 @@ import type { Channel } from '../lib/types'
 
 export function Sidebar({ variant = 'desktop' }: { variant?: 'desktop' | 'mobile' }) {
   const channels = useStore((s) => s.channels)
+  const nicknames = useStore((s) => s.nicknames)
   const online = useStore((s) => s.online)
   const voiceRooms = useStore((s) => s.voiceRooms)
   const me = useStore((s) => s.me)
@@ -38,10 +39,10 @@ export function Sidebar({ variant = 'desktop' }: { variant?: 'desktop' | 'mobile
         .sort((a, b) => {
           const ta = a.last_message_at ?? ''
           const tb = b.last_message_at ?? ''
-          if (ta === tb) return channelLabel(a).localeCompare(channelLabel(b))
+          if (ta === tb) return channelLabel(a, nicknames).localeCompare(channelLabel(b, nicknames))
           return ta < tb ? 1 : -1
         }),
-    [channels],
+    [channels, nicknames],
   )
 
   function submitSearch(e: React.FormEvent) {
@@ -277,6 +278,7 @@ function DmRow({
   voiceRoom?: VoiceRoom
 }) {
   const { channelId } = useParams()
+  const nicknames = useStore((s) => s.nicknames)
   const active = channelId === channel.id
   const unread = channel.unread_count > 0
   return (
@@ -293,7 +295,7 @@ function DmRow({
         style={{ backgroundColor: online ? '#4fbf9f' : '#4b4b56' }}
       />
       <span className={`min-w-0 flex-1 truncate ${unread && !active ? 'font-semibold text-[var(--color-text)]' : ''}`}>
-        {channelLabel(channel)}
+        {channelLabel(channel, nicknames)}
       </span>
       <VoiceRoomIndicator room={voiceRoom} />
       {unread && !active && (

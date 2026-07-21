@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { displayNameFor } from '../../lib/displayName'
 import { channelLabel } from '../../lib/util'
 import {
   closeElementPip,
@@ -108,11 +109,15 @@ export function useVoicePip(hasFallbackVideo: boolean): VoicePipController {
   useEffect(() => close, [close])
 
   useEffect(() => {
-    if (status !== 'connected') close()
+    if (status !== 'connected' && status !== 'reconnecting') close()
   }, [close, status])
 
   useEffect(() => {
-    if (status !== 'connected' || !documentPipSupported || !navigator.mediaSession) return
+    if (
+      (status !== 'connected' && status !== 'reconnecting') ||
+      !documentPipSupported ||
+      !navigator.mediaSession
+    ) return
     try {
       navigator.mediaSession.setActionHandler(
         'enterpictureinpicture' as MediaSessionAction,
@@ -134,7 +139,7 @@ export function useVoicePip(hasFallbackVideo: boolean): VoicePipController {
   }, [documentPipSupported, open, status])
 
   useEffect(() => {
-    if (status !== 'connected' || !navigator.mediaSession) return
+    if ((status !== 'connected' && status !== 'reconnecting') || !navigator.mediaSession) return
     try {
       void navigator.mediaSession.setMicrophoneActive(!muted).catch(() => {})
     } catch {
@@ -148,7 +153,7 @@ export function useVoicePip(hasFallbackVideo: boolean): VoicePipController {
   }, [cameraStatus, muted, status])
 
   useEffect(() => {
-    if (status !== 'connected' || !navigator.mediaSession) return
+    if ((status !== 'connected' && status !== 'reconnecting') || !navigator.mediaSession) return
     return () => {
       try {
         void navigator.mediaSession.setMicrophoneActive(false).catch(() => {})
@@ -190,6 +195,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
   const me = useStore((s) => s.me)
   const audioAuraEnabled = useAudioAuraPreference(me?.id) === true
   const users = useStore((s) => s.users)
+  const nicknames = useStore((s) => s.nicknames)
   const channel = useStore((s) =>
     s.channels.find((candidate) => candidate.id === channelId),
   )
@@ -255,14 +261,16 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
   }, [room, myConnId, localScreenStream, remoteScreenStreams])
 
   const resolveName = (userId: string, fallback?: string) =>
-    users[userId]?.display_name ??
-    (me?.id === userId ? me.display_name : undefined) ??
-    fallback ??
-    'Participant'
+    displayNameFor(userId, {
+      nicknames,
+      users,
+      fallback:
+        (me?.id === userId ? me.display_name : undefined) ?? fallback ?? 'Participant',
+    })
 
   const roomName = channel
     ? channel.kind === 'dm'
-      ? channel.dm_user?.display_name ?? channelLabel(channel)
+      ? channelLabel(channel, nicknames)
       : `# ${channel.name}`
     : 'Call'
 

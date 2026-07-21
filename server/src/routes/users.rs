@@ -237,3 +237,90 @@ pub async fn get_avatar(
 
     Ok(response)
 }
+
+/// All personal nicknames the caller has set for other users.
+pub async fn list_nicknames(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+) -> AppResult<Json<serde_json::Value>> {
+    let rows = sqlx::query(
+        "SELECT target_user_id, nickname FROM user_nicknames WHERE viewer_id = $1",
+    )
+    .bind(auth.id)
+    .fetch_all(&state.pool)
+    .await?;
+
+    let mut nicknames = serde_json::Map::new();
+    for row in &rows {
+        let target: Uuid = row.try_get("target_user_id")?;
+        let nickname: String = row.try_get("nickname")?;
+        nicknames.insert(target.to_string(), json!(nickname));
+    }
+    Ok(Json(json!({ "nicknames": nicknames })))
+}
+
+#[derive(Deserialize)]
+pub struct SetNicknameRequest {
+    pub nickname: String,
+}
+
+/// Set or clear a personal nickname for another user. Empty/whitespace clears.
+pub async fn set_nickname(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(target_id): Path<Uuid>,
+    Json(body): Json<SetNicknameRequest>,
+) -> AppResult<StatusCode> {
+    if target_id == auth.id {
+        return Err(AppError::Validation(
+            "cannot set a nickname for yourself".to_string(),
+        ));
+    }
+    let nickname = body.nickname.trim().to_string();
+    if nickname.is_empty() {
+        sqlx::query("DELETE FROM user_nicknames WHERE viewer_id = $1 AND target_user_id = $2")
+            .bind(auth.id)
+            .bind(target_id)
+            .execute(&state.pool)
+            .await?;
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    if nickname.chars().count() > 80 {
+        return Err(AppError::Validation(
+            "nickname is too long (max 80 characters)".to_string(),
+        ));
+    }
+    // Ensure the target exists.
+    let exists = sqlx::query("SELECT 1 AS x FROM users WHERE id = $1")
+        .bind(target_id)
+        .fetch_optional(&state.pool)
+        .await?;
+    if exists.is_none() {
+        return Err(AppError::NotFound("user not found".to_string()));
+    }
+    sqlx::query(
+        "INSERT INTO user_nicknames (viewer_id, target_user_id, nickname, updated_at)
+         VALUES ($1, $2, $3, now())
+         ON CONFLICT (viewer_id, target_user_id)
+         DO UPDATE SET nickname = EXCLUDED.nickname, updated_at = now()",
+    )
+    .bind(auth.id)
+    .bind(target_id)
+    .bind(&nickname)
+    .execute(&state.pool)
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn delete_nickname(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(target_id): Path<Uuid>,
+) -> AppResult<StatusCode> {
+    sqlx::query("DELETE FROM user_nicknames WHERE viewer_id = $1 AND target_user_id = $2")
+        .bind(auth.id)
+        .bind(target_id)
+        .execute(&state.pool)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
