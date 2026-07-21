@@ -80,8 +80,8 @@ web image at build time (`API_URL` below) — change the domain there, not at ru
    | `server.sharp.davideghiotto.it` | `sharp`   | 3000           |
    | `media.sharp.davideghiotto.it`  | `livekit` | 7880           |
 
-   Open host firewall ports `7881/tcp`, `3478/udp`, `5349/tcp`, and
-   `50000-50100/udp`. WebSockets work through Traefik. Do **not** add a domain
+   Open host firewall ports `7881/tcp`, `3478/udp`, `5349/tcp`,
+   `30000-30100/udp` (TURN relay), and `50000-50100/udp`. WebSockets work through Traefik. Do **not** add a domain
    for `db-studio` — it stays private, see below.)
 
 6. **Deploy**. First build compiles the Rust server + builds the web & landing

@@ -10,7 +10,7 @@ server (API + web SPA in one container), and Caddy.
 postgres ─┐
 redis ────┤
 sharp ────┼──> caddy :80/:443 ──> the internet
-livekit ──┤       └── media:7881/tcp, 3478/udp, 5349/tcp, 50000-60000/udp
+livekit ──┤       └── media:7881/tcp, 3478/udp, 5349/tcp, 30000-30100/udp, 50000-60000/udp
 landing ──┘
 ```
 
@@ -53,7 +53,7 @@ Edit `.env` and set:
   Caddy owns 443
 
 Open firewall ports `7881/tcp`, `3478/udp`, `5349/tcp`, and
-`50000-60000/udp`. Strict networks allowing only TCP 443 may not connect on this
+`30000-30100/udp` (TURN relay), and `50000-60000/udp`. Strict networks allowing only TCP 443 may not connect on this
 single-IP topology; use a second public IP or dedicated media VM when that
 coverage is required.
 

@@ -27,7 +27,8 @@ services:
       LIVEKIT_CONFIG: |
         port: 7880
         log_level: info
-        prometheus_port: 6789
+        prometheus:
+          port: 6789
         rtc:
           tcp_port: 7881
           port_range_start: 50000
@@ -43,6 +44,8 @@ services:
           cert_file: /etc/livekit/tls.crt
           key_file: /etc/livekit/tls.key
           ttl_seconds: 300
+          relay_range_start: 30000
+          relay_range_end: 30100
     volumes:
       - ${LIVEKIT_TURN_CERT_FILE}:/etc/livekit/tls.crt:ro
       - ${LIVEKIT_TURN_KEY_FILE}:/etc/livekit/tls.key:ro
@@ -52,6 +55,7 @@ services:
       - "7881:7881/tcp"
       - "3478:3478/udp"
       - "5349:5349/tcp"
+      - "30000-30100:30000-30100/udp"
       - "50000-50100:50000-50100/udp"
     networks:
       - dokploy-network
