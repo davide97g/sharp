@@ -5,14 +5,14 @@ const GITHUB_OWNER = "davide97g";
 const repo = `https://github.com/${GITHUB_OWNER}/sharp`;
 const releases = `${repo}/releases/latest`;
 
-const title = "sharp — Team chat, docs, canvas & calls. Your server. No compromises.";
+const title = "sharp — Team chat, docs, canvas, calls & tasks. Your server. No compromises.";
 const description =
-  "An open-source, self-hosted Slack replacement: channels, threads, DMs, collaborative docs and canvas, voice/video calls with screen sharing, file uploads and full-text search, running on your own server from a single container.";
+  "An open-source, self-hosted Slack replacement: channels, threads, DMs, collaborative docs and canvas, voice/video calls, a Linear-lite task tracker with GitHub sync, file uploads and full-text search — running on your own server from a single container.";
 const siteUrl = "https://sharp.davideghiotto.it";
 ---
 
 <!doctype html>
-<html lang="en" class="lenis">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -51,7 +51,7 @@ const siteUrl = "https://sharp.davideghiotto.it";
         </a>
         <div class="nav-links">
           <a class="hide-sm" href="#features">Features</a>
-          <a class="hide-sm" href="#stats">Stats</a>
+          <a class="hide-sm" href="#tasks">Tasks</a>
           <a class="hide-sm" href="#selfhost">Self-host</a>
           <a class="hide-sm" href="#download">Download</a>
           <a class="gh" href={repo} rel="noopener">
@@ -71,13 +71,13 @@ const siteUrl = "https://sharp.davideghiotto.it";
           <span class="pill"><span class="dot"></span> Open source · AGPL-3.0 · self-hosted</span>
         </div>
         <h1 class="headline reveal" style="transition-delay:0.2s">
-          <span id="headlineText">Chat, docs, canvas &amp; calls. Your server.</span><span class="typing-cursor"></span>
+          <span id="headlineText">Chat, docs, canvas, calls &amp; tasks. Your server.</span><span class="typing-cursor"></span>
         </h1>
         <p class="subline reveal" style="transition-delay:0.3s">
           sharp is an open-source Slack replacement — channels, threads and DMs,
           real-time collaborative docs and canvas, voice/video calls with screen
-          sharing, file uploads and full-text search — self-hosted in a single
-          container. Your data never leaves your infrastructure.
+          sharing, a Linear-lite task tracker, file uploads and full-text search —
+          self-hosted in a single container. Your data never leaves your infrastructure.
         </p>
         <div class="cta-row reveal" style="transition-delay:0.4s">
           <a id="downloadCta" class="btn btn-primary" href={releases} rel="noopener">
@@ -196,8 +196,8 @@ const siteUrl = "https://sharp.davideghiotto.it";
       <div class="container">
         <div class="section-head reveal">
           <div class="eyebrow">Why sharp</div>
-          <h2>One workspace. Chat, docs, canvas &amp; calls.</h2>
-          <p>Everything a team needs to talk, write, draw and meet together — and nothing that phones home.</p>
+          <h2>One workspace. Chat, docs, canvas, calls &amp; tasks.</h2>
+          <p>Everything a team needs to talk, write, draw, meet and ship — and nothing that phones home.</p>
         </div>
         <div class="features stagger" id="featuresGrid">
           <div class="card">
@@ -274,6 +274,101 @@ const siteUrl = "https://sharp.davideghiotto.it";
       </div>
     </section>
 
+    <!-- ===== Tasks (Linear-lite) ===== -->
+    <section id="tasks" class="tasks-section">
+      <div class="container">
+        <div class="section-head reveal">
+          <div class="eyebrow">Tasks</div>
+          <h2>Linear-lite, built in.</h2>
+          <p>
+            A native issue tracker for the same workspace — projects, workflow states,
+            list &amp; board views, chat bridging, and GitHub sync. No third-party SaaS.
+          </p>
+        </div>
+
+        <div class="tasks-layout">
+          <div class="tasks-copy reveal-left">
+            <ul class="tasks-points">
+              <li>
+                <strong>Projects &amp; identifiers</strong>
+                <span><code>SHARP-123</code> keys allocate from a sequence. Dense list rows or a state board — your call.</span>
+              </li>
+              <li>
+                <strong>Create from chat</strong>
+                <span>Turn a message into a task. Bare identifiers auto-linkify; chips deep-link back.</span>
+              </li>
+              <li>
+                <strong>GitHub sync</strong>
+                <span>Branch &amp; PR names move state for you — started on open, completed on merge.</span>
+              </li>
+              <li>
+                <strong>Keyboard-first</strong>
+                <span>Peek panel, property pickers, <code>c</code> to create. Same muscle memory as Linear.</span>
+              </li>
+            </ul>
+          </div>
+
+          <div class="tasks-mock reveal-right" aria-hidden="true">
+            <div class="tm-bar">
+              <span class="tm-proj"><span class="tm-key">SHARP</span> Engineering</span>
+              <span class="tm-views"><span class="on">List</span><span>Board</span></span>
+            </div>
+            <div class="tm-group">
+              <div class="tm-group-head"><span class="tm-dot started"></span> In Progress <em>3</em></div>
+              <div class="tm-row active">
+                <span class="tm-pri high" title="High"></span>
+                <span class="tm-id">SHARP-128</span>
+                <span class="tm-title">Wire GitHub webhook state automation</span>
+                <span class="tm-label">backend</span>
+                <span class="tm-avatar" style="background:#7c6cff">JL</span>
+              </div>
+              <div class="tm-row">
+                <span class="tm-pri urgent" title="Urgent"></span>
+                <span class="tm-id">SHARP-124</span>
+                <span class="tm-title">Task peek: comments + activity feed</span>
+                <span class="tm-label">web</span>
+                <span class="tm-avatar" style="background:#ff8a5c">MK</span>
+              </div>
+              <div class="tm-row">
+                <span class="tm-pri med" title="Medium"></span>
+                <span class="tm-id">SHARP-119</span>
+                <span class="tm-title">Create task from message toolbar</span>
+                <span class="tm-label">chat</span>
+                <span class="tm-avatar" style="background:#3ddc84">PS</span>
+              </div>
+            </div>
+            <div class="tm-group">
+              <div class="tm-group-head"><span class="tm-dot todo"></span> Todo <em>2</em></div>
+              <div class="tm-row">
+                <span class="tm-pri none" title="No priority"></span>
+                <span class="tm-id">SHARP-131</span>
+                <span class="tm-title">Sharpy embeddings for task titles</span>
+                <span class="tm-label">ai</span>
+                <span class="tm-due">Fri</span>
+              </div>
+              <div class="tm-row">
+                <span class="tm-pri low" title="Low"></span>
+                <span class="tm-id">SHARP-132</span>
+                <span class="tm-title">Filter bar: assignee + label + priority</span>
+                <span class="tm-label">web</span>
+                <span class="tm-due">Mon</span>
+              </div>
+            </div>
+            <div class="tm-peek">
+              <div class="tm-peek-id">SHARP-128</div>
+              <div class="tm-peek-title">Wire GitHub webhook state automation</div>
+              <div class="tm-props">
+                <div><span>Status</span><strong><i class="tm-dot started"></i> In Progress</strong></div>
+                <div><span>Priority</span><strong>High</strong></div>
+                <div><span>Assignee</span><strong>Jordan Lee</strong></div>
+                <div><span>GitHub</span><strong class="tm-gh">davide97g/sharp#128</strong></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ===== Self-host ===== -->
     <section id="selfhost" class="selfhost">
       <div class="container">
@@ -345,7 +440,7 @@ const siteUrl = "https://sharp.davideghiotto.it";
       </div>
     </footer>
 
-    <!-- ===== Master JS: Smooth scroll, reveals, tilt, particles, count-up, glow, cursor ===== -->
+    <!-- ===== Master JS: reveals, tilt, particles, count-up, glow ===== -->
     <script is:inline>
       (function () {
         "use strict";
@@ -401,62 +496,6 @@ const siteUrl = "https://sharp.davideghiotto.it";
             p.style.background = c + (0.2 + Math.random() * 0.4) + ")";
             container.appendChild(p);
           }
-        })();
-
-        /* ── Smooth scroll via Lenis-style virtual scroll ── */
-        (function () {
-          var html = document.documentElement;
-          var isSmooth = true;
-          var scrollY = window.scrollY;
-          var targetY = scrollY;
-          var raf = null;
-
-          function onWheel(e) {
-            if (!isSmooth) return;
-            e.preventDefault();
-            targetY += e.deltaY;
-            targetY = Math.max(0, Math.min(targetY, document.documentElement.scrollHeight - window.innerHeight));
-          }
-
-          function onScroll() {
-            if (isSmooth) {
-              targetY = window.scrollY;
-            } else {
-              scrollY = window.scrollY;
-              targetY = scrollY;
-            }
-          }
-
-          function lerp(a, b, t) { return a + (b - a) * t; }
-
-          function tick() {
-            var diff = targetY - scrollY;
-            if (Math.abs(diff) > 0.5) {
-              scrollY = lerp(scrollY, targetY, 0.1);
-              window.scrollTo(0, Math.round(scrollY));
-              raf = requestAnimationFrame(tick);
-            } else {
-              scrollY = targetY;
-              raf = null;
-            }
-          }
-
-          function startSmooth() {
-            html.classList.add("lenis-smooth");
-            isSmooth = true;
-            targetY = window.scrollY;
-            scrollY = targetY;
-            window.addEventListener("wheel", onWheel, { passive: false });
-            window.addEventListener("scroll", onScroll);
-          }
-
-          // Only enable on non-touch devices
-          if (!("ontouchstart" in window)) {
-            startSmooth();
-          }
-
-          // Expose for debugging
-          window.__smooth = { isSmooth: isSmooth };
         })();
 
         /* ── Scroll reveal via IntersectionObserver ── */
