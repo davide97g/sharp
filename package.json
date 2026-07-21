@@ -1,5 +1,6 @@
 {
   "dependencies": {
-    "@emoji-mart/data": "^1.2.1"
+    "@emoji-mart/data": "^1.2.1",
+    "node-web-audio-api": "2.1.0"
   }
 }

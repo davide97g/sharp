@@ -24,3 +24,6 @@ Thumbs.db
 # Tauri
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
+
+
+exports
