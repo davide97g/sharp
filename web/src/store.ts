@@ -111,6 +111,9 @@ import type {
   PollUpdatedPayload,
   PollDeletedPayload,
   VoicePollStatePayload,
+  SharpyConversation,
+  SharpyMessage,
+  SharpySource,
   WsEnvelope,
 } from './lib/types'
 
@@ -242,6 +245,18 @@ type State = {
   searchOpen: boolean
   // chat inbox (notifications) panel
   inboxOpen: boolean
+
+  // --- Sharpy: AI workspace assistant (slide-over) ---
+  sharpyOpen: boolean
+  sharpyEnabled: boolean
+  sharpyStatusChecked: boolean
+  sharpyConversations: SharpyConversation[]
+  sharpyActiveId: string | null
+  sharpyMessages: SharpyMessage[]
+  sharpyLoading: boolean
+  sharpyStreaming: boolean
+  sharpyStreamText: string
+  sharpyStreamSources: SharpySource[] | null
 
   // per-composer draft text, keyed `c:<channelId>` (main) or `t:<parentId>` (thread)
   drafts: Record<string, string>
@@ -391,6 +406,14 @@ type State = {
   setQuickSwitcher: (open: boolean) => void
   setSearchOpen: (open: boolean) => void
   setInboxOpen: (open: boolean) => void
+
+  // sharpy actions
+  initSharpy: () => Promise<void>
+  setSharpyOpen: (open: boolean) => void
+  openSharpyConversation: (id: string) => Promise<void>
+  newSharpyConversation: () => void
+  deleteSharpyConversation: (id: string) => Promise<void>
+  sendSharpy: (content: string) => Promise<void>
   setDraft: (key: string, text: string) => void
   setReplyTarget: (channelId: string, msg: Message | null) => void
   requestComposerFocus: (key: string) => void
@@ -565,6 +588,16 @@ export const useStore = create<State>((set, get) => ({
   quickSwitcherOpen: false,
   searchOpen: false,
   inboxOpen: false,
+  sharpyOpen: false,
+  sharpyEnabled: false,
+  sharpyStatusChecked: false,
+  sharpyConversations: [],
+  sharpyActiveId: null,
+  sharpyMessages: [],
+  sharpyLoading: false,
+  sharpyStreaming: false,
+  sharpyStreamText: '',
+  sharpyStreamSources: null,
   drafts: {},
   replyTargets: {},
   focusRequest: null,
@@ -646,6 +679,7 @@ export const useStore = create<State>((set, get) => ({
 
     await get().refetchDirectory()
     get().loadMentions()
+    void get().initSharpy()
     await get().loadInboxAndPrefs()
     set({ ready: true })
 
@@ -747,6 +781,16 @@ export const useStore = create<State>((set, get) => ({
       quickSwitcherOpen: false,
       searchOpen: false,
       inboxOpen: false,
+      sharpyOpen: false,
+      sharpyEnabled: false,
+      sharpyStatusChecked: false,
+      sharpyConversations: [],
+      sharpyActiveId: null,
+      sharpyMessages: [],
+      sharpyLoading: false,
+      sharpyStreaming: false,
+      sharpyStreamText: '',
+      sharpyStreamSources: null,
       drafts: {},
       replyTargets: {},
       focusRequest: null,
@@ -1397,6 +1441,137 @@ export const useStore = create<State>((set, get) => ({
 
   setInboxOpen(open) {
     set({ inboxOpen: open })
+  },
+
+  // --- Sharpy: AI workspace assistant ---
+
+  async initSharpy() {
+    if (get().sharpyStatusChecked) return
+    try {
+      const { enabled } = await api.sharpy.status()
+      set({ sharpyEnabled: enabled, sharpyStatusChecked: true })
+      if (!enabled) return
+      const conversations = await api.sharpy.conversations()
+      set({ sharpyConversations: conversations })
+    } catch {
+      // Feature stays disabled if status can't be resolved; never blocks boot.
+      set({ sharpyStatusChecked: true })
+    }
+  },
+
+  setSharpyOpen(open) {
+    set({ sharpyOpen: open })
+  },
+
+  async openSharpyConversation(id) {
+    set({ sharpyActiveId: id, sharpyLoading: true, sharpyMessages: [] })
+    try {
+      const { conversation, messages } = await api.sharpy.conversation(id)
+      // Ignore a stale response if the user switched conversations meanwhile.
+      if (get().sharpyActiveId !== id) return
+      set((s) => ({
+        sharpyMessages: messages,
+        sharpyLoading: false,
+        sharpyConversations: s.sharpyConversations.some((c) => c.id === conversation.id)
+          ? s.sharpyConversations.map((c) => (c.id === conversation.id ? conversation : c))
+          : [conversation, ...s.sharpyConversations],
+      }))
+    } catch (e) {
+      if (get().sharpyActiveId === id) set({ sharpyLoading: false })
+      if (e instanceof Error) toastError(e.message)
+    }
+  },
+
+  newSharpyConversation() {
+    // A fresh conversation is created lazily on the first send.
+    set({ sharpyActiveId: null, sharpyMessages: [], sharpyStreamText: '', sharpyStreamSources: null })
+  },
+
+  async deleteSharpyConversation(id) {
+    const prev = get().sharpyConversations
+    set((s) => ({
+      sharpyConversations: s.sharpyConversations.filter((c) => c.id !== id),
+      ...(s.sharpyActiveId === id
+        ? { sharpyActiveId: null, sharpyMessages: [] }
+        : {}),
+    }))
+    try {
+      await api.sharpy.deleteConversation(id)
+    } catch (e) {
+      set({ sharpyConversations: prev })
+      if (e instanceof Error) toastError(e.message)
+    }
+  },
+
+  async sendSharpy(content) {
+    const text = content.trim()
+    if (!text || get().sharpyStreaming || !get().sharpyEnabled) return
+
+    // Create a conversation on the fly when none is active.
+    let conversationId = get().sharpyActiveId
+    if (!conversationId) {
+      try {
+        const conversation = await api.sharpy.createConversation()
+        conversationId = conversation.id
+        set((s) => ({
+          sharpyActiveId: conversation.id,
+          sharpyMessages: [],
+          sharpyConversations: [conversation, ...s.sharpyConversations],
+        }))
+      } catch (e) {
+        if (e instanceof Error) toastError(e.message)
+        return
+      }
+    }
+
+    const optimisticUser: SharpyMessage = {
+      id: `local-${Date.now()}`,
+      role: 'user',
+      content: text,
+      sources: null,
+      created_at: new Date().toISOString(),
+    }
+    set((s) => ({
+      sharpyMessages: [...s.sharpyMessages, optimisticUser],
+      sharpyStreaming: true,
+      sharpyStreamText: '',
+      sharpyStreamSources: null,
+    }))
+
+    await api.sharpy.send(conversationId, text, {
+      onSources: (sources) => {
+        if (get().sharpyActiveId !== conversationId) return
+        set({ sharpyStreamSources: sources })
+      },
+      onDelta: (delta) => {
+        if (get().sharpyActiveId !== conversationId) return
+        set((s) => ({ sharpyStreamText: s.sharpyStreamText + delta }))
+      },
+      onDone: (message) => {
+        set((s) => {
+          const stillActive = s.sharpyActiveId === conversationId
+          return {
+            sharpyStreaming: false,
+            sharpyStreamText: '',
+            sharpyStreamSources: null,
+            sharpyMessages: stillActive ? [...s.sharpyMessages, message] : s.sharpyMessages,
+          }
+        })
+        // Refresh list ordering + server-generated title after the exchange.
+        void api.sharpy
+          .conversations()
+          .then((conversations) => set({ sharpyConversations: conversations }))
+          .catch(() => {})
+      },
+      onError: (errMessage) => {
+        set({ sharpyStreaming: false, sharpyStreamText: '', sharpyStreamSources: null })
+        toastError(errMessage)
+      },
+    })
+    // Safety net if the stream ends without a terminal frame.
+    if (get().sharpyStreaming) {
+      set({ sharpyStreaming: false, sharpyStreamText: '', sharpyStreamSources: null })
+    }
   },
 
   setDraft(key, text) {

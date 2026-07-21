@@ -10,6 +10,7 @@ pub mod messages;
 pub mod notifications;
 pub mod polls;
 pub mod search;
+pub mod sharpy;
 pub mod users;
 pub mod voice;
 pub mod voice_triggers;

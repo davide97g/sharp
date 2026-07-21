@@ -339,6 +339,22 @@ async fn publish_message(
         )
         .await;
     });
+
+    // Sharpy: embed the new message immediately (no-op when disabled/encrypted).
+    if state.config.ai.is_some() && !message.encrypted {
+        let embed_state = state.clone();
+        let embed_content = message.content.clone();
+        let embed_id = message.id;
+        tokio::spawn(async move {
+            crate::routes::sharpy::embed_message(
+                &embed_state,
+                embed_id,
+                channel_id,
+                embed_content,
+            )
+            .await;
+        });
+    }
     Ok(())
 }
 
@@ -598,6 +614,9 @@ pub async fn edit_message(
     .execute(&state.pool)
     .await?;
 
+    // Sharpy: drop the stale embedding so the worker re-embeds the new content.
+    crate::routes::sharpy::drop_message_embedding(&state, id).await;
+
     let message = load_message(&state.pool, id, auth.id).await?;
 
     let targets = channel_member_ids(&state.pool, meta.channel_id).await?;
@@ -624,6 +643,9 @@ pub async fn delete_message(
             .execute(&state.pool)
             .await?;
     }
+
+    // Sharpy: forget the deleted message.
+    crate::routes::sharpy::drop_message_embedding(&state, id).await;
 
     let targets = channel_member_ids(&state.pool, meta.channel_id).await?;
     let ev = envelope(
@@ -652,6 +674,9 @@ pub(crate) async fn soft_delete_card_message(
             .execute(&state.pool)
             .await?;
     }
+    // Sharpy: forget the soft-deleted card message.
+    crate::routes::sharpy::drop_message_embedding(&state, id).await;
+
     let message = load_message(&state.pool, id, viewer).await?;
     let targets = channel_member_ids(&state.pool, meta.channel_id).await?;
     state

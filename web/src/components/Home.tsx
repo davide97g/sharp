@@ -11,6 +11,9 @@ export function Home() {
   const navigate = useNavigate()
   const setQuickSwitcher = useStore((state) => state.setQuickSwitcher)
   const setSearchOpen = useStore((state) => state.setSearchOpen)
+  const sharpyEnabled = useStore((state) => state.sharpyEnabled)
+  const setSharpyOpen = useStore((state) => state.setSharpyOpen)
+  const sendSharpy = useStore((state) => state.sendSharpy)
   const [question, setQuestion] = useState('')
   const [previewMessage, setPreviewMessage] = useState('')
 
@@ -20,7 +23,14 @@ export function Home() {
 
   function submitSharpy(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!question.trim()) return
+    const text = question.trim()
+    if (!text) return
+    if (sharpyEnabled) {
+      setSharpyOpen(true)
+      void sendSharpy(text)
+      setQuestion('')
+      return
+    }
     setPreviewMessage("Sharpy is still in preview — your question wasn't sent.")
   }
 
@@ -83,7 +93,7 @@ export function Home() {
           <label htmlFor="ask-sharpy-input" className="ask-sharpy-label">
             <SparkIcon />
             <span>Ask Sharpy</span>
-            <span className="ask-sharpy-badge">Preview</span>
+            {!sharpyEnabled && <span className="ask-sharpy-badge">Preview</span>}
           </label>
           <div className="ask-sharpy-field">
             <input
@@ -101,7 +111,9 @@ export function Home() {
             </button>
           </div>
           <p className="ask-sharpy-hint" aria-live="polite">
-            {previewMessage || 'AI workspace answers are coming soon.'}
+            {sharpyEnabled
+              ? 'Answers grounded in your workspace messages and docs.'
+              : previewMessage || 'AI workspace answers are coming soon.'}
           </p>
         </form>
 

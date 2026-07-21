@@ -623,3 +623,52 @@ export type PollDeletedPayload = {
   message_id: string | null
 }
 export type VoicePollStatePayload = { room_id: string; poll: CallPoll | null }
+
+// --- Sharpy: AI workspace assistant ---
+
+export type SharpyConversation = {
+  id: string
+  title: string
+  created_at: string
+  updated_at: string
+}
+
+export type SharpySource =
+  | {
+      kind: 'message'
+      message_id: string
+      channel_id: string
+      channel_name: string
+      author: string
+      snippet: string
+      created_at: string
+    }
+  | {
+      kind: 'doc'
+      doc_id: string
+      title: string
+      doc_kind: 'doc' | 'canvas' | 'board'
+      snippet: string
+    }
+
+export type SharpyMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  sources: SharpySource[] | null
+  created_at: string
+}
+
+// REST response shapes
+export type SharpyStatusResponse = { enabled: boolean }
+export type SharpyConversationDetail = {
+  conversation: SharpyConversation
+  messages: SharpyMessage[]
+}
+
+// SSE stream frames (POST .../messages)
+export type SharpyStreamEvent =
+  | { type: 'sources'; sources: SharpySource[] }
+  | { type: 'delta'; text: string }
+  | { type: 'done'; message: SharpyMessage }
+  | { type: 'error'; message: string }

@@ -8,6 +8,7 @@ import { MeetingsSidebar } from './meetings/MeetingsSidebar'
 import { CalendarSidebar } from './calendar/CalendarSidebar'
 import { CompactSidebar } from './CompactSidebar'
 import { ThreadPanel } from './ThreadPanel'
+import { SharpyPanel } from './SharpyPanel'
 import { QuickSwitcher } from './QuickSwitcher'
 import { SearchPalette } from './SearchPalette'
 import { InboxPanel } from './NotificationCenter'
@@ -169,6 +170,7 @@ export function AppShell() {
       >
         <Outlet />
         {mode === 'chat' && <ThreadPanel />}
+        <SharpyPanel />
       </div>
       {isMobile && <MobileTabBar />}
       {inVoice && <VideoStage />}
@@ -193,6 +195,9 @@ function ModeRail({
   const navigate = useNavigate()
   const [unseenRelease, setUnseenRelease] = useState(hasUnseenRelease)
   const chatUnread = useStore((s) => s.notifUnread)
+  const sharpyEnabled = useStore((s) => s.sharpyEnabled)
+  const sharpyOpen = useStore((s) => s.sharpyOpen)
+  const setSharpyOpen = useStore((s) => s.setSharpyOpen)
   const mentions = useStore((s) => s.mentions)
   const docMentions = mentions.reduce(
     (n, m) => n + (!m.read_at && m.doc.kind === 'doc' ? 1 : 0),
@@ -364,6 +369,29 @@ function ModeRail({
           </svg>
         }
       />
+      {sharpyEnabled && (
+        <RailButton
+          active={sharpyOpen}
+          onClick={() => setSharpyOpen(!sharpyOpen)}
+          title="Sharpy"
+          label={
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M12 3c.4 4.7 2.3 6.6 7 7-4.7.4-6.6 2.3-7 7-.4-4.7-2.3-6.6-7-7 4.7-.4 6.6-2.3 7-7Z" />
+              <path d="M18.5 16.5c.1 1.5.8 2.2 2.3 2.3-1.5.1-2.2.8-2.3 2.3-.1-1.5-.8-2.2-2.3-2.3 1.5-.1 2.2-.8 2.3-2.3Z" />
+            </svg>
+          }
+        />
+      )}
       <button
         type="button"
         onClick={onToggleSidebar}

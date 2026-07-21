@@ -24,6 +24,9 @@ pub struct Config {
     pub tenor_api_key: Option<String>,
     /// DeepSeek configuration. `None` when `DEEPSEEK_API_KEY` is unset.
     pub deepseek: Option<DeepSeekConfig>,
+    /// Sharpy AI assistant (OpenAI-compatible chat + embeddings). `None` when
+    /// `AI_API_KEY` is unset — the whole feature is then inert.
+    pub ai: Option<AiConfig>,
     /// Google Calendar OAuth. `None` unless client id + secret (+ redirect) are set.
     pub google: Option<GoogleConfig>,
     /// WebAuthn relying-party configuration. `None` keeps passkeys disabled.
@@ -66,6 +69,14 @@ pub struct DeepSeekConfig {
     pub api_key: String,
     pub model: String,
     pub base_url: String,
+}
+
+#[derive(Clone)]
+pub struct AiConfig {
+    pub base_url: String,
+    pub api_key: String,
+    pub chat_model: String,
+    pub embed_model: String,
 }
 
 #[derive(Clone)]
@@ -187,6 +198,17 @@ impl Config {
                 .unwrap_or_else(|| "https://api.deepseek.com".to_string()),
         });
 
+        // Sharpy is enabled only when an API key is present; everything else has a
+        // sensible OpenAI default.
+        let ai = env_opt("AI_API_KEY").map(|api_key| AiConfig {
+            api_key,
+            base_url: env_opt("AI_BASE_URL")
+                .unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
+            chat_model: env_opt("AI_CHAT_MODEL").unwrap_or_else(|| "gpt-4o-mini".to_string()),
+            embed_model: env_opt("AI_EMBED_MODEL")
+                .unwrap_or_else(|| "text-embedding-3-small".to_string()),
+        });
+
         // Google Calendar OAuth is enabled only when client id + secret are both
         // present; the redirect URI is required alongside them (Google demands an
         // exact match, so there is no safe default).
@@ -245,6 +267,7 @@ impl Config {
             giphy_api_key,
             tenor_api_key,
             deepseek,
+            ai,
             google,
             webauthn,
         })

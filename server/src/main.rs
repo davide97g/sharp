@@ -1,3 +1,4 @@
+mod ai;
 mod auth;
 mod calendar_crypto;
 mod calendar_sync;
@@ -202,6 +203,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
         }
     });
+
+    // Sharpy embedder: 15s tick that backfills message embeddings and re-embeds
+    // changed docs. Only runs when the AI assistant is configured.
+    if app_state.config.ai.is_some() {
+        let embed_state = app_state.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Err(error) = routes::sharpy::embed_tick(&embed_state).await {
+                    tracing::warn!("sharpy embed tick failed: {}", error);
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            }
+        });
+    }
 
     // Google Calendar sync poller: 5-minute rolling-window refresh of every active
     // connection. Only runs when Google OAuth is configured.
@@ -439,6 +454,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             post(routes::notifications::expo_unregister),
         )
         .route("/search", get(routes::search::search))
+        // --- Sharpy AI assistant ---
+        .route("/sharpy/status", get(routes::sharpy::status))
+        .route(
+            "/sharpy/conversations",
+            get(routes::sharpy::list_conversations).post(routes::sharpy::create_conversation),
+        )
+        .route(
+            "/sharpy/conversations/:id",
+            get(routes::sharpy::get_conversation).delete(routes::sharpy::delete_conversation),
+        )
+        .route(
+            "/sharpy/conversations/:id/messages",
+            post(routes::sharpy::send_message),
+        )
         // --- Phase 2: docs ---
         .route(
             "/channels/:id/docs",

@@ -9,7 +9,7 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
       POSTGRES_USER: sharp
@@ -68,6 +68,11 @@ services:
       S3_SECRET_KEY: sharp-secret
       S3_REGION: us-east-1
       S3_ALLOW_HTTP: "true"
+      # Sharpy AI assistant (OpenAI-compatible) — optional; disabled when unset.
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.openai.com/v1}
+      AI_CHAT_MODEL: ${AI_CHAT_MODEL:-gpt-4o-mini}
+      AI_EMBED_MODEL: ${AI_EMBED_MODEL:-text-embedding-3-small}
       # Google Calendar (Phase 5) — optional. Set to a Google OAuth client with
       # redirect http://localhost:3000/api/v1/calendar/google/callback to test sync.
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}

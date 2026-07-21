@@ -17,7 +17,7 @@ sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_urlencoded = "0.7"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 argon2 = "0.5"
@@ -42,3 +42,5 @@ aes-gcm = "0.10"
 hkdf = "0.12"
 sha2 = "0.10"
 webauthn-rs = { version = "0.5.5", features = ["conditional-ui", "danger-allow-state-serialisation"] }
+# Sharpy AI assistant: pgvector bindings for semantic retrieval (works with sqlx 0.8)
+pgvector = { version = "0.4", features = ["sqlx"] }

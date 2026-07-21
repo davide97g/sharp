@@ -49,6 +49,12 @@ import type {
   CalendarEventsResponse,
   ScheduledMeeting,
   Poll,
+  SharpyConversation,
+  SharpyConversationDetail,
+  SharpyMessage,
+  SharpySource,
+  SharpyStatusResponse,
+  SharpyStreamEvent,
 } from './types'
 
 const TOKEN_KEY = 'sharp.token'
@@ -728,6 +734,33 @@ export const api = {
     return request<DocSearchResponse>(`/docs/search?${params.toString()}`)
   },
 
+  // --- Sharpy: AI workspace assistant ---
+  sharpy: {
+    status: () => request<SharpyStatusResponse>('/sharpy/status'),
+    conversations: () => request<SharpyConversation[]>('/sharpy/conversations'),
+    createConversation: () =>
+      request<SharpyConversation>('/sharpy/conversations', { method: 'POST', body: {} }),
+    conversation: (id: string) =>
+      request<SharpyConversationDetail>(`/sharpy/conversations/${id}`),
+    deleteConversation: (id: string) =>
+      request<void>(`/sharpy/conversations/${id}`, { method: 'DELETE' }),
+    // Streaming send. No EventSource (needs POST + auth header): raw fetch +
+    // ReadableStream reader, split on the SSE frame delimiter (\n\n), tolerate
+    // CRLF, multi-event chunks, partial frames, and a trailing unterminated
+    // buffer. Returns once the stream ends (done/error frame or connection end).
+    send: (
+      id: string,
+      content: string,
+      handlers: {
+        onSources?: (sources: SharpySource[]) => void
+        onDelta?: (text: string) => void
+        onDone?: (message: SharpyMessage) => void
+        onError?: (message: string) => void
+      },
+      signal?: AbortSignal,
+    ) => sharpySend(id, content, handlers, signal),
+  },
+
   // --- calendar (Phase 5) ---
   calendar: {
     connections: () =>
@@ -787,6 +820,130 @@ export const api = {
         }),
     },
   },
+}
+
+type SharpyStreamHandlers = {
+  onSources?: (sources: SharpySource[]) => void
+  onDelta?: (text: string) => void
+  onDone?: (message: SharpyMessage) => void
+  onError?: (message: string) => void
+}
+
+function dispatchSharpyEvent(evt: SharpyStreamEvent, handlers: SharpyStreamHandlers) {
+  switch (evt.type) {
+    case 'sources':
+      handlers.onSources?.(evt.sources)
+      break
+    case 'delta':
+      handlers.onDelta?.(evt.text)
+      break
+    case 'done':
+      handlers.onDone?.(evt.message)
+      break
+    case 'error':
+      handlers.onError?.(evt.message)
+      break
+  }
+}
+
+/**
+ * Parse one SSE frame block (one or more `data:` lines) and dispatch its JSON
+ * payload. Non-`data:` lines and comments are ignored per the SSE spec.
+ */
+function handleSharpyFrame(frame: string, handlers: SharpyStreamHandlers) {
+  const dataLines: string[] = []
+  for (const rawLine of frame.split('\n')) {
+    const line = rawLine.replace(/\r$/, '')
+    if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).replace(/^ /, ''))
+    }
+  }
+  if (dataLines.length === 0) return
+  const payload = dataLines.join('\n')
+  if (!payload) return
+  try {
+    dispatchSharpyEvent(JSON.parse(payload) as SharpyStreamEvent, handlers)
+  } catch {
+    // Ignore malformed frames rather than aborting the whole stream.
+  }
+}
+
+async function sharpySend(
+  id: string,
+  content: string,
+  handlers: SharpyStreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const token = getToken()
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
+  let res: Response
+  try {
+    res = await fetch(`${apiBase()}/sharpy/conversations/${id}/messages`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ content }),
+      signal,
+    })
+  } catch (e) {
+    if ((e as { name?: string })?.name === 'AbortError') return
+    handlers.onError?.('Could not reach the assistant.')
+    return
+  }
+
+  if (!res.ok || !res.body) {
+    if (res.status === 401 && !hasSessionToken()) {
+      clearToken()
+      onUnauthorized?.()
+    }
+    let message = `Request failed (${res.status})`
+    try {
+      const text = await res.text()
+      const data = text ? JSON.parse(text) : undefined
+      message = data?.error?.message ?? message
+    } catch {
+      /* ignore */
+    }
+    handlers.onError?.(message)
+    return
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      // Split complete frames on the blank-line delimiter (tolerate CRLF).
+      for (let sep = indexOfFrameEnd(buffer); sep !== -1; sep = indexOfFrameEnd(buffer)) {
+        const frame = buffer.slice(0, sep)
+        buffer = buffer.slice(sep + frameEndLength(buffer, sep))
+        handleSharpyFrame(frame, handlers)
+      }
+    }
+    // Flush any trailing unterminated frame.
+    buffer += decoder.decode()
+    if (buffer.trim()) handleSharpyFrame(buffer, handlers)
+  } catch (e) {
+    if ((e as { name?: string })?.name === 'AbortError') return
+    handlers.onError?.('The assistant stream was interrupted.')
+  }
+}
+
+/** Index of the end of the first complete SSE frame (\n\n or \r\n\r\n), or -1. */
+function indexOfFrameEnd(buffer: string): number {
+  const lf = buffer.indexOf('\n\n')
+  const crlf = buffer.indexOf('\r\n\r\n')
+  if (lf === -1) return crlf
+  if (crlf === -1) return lf
+  return Math.min(lf, crlf)
+}
+
+function frameEndLength(buffer: string, at: number): number {
+  return buffer.startsWith('\r\n\r\n', at) ? 4 : 2
 }
 
 /** Absolute URL for a proxied attachment path (handles custom server origins). */

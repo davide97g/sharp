@@ -9,7 +9,7 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
       POSTGRES_USER: sharp
@@ -89,6 +89,12 @@ services:
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_ALLOW_HTTP: "true"
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@sharp.app}
+      # Sharpy AI assistant (OpenAI-compatible LLM + embeddings) — disabled when
+      # AI_API_KEY is unset. Base URL works with OpenAI, DeepSeek, Ollama, etc.
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.openai.com/v1}
+      AI_CHAT_MODEL: ${AI_CHAT_MODEL:-gpt-4o-mini}
+      AI_EMBED_MODEL: ${AI_EMBED_MODEL:-text-embedding-3-small}
       # Google Calendar (Phase 5) — optional. Leave unset to disable calendar sync.
       # GOOGLE_REDIRECT_URI must exactly match a redirect registered on the OAuth
       # client, pointing at this API origin: https://<domain>/api/v1/calendar/google/callback
