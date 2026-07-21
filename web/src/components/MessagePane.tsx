@@ -10,6 +10,7 @@ import { ChatLayoutChooser } from './ChatLayoutChooser'
 import { InboxTrigger } from './NotificationCenter'
 import { ChannelTabs } from './ChannelTabs'
 import { Avatar } from './Avatar'
+import { UserChip } from './UserCard'
 import { GearIcon, LockIcon } from './icons'
 import { DuckSuggest } from './DuckSuggest'
 import { ScheduleMeetingModal } from './calendar/ScheduleMeetingModal'
@@ -375,14 +376,25 @@ export function MessagePane() {
           {isDm ? (
             <span className="flex min-w-0 items-center gap-2 truncate font-semibold">
               {channel.dm_user && (
-                <Avatar
-                  id={channel.dm_user.id}
-                  name={channel.dm_user.display_name}
-                  size={26}
-                  online={dmOnline}
-                />
+                <>
+                  <Avatar
+                    id={channel.dm_user.id}
+                    name={channel.dm_user.display_name}
+                    size={26}
+                    online={dmOnline}
+                  />
+                  <UserChip
+                    userId={channel.dm_user.id}
+                    fallbackName={channel.dm_user.display_name}
+                    className="min-w-0 truncate hover:underline"
+                  >
+                    {channelLabel(channel, nicknames)}
+                  </UserChip>
+                </>
               )}
-              <span className="truncate">{channelLabel(channel, nicknames)}</span>
+              {!channel.dm_user && (
+                <span className="truncate">{channelLabel(channel, nicknames)}</span>
+              )}
               {dmEncryption === true && (
                 <span className="shrink-0 text-[var(--color-text-faint)]" title="End-to-end encrypted">
                   <LockIcon />

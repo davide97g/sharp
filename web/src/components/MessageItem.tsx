@@ -525,9 +525,7 @@ export function MessageItem({
             {fmtTime(message.created_at)}
           </span>
         ) : (
-          <UserChip userId={message.user.id} fallbackName={message.user.display_name}>
-            <Avatar id={message.user.id} name={message.user.display_name} size={36} online={online} />
-          </UserChip>
+          <Avatar id={message.user.id} name={message.user.display_name} size={36} online={online} />
         )}
       </div>
 

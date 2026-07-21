@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { avatarColor, initials } from '../lib/util'
 import { fetchAttachmentBlob } from '../lib/api'
 import { useStore } from '../store'
+import { UserChip } from './UserCard'
 
 // The avatar API requires a Bearer header, so <img src> can't load it directly.
 // Fetch as an authed blob once per URL and cache the resulting object URL. The
@@ -22,11 +23,14 @@ export function Avatar({
   name,
   size = 36,
   online,
+  /** Click-to-open nickname card for other users. Default on; off inside the card itself. */
+  nicknameCard = true,
 }: {
   id: string
   name: string
   size?: number
   online?: boolean
+  nicknameCard?: boolean
 }) {
   // Resolve the freshest name/avatar from the directory (and personal nickname)
   // so profile edits reflect live everywhere; fall back to the props for users
@@ -53,7 +57,7 @@ export function Avatar({
   // Soft rounded-square, scaling with size (never a hard square, never a full circle).
   const radius = Math.max(6, Math.round(size * 0.28))
 
-  return (
+  const face = (
     <div
       className="user-avatar relative shrink-0"
       style={{ width: size, height: size, borderRadius: radius }}
@@ -90,5 +94,13 @@ export function Avatar({
         />
       )}
     </div>
+  )
+
+  if (!nicknameCard) return face
+
+  return (
+    <UserChip userId={id} fallbackName={name} className="inline-flex shrink-0 cursor-pointer">
+      {face}
+    </UserChip>
   )
 }

@@ -465,9 +465,7 @@ function MembersTab({ channelId }: { channelId: string }) {
             const isLastOwner = u.role === 'owner' && ownersCount === 1
             return (
               <div key={u.id} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5">
-                <UserChip userId={u.id} fallbackName={u.display_name}>
-                  <Avatar id={u.id} name={u.display_name} size={30} />
-                </UserChip>
+                <Avatar id={u.id} name={u.display_name} size={30} />
                 <div className="min-w-0 flex-1">
                   <UserChip
                     userId={u.id}

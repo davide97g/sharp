@@ -65,19 +65,21 @@ export function ChannelPaneHeader({
         {isDm ? (
           <span className="flex items-center gap-2 font-semibold">
             {channel.dm_user && (
-              <UserChip
-                userId={channel.dm_user.id}
-                fallbackName={channel.dm_user.display_name}
-                className="flex items-center gap-2"
-              >
+              <>
                 <Avatar
                   id={channel.dm_user.id}
                   name={channel.dm_user.display_name}
                   size={26}
                   online={dmOnline}
                 />
-                <span>{channelLabel(channel, nicknames)}</span>
-              </UserChip>
+                <UserChip
+                  userId={channel.dm_user.id}
+                  fallbackName={channel.dm_user.display_name}
+                  className="hover:underline"
+                >
+                  {channelLabel(channel, nicknames)}
+                </UserChip>
+              </>
             )}
             {!channel.dm_user && channelLabel(channel, nicknames)}
             {encrypted && (

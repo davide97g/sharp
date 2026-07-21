@@ -1,22 +1,21 @@
 import {
-  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store'
-import { useCoarsePointer } from '../lib/useMediaQuery'
 import { useDisplayName } from '../lib/displayName'
 import { Avatar } from './Avatar'
 
 type Anchor = { top: number; left: number; bottom: number; right: number }
 
 /**
- * Click (and desktop hover) target that opens a personal nickname card for
- * another user. Self targets render children unchanged.
+ * Click target that opens a personal nickname card for another user.
+ * Self targets render children unchanged.
  */
 export function UserChip({
   userId,
@@ -30,21 +29,9 @@ export function UserChip({
   className?: string
 }) {
   const meId = useStore((s) => s.me?.id)
-  const coarse = useCoarsePointer()
   const [open, setOpen] = useState(false)
   const [anchor, setAnchor] = useState<Anchor | null>(null)
   const triggerRef = useRef<HTMLSpanElement>(null)
-  const hoverOpenTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const hoverCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const clearTimers = useCallback(() => {
-    if (hoverOpenTimer.current) clearTimeout(hoverOpenTimer.current)
-    if (hoverCloseTimer.current) clearTimeout(hoverCloseTimer.current)
-    hoverOpenTimer.current = null
-    hoverCloseTimer.current = null
-  }, [])
-
-  useEffect(() => () => clearTimers(), [clearTimers])
 
   if (!userId || userId === meId) {
     return <span className={className}>{children}</span>
@@ -64,25 +51,6 @@ export function UserChip({
     setOpen(true)
   }
 
-  function scheduleOpen() {
-    if (coarse) return
-    clearTimers()
-    hoverOpenTimer.current = setTimeout(() => openAt(), 280)
-  }
-
-  function scheduleClose() {
-    if (coarse) return
-    clearTimers()
-    hoverCloseTimer.current = setTimeout(() => setOpen(false), 200)
-  }
-
-  function cancelClose() {
-    if (hoverCloseTimer.current) {
-      clearTimeout(hoverCloseTimer.current)
-      hoverCloseTimer.current = null
-    }
-  }
-
   return (
     <>
       <span
@@ -91,14 +59,9 @@ export function UserChip({
         onClick={(e) => {
           e.stopPropagation()
           e.preventDefault()
-          if (open) {
-            setOpen(false)
-          } else {
-            openAt()
-          }
+          if (open) setOpen(false)
+          else openAt()
         }}
-        onMouseEnter={scheduleOpen}
-        onMouseLeave={scheduleClose}
         role="button"
         tabIndex={0}
         onKeyDown={(e) => {
@@ -116,9 +79,8 @@ export function UserChip({
           userId={userId}
           fallbackName={fallbackName}
           anchor={anchor}
+          triggerRef={triggerRef}
           onClose={() => setOpen(false)}
-          onMouseEnter={cancelClose}
-          onMouseLeave={scheduleClose}
         />
       )}
     </>
@@ -129,16 +91,14 @@ function UserCardPopover({
   userId,
   fallbackName,
   anchor,
+  triggerRef,
   onClose,
-  onMouseEnter,
-  onMouseLeave,
 }: {
   userId: string
   fallbackName: string
   anchor: Anchor
+  triggerRef: RefObject<HTMLSpanElement | null>
   onClose: () => void
-  onMouseEnter: () => void
-  onMouseLeave: () => void
 }) {
   const users = useStore((s) => s.users)
   const nicknames = useStore((s) => s.nicknames)
@@ -174,7 +134,11 @@ function UserCardPopover({
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+      const target = e.target as Node
+      if (ref.current?.contains(target)) return
+      // Let the trigger's own click handler toggle closed (avoid close+reopen).
+      if (triggerRef.current?.contains(target)) return
+      onClose()
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
@@ -185,7 +149,7 @@ function UserCardPopover({
       window.removeEventListener('mousedown', onDown)
       window.removeEventListener('keydown', onKey)
     }
-  }, [onClose])
+  }, [onClose, triggerRef])
 
   async function save() {
     const next = draft.trim()
@@ -222,12 +186,10 @@ function UserCardPopover({
       ref={ref}
       className="fixed z-[80] w-[280px] rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-3 shadow-2xl"
       style={{ top: pos.top, left: pos.left }}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
       onClick={(e) => e.stopPropagation()}
     >
       <div className="flex items-center gap-3">
-        <Avatar id={userId} name={realName} size={48} />
+        <Avatar id={userId} name={realName} size={48} nicknameCard={false} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold text-[var(--color-text)]">
             {displayName}
