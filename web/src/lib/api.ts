@@ -25,6 +25,8 @@ import type {
   MessagesResponse,
   NotificationsResponse,
   Prefs,
+  PrefsUpdate,
+  ChannelNotifyMode,
   PasskeyChallenge,
   PasskeyConfig,
   PasskeyList,
@@ -720,6 +722,9 @@ export const api = {
   setDnd(dnd: boolean) {
     return request<void>('/prefs/dnd', { method: 'PUT', body: { dnd } })
   },
+  setPrefs(body: PrefsUpdate) {
+    return request<void>('/prefs', { method: 'PUT', body })
+  },
   setChatLayout(chat_layout: 'bubble' | 'classic') {
     return request<void>('/prefs/chat-layout', { method: 'PUT', body: { chat_layout } })
   },
@@ -727,6 +732,12 @@ export const api = {
     return request<void>(`/channels/${channelId}/prefs`, {
       method: 'PUT',
       body: { muted },
+    })
+  },
+  setChannelMode(channelId: string, mode: ChannelNotifyMode) {
+    return request<void>(`/channels/${channelId}/prefs`, {
+      method: 'PUT',
+      body: { mode },
     })
   },
 

@@ -53,6 +53,8 @@ import {
 import type {
   Channel,
   ChannelMember,
+  ChannelNotifyMode,
+  PrefsUpdate,
   ChannelCreatedPayload,
   ChannelUpdatedPayload,
   ChannelDeletedPayload,
@@ -202,6 +204,26 @@ export type ChannelMessages = {
   hasMore: boolean
 }
 
+/**
+ * Whether alerts should be suppressed right now: the manual DND toggle, or an
+ * active scheduled quiet-hours window (evaluated against the local clock, so it
+ * matches what the user configured regardless of the stored tz offset).
+ */
+export function dndActive(s: {
+  dnd: boolean
+  dndScheduled: boolean
+  dndStart: number | null
+  dndEnd: number | null
+}): boolean {
+  if (s.dnd) return true
+  if (!s.dndScheduled || s.dndStart == null || s.dndEnd == null) return false
+  const now = new Date()
+  const cur = now.getHours() * 60 + now.getMinutes()
+  const { dndStart: a, dndEnd: b } = s
+  if (a === b) return false
+  return a < b ? cur >= a && cur < b : cur >= a || cur < b
+}
+
 type State = {
   // auth
   token: string | null
@@ -300,6 +322,16 @@ type State = {
   notifUnread: number
   dnd: boolean
   mutedChannels: Set<string>
+  channelModes: Record<string, ChannelNotifyMode>
+  notifyDm: boolean
+  notifyMention: boolean
+  notifyReply: boolean
+  notifyTask: boolean
+  notifyPoll: boolean
+  dndScheduled: boolean
+  dndStart: number | null
+  dndEnd: number | null
+  tzOffset: number
   notifyEnabled: boolean
   notificationState: NotificationSetupState
   notifHasMore: boolean
@@ -541,7 +573,9 @@ type State = {
   markAllNotifRead: () => void
   markChannelNotifsRead: (channelId: string) => void
   setDnd: (dnd: boolean) => Promise<void>
+  updateNotifyPrefs: (patch: PrefsUpdate) => Promise<void>
   toggleMute: (channelId: string) => Promise<void>
+  setChannelMode: (channelId: string, mode: ChannelNotifyMode) => Promise<void>
   enableDesktopNotifications: () => Promise<void>
   disableDesktopNotifications: () => Promise<void>
 
@@ -666,6 +700,16 @@ export const useStore = create<State>((set, get) => ({
   notifUnread: 0,
   dnd: false,
   mutedChannels: new Set(),
+  channelModes: {},
+  notifyDm: true,
+  notifyMention: true,
+  notifyReply: true,
+  notifyTask: true,
+  notifyPoll: true,
+  dndScheduled: false,
+  dndStart: null,
+  dndEnd: null,
+  tzOffset: 0,
   notifyEnabled: false,
   notificationState: initialNotificationState(),
   notifHasMore: false,
@@ -873,6 +917,16 @@ export const useStore = create<State>((set, get) => ({
       notifUnread: 0,
       dnd: false,
       mutedChannels: new Set(),
+      channelModes: {},
+      notifyDm: true,
+      notifyMention: true,
+      notifyReply: true,
+      notifyTask: true,
+      notifyPoll: true,
+      dndScheduled: false,
+      dndStart: null,
+      dndEnd: null,
+      tzOffset: 0,
       notifyEnabled: false,
       notificationState: initialNotificationState(),
       chatLayout: null,
@@ -2412,6 +2466,16 @@ export const useStore = create<State>((set, get) => ({
         notifHasMore: inbox.notifications.length >= 30,
         dnd: prefs.dnd,
         mutedChannels: new Set(prefs.muted_channel_ids),
+        channelModes: prefs.channel_modes ?? {},
+        notifyDm: prefs.notify_dm,
+        notifyMention: prefs.notify_mention,
+        notifyReply: prefs.notify_reply,
+        notifyTask: prefs.notify_task,
+        notifyPoll: prefs.notify_poll,
+        dndScheduled: prefs.dnd_scheduled,
+        dndStart: prefs.dnd_start,
+        dndEnd: prefs.dnd_end,
+        tzOffset: prefs.tz_offset,
         chatLayout: prefs.chat_layout,
         nicknames: nickRes.nicknames ?? {},
       })
@@ -2566,19 +2630,58 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
+  async updateNotifyPrefs(patch) {
+    // Optimistic: apply the camelCase mirror of the snake_case wire patch.
+    const prev = get()
+    const next: Partial<State> = {}
+    if (patch.notify_dm !== undefined) next.notifyDm = patch.notify_dm
+    if (patch.notify_mention !== undefined) next.notifyMention = patch.notify_mention
+    if (patch.notify_reply !== undefined) next.notifyReply = patch.notify_reply
+    if (patch.notify_task !== undefined) next.notifyTask = patch.notify_task
+    if (patch.notify_poll !== undefined) next.notifyPoll = patch.notify_poll
+    if (patch.dnd_scheduled !== undefined) next.dndScheduled = patch.dnd_scheduled
+    if (patch.dnd_start !== undefined) next.dndStart = patch.dnd_start
+    if (patch.dnd_end !== undefined) next.dndEnd = patch.dnd_end
+    if (patch.tz_offset !== undefined) next.tzOffset = patch.tz_offset
+    set(next)
+    try {
+      await api.setPrefs(patch)
+    } catch (e) {
+      set({
+        notifyDm: prev.notifyDm,
+        notifyMention: prev.notifyMention,
+        notifyReply: prev.notifyReply,
+        notifyTask: prev.notifyTask,
+        notifyPoll: prev.notifyPoll,
+        dndScheduled: prev.dndScheduled,
+        dndStart: prev.dndStart,
+        dndEnd: prev.dndEnd,
+        tzOffset: prev.tzOffset,
+      })
+      if (e instanceof Error) toastError(e.message)
+    }
+  },
+
   async toggleMute(channelId) {
     const muted = new Set(get().mutedChannels)
     const nextMuted = !muted.has(channelId)
-    if (nextMuted) muted.add(channelId)
-    else muted.delete(channelId)
-    set({ mutedChannels: muted })
+    await get().setChannelMode(channelId, nextMuted ? 'muted' : 'all')
+    // Preserve the historical return semantics: reflect the toggle in the set.
+    void muted
+  },
+
+  async setChannelMode(channelId, mode) {
+    const prevModes = get().channelModes
+    const prevMuted = get().mutedChannels
+    const nextModes = { ...prevModes, [channelId]: mode }
+    const nextMuted = new Set(prevMuted)
+    if (mode === 'muted') nextMuted.add(channelId)
+    else nextMuted.delete(channelId)
+    set({ channelModes: nextModes, mutedChannels: nextMuted })
     try {
-      await api.setChannelMute(channelId, nextMuted)
+      await api.setChannelMode(channelId, mode)
     } catch (e) {
-      const revert = new Set(get().mutedChannels)
-      if (nextMuted) revert.delete(channelId)
-      else revert.add(channelId)
-      set({ mutedChannels: revert })
+      set({ channelModes: prevModes, mutedChannels: prevMuted })
       if (e instanceof Error) toastError(e.message)
     }
   },
@@ -3201,7 +3304,7 @@ export const useStore = create<State>((set, get) => ({
           window.location.pathname === deepLink
         const visibleHere =
           typeof document === 'undefined' || document.visibilityState === 'visible'
-        if (!viewing && !get().dnd && visibleHere) {
+        if (!viewing && !dndActive(get()) && visibleHere) {
           const docTitle = mention.doc.title || 'Untitled'
           const who = mention.from_user.display_name
           const isCanvas = mention.doc.kind === 'canvas'
@@ -3250,7 +3353,7 @@ export const useStore = create<State>((set, get) => ({
         const st = get()
         const visibleHere =
           typeof document === 'undefined' || document.visibilityState === 'visible'
-        if (!st.dnd && !focusedHere && visibleHere) {
+        if (!dndActive(st) && !focusedHere && visibleHere) {
           const title =
             notification.kind === 'dm'
               ? notification.actor.display_name
@@ -3414,7 +3517,7 @@ export const useStore = create<State>((set, get) => ({
       case 'calendar.reminder': {
         const p = env.payload as CalendarReminderPayload
         if (
-          get().dnd ||
+          dndActive(get()) ||
           (typeof document !== 'undefined' && document.visibilityState !== 'visible')
         ) break
         const when = p.kind === 'lead' ? 'starts soon' : 'starting now'

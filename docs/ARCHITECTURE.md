@@ -1000,9 +1000,16 @@ notifications(
 -- indexes: (user_id, id DESC); (user_id) WHERE read_at IS NULL
 
 channel_prefs(user_id uuid, channel_id uuid, muted boolean NOT NULL default false,
-  PRIMARY KEY (user_id, channel_id))                 -- absence = not muted
+  mode text NOT NULL default 'all' CHECK (mode IN ('all','mentions','muted')),  -- 0026; muted kept in sync
+  PRIMARY KEY (user_id, channel_id))                 -- absence = mode 'all'
 user_prefs(user_id uuid PK, dnd boolean NOT NULL default false,
-  chat_layout text)                                  -- 'bubble'|'classic'; null = not chosen yet
+  chat_layout text,                                  -- 'bubble'|'classic'; null = not chosen yet
+  -- migration 0026: per-type toggles + scheduled DND (quiet hours)
+  notify_dm boolean NOT NULL default true, notify_mention boolean NOT NULL default true,
+  notify_reply boolean NOT NULL default true, notify_task boolean NOT NULL default true,
+  notify_poll boolean NOT NULL default true, dnd_scheduled boolean NOT NULL default false,
+  dnd_start integer, dnd_end integer,                -- minutes-of-day, user-local; may wrap midnight
+  tz_offset integer NOT NULL default 0)              -- minutes east of UTC
 push_subscriptions(id uuid PK, user_id uuid, endpoint text UNIQUE NOT NULL,
   p256dh text NOT NULL, auth text NOT NULL, created_at timestamptz)
 expo_push_tokens(id uuid PK, user_id uuid REFERENCES users(id), token text UNIQUE NOT NULL,
@@ -1019,16 +1026,27 @@ Attachment = { id: string, filename: string, content_type: string, size: number,
                url: string }              // url = proxied path "/api/v1/files/<id>"
 Message = { …, attachments: Attachment[] }  // added to the existing Message shape
 
-NotificationKind = 'mention'|'dm'|'reply'|'poll_ended'
+NotificationKind = 'mention'|'dm'|'reply'|'poll_ended'|'task_assigned'|'task_comment'
 Notification = {
   id: string, kind: NotificationKind,
   actor: { id: string, display_name: string, avatar_url: string|null },
-  channel_id: string, channel_kind: 'public'|'private'|'dm', channel_name: string,
-  message_id: string|null, preview: string,
-  created_at: string, read_at: string|null
+  channel_id: string|null, channel_kind: 'public'|'private'|'dm'|null, channel_name: string|null,
+  message_id: string|null, task_id: string|null, task_identifier: string|null,
+  preview: string, created_at: string, read_at: string|null
 }
 ChatLayout = 'bubble' | 'classic'        // DM rendering: WhatsApp-style vs Slack-style rows
-Prefs = { dnd: boolean, muted_channel_ids: string[], chat_layout: ChatLayout | null }
+ChannelNotifyMode = 'all' | 'mentions' | 'muted'
+Prefs = {
+  dnd: boolean, muted_channel_ids: string[],         // muted_channel_ids = channels with mode 'muted'
+  channel_modes: Record<string, ChannelNotifyMode>,  // per-channel override
+  chat_layout: ChatLayout | null,
+  notify_dm: boolean, notify_mention: boolean, notify_reply: boolean,
+  notify_task: boolean, notify_poll: boolean,        // per-type master switches (default on)
+  dnd_scheduled: boolean,                             // quiet-hours enabled
+  dnd_start: number|null, dnd_end: number|null,       // minutes-of-day, user-local; may wrap midnight
+  tz_offset: number                                   // minutes east of UTC (client-supplied)
+}
+PrefsUpdate = Partial<Pick<Prefs, notify_*|dnd_scheduled|dnd_start|dnd_end|tz_offset>>
 ```
 
 ## REST API additions — base `/api/v1`
@@ -1042,9 +1060,10 @@ Prefs = { dnd: boolean, muted_channel_ids: string[], chat_layout: ChatLayout | n
 | GET | `/notifications?before=<id>&limit=30` | → `{notifications: Notification[], unread_count}` (newest first) |
 | POST | `/notifications/read` | `{ids?: string[]}` or `{all: true}` → `204` |
 | GET | `/prefs` | → `Prefs` |
+| PUT | `/prefs` | `PrefsUpdate` → `204` (per-type toggles + scheduled DND; omitted fields unchanged) |
 | PUT | `/prefs/dnd` | `{dnd}` → `204` |
 | PUT | `/prefs/chat-layout` | `{chat_layout: 'bubble'\|'classic'}` → `204` |
-| PUT | `/channels/{id}/prefs` | `{muted}` → `204` |
+| PUT | `/channels/{id}/prefs` | `{mode: 'all'\|'mentions'\|'muted'}` (or legacy `{muted}`) → `204` |
 | GET | `/push/vapid` | → `{public_key: string\|null}` |
 | POST | `/push/subscribe` | `{endpoint, keys:{p256dh, auth}}` → `204` (upsert by endpoint) |
 | POST | `/push/unsubscribe` | `{endpoint}` → `204` |
@@ -1075,12 +1094,22 @@ Triggers, computed on message create:
 Author is never notified; within a normal channel a mention supersedes a reply for the
 same user.
 
-Controls:
-- **Mute (per channel)** — no notification row is created for that channel (silent).
-- **Do Not Disturb (global)** — inbox row + `notification.created` still happen (bell
-  updates), but **web push is suppressed** and the client suppresses toasts / OS popups.
+Controls (all enforced server-side in `notify.rs`; the client mirrors DND for toast/sound):
+- **Per-channel mode** (`channel_prefs.mode`, default `all`) — `muted` creates no row for
+  that channel; `mentions` allows only `mention`/`reply` there; `all` is unrestricted. The
+  legacy `muted` boolean is kept in sync (`muted` = mode `muted`) for older reads.
+- **Per-type master switch** (`user_prefs.notify_{dm,mention,reply,task,poll}`, default on) —
+  a disabled type produces **no notification at all** (no inbox row, no push), like a mute.
+  `task` covers both `task_assigned` and `task_comment`.
+- **Do Not Disturb** — the manual `dnd` toggle, or an active **scheduled** window
+  (`dnd_scheduled` + `dnd_start`/`dnd_end` minutes-of-day in the user's local time via
+  `tz_offset`, wrap-aware past midnight). While DND is active the inbox row +
+  `notification.created` still happen (bell updates) but **push is suppressed**, and the
+  client suppresses toasts / OS popups / sound.
 - The client also suppresses the toast/OS popup when the message's channel is already
   open in a focused window.
+- All of the above are managed from **Settings → Notifications** (device enable/disable,
+  sound, DND mode + quiet hours, per-type toggles, per-channel mode).
 
 Delivery: in-app inbox (bell + dropdown) + arrival toast; OS notification when the app is
 open but unfocused (Web Notification API, or `tauri-plugin-notification` in the desktop

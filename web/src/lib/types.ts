@@ -119,11 +119,39 @@ export function notificationPath(n: Notification): string {
   return n.channel_id ? `/c/${n.channel_id}` : '/'
 }
 
+export type ChannelNotifyMode = 'all' | 'mentions' | 'muted'
+
 export type Prefs = {
   dnd: boolean
   muted_channel_ids: string[]
+  channel_modes: Record<string, ChannelNotifyMode>
   chat_layout: ChatLayout | null
+  notify_dm: boolean
+  notify_mention: boolean
+  notify_reply: boolean
+  notify_task: boolean
+  notify_poll: boolean
+  dnd_scheduled: boolean
+  dnd_start: number | null // minutes-of-day, local time
+  dnd_end: number | null
+  tz_offset: number // minutes east of UTC
 }
+
+/** Partial update accepted by PUT /prefs. */
+export type PrefsUpdate = Partial<
+  Pick<
+    Prefs,
+    | 'notify_dm'
+    | 'notify_mention'
+    | 'notify_reply'
+    | 'notify_task'
+    | 'notify_poll'
+    | 'dnd_scheduled'
+    | 'dnd_start'
+    | 'dnd_end'
+    | 'tz_offset'
+  >
+>
 
 export type E2eeDevice = {
   id: string

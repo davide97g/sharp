@@ -414,27 +414,92 @@ async fn parent_author(pool: &PgPool, message_id: i64) -> AppResult<Option<Uuid>
     })
 }
 
-async fn is_muted(pool: &PgPool, user_id: Uuid, channel_id: Uuid) -> bool {
-    sqlx::query("SELECT muted FROM channel_prefs WHERE user_id = $1 AND channel_id = $2")
+/// Whether a channel's per-user notification `mode` lets `kind` through.
+/// Absent row = `all`. `muted` blocks everything; `mentions` blocks all but
+/// mention/reply. This subsumes the legacy per-channel mute.
+async fn channel_allows(pool: &PgPool, user_id: Uuid, channel_id: Uuid, kind: &str) -> bool {
+    let mode: String = sqlx::query("SELECT mode FROM channel_prefs WHERE user_id = $1 AND channel_id = $2")
         .bind(user_id)
         .bind(channel_id)
         .fetch_optional(pool)
         .await
         .ok()
         .flatten()
-        .and_then(|r| r.try_get::<bool, _>("muted").ok())
-        .unwrap_or(false)
+        .and_then(|r| r.try_get::<String, _>("mode").ok())
+        .unwrap_or_else(|| "all".to_string());
+    match mode.as_str() {
+        "muted" => false,
+        "mentions" => kind == "mention" || kind == "reply",
+        _ => true,
+    }
 }
 
-async fn is_dnd(pool: &PgPool, user_id: Uuid) -> bool {
-    sqlx::query("SELECT dnd FROM user_prefs WHERE user_id = $1")
+/// Whether the user has this notification *type* enabled at all. A disabled type
+/// produces no notification whatsoever (no inbox row, no push). Absent row =
+/// every type enabled (the column defaults).
+async fn kind_enabled(pool: &PgPool, user_id: Uuid, kind: &str) -> bool {
+    let column = match kind {
+        "dm" => "notify_dm",
+        "mention" => "notify_mention",
+        "reply" => "notify_reply",
+        "task_assigned" | "task_comment" => "notify_task",
+        "poll_ended" => "notify_poll",
+        _ => return true,
+    };
+    let sql = format!("SELECT {column} AS enabled FROM user_prefs WHERE user_id = $1");
+    sqlx::query(&sql)
         .bind(user_id)
         .fetch_optional(pool)
         .await
         .ok()
         .flatten()
-        .and_then(|r| r.try_get::<bool, _>("dnd").ok())
-        .unwrap_or(false)
+        .and_then(|r| r.try_get::<bool, _>("enabled").ok())
+        .unwrap_or(true)
+}
+
+/// Minutes-of-day `cur` inside a quiet-hours window `[start, end)`, wrap-aware
+/// (a window like 22:00→08:00 spans midnight). Equal bounds = empty window.
+fn within_window(start: i32, end: i32, cur: i32) -> bool {
+    if start == end {
+        return false;
+    }
+    if start < end {
+        cur >= start && cur < end
+    } else {
+        cur >= start || cur < end
+    }
+}
+
+/// Do-Not-Disturb: the manual toggle, or an active scheduled quiet-hours window.
+/// Quiet hours are evaluated against the user's local clock via the stored
+/// `tz_offset` (minutes east of UTC).
+async fn is_dnd(pool: &PgPool, user_id: Uuid) -> bool {
+    let Some(row) = sqlx::query(
+        "SELECT dnd, dnd_scheduled, dnd_start, dnd_end, tz_offset
+         FROM user_prefs WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten() else {
+        return false;
+    };
+    if row.try_get::<bool, _>("dnd").unwrap_or(false) {
+        return true;
+    }
+    if !row.try_get::<bool, _>("dnd_scheduled").unwrap_or(false) {
+        return false;
+    }
+    let (Ok(Some(start)), Ok(Some(end))) = (
+        row.try_get::<Option<i32>, _>("dnd_start"),
+        row.try_get::<Option<i32>, _>("dnd_end"),
+    ) else {
+        return false;
+    };
+    let offset = row.try_get::<i32, _>("tz_offset").unwrap_or(0);
+    let local_min = ((chrono::Utc::now().timestamp() / 60 + offset as i64) % 1440 + 1440) % 1440;
+    within_window(start, end, local_min as i32)
 }
 
 /// Best-effort push for a non-message event (e.g. a doc/canvas mention).
@@ -567,7 +632,8 @@ async fn dispatch_inner(
     };
 
     for (uid, kind) in targets {
-        if is_muted(pool, uid, channel_id).await {
+        if !channel_allows(pool, uid, channel_id, kind).await || !kind_enabled(pool, uid, kind).await
+        {
             continue;
         }
         let row = sqlx::query(
@@ -656,7 +722,9 @@ async fn dispatch_poll_ended_inner(
     };
 
     for uid in recipients {
-        if is_muted(&state.pool, uid, poll.channel_id).await {
+        if !channel_allows(&state.pool, uid, poll.channel_id, "poll_ended").await
+            || !kind_enabled(&state.pool, uid, "poll_ended").await
+        {
             continue;
         }
         let row = sqlx::query(
@@ -760,6 +828,9 @@ async fn dispatch_task_event(
     kind: &str,
     preview: &str,
 ) -> AppResult<()> {
+    if !kind_enabled(&state.pool, recipient, kind).await {
+        return Ok(());
+    }
     let row = sqlx::query(
         "INSERT INTO notifications (user_id, kind, actor_id, task_id, preview)
          VALUES ($1, $2, $3, $4, $5) RETURNING id",

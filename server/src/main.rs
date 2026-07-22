@@ -438,7 +438,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/notifications/read",
             post(routes::notifications::mark_read),
         )
-        .route("/prefs", get(routes::notifications::get_prefs))
+        .route(
+            "/prefs",
+            get(routes::notifications::get_prefs).put(routes::notifications::set_prefs),
+        )
         .route("/prefs/dnd", put(routes::notifications::set_dnd))
         .route(
             "/prefs/chat-layout",

@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import type {
+  ChannelNotifyMode,
   DuckContext,
   DuckCooldownSecs,
   GifSettings,
@@ -31,6 +32,7 @@ import { Modal } from './Modal'
 import { Avatar } from './Avatar'
 import { AvatarCropper } from './AvatarCropper'
 import { ChatLayoutPicker } from './ChatLayoutChooser'
+import { NotificationSetup } from './NotificationSetup'
 import { ThemePicker } from './ThemePicker'
 import { VoiceTriggerEditor } from './VoiceTriggerEditor'
 import { setAudioAuraPreference, useAudioAuraPreference } from '../lib/meetingEffects'
@@ -40,6 +42,7 @@ import { getThemePreset, setThemePreset, type ThemePreset } from '../lib/theme'
 type Tab =
   | 'profile'
   | 'chat'
+  | 'notifications'
   | 'appearance'
   | 'meetings'
   | 'security'
@@ -51,6 +54,7 @@ type Tab =
 const SETTINGS_TABS: Tab[] = [
   'profile',
   'chat',
+  'notifications',
   'appearance',
   'meetings',
   'accounts',
@@ -352,8 +356,6 @@ export function UserSettingsModal({
             </div>
           </div>
 
-          <SoundSettingsSection />
-
           <PersonalVoiceTriggers />
 
           <div className="text-[11px] text-[var(--color-text-faint)]">
@@ -370,6 +372,8 @@ export function UserSettingsModal({
             Applies to 1:1 conversations. Channels always use the classic layout.
           </p>
         </div>
+      ) : tab === 'notifications' ? (
+        <NotificationsSettings />
       ) : tab === 'appearance' ? (
         <div className="flex flex-col gap-3">
           <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
@@ -610,6 +614,7 @@ export function UserSettingsModal({
 const SETTINGS_META: Record<Tab, { label: string; description: string; group: string }> = {
   profile: { label: 'My profile', description: 'How you appear across Sharp.', group: 'Personal' },
   chat: { label: 'Chat', description: 'Choose how conversations feel and flow.', group: 'Personal' },
+  notifications: { label: 'Notifications', description: 'Control what alerts you, where, and when.', group: 'Personal' },
   appearance: { label: 'Appearance', description: 'Tune Sharp to your space and style.', group: 'Personal' },
   meetings: { label: 'Meetings', description: 'Control voice and meeting effects.', group: 'Personal' },
   accounts: { label: 'Connected accounts', description: 'Manage calendar connections and external accounts.', group: 'Account' },
@@ -777,6 +782,7 @@ function SettingsIcon({ tab }: { tab: Tab }) {
   const paths: Record<Tab, React.ReactNode> = {
     profile: <><circle cx="12" cy="8" r="3" /><path d="M5 21a7 7 0 0 1 14 0" /></>,
     chat: <path d="M4 5h16v11H8l-4 4V5Z" />,
+    notifications: <><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></>,
     appearance: <><circle cx="12" cy="12" r="3" /><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4" /></>,
     meetings: <><rect x="3" y="6" width="13" height="12" rx="2" /><path d="m16 10 5-3v10l-5-3" /></>,
     accounts: <><circle cx="8" cy="8" r="3" /><path d="M2 20a6 6 0 0 1 12 0M16 8h6M19 5v6" /></>,
@@ -1453,6 +1459,214 @@ function SoundSettingsSection() {
           </span>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ---- Notifications tab ----
+
+const DEFAULT_QUIET_START = 22 * 60 // 22:00
+const DEFAULT_QUIET_END = 7 * 60 // 07:00
+
+function minutesToHHMM(min: number | null, fallback: number): string {
+  const m = min ?? fallback
+  const h = Math.floor(m / 60)
+  const mm = m % 60
+  return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+}
+
+function hhmmToMinutes(value: string): number {
+  const [h, m] = value.split(':').map((n) => Number(n))
+  if (Number.isNaN(h) || Number.isNaN(m)) return 0
+  return h * 60 + m
+}
+
+type DndModeChoice = 'off' | 'on' | 'scheduled'
+
+function NotificationsSettings() {
+  const dnd = useStore((s) => s.dnd)
+  const dndScheduled = useStore((s) => s.dndScheduled)
+  const dndStart = useStore((s) => s.dndStart)
+  const dndEnd = useStore((s) => s.dndEnd)
+  const setDnd = useStore((s) => s.setDnd)
+  const updateNotifyPrefs = useStore((s) => s.updateNotifyPrefs)
+  const notifyDm = useStore((s) => s.notifyDm)
+  const notifyMention = useStore((s) => s.notifyMention)
+  const notifyReply = useStore((s) => s.notifyReply)
+  const notifyTask = useStore((s) => s.notifyTask)
+  const notifyPoll = useStore((s) => s.notifyPoll)
+  const channels = useStore((s) => s.channels)
+  const channelModes = useStore((s) => s.channelModes)
+  const setChannelMode = useStore((s) => s.setChannelMode)
+
+  const dndMode: DndModeChoice = dnd ? 'on' : dndScheduled ? 'scheduled' : 'off'
+  const tzOffset = -new Date().getTimezoneOffset() // minutes east of UTC
+
+  async function selectDndMode(next: DndModeChoice) {
+    if (next === 'off') {
+      await Promise.all([setDnd(false), updateNotifyPrefs({ dnd_scheduled: false })])
+    } else if (next === 'on') {
+      await Promise.all([setDnd(true), updateNotifyPrefs({ dnd_scheduled: false })])
+    } else {
+      await Promise.all([
+        setDnd(false),
+        updateNotifyPrefs({
+          dnd_scheduled: true,
+          dnd_start: dndStart ?? DEFAULT_QUIET_START,
+          dnd_end: dndEnd ?? DEFAULT_QUIET_END,
+          tz_offset: tzOffset,
+        }),
+      ])
+    }
+  }
+
+  const memberChannels = channels.filter((c) => c.is_member)
+
+  const TYPES: { key: string; label: string; hint: string; value: boolean; field: string }[] = [
+    { key: 'dm', label: 'Direct messages', hint: 'New messages in your DMs.', value: notifyDm, field: 'notify_dm' },
+    { key: 'mention', label: 'Mentions & @all', hint: 'When someone @-mentions you or the channel.', value: notifyMention, field: 'notify_mention' },
+    { key: 'reply', label: 'Thread replies', hint: 'Replies to threads you started.', value: notifyReply, field: 'notify_reply' },
+    { key: 'task', label: 'Task activity', hint: 'Assigned a task or a new comment on one.', value: notifyTask, field: 'notify_task' },
+    { key: 'poll', label: 'Poll results', hint: 'When a poll you created or voted in ends.', value: notifyPoll, field: 'notify_poll' },
+  ]
+
+  return (
+    <div className="flex flex-col gap-7">
+      <section className="flex flex-col gap-3">
+        <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+          Delivery
+        </div>
+        <NotificationSetup />
+        <p className="text-[11px] leading-5 text-[var(--color-text-faint)]">
+          Push works on this website, installed PWAs (macOS &amp; iOS Home-Screen app), and the
+          desktop app. Enable it once per device.
+        </p>
+      </section>
+
+      <SoundSettingsSection />
+
+      <section className="flex flex-col gap-3">
+        <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+          Do Not Disturb
+        </div>
+        <div className="flex flex-col gap-2">
+          {(
+            [
+              { value: 'off', label: 'Off', hint: 'Deliver notifications normally.' },
+              { value: 'on', label: 'On', hint: 'Silence all push, toasts, and sounds.' },
+              { value: 'scheduled', label: 'Scheduled', hint: 'Quiet during set hours each day.' },
+            ] as { value: DndModeChoice; label: string; hint: string }[]
+          ).map((opt) => (
+            <label
+              key={opt.value}
+              className="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] p-3"
+            >
+              <input
+                type="radio"
+                name="dnd-mode"
+                checked={dndMode === opt.value}
+                onChange={() => void selectDndMode(opt.value)}
+                className="mt-0.5 h-4 w-4 accent-[var(--color-accent)]"
+              />
+              <span>
+                <span className="block text-sm font-medium text-[var(--color-text)]">{opt.label}</span>
+                <span className="mt-0.5 block text-xs text-[var(--color-text-faint)]">{opt.hint}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        {dndMode === 'scheduled' && (
+          <div className="flex flex-wrap items-end gap-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] p-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+                From
+              </span>
+              <input
+                type="time"
+                value={minutesToHHMM(dndStart, DEFAULT_QUIET_START)}
+                onChange={(e) =>
+                  void updateNotifyPrefs({ dnd_start: hhmmToMinutes(e.target.value), tz_offset: tzOffset })
+                }
+                className="rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+                To
+              </span>
+              <input
+                type="time"
+                value={minutesToHHMM(dndEnd, DEFAULT_QUIET_END)}
+                onChange={(e) =>
+                  void updateNotifyPrefs({ dnd_end: hhmmToMinutes(e.target.value), tz_offset: tzOffset })
+                }
+                className="rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+              />
+            </label>
+            <p className="min-w-[8rem] flex-1 text-[11px] leading-5 text-[var(--color-text-faint)]">
+              Uses this device&rsquo;s time zone. Windows past midnight are fine.
+            </p>
+          </div>
+        )}
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+          Notify me about
+        </div>
+        {TYPES.map((t) => (
+          <label
+            key={t.key}
+            className="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] p-3"
+          >
+            <input
+              type="checkbox"
+              checked={t.value}
+              onChange={(e) => void updateNotifyPrefs({ [t.field]: e.target.checked })}
+              className="mt-0.5 h-4 w-4 accent-[var(--color-accent)]"
+            />
+            <span>
+              <span className="block text-sm font-medium text-[var(--color-text)]">{t.label}</span>
+              <span className="mt-0.5 block text-xs text-[var(--color-text-faint)]">{t.hint}</span>
+            </span>
+          </label>
+        ))}
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+            Per-channel
+          </div>
+          <p className="mt-1 text-[11px] text-[var(--color-text-faint)]">
+            Override the defaults above for a specific conversation.
+          </p>
+        </div>
+        {memberChannels.length === 0 ? (
+          <p className="text-sm text-[var(--color-text-dim)]">No channels yet.</p>
+        ) : (
+          <div className="divide-y divide-[var(--color-border)] rounded-lg border border-[var(--color-border)]">
+            {memberChannels.map((c) => {
+              const label = c.kind === 'dm' ? c.dm_user?.display_name ?? 'Direct message' : `# ${c.name}`
+              const mode = (channelModes[c.id] ?? 'all') as ChannelNotifyMode
+              return (
+                <div key={c.id} className="flex items-center justify-between gap-3 p-3">
+                  <span className="min-w-0 truncate text-sm text-[var(--color-text)]">{label}</span>
+                  <select
+                    value={mode}
+                    onChange={(e) => void setChannelMode(c.id, e.target.value as ChannelNotifyMode)}
+                    className="shrink-0 rounded-md border border-[var(--color-border)] bg-[var(--color-panel-2)] px-2 py-1.5 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+                  >
+                    <option value="all">All messages</option>
+                    <option value="mentions">Mentions only</option>
+                    <option value="muted">Muted</option>
+                  </select>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </section>
     </div>
   )
 }

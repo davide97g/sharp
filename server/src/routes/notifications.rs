@@ -85,38 +85,142 @@ pub async fn get_prefs(
     State(state): State<SharedState>,
     auth: AuthUser,
 ) -> AppResult<Json<serde_json::Value>> {
-    let prefs_row = sqlx::query("SELECT dnd, chat_layout FROM user_prefs WHERE user_id = $1")
-        .bind(auth.id)
-        .fetch_optional(&state.pool)
-        .await?;
-    let dnd: bool = prefs_row
-        .as_ref()
-        .and_then(|r| r.try_get::<bool, _>("dnd").ok())
-        .unwrap_or(false);
+    let prefs_row = sqlx::query(
+        "SELECT dnd, chat_layout, notify_dm, notify_mention, notify_reply, notify_task,
+                notify_poll, dnd_scheduled, dnd_start, dnd_end, tz_offset
+         FROM user_prefs WHERE user_id = $1",
+    )
+    .bind(auth.id)
+    .fetch_optional(&state.pool)
+    .await?;
+    // Absent row = defaults (matching the column defaults in migration 0004/0026).
+    let flag = |name: &str, default: bool| -> bool {
+        prefs_row
+            .as_ref()
+            .and_then(|r| r.try_get::<bool, _>(name).ok())
+            .unwrap_or(default)
+    };
     let chat_layout: Option<String> = prefs_row
         .as_ref()
         .and_then(|r| r.try_get::<Option<String>, _>("chat_layout").ok())
         .flatten();
+    let dnd_start: Option<i32> = prefs_row
+        .as_ref()
+        .and_then(|r| r.try_get::<Option<i32>, _>("dnd_start").ok())
+        .flatten();
+    let dnd_end: Option<i32> = prefs_row
+        .as_ref()
+        .and_then(|r| r.try_get::<Option<i32>, _>("dnd_end").ok())
+        .flatten();
+    let tz_offset: i32 = prefs_row
+        .as_ref()
+        .and_then(|r| r.try_get::<i32, _>("tz_offset").ok())
+        .unwrap_or(0);
 
-    let rows = sqlx::query(
-        "SELECT channel_id FROM channel_prefs WHERE user_id = $1 AND muted = true",
-    )
-    .bind(auth.id)
-    .fetch_all(&state.pool)
-    .await?;
-    let mut muted: Vec<String> = Vec::with_capacity(rows.len());
+    // Per-channel modes; also derive the legacy muted-id list for older clients.
+    let rows = sqlx::query("SELECT channel_id, mode FROM channel_prefs WHERE user_id = $1")
+        .bind(auth.id)
+        .fetch_all(&state.pool)
+        .await?;
+    let mut channel_modes = serde_json::Map::new();
+    let mut muted: Vec<String> = Vec::new();
     for row in &rows {
-        muted.push(row.try_get::<Uuid, _>("channel_id")?.to_string());
+        let id = row.try_get::<Uuid, _>("channel_id")?.to_string();
+        let mode: String = row.try_get("mode")?;
+        if mode == "muted" {
+            muted.push(id.clone());
+        }
+        channel_modes.insert(id, json!(mode));
     }
 
-    Ok(Json(
-        json!({ "dnd": dnd, "muted_channel_ids": muted, "chat_layout": chat_layout }),
-    ))
+    Ok(Json(json!({
+        "dnd": flag("dnd", false),
+        "muted_channel_ids": muted,
+        "channel_modes": channel_modes,
+        "chat_layout": chat_layout,
+        "notify_dm": flag("notify_dm", true),
+        "notify_mention": flag("notify_mention", true),
+        "notify_reply": flag("notify_reply", true),
+        "notify_task": flag("notify_task", true),
+        "notify_poll": flag("notify_poll", true),
+        "dnd_scheduled": flag("dnd_scheduled", false),
+        "dnd_start": dnd_start,
+        "dnd_end": dnd_end,
+        "tz_offset": tz_offset,
+    })))
 }
 
 #[derive(Deserialize)]
 pub struct DndRequest {
     pub dnd: bool,
+}
+
+/// Bulk update of granular notification preferences. Every field is optional;
+/// omitted fields keep their current value (COALESCE), and the row is created
+/// with column defaults if it does not yet exist.
+#[derive(Deserialize)]
+pub struct PrefsUpdate {
+    pub notify_dm: Option<bool>,
+    pub notify_mention: Option<bool>,
+    pub notify_reply: Option<bool>,
+    pub notify_task: Option<bool>,
+    pub notify_poll: Option<bool>,
+    pub dnd_scheduled: Option<bool>,
+    pub dnd_start: Option<i32>,
+    pub dnd_end: Option<i32>,
+    pub tz_offset: Option<i32>,
+}
+
+fn valid_minute(value: Option<i32>) -> AppResult<()> {
+    if let Some(m) = value {
+        if !(0..1440).contains(&m) {
+            return Err(AppError::Validation(
+                "dnd_start/dnd_end must be minutes-of-day in [0, 1440)".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub async fn set_prefs(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Json(body): Json<PrefsUpdate>,
+) -> AppResult<StatusCode> {
+    valid_minute(body.dnd_start)?;
+    valid_minute(body.dnd_end)?;
+    sqlx::query(
+        "INSERT INTO user_prefs
+            (user_id, notify_dm, notify_mention, notify_reply, notify_task, notify_poll,
+             dnd_scheduled, dnd_start, dnd_end, tz_offset)
+         VALUES ($1,
+             COALESCE($2, true), COALESCE($3, true), COALESCE($4, true),
+             COALESCE($5, true), COALESCE($6, true), COALESCE($7, false),
+             $8, $9, COALESCE($10, 0))
+         ON CONFLICT (user_id) DO UPDATE SET
+             notify_dm      = COALESCE($2, user_prefs.notify_dm),
+             notify_mention = COALESCE($3, user_prefs.notify_mention),
+             notify_reply   = COALESCE($4, user_prefs.notify_reply),
+             notify_task    = COALESCE($5, user_prefs.notify_task),
+             notify_poll    = COALESCE($6, user_prefs.notify_poll),
+             dnd_scheduled  = COALESCE($7, user_prefs.dnd_scheduled),
+             dnd_start      = COALESCE($8, user_prefs.dnd_start),
+             dnd_end        = COALESCE($9, user_prefs.dnd_end),
+             tz_offset      = COALESCE($10, user_prefs.tz_offset)",
+    )
+    .bind(auth.id)
+    .bind(body.notify_dm)
+    .bind(body.notify_mention)
+    .bind(body.notify_reply)
+    .bind(body.notify_task)
+    .bind(body.notify_poll)
+    .bind(body.dnd_scheduled)
+    .bind(body.dnd_start)
+    .bind(body.dnd_end)
+    .bind(body.tz_offset)
+    .execute(&state.pool)
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]
@@ -161,9 +265,12 @@ pub async fn set_dnd(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Either a `mode` (all/mentions/muted) or the legacy `muted` boolean. `mode`
+/// wins when both are present; `muted` maps to `muted`/`all`.
 #[derive(Deserialize)]
 pub struct MuteRequest {
-    pub muted: bool,
+    pub muted: Option<bool>,
+    pub mode: Option<String>,
 }
 
 pub async fn set_channel_pref(
@@ -175,13 +282,30 @@ pub async fn set_channel_pref(
     if channel_kind(&state.pool, channel_id).await?.is_none() {
         return Err(AppError::NotFound("channel not found".to_string()));
     }
+    let mode = match body.mode {
+        Some(m) => {
+            if !matches!(m.as_str(), "all" | "mentions" | "muted") {
+                return Err(AppError::Validation(
+                    "mode must be 'all', 'mentions', or 'muted'".to_string(),
+                ));
+            }
+            m
+        }
+        None => match body.muted {
+            Some(true) => "muted".to_string(),
+            _ => "all".to_string(),
+        },
+    };
+    let muted = mode == "muted";
     sqlx::query(
-        "INSERT INTO channel_prefs (user_id, channel_id, muted) VALUES ($1, $2, $3)
-         ON CONFLICT (user_id, channel_id) DO UPDATE SET muted = EXCLUDED.muted",
+        "INSERT INTO channel_prefs (user_id, channel_id, muted, mode) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (user_id, channel_id)
+         DO UPDATE SET muted = EXCLUDED.muted, mode = EXCLUDED.mode",
     )
     .bind(auth.id)
     .bind(channel_id)
-    .bind(body.muted)
+    .bind(muted)
+    .bind(&mode)
     .execute(&state.pool)
     .await?;
     Ok(StatusCode::NO_CONTENT)
