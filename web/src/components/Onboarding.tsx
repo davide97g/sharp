@@ -1,22 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ChatLayout } from '../lib/types'
 import { useStore } from '../store'
 import { isTauri } from '../lib/desktopAuth'
 import { markOnboardingDone } from '../lib/onboarding'
-import { getThemePreset, setThemePreset, type ThemePreset } from '../lib/theme'
+import { sound } from '../lib/sound'
 import { ChatLayoutPicker } from './ChatLayoutChooser'
 import { NotificationSetup } from './NotificationSetup'
-import { ThemePicker } from './ThemePicker'
 
-const STEPS = ['Chat style', 'Notifications', 'Appearance'] as const
+const STEPS = ['Chat style', 'Notifications'] as const
 
 /**
  * First-login onboarding: a full-screen, skippable stepper.
- * 1. chat style  2. notification permission + DND  3. theme preset
- * Rendered app-wide by AppShell until the client has completed or skipped it.
+ * 1. chat style  2. notification permission + DND
+ * (Theme is picked during signup on the auth stage; settings can change all
+ * of this later.) Rendered app-wide by AppShell until completed or skipped.
  */
 export function Onboarding({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState(0)
+  const dirRef = useRef<1 | -1>(1)
 
   // step 1 — chat style
   const setChatLayout = useStore((s) => s.setChatLayout)
@@ -25,9 +26,6 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
   // step 2 — notifications
   const dnd = useStore((s) => s.dnd)
   const setDnd = useStore((s) => s.setDnd)
-
-  // step 3 — theme (applied live as you pick)
-  const [theme, setTheme] = useState<ThemePreset>(() => getThemePreset())
 
   const [finishing, setFinishing] = useState(false)
 
@@ -46,12 +44,11 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
     onClose()
   }
 
-  // Finish: persist the picked chat layout + theme, then close. DND and
-  // notification permission are already applied live within their step.
+  // Finish: persist the picked chat layout, then close. DND and notification
+  // permission are already applied live within their step.
   async function finish() {
     if (finishing) return
     setFinishing(true)
-    setThemePreset(theme)
     try {
       await setChatLayout(layout)
     } catch {
@@ -61,14 +58,21 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
     onClose()
   }
 
-  function pickTheme(preset: ThemePreset) {
-    setTheme(preset)
-    setThemePreset(preset)
-  }
-
   const isLast = step === STEPS.length - 1
-  const next = () => (isLast ? void finish() : setStep((s) => s + 1))
-  const back = () => setStep((s) => Math.max(0, s - 1))
+  const next = () => {
+    if (isLast) {
+      void finish()
+      return
+    }
+    dirRef.current = 1
+    setStep((s) => s + 1)
+    sound.tabSwitch()
+  }
+  const back = () => {
+    dirRef.current = -1
+    setStep((s) => Math.max(0, s - 1))
+    sound.tabSwitch()
+  }
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-[var(--color-ink)] safe-pad">
@@ -84,7 +88,7 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
         </div>
         <button
           onClick={skip}
-          className="min-h-11 rounded-md px-3 text-sm text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
+          className="min-h-11 cursor-pointer rounded-md px-3 text-sm text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
         >
           Skip for now
         </button>
@@ -123,9 +127,12 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
         ))}
       </div>
 
-      {/* body */}
+      {/* body — direction-aware slide between steps */}
       <div className="flex flex-1 items-start justify-center overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
-        <div className="w-full max-w-lg">
+        <div
+          key={step}
+          className={`w-full max-w-lg ${dirRef.current === 1 ? 'auth-step-next' : 'auth-step-prev'}`}
+        >
           {step === 0 && (
             <StepShell
               title="How should DMs look?"
@@ -166,15 +173,6 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
               )}
             </StepShell>
           )}
-
-          {step === 2 && (
-            <StepShell
-              title="Pick your look"
-              subtitle="Choose a theme. You can change this anytime in Settings → Appearance."
-            >
-              <ThemePicker value={theme} onChange={pickTheme} />
-            </StepShell>
-          )}
         </div>
       </div>
 
@@ -183,14 +181,14 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
         <button
           onClick={back}
           disabled={step === 0}
-          className="min-h-11 rounded-md px-4 text-sm text-[var(--color-text-dim)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] disabled:invisible"
+          className="min-h-11 cursor-pointer rounded-md px-4 text-sm text-[var(--color-text-dim)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] disabled:invisible"
         >
           Back
         </button>
         <button
           onClick={next}
           disabled={finishing}
-          className="min-h-11 rounded-md bg-[var(--color-accent)] px-5 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
+          className="login-primary-action min-h-11 cursor-pointer rounded-md bg-[var(--color-accent)] px-5 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
         >
           {isLast ? (finishing ? 'Finishing…' : 'Get started') : 'Continue'}
         </button>

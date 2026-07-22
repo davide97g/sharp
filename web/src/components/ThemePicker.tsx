@@ -71,7 +71,7 @@ function colorMix(hex: string, alphaPct: number): string {
   return `rgb(${r} ${g} ${b} / ${alphaPct}%)`
 }
 
-/** Shared 4-preset picker used by onboarding + settings Appearance. */
+/** Shared 4-preset picker used by the auth-stage setup + settings Appearance. */
 export function ThemePicker({
   value,
   onChange,

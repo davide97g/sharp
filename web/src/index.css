@@ -1712,6 +1712,300 @@ html[data-splash-done] .login-brand-copy {
   visibility: visible;
 }
 
+/* ── Auth stage (login + register wizard) ────────────────────────────────
+   "Get badged in": registration is a three-station badge-cutting ceremony
+   (name → credentials → look). All surfaces read the theme tokens, so the
+   theme step repaints the whole stage live. Motion uses the shared tokens;
+   everything degrades gracefully under prefers-reduced-motion. */
+
+/* Ambient backdrop: two accent auroras + a giant `#` watermark behind the
+   form column. Theme-aware (color-mix on --color-accent), so picking a
+   preset morphs the room. Pure radial gradients — no filter blur cost. */
+.auth-ambient {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.auth-aurora {
+  position: absolute;
+  border-radius: 9999px;
+}
+.auth-aurora-a {
+  width: 55vmax;
+  height: 55vmax;
+  top: -18%;
+  right: -12%;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--color-accent) 20%, transparent),
+    transparent 72%
+  );
+  animation: auth-drift-a 26s ease-in-out infinite alternate;
+}
+.auth-aurora-b {
+  width: 48vmax;
+  height: 48vmax;
+  bottom: -28%;
+  left: -16%;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--color-accent) 12%, transparent),
+    transparent 70%
+  );
+  animation: auth-drift-b 32s ease-in-out infinite alternate;
+}
+@keyframes auth-drift-a {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(-6%, 7%, 0) scale(1.12); }
+}
+@keyframes auth-drift-b {
+  from { transform: translate3d(0, 0, 0) scale(1.05); }
+  to { transform: translate3d(7%, -6%, 0) scale(1); }
+}
+.auth-hashmark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -52%) rotate(-10deg);
+  font-size: min(30rem, 90vw);
+  font-weight: 800;
+  line-height: 1;
+  color: color-mix(in srgb, var(--color-text) 3%, transparent);
+  user-select: none;
+}
+@media (max-width: 767px) {
+  .auth-hashmark { display: none; }
+}
+
+/* Mode swap (login ↔ register) — crossfade with a gentle rise. */
+.auth-swap {
+  animation: auth-swap-in 260ms var(--motion-spring) both;
+}
+@keyframes auth-swap-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.99); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Direction-aware step transitions: forward enters from the right, back
+   from the left — hierarchy expressed through motion. */
+.auth-step-next {
+  animation: auth-step-next 300ms var(--motion-spring) both;
+}
+.auth-step-prev {
+  animation: auth-step-prev 300ms var(--motion-spring) both;
+}
+@keyframes auth-step-next {
+  from { opacity: 0; transform: translateX(32px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes auth-step-prev {
+  from { opacity: 0; transform: translateX(-32px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Staggered rise for fields; set --i per element (45ms cadence). */
+.auth-rise {
+  animation: auth-rise 340ms var(--motion-spring) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+@keyframes auth-rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Field errors — inline, near the field, announced via role="alert". */
+.auth-field-error {
+  color: var(--board-red-fg);
+  animation: auth-rise 200ms ease both;
+}
+.auth-error-box {
+  border: 1px solid color-mix(in srgb, var(--board-red-fg) 35%, transparent);
+  background: color-mix(in srgb, var(--board-red-bg) 55%, transparent);
+  color: var(--board-red-fg);
+}
+.login-field-input[data-invalid='true'] {
+  border-color: color-mix(in srgb, var(--board-red-fg) 65%, var(--color-border));
+}
+.login-field-input[data-invalid='true']:focus {
+  border-color: var(--board-red-fg);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--board-red-fg) 30%, transparent),
+    0 10px 28px -18px var(--board-red-fg);
+}
+
+/* The member badge — a keycard that fills in live as you type. Tilt is
+   driven by --rx/--ry from pointer handlers (fine pointers only). */
+.auth-badge {
+  position: relative;
+  overflow: hidden;
+  transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  transition:
+    transform 200ms var(--motion-spring),
+    box-shadow 300ms ease,
+    border-color 200ms ease;
+}
+.auth-badge-sheen {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.auth-badge-sheen::before {
+  content: '';
+  position: absolute;
+  top: -60%;
+  bottom: -60%;
+  left: 0;
+  width: 36%;
+  background: linear-gradient(
+    105deg,
+    transparent,
+    color-mix(in srgb, #ffffff 14%, transparent) 50%,
+    transparent
+  );
+  transform: translateX(-140%) skewX(-12deg);
+}
+@keyframes auth-sheen {
+  to { transform: translateX(460%) skewX(-12deg); }
+}
+.auth-badge[data-issued='true'] .auth-badge-sheen::before {
+  animation: auth-sheen 1100ms 250ms ease both;
+}
+@media (hover: hover) and (pointer: fine) {
+  .auth-badge:hover .auth-badge-sheen::before {
+    animation: auth-sheen 900ms ease;
+  }
+}
+.auth-barcode {
+  height: 22px;
+  width: 64px;
+  opacity: 0.35;
+  color: var(--color-text-dim);
+  background: repeating-linear-gradient(
+    90deg,
+    currentColor 0 1px,
+    transparent 1px 4px,
+    currentColor 4px 7px,
+    transparent 7px 8px,
+    currentColor 8px 9px,
+    transparent 9px 13px
+  );
+}
+
+/* Issued-state check: ring pops, stroke draws. */
+.auth-check {
+  animation: auth-check-pop 320ms 150ms var(--motion-spring) both;
+}
+@keyframes auth-check-pop {
+  from { opacity: 0; transform: scale(0.4); }
+  to { opacity: 1; transform: scale(1); }
+}
+.auth-check-path {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: auth-check-draw 380ms 400ms ease-out forwards;
+}
+@keyframes auth-check-draw {
+  to { stroke-dashoffset: 0; }
+}
+
+/* Indeterminate progress bar shown while the workspace boots. */
+.auth-progress {
+  position: relative;
+  height: 3px;
+  width: 180px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-border);
+}
+.auth-progress::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-hover));
+  animation: auth-progress-slide 1.2s ease-in-out infinite;
+}
+@keyframes auth-progress-slide {
+  from { left: -40%; }
+  to { left: 100%; }
+}
+
+/* Password sharpness meter: dull → keen → sharp → razor. The text label
+   carries the meaning; color is reinforcement, not the only signal. */
+.auth-meter-seg {
+  height: 4px;
+  flex: 1;
+  border-radius: 999px;
+  background: var(--color-border);
+  transition: background-color 240ms ease, box-shadow 240ms ease;
+}
+.auth-meter-seg[data-on='true'] {
+  animation: auth-seg-pop 280ms var(--motion-spring);
+}
+@keyframes auth-seg-pop {
+  0% { transform: scaleY(1); }
+  45% { transform: scaleY(1.9); }
+  100% { transform: scaleY(1); }
+}
+.auth-meter[data-grade='0'] .auth-meter-seg[data-on='true'] {
+  background: var(--color-text-faint);
+}
+.auth-meter[data-grade='1'] .auth-meter-seg[data-on='true'] {
+  background: var(--board-yellow-fg);
+}
+.auth-meter[data-grade='2'] .auth-meter-seg[data-on='true'] {
+  background: var(--color-accent);
+}
+.auth-meter[data-grade='3'] .auth-meter-seg[data-on='true'] {
+  background: var(--color-accent-hover);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+.auth-meter-label {
+  display: inline-block;
+  animation: auth-meter-label 240ms var(--motion-spring) both;
+}
+@keyframes auth-meter-label {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-aurora-a,
+  .auth-aurora-b {
+    animation: none;
+  }
+  .auth-swap,
+  .auth-step-next,
+  .auth-step-prev,
+  .auth-rise,
+  .auth-field-error,
+  .auth-meter-label {
+    animation-duration: 1ms;
+    animation-delay: 0ms;
+  }
+  .auth-badge {
+    transform: none !important;
+    transition: none;
+  }
+  .auth-badge-sheen {
+    display: none;
+  }
+  .auth-check,
+  .auth-check-path,
+  .auth-meter-seg[data-on='true'] {
+    animation-duration: 1ms;
+    animation-delay: 0ms;
+  }
+  .auth-progress::after {
+    animation-duration: 2s;
+  }
+}
+
 /* ── Brand splash (app load) ─────────────────────────────────────────────
    `#` mark pops in, "sharp" wordmark reveals out of it, a glowing rubber
    duck drifts through. If login is underneath, the lockup FLIPs into the
