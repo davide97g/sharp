@@ -64,6 +64,11 @@ export function Login() {
   const [loginPassword, setLoginPassword] = useState('')
   const [loginError, setLoginError] = useState<string | null>(null)
 
+  // forgot password
+  const [resetEnabled, setResetEnabled] = useState(false)
+  const [loginView, setLoginView] = useState<'signin' | 'forgot' | 'forgot-sent'>('signin')
+  const [forgotEmail, setForgotEmail] = useState('')
+
   // register
   const [step, setStep] = useState(0)
   const dirRef = useRef<1 | -1>(1)
@@ -77,6 +82,7 @@ export function Login() {
   const headingRef = useRef<HTMLHeadingElement>(null)
 
   useEffect(() => {
+    api.passwordResetConfig().then((value) => setResetEnabled(value.enabled)).catch(() => {})
     if (isTauri || !supportsPasskeys()) return
     api.passkeyConfig().then((value) => setPasskeysEnabled(value.enabled)).catch(() => {})
   }, [])
@@ -94,7 +100,26 @@ export function Login() {
     setErrors({})
     dirRef.current = 1
     setStep(0)
+    setLoginView('signin')
     setMode(next)
+  }
+
+  async function forgotSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (busy) return
+    if (isTauri && server.trim()) {
+      setServerUrl(server.trim().replace(/\/+$/, ''))
+    }
+    setBusy(true)
+    try {
+      await api.forgotPassword(forgotEmail.trim().toLowerCase())
+      // Response is intentionally identical whether or not the email exists.
+      setLoginView('forgot-sent')
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : 'Something went wrong.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function loginSubmit(e: React.FormEvent) {
@@ -306,6 +331,7 @@ export function Login() {
 
         <div className="relative my-auto w-full max-w-sm self-center">
           {mode === 'login' ? (
+            loginView === 'signin' ? (
             /* ── Login: the fast path ── */
             <div className="auth-swap">
               <header className="mb-8">
@@ -350,6 +376,20 @@ export function Login() {
                   required
                   index={idx + 1}
                 />
+
+                {resetEnabled && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoginError(null)
+                      setForgotEmail(loginEmail)
+                      setLoginView('forgot')
+                    }}
+                    className="-mt-1 self-end cursor-pointer text-xs font-medium text-[var(--color-text-dim)] transition-colors hover:text-[var(--color-accent-hover)]"
+                  >
+                    Forgot password?
+                  </button>
+                )}
 
                 {loginError && (
                   <p role="alert" className="auth-error-box auth-rise rounded-lg px-3 py-2.5 text-xs">
@@ -404,6 +444,86 @@ export function Login() {
 
               <ModeToggle mode={mode} onSwitch={switchMode} />
             </div>
+            ) : loginView === 'forgot' ? (
+              /* ── Forgot password: request a reset link ── */
+              <div className="auth-swap">
+                <header className="mb-8">
+                  <h1 className="login-heading text-2xl font-bold tracking-tight text-[var(--color-text)]">
+                    Forgot your password?
+                  </h1>
+                  <p className="mt-1.5 text-sm text-[var(--color-text-dim)]">
+                    Enter your email and we’ll send you a reset link.
+                  </p>
+                </header>
+
+                <form onSubmit={forgotSubmit} className="flex flex-col gap-3">
+                  {isTauri && (
+                    <AuthField
+                      label="Server URL"
+                      type="url"
+                      placeholder="https://chat.example.com"
+                      value={server}
+                      onChange={setServer}
+                      autoComplete="url"
+                      index={0}
+                    />
+                  )}
+                  <AuthField
+                    label="Email"
+                    type="email"
+                    value={forgotEmail}
+                    onChange={setForgotEmail}
+                    placeholder="you@example.com"
+                    autoComplete="email"
+                    autoFocus={canAutofocus()}
+                    required
+                    index={idx}
+                  />
+
+                  <button
+                    type="submit"
+                    disabled={busy}
+                    className="login-primary-action mt-2 min-h-11 cursor-pointer rounded-lg bg-[var(--color-accent)] px-4 py-2.5 text-base font-semibold text-white transition hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 focus:ring-offset-[var(--color-ink)] disabled:opacity-60 sm:text-sm"
+                  >
+                    {busy ? 'Sending…' : 'Send reset link'}
+                  </button>
+                </form>
+
+                <p className="mt-6 text-center text-sm text-[var(--color-text-dim)]">
+                  <button
+                    type="button"
+                    className="cursor-pointer font-medium text-[var(--color-accent-hover)] hover:underline"
+                    onClick={() => setLoginView('signin')}
+                  >
+                    Back to sign in
+                  </button>
+                </p>
+              </div>
+            ) : (
+              /* ── Reset link sent: confirmation ── */
+              <div className="auth-swap">
+                <header className="mb-8">
+                  <h1 className="login-heading text-2xl font-bold tracking-tight text-[var(--color-text)]">
+                    Check your email.
+                  </h1>
+                  <p className="mt-1.5 text-sm leading-relaxed text-[var(--color-text-dim)]">
+                    If an account exists for{' '}
+                    <span className="font-medium text-[var(--color-text)]">
+                      {forgotEmail.trim() || 'that address'}
+                    </span>
+                    , a password reset link is on its way. The link expires in 1 hour.
+                  </p>
+                </header>
+
+                <button
+                  type="button"
+                  onClick={() => setLoginView('signin')}
+                  className="login-primary-action min-h-11 w-full cursor-pointer rounded-lg bg-[var(--color-accent)] px-4 py-2.5 text-base font-semibold text-white transition hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 focus:ring-offset-[var(--color-ink)] disabled:opacity-60 sm:text-sm"
+                >
+                  Back to sign in
+                </button>
+              </div>
+            )
           ) : issued ? (
             /* ── Badge issued: the ceremony beat while the workspace boots ── */
             <div className="auth-swap flex flex-col items-center gap-6 py-4 text-center">

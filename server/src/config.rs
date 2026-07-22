@@ -40,6 +40,25 @@ pub struct Config {
     /// Apple Push Notification service (token-based) for the native macOS desktop
     /// app. `None` unless all `APNS_*` credentials are set — inert otherwise.
     pub apns: Option<ApnsConfig>,
+    /// Outbound SMTP for transactional email (password reset). `None` unless
+    /// `SMTP_HOST` + `SMTP_FROM` are set — the reset flow is then inert.
+    pub smtp: Option<SmtpConfig>,
+    /// Public base URL of the web app, used to build links in emails
+    /// (e.g. `https://chat.example.com`). Falls back to the request Origin/Host
+    /// when unset.
+    pub app_url: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct SmtpConfig {
+    pub host: String,
+    pub port: u16,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    /// Envelope + header From address (e.g. `Sharp <no-reply@example.com>`).
+    pub from: String,
+    /// true → implicit TLS (SMTPS, usually port 465); false → STARTTLS.
+    pub implicit_tls: bool,
 }
 
 #[derive(Clone)]
@@ -335,6 +354,33 @@ impl Config {
             _ => None,
         };
 
+        // SMTP is enabled only when a host and a From address are both present.
+        // Port defaults to 465 (implicit TLS) unless overridden; STARTTLS is
+        // selected either by SMTP_TLS=starttls or by any non-465 port.
+        let smtp = match (env_opt("SMTP_HOST"), env_opt("SMTP_FROM")) {
+            (Some(host), Some(from)) => {
+                let port = env_opt("SMTP_PORT")
+                    .and_then(|p| p.parse::<u16>().ok())
+                    .unwrap_or(465);
+                let implicit_tls = match env_opt("SMTP_TLS").as_deref() {
+                    Some("implicit") | Some("smtps") => true,
+                    Some("starttls") => false,
+                    _ => port == 465,
+                };
+                Some(SmtpConfig {
+                    host,
+                    port,
+                    username: env_opt("SMTP_USERNAME"),
+                    password: env_opt("SMTP_PASSWORD"),
+                    from,
+                    implicit_tls,
+                })
+            }
+            _ => None,
+        };
+
+        let app_url = env_opt("APP_URL").map(|u| u.trim_end_matches('/').to_string());
+
         Ok(Config {
             database_url,
             jwt_secret,
@@ -356,6 +402,8 @@ impl Config {
             webauthn,
             github,
             apns,
+            smtp,
+            app_url,
         })
     }
 }

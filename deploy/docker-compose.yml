@@ -141,6 +141,17 @@ services:
       APNS_PRIVATE_KEY: ${APNS_PRIVATE_KEY:-}
       APNS_BUNDLE_ID: ${APNS_BUNDLE_ID:-dev.sharp.app}
       APNS_ENV: ${APNS_ENV:-production}
+      # Password-reset email over SMTP — self-service reset is inert (the
+      # "Forgot password?" link is hidden) unless SMTP_HOST + SMTP_FROM are set.
+      # SMTP_PORT defaults to 465 (implicit TLS); set SMTP_TLS=starttls for 587.
+      # APP_URL is the public web URL used in email links (else request origin).
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_TLS: ${SMTP_TLS:-}
+      APP_URL: ${APP_URL:-}
       # Sharpy AI assistant (OpenAI-compatible LLM + embeddings) — disabled when
       # AI_API_KEY is unset. Base URL works with OpenAI, DeepSeek, Ollama, etc.
       AI_API_KEY: ${AI_API_KEY:-}

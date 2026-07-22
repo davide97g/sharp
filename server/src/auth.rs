@@ -304,6 +304,201 @@ pub async fn login(
     Ok(Json(AuthResponse { token, user }))
 }
 
+// ── Password reset ──────────────────────────────────────────────────────────
+
+/// How long an emailed reset link stays valid.
+const RESET_TOKEN_TTL: Duration = Duration::hours(1);
+
+#[derive(Serialize)]
+pub struct PasswordResetConfig {
+    pub enabled: bool,
+}
+
+#[derive(Deserialize)]
+pub struct ForgotPasswordRequest {
+    pub email: String,
+}
+
+#[derive(Deserialize)]
+pub struct ResetPasswordRequest {
+    pub token: String,
+    pub password: String,
+}
+
+/// Whether self-service password reset is available (SMTP configured). The web
+/// login only shows the "Forgot password?" link when this is true.
+pub async fn password_reset_config(
+    State(state): State<SharedState>,
+) -> Json<PasswordResetConfig> {
+    Json(PasswordResetConfig {
+        enabled: state.mailer.is_some(),
+    })
+}
+
+/// SHA-256 hex of a raw reset token. Only the hash is persisted, so a DB leak
+/// alone can't be used to reset anyone's password.
+fn hash_reset_token(raw: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(raw.as_bytes());
+    hex_encode(&digest)
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        s.push_str(&format!("{:02x}", b));
+    }
+    s
+}
+
+/// Public base URL for links in emails: explicit `APP_URL`, else the request's
+/// Origin, else scheme (X-Forwarded-Proto) + Host.
+fn resolve_app_url(state: &SharedState, headers: &axum::http::HeaderMap) -> Option<String> {
+    if let Some(url) = &state.config.app_url {
+        return Some(url.clone());
+    }
+    if let Some(origin) = headers.get("origin").and_then(|v| v.to_str().ok()) {
+        if !origin.is_empty() && origin != "null" {
+            return Some(origin.trim_end_matches('/').to_string());
+        }
+    }
+    let host = headers.get("host").and_then(|v| v.to_str().ok())?;
+    let scheme = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("https");
+    Some(format!("{scheme}://{host}"))
+}
+
+/// Request a reset link. Always responds 200 with no body detail — it must not
+/// reveal whether an email is registered (user-enumeration guard).
+pub async fn forgot_password(
+    State(state): State<SharedState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<ForgotPasswordRequest>,
+) -> AppResult<axum::http::StatusCode> {
+    let email = body.email.trim().to_lowercase();
+
+    // Nothing to do without SMTP or a syntactically plausible email — but the
+    // response is identical in every branch.
+    let Some(mailer) = &state.mailer else {
+        return Ok(axum::http::StatusCode::OK);
+    };
+    if email.is_empty() || !email.contains('@') {
+        return Ok(axum::http::StatusCode::OK);
+    }
+
+    let row = sqlx::query("SELECT id, display_name FROM users WHERE email = $1")
+        .bind(&email)
+        .fetch_optional(&state.pool)
+        .await?;
+
+    if let Some(row) = row {
+        let user_id: Uuid = row.try_get("id")?;
+        let display_name: String = row.try_get("display_name")?;
+
+        // A user only ever needs their latest link; drop any outstanding ones.
+        sqlx::query("DELETE FROM password_reset_tokens WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&state.pool)
+            .await?;
+
+        let mut raw_bytes = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut raw_bytes);
+        let raw_token = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw_bytes);
+        let token_hash = hash_reset_token(&raw_token);
+        let expires_at = Utc::now() + RESET_TOKEN_TTL;
+
+        sqlx::query(
+            "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+             VALUES ($1, $2, $3)",
+        )
+        .bind(user_id)
+        .bind(&token_hash)
+        .bind(expires_at)
+        .execute(&state.pool)
+        .await?;
+
+        let base = resolve_app_url(&state, &headers)
+            .unwrap_or_else(|| "https://localhost".to_string());
+        let link = format!("{base}/reset-password?token={raw_token}");
+
+        let subject = "Reset your Sharp password";
+        let text = format!(
+            "Hi {display_name},\n\n\
+             We received a request to reset your Sharp password. Open the link \
+             below to choose a new one. It expires in 1 hour.\n\n\
+             {link}\n\n\
+             If you didn't request this, you can safely ignore this email — your \
+             password won't change.\n"
+        );
+        let html = format!(
+            "<div style=\"font-family:system-ui,-apple-system,Segoe UI,sans-serif;font-size:15px;line-height:1.6;color:#1a1a2e\">\
+               <p>Hi {display_name},</p>\
+               <p>We received a request to reset your Sharp password. Click the button below to choose a new one. This link expires in <strong>1 hour</strong>.</p>\
+               <p style=\"margin:28px 0\"><a href=\"{link}\" style=\"background:#7c6cf0;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600\">Reset password</a></p>\
+               <p style=\"font-size:13px;color:#666\">Or paste this link into your browser:<br><a href=\"{link}\">{link}</a></p>\
+               <p style=\"font-size:13px;color:#666\">If you didn't request this, you can safely ignore this email — your password won't change.</p>\
+             </div>"
+        );
+
+        // Failures are logged but never surfaced — the response can't hint at
+        // whether the address exists.
+        if let Err(e) = mailer.send(&email, subject, &text, &html).await {
+            tracing::warn!("password reset email to {} failed: {}", email, e);
+        }
+    }
+
+    Ok(axum::http::StatusCode::OK)
+}
+
+/// Complete a reset: validate the token, set the new password, burn the token.
+pub async fn reset_password(
+    State(state): State<SharedState>,
+    Json(body): Json<ResetPasswordRequest>,
+) -> AppResult<axum::http::StatusCode> {
+    if body.password.len() < 8 {
+        return Err(AppError::Validation(
+            "password must be at least 8 characters".to_string(),
+        ));
+    }
+    let token = body.token.trim();
+    if token.is_empty() {
+        return Err(AppError::Validation("missing token".to_string()));
+    }
+    let token_hash = hash_reset_token(token);
+
+    let row = sqlx::query(
+        "SELECT user_id FROM password_reset_tokens
+         WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()",
+    )
+    .bind(&token_hash)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    let row = row.ok_or_else(|| {
+        AppError::Validation("this reset link is invalid or has expired".to_string())
+    })?;
+    let user_id: Uuid = row.try_get("user_id")?;
+
+    let password_hash = hash_password(&body.password)?;
+
+    let mut tx = state.pool.begin().await?;
+    sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
+        .bind(&password_hash)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    // Burn every outstanding token for this user, not just the one used.
+    sqlx::query("DELETE FROM password_reset_tokens WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+
+    Ok(axum::http::StatusCode::OK)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

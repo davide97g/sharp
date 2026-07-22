@@ -7,6 +7,7 @@ import { isTauri, registerDeepLinkHandler } from './lib/desktopAuth'
 import { toastError } from './lib/toast'
 import { useStore } from './store'
 import { Login } from './components/Login'
+import { ResetPassword } from './components/ResetPassword'
 import { GuestCall } from './components/GuestCall'
 import { AppShell } from './components/AppShell'
 import { Splash } from './components/Splash'
@@ -125,6 +126,8 @@ export function App() {
           path="/login"
           element={authed ? <Navigate to="/" replace /> : <Login />}
         />
+        {/* Public reset landing — reachable regardless of auth state. */}
+        <Route path="/reset-password" element={<ResetPassword />} />
         {/* Public call link: authenticated visitors keep their account session;
             anonymous visitors get the scoped guest flow. */}
         <Route path="/call/:token" element={<GuestCall />} />

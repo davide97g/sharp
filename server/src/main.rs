@@ -11,6 +11,7 @@ mod expo_push;
 mod gif;
 mod google_oauth;
 mod livekit;
+mod mailer;
 mod models;
 mod notify;
 mod passkeys;
@@ -156,6 +157,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Transactional email (password reset) over SMTP.
+    let mailer = match &config.smtp {
+        Some(smtp) => match mailer::Mailer::from_config(smtp) {
+            Ok(m) => {
+                tracing::info!("smtp email enabled (host '{}')", smtp.host);
+                Some(m)
+            }
+            Err(e) => {
+                tracing::warn!("smtp email disabled: {}", e);
+                None
+            }
+        },
+        None => {
+            tracing::info!("smtp email disabled (SMTP not configured)");
+            None
+        }
+    };
+
     let port = config.port;
     let web_dist = config.web_dist.clone();
     let upload_limit = config.max_upload_bytes + 1024 * 1024;
@@ -174,6 +193,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         duck_streaks: Default::default(),
         giphy_usage: Default::default(),
         webauthn,
+        mailer,
     });
 
     // Heartbeats distinguish quiet live calls from records orphaned by a process
@@ -244,6 +264,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api = Router::new()
         .route("/auth/register", post(auth::register))
         .route("/auth/login", post(auth::login))
+        .route("/auth/password/config", get(auth::password_reset_config))
+        .route("/auth/password/forgot", post(auth::forgot_password))
+        .route("/auth/password/reset", post(auth::reset_password))
         .route("/auth/desktop/code", post(auth::desktop_code))
         .route("/auth/desktop/exchange", post(auth::desktop_exchange))
         .route("/auth/passkeys/config", get(passkeys::config))

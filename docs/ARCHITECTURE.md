@@ -153,6 +153,9 @@ ReplyPreview = { id: string, user: { id, display_name, avatar_url }, content: st
 |---|---|---|
 | POST | `/auth/register` | `{email, password, display_name}` → `201 {token, user}` |
 | POST | `/auth/login` | `{email, password}` → `{token, user}` |
+| GET | `/auth/password/config` | → `{enabled}` — whether self-service reset is available (SMTP configured). The web login only shows "Forgot password?" when true. |
+| POST | `/auth/password/forgot` | `{email}` → `200` **always** (no user-enumeration). If SMTP configured and the email exists, emails a reset link `{APP_URL or request origin}/reset-password?token=<raw>` (TTL 1h). Only the SHA-256 of the raw token is persisted (`password_reset_tokens`). |
+| POST | `/auth/password/reset` | `{token, password}` → `200` — validates the unused/unexpired token, sets the new password hash, burns all of that user's tokens; `400` on invalid/expired token or password < 8. |
 | POST | `/auth/desktop/code` | (authed) → `{code, expires_in}` — mints a one-time, single-use browser-login code (TTL 60s, in-process/per-replica) bound to the caller. Used by the desktop browser-login bridge. |
 | POST | `/auth/desktop/exchange` | `{code}` → `{token, user}` — unauthenticated; consumes the code (single use, must be unexpired) and issues a JWT. The native app calls this after receiving the `sharp://auth?code=&state=` deep link. |
 | GET | `/me` | → `User` |

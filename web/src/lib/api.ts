@@ -488,6 +488,23 @@ export const api = {
       auth: false,
     })
   },
+  passwordResetConfig() {
+    return request<{ enabled: boolean }>('/auth/password/config', { auth: false })
+  },
+  forgotPassword(email: string) {
+    return request<void>('/auth/password/forgot', {
+      method: 'POST',
+      body: { email },
+      auth: false,
+    })
+  },
+  resetPassword(token: string, password: string) {
+    return request<void>('/auth/password/reset', {
+      method: 'POST',
+      body: { token, password },
+      auth: false,
+    })
+  },
   me() {
     return request<User>('/me')
   },
