@@ -127,7 +127,11 @@ services:
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_ALLOW_HTTP: "true"
+      # VAPID keys auto-generate + persist on first startup (leave unset). Set
+      # both to pin your own keypair; empty => auto-generate.
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@sharp.app}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       # Sharpy AI assistant (OpenAI-compatible LLM + embeddings) — disabled when
       # AI_API_KEY is unset. Base URL works with OpenAI, DeepSeek, Ollama, etc.
       AI_API_KEY: ${AI_API_KEY:-}

@@ -113,9 +113,12 @@ services:
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:?set S3_ACCESS_KEY in the Environment tab}
       S3_SECRET_KEY: ${S3_SECRET_KEY:?set S3_SECRET_KEY in the Environment tab}
       S3_REGION: ${S3_REGION:-auto}
-      # Web push: VAPID keys auto-generate + persist on first startup. Only the
-      # subject (contact URL) is configurable here.
+      # Web push: VAPID keys auto-generate + persist on first startup, so these
+      # can be left unset. To pin your own keypair, set both VAPID_PUBLIC_KEY and
+      # VAPID_PRIVATE_KEY in the Environment tab (empty => auto-generate).
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@sharp.davideghiotto.it}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       # GIF search (server-side proxy). Key can also be saved from the in-app
       # Settings → Workspace tab (persisted in Postgres); these are the env
       # fallbacks. GIPHY is the default provider; Tenor is legacy-only.
