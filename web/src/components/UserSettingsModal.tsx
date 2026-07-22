@@ -33,6 +33,7 @@ import { Avatar } from './Avatar'
 import { AvatarCropper } from './AvatarCropper'
 import { ChatLayoutPicker } from './ChatLayoutChooser'
 import { NotificationSetup } from './NotificationSetup'
+import { Toggle } from './Toggle'
 import { ThemePicker } from './ThemePicker'
 import { NavigationPicker } from './NavigationPicker'
 import { VoiceTriggerEditor } from './VoiceTriggerEditor'
@@ -90,6 +91,8 @@ export function UserSettingsModal({
   const setChatLayout = useStore((s) => s.setChatLayout)
   const railPosition = useStore((s) => s.railPosition)
   const setRailPosition = useStore((s) => s.setRailPosition)
+  const dockAutoHide = useStore((s) => s.dockAutoHide)
+  const setDockAutoHide = useStore((s) => s.setDockAutoHide)
 
   const navigate = useNavigate()
   const location = useLocation()
@@ -397,6 +400,19 @@ export function UserSettingsModal({
               Navigation
             </div>
             <NavigationPicker value={railPosition} onChange={setRailPosition} />
+            {railPosition === 'bottom' && (
+              <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] px-3 py-2">
+                <div>
+                  <div className="text-sm font-medium text-[var(--color-text)]">
+                    Automatically hide the dock
+                  </div>
+                  <div className="text-[11px] text-[var(--color-text-faint)]">
+                    The dock slides away. Move the cursor to the bottom edge to show it.
+                  </div>
+                </div>
+                <DockAutoHideSwitch checked={dockAutoHide} onChange={setDockAutoHide} />
+              </div>
+            )}
             <p className="mt-3 text-[11px] text-[var(--color-text-faint)]">
               Desktop only. Mobile always uses its bottom tabs.
             </p>
@@ -1464,7 +1480,11 @@ function SoundSettingsSection() {
               // Preview at the new level so dragging is audible feedback.
               sound.previewTick()
             }}
-            className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-[var(--color-panel)] accent-[var(--color-accent)] disabled:cursor-default disabled:opacity-50"
+            className="range-slider flex-1 disabled:cursor-default disabled:opacity-50"
+            style={{
+              // Filled portion up to the thumb, then the empty track color.
+              background: `linear-gradient(to right, var(--color-accent) ${pct}%, var(--color-panel) ${pct}%)`,
+            }}
           />
           <span className="w-10 text-right text-xs tabular-nums text-[var(--color-text-dim)]">
             {pct}%
@@ -1754,4 +1774,14 @@ function TabBtn({
       {children}
     </button>
   )
+}
+
+function DockAutoHideSwitch({
+  checked,
+  onChange,
+}: {
+  checked: boolean
+  onChange: (v: boolean) => void
+}) {
+  return <Toggle checked={checked} onChange={onChange} label="Automatically hide the dock" />
 }

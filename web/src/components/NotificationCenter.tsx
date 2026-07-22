@@ -9,6 +9,7 @@ import { gifPreviewText } from '../lib/gif'
 import { notificationPath } from '../lib/types'
 import type { Notification, NotificationKind } from '../lib/types'
 import { NotificationSetup } from './NotificationSetup'
+import { Toggle } from './Toggle'
 
 type Filter = 'all' | NotificationKind
 
@@ -449,39 +450,6 @@ function groupByDay(items: Notification[]): { label: string; items: Notification
     }
   }
   return groups
-}
-
-function Toggle({
-  checked,
-  onChange,
-  label,
-}: {
-  checked: boolean
-  onChange: (v: boolean) => void
-  label: string
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      onClick={() => onChange(!checked)}
-      className="relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
-    >
-      <span
-        className={`relative h-5 w-9 rounded-full transition-colors ${
-          checked ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-border)]'
-        }`}
-      >
-        <span
-          className={`absolute top-0.5 inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-            checked ? 'translate-x-[18px]' : 'translate-x-0.5'
-          }`}
-        />
-      </span>
-    </button>
-  )
 }
 
 function CountBadge({ count, ring }: { count: number; ring: string }) {

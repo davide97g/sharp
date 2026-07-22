@@ -1,5 +1,4 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Navigate } from 'react-router-dom'
 import { fmtRelative } from '../../lib/util'
 import { useIsMobile } from '../../lib/useMediaQuery'
 import type { SharpySource } from '../../lib/types'
@@ -47,7 +46,35 @@ export function SharpyPage() {
     return <div className="flex flex-1 bg-[var(--color-ink)]" aria-busy="true" />
   }
 
-  if (!enabled) return <Navigate to="/" replace />
+  if (!enabled) {
+    return (
+      <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-4 bg-[var(--color-ink)] px-6 text-center">
+        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]">
+          <svg
+            width="26"
+            height="26"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M12 3c.4 4.7 2.3 6.6 7 7-4.7.4-6.6 2.3-7 7-.4-4.7-2.3-6.6-7-7 4.7-.4 6.6-2.3 7-7Z" />
+            <path d="M18.5 16.5c.1 1.5.8 2.2 2.3 2.3-1.5.1-2.2.8-2.3 2.3-.1-1.5-.8-2.2-2.3-2.3 1.5-.1 2.2-.8 2.3-2.3Z" />
+          </svg>
+        </span>
+        <h1 className="text-xl font-semibold text-[var(--color-text)]">Sharpy is off on this server</h1>
+        <p className="max-w-md text-sm text-[var(--color-text-dim)]">
+          Workspace AI answers need an AI provider. A server admin can enable Sharpy by
+          setting the <code className="rounded bg-[var(--color-panel)] px-1.5 py-0.5 text-[12px]">AI_API_KEY</code> environment
+          variable (plus optional <code className="rounded bg-[var(--color-panel)] px-1.5 py-0.5 text-[12px]">AI_BASE_URL</code> and
+          model settings), then restarting the server.
+        </p>
+      </div>
+    )
+  }
 
   function submit() {
     const text = input.trim()

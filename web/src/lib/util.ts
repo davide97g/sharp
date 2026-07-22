@@ -119,11 +119,35 @@ export function fuzzyScore(query: string, target: string): number {
   return score
 }
 
+/** First grapheme cluster of a string (keeps ZWJ emoji whole, e.g. 👨‍👩‍👧). */
+function firstGrapheme(s: string): string {
+  const Seg = (Intl as { Segmenter?: new (locale?: string, opts?: { granularity: string }) => { segment(s: string): Iterable<{ segment: string }> } }).Segmenter
+  if (Seg) {
+    for (const { segment } of new Seg(undefined, { granularity: 'grapheme' }).segment(s)) return segment
+  }
+  return [...s][0] ?? ''
+}
+
 export function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return '?'
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+  const trimmed = (name ?? '').trim()
+  if (!trimmed) return '?'
+  const isAlnum = (ch: string) => /[\p{L}\p{N}]/u.test(ch)
+  // First alphanumeric code point of a word, skipping any leading symbols/emoji.
+  const firstLetter = (word: string): string | null => {
+    for (const ch of word) if (isAlnum(ch)) return ch
+    return null
+  }
+  const words = trimmed.split(/\s+/).filter(Boolean)
+  const letters = words.map(firstLetter).filter((c): c is string => c !== null)
+  // Two or more real words → first + last initial.
+  if (letters.length >= 2) return (letters[0] + letters[letters.length - 1]).toUpperCase()
+  // Single real word → up to two of its leading alphanumerics.
+  if (letters.length === 1) {
+    const word = words.find(firstLetter)!
+    return [...word].filter(isAlnum).slice(0, 2).join('').toUpperCase()
+  }
+  // No letters/digits at all — a pure emoji/symbol name. Show its first glyph.
+  return firstGrapheme(trimmed)
 }
 
 /**

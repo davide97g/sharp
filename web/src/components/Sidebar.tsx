@@ -8,7 +8,13 @@ import { ChannelSettingsModal } from './ChannelSettingsModal'
 import { GearIcon, LockIcon } from './icons'
 import type { Channel } from '../lib/types'
 
-export function Sidebar({ variant = 'desktop' }: { variant?: 'desktop' | 'mobile' }) {
+export function Sidebar({
+  variant = 'desktop',
+  onToggle,
+}: {
+  variant?: 'desktop' | 'mobile'
+  onToggle?: () => void
+}) {
   const channels = useStore((s) => s.channels)
   const nicknames = useStore((s) => s.nicknames)
   const online = useStore((s) => s.online)
@@ -69,6 +75,20 @@ export function Sidebar({ variant = 'desktop' }: { variant?: 'desktop' | 'mobile
         >
           ⌘K
         </button>
+        {onToggle && (
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-controls="app-sidebar"
+            aria-expanded
+            aria-keyshortcuts="\\"
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar (\)"
+            className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-[var(--color-text-faint)] outline-none hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+          >
+            <SidebarToggleIcon open />
+          </button>
+        )}
       </div>
 
       {/* search */}
@@ -300,5 +320,25 @@ function VoiceRoomIndicator({ room }: { room?: VoiceRoom }) {
       </svg>
       {count}
     </span>
+  )
+}
+
+export function SidebarToggleIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="19"
+      height="19"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="3" y="4" width="18" height="16" rx="2.5" />
+      <path d="M8.5 4v16" />
+      <path d={open ? 'm15 9-3 3 3 3' : 'm12 9 3 3-3 3'} />
+    </svg>
   )
 }

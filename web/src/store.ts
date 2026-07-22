@@ -342,6 +342,8 @@ type State = {
 
   // Device-local desktop navigation preference.
   railPosition: RailPosition
+  // Bottom dock only: slide away until the cursor nears the bottom edge.
+  dockAutoHide: boolean
 
   // ephemeral voice rooms + this connection's active call
   voiceRooms: Record<string, VoiceRoom>
@@ -586,6 +588,7 @@ type State = {
   // profile + chat layout
   setChatLayout: (layout: ChatLayout) => Promise<void>
   setRailPosition: (position: RailPosition) => void
+  setDockAutoHide: (autoHide: boolean) => void
   updateProfile: (input: { display_name?: string }) => Promise<void>
   uploadAvatar: (file: Blob, onProgress?: (f: number) => void) => Promise<void>
   removeAvatar: () => Promise<void>
@@ -613,6 +616,7 @@ function emptyChannelMessages(): ChannelMessages {
 
 const NOISE_SUPPRESSION_KEY = 'sharp.noiseSuppression'
 const RAIL_POSITION_KEY = 'sharp.railPosition'
+const DOCK_AUTOHIDE_KEY = 'sharp.dockAutoHide'
 
 function storedNoiseSuppression(): boolean {
   try {
@@ -627,6 +631,14 @@ function storedRailPosition(): RailPosition {
     return window.localStorage.getItem(RAIL_POSITION_KEY) === 'bottom' ? 'bottom' : 'left'
   } catch {
     return 'left'
+  }
+}
+
+function storedDockAutoHide(): boolean {
+  try {
+    return window.localStorage.getItem(DOCK_AUTOHIDE_KEY) === '1'
+  } catch {
+    return false
   }
 }
 
@@ -729,6 +741,7 @@ export const useStore = create<State>((set, get) => ({
   notifHasMore: false,
   chatLayout: null,
   railPosition: storedRailPosition(),
+  dockAutoHide: storedDockAutoHide(),
   voiceRooms: {},
   activeMeetings: {},
   voice: emptyVoiceState(),
@@ -2549,6 +2562,15 @@ export const useStore = create<State>((set, get) => ({
     set({ railPosition: position })
     try {
       window.localStorage.setItem(RAIL_POSITION_KEY, position)
+    } catch {
+      // The preference is still usable for this session if storage is unavailable.
+    }
+  },
+
+  setDockAutoHide(autoHide) {
+    set({ dockAutoHide: autoHide })
+    try {
+      window.localStorage.setItem(DOCK_AUTOHIDE_KEY, autoHide ? '1' : '0')
     } catch {
       // The preference is still usable for this session if storage is unavailable.
     }

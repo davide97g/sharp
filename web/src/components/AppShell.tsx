@@ -34,6 +34,7 @@ export function AppShell() {
   const setSearchOpen = useStore((s) => s.setSearchOpen)
   const channels = useStore((s) => s.channels)
   const railPosition = useStore((s) => s.railPosition)
+  const dockAutoHide = useStore((s) => s.dockAutoHide)
   const inVoice = useStore((s) => s.voice.channelId !== null)
   const location = useLocation()
   const isMobile = useIsMobile()
@@ -76,6 +77,31 @@ export function AppShell() {
 
   const setInboxOpen = useStore((s) => s.setInboxOpen)
   const bottomRail = !isMobile && !settingsMode && railPosition === 'bottom'
+
+  // Auto-hidden dock: slides away until the cursor nears the bottom edge (or
+  // focus moves into it). A short delay keeps it from flickering on exit.
+  const [dockShown, setDockShown] = useState(true)
+  const dockHideTimer = useRef<number | null>(null)
+  useEffect(() => {
+    setDockShown(!dockAutoHide)
+    return () => {
+      if (dockHideTimer.current !== null) window.clearTimeout(dockHideTimer.current)
+    }
+  }, [dockAutoHide, bottomRail])
+  const showDock = useCallback(() => {
+    if (dockHideTimer.current !== null) {
+      window.clearTimeout(dockHideTimer.current)
+      dockHideTimer.current = null
+    }
+    setDockShown(true)
+  }, [])
+  const scheduleDockHide = useCallback(() => {
+    if (!dockAutoHide) return
+    if (dockHideTimer.current !== null) window.clearTimeout(dockHideTimer.current)
+    // Near-immediate: just enough slack to cross the gap between the reveal
+    // strip and the dock without flicker.
+    dockHideTimer.current = window.setTimeout(() => setDockShown(false), 150)
+  }, [dockAutoHide])
 
   // Navigation cues: a mid tick when the mode rail switches (chat/docs/canvas),
   // a near-subliminal tick when moving between channels/docs within a mode. The
@@ -136,14 +162,9 @@ export function AppShell() {
   }, [setQuickSwitcher, setSearchOpen, toggleSidebar, isMobile, mode])
 
   return (
-    <div className={`flex h-full w-full overflow-hidden ${isMobile || bottomRail ? 'flex-col' : ''}`}>
+    <div className={`relative flex h-full w-full overflow-hidden ${isMobile ? 'flex-col' : ''}`}>
       {!settingsMode && !isMobile && !bottomRail && (
-        <ModeRail
-          mode={mode}
-          orientation="vertical"
-          sidebarOpen={sidebarOpen}
-          onToggleSidebar={toggleSidebar}
-        />
+        <ModeRail mode={mode} orientation="vertical" />
       )}
       <div className={`flex min-h-0 min-w-0 flex-1 overflow-hidden ${isMobile && !settingsMode ? 'mobile-main' : ''}`}>
         {!settingsMode && !isMobile && mode === 'chat' && (
@@ -152,7 +173,11 @@ export function AppShell() {
             className="sidebar-shell relative"
             data-open={sidebarOpen}
           >
-            {sidebarOpen ? <Sidebar /> : <CompactSidebar />}
+            {sidebarOpen ? (
+              <Sidebar onToggle={toggleSidebar} />
+            ) : (
+              <CompactSidebar onToggle={toggleSidebar} />
+            )}
           </div>
         )}
         <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -162,12 +187,25 @@ export function AppShell() {
         </div>
       </div>
       {!settingsMode && !isMobile && bottomRail && (
-        <ModeRail
-          mode={mode}
-          orientation="horizontal"
-          sidebarOpen={sidebarOpen}
-          onToggleSidebar={toggleSidebar}
-        />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40">
+          {dockAutoHide && (
+            <div
+              aria-hidden
+              onMouseEnter={showDock}
+              onMouseLeave={scheduleDockHide}
+              className="pointer-events-auto absolute inset-x-0 bottom-0 h-2"
+            />
+          )}
+          <div
+            onMouseEnter={showDock}
+            onMouseLeave={scheduleDockHide}
+            onFocusCapture={showDock}
+            data-shown={dockShown}
+            className="dock-float pointer-events-auto mx-auto mb-2 w-fit"
+          >
+            <ModeRail mode={mode} orientation="horizontal" />
+          </div>
+        </div>
       )}
       {!settingsMode && isMobile && <MobileTabBar />}
       {inVoice && <VideoStage />}
@@ -183,19 +221,14 @@ export function AppShell() {
 function ModeRail({
   mode,
   orientation,
-  sidebarOpen,
-  onToggleSidebar,
 }: {
   mode: 'chat' | 'docs' | 'canvas' | 'board' | 'tasks' | 'meetings' | 'calendar' | 'sharpy' | 'help'
   orientation: 'vertical' | 'horizontal'
-  sidebarOpen: boolean
-  onToggleSidebar: () => void
 }) {
   const navigate = useNavigate()
   const location = useLocation()
   const [unseenRelease, setUnseenRelease] = useState(hasUnseenRelease)
   const chatUnread = useStore((s) => s.notifUnread)
-  const sharpyEnabled = useStore((s) => s.sharpyEnabled)
   const mentions = useStore((s) => s.mentions)
   const me = useStore((s) => s.me)
   const docMentions = mentions.reduce(
@@ -225,10 +258,10 @@ function ModeRail({
     <nav
       aria-label="Workspace sections"
       data-orientation={orientation}
-      className={`mode-rail flex shrink-0 items-center gap-2 bg-[var(--color-ink)] ${
+      className={`mode-rail flex shrink-0 items-center gap-2 ${
         orientation === 'vertical'
-          ? 'w-14 flex-col border-r border-[var(--color-border)] py-3'
-          : 'h-14 flex-row justify-center border-t border-[var(--color-border)] pb-1 pt-1'
+          ? 'w-14 flex-col border-r border-[var(--color-border)] bg-[var(--color-ink)] py-3'
+          : 'h-14 flex-row justify-center rounded-2xl border border-[var(--color-border)] bg-[color-mix(in_srgb,var(--color-ink)_72%,transparent)] px-2 pb-1 pt-1 shadow-[0_10px_28px_rgba(0,0,0,0.4)] backdrop-blur-md'
       }`}
     >
       <RailButton
@@ -379,8 +412,9 @@ function ModeRail({
           </svg>
         }
       />
-      {sharpyEnabled && (
-        <RailButton
+      {/* Always visible: when the server has no AI configured, /sharpy explains
+          how to enable it instead of the destination silently vanishing. */}
+      <RailButton
           active={mode === 'sharpy'}
           onClick={() => navigate('/sharpy')}
           title="Sharpy"
@@ -401,7 +435,6 @@ function ModeRail({
             </svg>
           }
         />
-      )}
       {me ? (
           <button
             type="button"
@@ -413,41 +446,7 @@ function ModeRail({
             <Avatar id={me.id} name={me.display_name} size={32} nicknameCard={false} />
           </button>
       ) : null}
-      {mode === 'chat' && <button
-          type="button"
-          onClick={onToggleSidebar}
-          aria-controls="app-sidebar"
-          aria-expanded={sidebarOpen}
-          aria-keyshortcuts="\\"
-          aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
-          title={`${sidebarOpen ? 'Collapse' : 'Expand'} sidebar (\\)`}
-          className="mode-rail-control micro-icon-button flex h-11 w-11 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-faint)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-ink)]"
-        >
-          <span className="micro-icon-glyph">
-            <SidebarToggleIcon open={sidebarOpen} />
-          </span>
-        </button>}
     </nav>
-  )
-}
-
-function SidebarToggleIcon({ open }: { open: boolean }) {
-  return (
-    <svg
-      width="19"
-      height="19"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <rect x="3" y="4" width="18" height="16" rx="2.5" />
-      <path d="M8.5 4v16" />
-      <path d={open ? 'm15 9-3 3 3 3' : 'm12 9 3 3-3 3'} />
-    </svg>
   )
 }
 
