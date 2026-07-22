@@ -21,6 +21,27 @@ import { Avatar } from './Avatar'
 
 const SIDEBAR_OPEN_KEY = 'sharp.sidebarOpen'
 
+// Module jump targets (chord+1…9), in the rail's visual order.
+const MODE_ROUTES = ['/', '/docs', '/canvas', '/board', '/tasks', '/meetings', '/calendar', '/help', '/sharpy']
+
+// Browsers reserve ⌘/Ctrl+digit for tab switching, so the chord adapts:
+// desktop app (no browser chrome) gets the native ⌘/Ctrl+digit, Mac browsers
+// get ⌃digit, and other browsers get Alt+digit.
+const isMac = navigator.platform.toUpperCase().includes('MAC')
+const isTauri = '__TAURI_INTERNALS__' in window
+export const modeChordLabel = isTauri ? (isMac ? '⌘' : 'Ctrl+') : isMac ? '⌃' : 'Alt+'
+
+function chord(digit: number): string {
+  return `${modeChordLabel}${digit}`
+}
+
+function modeChordPressed(e: KeyboardEvent): boolean {
+  if (e.shiftKey) return false
+  if (isTauri) return (e.metaKey || e.ctrlKey) && !e.altKey
+  if (isMac) return e.ctrlKey && !e.metaKey && !e.altKey
+  return e.altKey && !e.metaKey && !e.ctrlKey
+}
+
 function isEditableTarget(target: EventTarget | null) {
   return (
     target instanceof HTMLElement &&
@@ -37,6 +58,7 @@ export function AppShell() {
   const dockAutoHide = useStore((s) => s.dockAutoHide)
   const inVoice = useStore((s) => s.voice.channelId !== null)
   const location = useLocation()
+  const navigate = useNavigate()
   const isMobile = useIsMobile()
   const [sidebarOpen, setSidebarOpen] = useState(
     () => window.localStorage.getItem(SIDEBAR_OPEN_KEY) !== 'false',
@@ -76,7 +98,9 @@ export function AppShell() {
                   : 'chat'
 
   const setInboxOpen = useStore((s) => s.setInboxOpen)
-  const bottomRail = !isMobile && !settingsMode && railPosition === 'bottom'
+  const dockEdge: 'bottom' | 'top' | null =
+    railPosition === 'bottom' ? 'bottom' : railPosition === 'top' ? 'top' : null
+  const dockRail = !isMobile && !settingsMode && dockEdge !== null
 
   // Auto-hidden dock: slides away until the cursor nears the bottom edge (or
   // focus moves into it). A short delay keeps it from flickering on exit.
@@ -87,7 +111,7 @@ export function AppShell() {
     return () => {
       if (dockHideTimer.current !== null) window.clearTimeout(dockHideTimer.current)
     }
-  }, [dockAutoHide, bottomRail])
+  }, [dockAutoHide, dockRail])
   const showDock = useCallback(() => {
     if (dockHideTimer.current !== null) {
       window.clearTimeout(dockHideTimer.current)
@@ -152,6 +176,17 @@ export function AppShell() {
         return
       }
 
+      // Chord+1…9: jump between modules in rail order. e.code keeps digits
+      // stable when Option+digit types a symbol on macOS layouts.
+      if (!isMobile && modeChordPressed(e) && e.code.startsWith('Digit')) {
+        const digit = Number(e.code.slice(5))
+        if (digit >= 1 && digit <= MODE_ROUTES.length) {
+          e.preventDefault()
+          navigate(MODE_ROUTES[digit - 1])
+          return
+        }
+      }
+
       if (e.key === '\\' && !e.repeat && !isEditableTarget(e.target) && !isMobile && mode === 'chat') {
         e.preventDefault()
         toggleSidebar()
@@ -159,11 +194,11 @@ export function AppShell() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [setQuickSwitcher, setSearchOpen, toggleSidebar, isMobile, mode])
+  }, [setQuickSwitcher, setSearchOpen, toggleSidebar, isMobile, mode, navigate])
 
   return (
     <div className={`relative flex h-full w-full overflow-hidden ${isMobile ? 'flex-col' : ''}`}>
-      {!settingsMode && !isMobile && !bottomRail && (
+      {!settingsMode && !isMobile && !dockRail && (
         <ModeRail mode={mode} orientation="vertical" />
       )}
       <div className={`flex min-h-0 min-w-0 flex-1 overflow-hidden ${isMobile && !settingsMode ? 'mobile-main' : ''}`}>
@@ -186,24 +221,45 @@ export function AppShell() {
           <SharpyPanel />
         </div>
       </div>
-      {!settingsMode && !isMobile && bottomRail && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40">
+      {!settingsMode && !isMobile && dockEdge && (
+        <div
+          className={`pointer-events-none absolute inset-x-0 z-40 ${
+            dockEdge === 'top' ? 'top-0' : 'bottom-0'
+          }`}
+        >
           {dockAutoHide && (
             <div
               aria-hidden
               onMouseEnter={showDock}
               onMouseLeave={scheduleDockHide}
-              className="pointer-events-auto absolute inset-x-0 bottom-0 h-2"
+              className={`pointer-events-auto absolute inset-x-0 h-2 ${
+                dockEdge === 'top' ? 'top-0' : 'bottom-0'
+              }`}
             />
+          )}
+          {dockEdge === 'top' && dockAutoHide && (
+            <div
+              data-shown={dockShown}
+              onMouseEnter={showDock}
+              onMouseLeave={scheduleDockHide}
+              className="dock-notch pointer-events-auto absolute left-1/2 top-0 flex items-center rounded-b-xl border border-t-0 border-[var(--color-border)] bg-[var(--color-ink)] px-2.5 pb-1 pt-0.5"
+            >
+              <span className="flex h-4.5 w-4.5 items-center justify-center text-[13px] font-extrabold text-[var(--color-accent)]">
+                #
+              </span>
+            </div>
           )}
           <div
             onMouseEnter={showDock}
             onMouseLeave={scheduleDockHide}
             onFocusCapture={showDock}
             data-shown={dockShown}
-            className="dock-float pointer-events-auto mx-auto mb-2 w-fit"
+            data-edge={dockEdge}
+            className={`dock-float pointer-events-auto mx-auto w-fit ${
+              dockEdge === 'top' ? 'mt-2' : 'mb-2'
+            }`}
           >
-            <ModeRail mode={mode} orientation="horizontal" />
+            <ModeRail mode={mode} orientation="horizontal" edge={dockEdge} />
           </div>
         </div>
       )}
@@ -221,9 +277,11 @@ export function AppShell() {
 function ModeRail({
   mode,
   orientation,
+  edge = 'bottom',
 }: {
   mode: 'chat' | 'docs' | 'canvas' | 'board' | 'tasks' | 'meetings' | 'calendar' | 'sharpy' | 'help'
   orientation: 'vertical' | 'horizontal'
+  edge?: 'bottom' | 'top'
 }) {
   const navigate = useNavigate()
   const location = useLocation()
@@ -254,10 +312,15 @@ function ModeRail({
     }
   }, [])
 
+  // Docked (horizontal) items get instant styled tooltips instead of the
+  // browser's delayed native ones; labels flip to the free side of the dock.
+  const tip = orientation === 'horizontal' ? (edge === 'top' ? 'below' : 'above') : undefined
+
   return (
     <nav
       aria-label="Workspace sections"
       data-orientation={orientation}
+      data-edge={orientation === 'horizontal' ? edge : undefined}
       className={`mode-rail flex shrink-0 items-center gap-2 ${
         orientation === 'vertical'
           ? 'w-14 flex-col border-r border-[var(--color-border)] bg-[var(--color-ink)] py-3'
@@ -265,6 +328,8 @@ function ModeRail({
       }`}
     >
       <RailButton
+        tip={tip}
+        shortcut={chord(1)}
         active={mode === 'chat'}
         onClick={() => navigate('/')}
         title="Chat"
@@ -272,6 +337,8 @@ function ModeRail({
         label="#"
       />
       <RailButton
+        tip={tip}
+        shortcut={chord(2)}
         active={mode === 'docs'}
         onClick={() => navigate('/docs')}
         title="Docs"
@@ -296,6 +363,8 @@ function ModeRail({
         }
       />
       <RailButton
+        tip={tip}
+        shortcut={chord(3)}
         active={mode === 'canvas'}
         onClick={() => navigate('/canvas')}
         title="Canvas"
@@ -319,6 +388,8 @@ function ModeRail({
         }
       />
       <RailButton
+        tip={tip}
+        shortcut={chord(4)}
         active={mode === 'board'}
         onClick={() => navigate('/board')}
         title="Board"
@@ -342,12 +413,16 @@ function ModeRail({
         }
       />
       <RailButton
+        tip={tip}
+        shortcut={chord(5)}
         active={mode === 'tasks'}
         onClick={() => navigate('/tasks')}
         title="Tasks"
         label={<TasksGlyph size={18} />}
       />
       <RailButton
+        tip={tip}
+        shortcut={chord(6)}
         active={mode === 'meetings'}
         onClick={() => navigate('/meetings')}
         title="Meetings"
@@ -369,6 +444,8 @@ function ModeRail({
         }
       />
       <RailButton
+        tip={tip}
+        shortcut={chord(7)}
         active={mode === 'calendar'}
         onClick={() => navigate('/calendar')}
         title="Calendar"
@@ -390,6 +467,8 @@ function ModeRail({
         }
       />
       <RailButton
+        tip={tip}
+        shortcut={chord(8)}
         active={mode === 'help'}
         onClick={() => navigate('/help')}
         title="Help"
@@ -415,6 +494,8 @@ function ModeRail({
       {/* Always visible: when the server has no AI configured, /sharpy explains
           how to enable it instead of the destination silently vanishing. */}
       <RailButton
+          tip={tip}
+        shortcut={chord(9)}
           active={mode === 'sharpy'}
           onClick={() => navigate('/sharpy')}
           title="Sharpy"
@@ -440,7 +521,9 @@ function ModeRail({
             type="button"
             onClick={() => navigate('/settings/profile', { state: { from: `${location.pathname}${location.search}` } })}
             aria-label={`Open settings for ${me.display_name}`}
-            title={me.display_name}
+            title={tip ? undefined : me.display_name}
+            data-tooltip={tip ? me.display_name : undefined}
+            data-tip={tip}
             className={`mode-rail-control flex h-11 w-11 cursor-pointer items-center justify-center rounded-xl outline-none transition-colors hover:bg-[var(--color-panel)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-ink)] ${orientation === 'vertical' ? 'mt-auto' : ''}`}
           >
             <Avatar id={me.id} name={me.display_name} size={32} nicknameCard={false} />
@@ -457,6 +540,8 @@ function RailButton({
   label,
   badge,
   dot,
+  tip,
+  shortcut,
 }: {
   active: boolean
   onClick: () => void
@@ -464,11 +549,16 @@ function RailButton({
   label: React.ReactNode
   badge?: number
   dot?: boolean
+  tip?: 'above' | 'below'
+  shortcut?: string
 }) {
+  const hint = shortcut ? `${title}  ${shortcut}` : title
   return (
     <button
       onClick={onClick}
-      title={title}
+      title={tip ? undefined : shortcut ? `${title} (${shortcut})` : title}
+      data-tooltip={tip ? hint : undefined}
+      data-tip={tip}
       className={`mode-rail-control micro-icon-button relative flex h-11 w-11 items-center justify-center rounded-xl text-lg font-extrabold transition ${
         active
           ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)] ring-1 ring-[var(--color-accent)]'

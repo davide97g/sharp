@@ -168,7 +168,7 @@ export type VoiceRoom = Record<
 >
 
 export type VoiceStageMode = 'expanded' | 'compact' | 'mini' | 'full'
-export type RailPosition = 'left' | 'bottom'
+export type RailPosition = 'left' | 'bottom' | 'top'
 
 type VoiceState = {
   channelId: string | null
@@ -628,7 +628,8 @@ function storedNoiseSuppression(): boolean {
 
 function storedRailPosition(): RailPosition {
   try {
-    return window.localStorage.getItem(RAIL_POSITION_KEY) === 'bottom' ? 'bottom' : 'left'
+    const stored = window.localStorage.getItem(RAIL_POSITION_KEY)
+    return stored === 'bottom' || stored === 'top' ? stored : 'left'
   } catch {
     return 'left'
   }

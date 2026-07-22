@@ -400,14 +400,16 @@ export function UserSettingsModal({
               Navigation
             </div>
             <NavigationPicker value={railPosition} onChange={setRailPosition} />
-            {railPosition === 'bottom' && (
+            {railPosition !== 'left' && (
               <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] px-3 py-2">
                 <div>
                   <div className="text-sm font-medium text-[var(--color-text)]">
                     Automatically hide the dock
                   </div>
                   <div className="text-[11px] text-[var(--color-text-faint)]">
-                    The dock slides away. Move the cursor to the bottom edge to show it.
+                    {railPosition === 'top'
+                      ? 'The dock tucks into a notch. Move the cursor to the notch to show it.'
+                      : 'The dock slides away. Move the cursor to the bottom edge to show it.'}
                   </div>
                 </div>
                 <DockAutoHideSwitch checked={dockAutoHide} onChange={setDockAutoHide} />
