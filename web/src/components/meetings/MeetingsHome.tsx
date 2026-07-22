@@ -7,8 +7,10 @@ import { useStore } from '../../store'
 import { NewMeetDialog } from './NewMeetDialog'
 
 export function MeetingsHome() {
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const channelId = params.get('channel') ?? undefined
+  const query = params.get('q') ?? ''
+  const filter = params.get('filter') ?? 'all'
   const activeMeetings = useStore((state) => state.activeMeetings)
   const [meetings, setMeetings] = useState<MeetingListItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -18,14 +20,17 @@ export function MeetingsHome() {
   useEffect(() => {
     setLoading(true)
     void api.meetings
-      .list({ channelId, limit: 100 })
+      .list({ channelId, q: query || undefined, limit: 100 })
       .then((result) => setMeetings(result.meetings))
       .catch(() => setMeetings([]))
       .finally(() => setLoading(false))
-  }, [channelId, activeMeetings])
+  }, [channelId, query, activeMeetings])
 
   const live = meetings.filter((meeting) => meeting.status === 'active')
   const completed = meetings.filter((meeting) => meeting.status !== 'active')
+  const showLive = filter !== 'completed'
+  const showCompleted = filter !== 'live'
+  const updateParam = (key: string, value?: string) => { const next = new URLSearchParams(params); if (value) next.set(key, value); else next.delete(key); setParams(next, { replace: true }) }
   const totalMinutes = useMemo(
     () => completed.reduce((total, meeting) => total + durationMinutes(meeting), 0),
     [completed],
@@ -33,11 +38,9 @@ export function MeetingsHome() {
 
   return (
     <main className="flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
-      <header className="flex min-h-14 items-center gap-3 border-b border-[var(--color-border)] px-5 py-2">
-        <div className="min-w-0 flex-1">
-          <span className="font-semibold">Meeting records</span>
-          <span className="ml-2 hidden text-sm text-[var(--color-text-faint)] sm:inline">Attendance, notes, transcript</span>
-        </div>
+      <header className="border-b border-[var(--color-border)] px-5 py-5 sm:px-8">
+        <div className="flex flex-wrap items-end gap-3">
+        <div className="min-w-0 flex-1"><h1 className="text-3xl font-semibold tracking-[-0.04em]">Meetings</h1><p className="mt-1 text-sm text-[var(--color-text-faint)]">Attendance, notes, transcript</p></div>
         <button
           type="button"
           onClick={() => setCreatingMeet(true)}
@@ -45,6 +48,8 @@ export function MeetingsHome() {
         >
           <PlusIcon /> New meet
         </button>
+        </div>
+        <div className="mt-5 flex flex-wrap gap-2"><input autoFocus value={query} onChange={(event) => updateParam('q', event.target.value || undefined)} placeholder="Search meeting records…" className="min-h-11 min-w-[min(100%,20rem)] flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]" />{['all', 'live', 'completed'].map((value) => <button key={value} onClick={() => updateParam('filter', value === 'all' ? undefined : value)} className={`min-h-11 rounded-full border px-3 text-xs capitalize ${filter === value ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:bg-[var(--color-panel)]'}`}>{value}</button>)}</div>
       </header>
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl px-5 py-8 sm:px-8">
@@ -64,7 +69,7 @@ export function MeetingsHome() {
             </div>
           </section>
 
-          {live.length > 0 && (
+          {showLive && live.length > 0 && (
             <section className="mb-9">
               <h2 className="meeting-kicker mb-3 text-[#ff8a80]">Live now</h2>
               <div className="grid gap-3 md:grid-cols-2">
@@ -75,7 +80,7 @@ export function MeetingsHome() {
             </section>
           )}
 
-          <section>
+          {showCompleted && <section>
             <div className="mb-3 flex items-center justify-between">
               <h2 className="meeting-kicker">Recent records</h2>
               <span className="text-[11px] text-[var(--color-text-faint)]">Newest first</span>
@@ -97,7 +102,7 @@ export function MeetingsHome() {
                 ))}
               </div>
             )}
-          </section>
+          </section>}
         </div>
       </div>
       {creatingMeet ? <NewMeetDialog onClose={() => setCreatingMeet(false)} /> : null}

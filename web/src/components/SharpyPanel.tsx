@@ -5,6 +5,7 @@ import { useIsMobile } from '../lib/useMediaQuery'
 import { fmtRelative } from '../lib/util'
 import { Markdown } from './Markdown'
 import type { SharpySource } from '../lib/types'
+import { SharpyCitationChips } from './sharpy/SharpyCitationChips'
 
 const SUGGESTED_PROMPTS = [
   'What did we decide about ',
@@ -13,6 +14,7 @@ const SUGGESTED_PROMPTS = [
 ]
 
 export function SharpyPanel() {
+  const navigate = useNavigate()
   const open = useStore((s) => s.sharpyOpen)
   const enabled = useStore((s) => s.sharpyEnabled)
   const messages = useStore((s) => s.sharpyMessages)
@@ -111,6 +113,15 @@ export function SharpyPanel() {
           <span className="text-sm font-semibold">Sharpy</span>
         </div>
         <div className="flex items-center gap-1">
+          <IconButton
+            title="Open full page"
+            onClick={() => {
+              setSharpyOpen(false)
+              navigate('/sharpy')
+            }}
+          >
+            <ExpandIcon />
+          </IconButton>
           <IconButton
             title="Conversation history"
             active={historyOpen}
@@ -299,52 +310,7 @@ function AssistantMessage({
         ) : null}
         {streaming && content ? <TypingIndicator inline /> : null}
       </div>
-      {sources && sources.length > 0 && <SourceChips sources={sources} />}
-    </div>
-  )
-}
-
-function SourceChips({ sources }: { sources: SharpySource[] }) {
-  const navigate = useNavigate()
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {sources.map((src, i) => {
-        const label =
-          src.kind === 'message'
-            ? `#${src.channel_name} · ${src.author}`
-            : src.kind === 'task'
-              ? `${src.identifier} ${src.title}`
-              : src.title
-        const taskAt = src.kind === 'task' ? src.identifier.lastIndexOf('-') : -1
-        const to =
-          src.kind === 'message'
-            ? `/c/${src.channel_id}`
-            : src.kind === 'task'
-              ? `/t/${src.identifier.slice(0, taskAt).toLowerCase()}/${src.identifier.slice(taskAt + 1)}`
-              : src.doc_kind === 'canvas'
-                ? `/x/${src.doc_id}`
-                : src.doc_kind === 'board'
-                  ? `/b/${src.doc_id}`
-                  : `/d/${src.doc_id}`
-        const key =
-          src.kind === 'message'
-            ? `m-${src.message_id}-${i}`
-            : src.kind === 'task'
-              ? `t-${src.task_id}-${i}`
-              : `d-${src.doc_id}-${i}`
-        return (
-          <button
-            key={key}
-            type="button"
-            title={src.snippet}
-            onClick={() => navigate(to)}
-            className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1 text-[11px] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
-          >
-            <span className="text-[var(--color-text-faint)]">[{i + 1}]</span>
-            <span className="truncate">{label}</span>
-          </button>
-        )
-      })}
+      {sources && sources.length > 0 && <SharpyCitationChips sources={sources} />}
     </div>
   )
 }
@@ -424,6 +390,14 @@ function PlusIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M12 5v14M5 12h14" />
+    </svg>
+  )
+}
+
+function ExpandIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M15 3h6v6M21 3l-7 7M9 21H3v-6M3 21l7-7" />
     </svg>
   )
 }

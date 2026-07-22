@@ -454,6 +454,7 @@ DocMention = {
 | GET | `/mentions` | → `{mentions: DocMention[]}` (mine, unread first then newest, limit 50) |
 | POST | `/mentions/read` | `{ids: string[]}` → `204` (marks mine read) |
 | GET | `/docs/search?q=&limit=20&doc_id=` | → `{results: (Doc & {channel_name: string, snippet: string})[]}` (docs I can see, FTS + title ILIKE; optional `doc_id` scopes to one doc; `snippet` is a `ts_headline` over `content_text` with `<<`/`>>` markers, empty for canvases and boards) |
+| GET | `/docs/recent?kind=&limit=30` | → `{docs: [{doc: Doc, channel_name: string}]}` (workspace-wide visible docs, newest updated first; optional `kind` is `doc`, `canvas`, or `board`; `limit` defaults to 30, max 100) |
 
 Validation: title ≤ 200 chars; icon ≤ 16 chars; mention POST is idempotent.
 

@@ -34,6 +34,7 @@ import { AvatarCropper } from './AvatarCropper'
 import { ChatLayoutPicker } from './ChatLayoutChooser'
 import { NotificationSetup } from './NotificationSetup'
 import { ThemePicker } from './ThemePicker'
+import { NavigationPicker } from './NavigationPicker'
 import { VoiceTriggerEditor } from './VoiceTriggerEditor'
 import { setAudioAuraPreference, useAudioAuraPreference } from '../lib/meetingEffects'
 import { AudioAuraPreview } from './voice/AudioAuraAvatar'
@@ -87,6 +88,8 @@ export function UserSettingsModal({
   const uploadAvatar = useStore((s) => s.uploadAvatar)
   const removeAvatar = useStore((s) => s.removeAvatar)
   const setChatLayout = useStore((s) => s.setChatLayout)
+  const railPosition = useStore((s) => s.railPosition)
+  const setRailPosition = useStore((s) => s.setRailPosition)
 
   const navigate = useNavigate()
   const location = useLocation()
@@ -389,6 +392,15 @@ export function UserSettingsModal({
           <p className="text-[11px] text-[var(--color-text-faint)]">
             Saved on this device. Themes change colors only — layout stays the same.
           </p>
+          <div className="mt-3 border-t border-[var(--color-border)] pt-5">
+            <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+              Navigation
+            </div>
+            <NavigationPicker value={railPosition} onChange={setRailPosition} />
+            <p className="mt-3 text-[11px] text-[var(--color-text-faint)]">
+              Desktop only. Mobile always uses its bottom tabs.
+            </p>
+          </div>
         </div>
       ) : tab === 'meetings' ? (
         <MeetingEffectsSettings userId={me.id} />

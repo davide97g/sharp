@@ -184,9 +184,7 @@ export function CanvasEditor() {
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-[var(--color-border)] px-3 sm:gap-3 sm:px-5">
         <button
           type="button"
-          onClick={() =>
-            navigate(doc.channel_id ? `/canvas/c/${doc.channel_id}` : '/canvas')
-          }
+          onClick={() => navigate('/canvas')}
           aria-label="Back to canvas"
           className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] md:hidden"
         >
@@ -195,10 +193,7 @@ export function CanvasEditor() {
           </svg>
         </button>
         <StatusDot status={status} />
-        <div className="min-w-0 flex-1 truncate text-sm text-[var(--color-text-faint)]">
-          {doc.icon ? `${doc.icon} ` : ''}
-          {doc.title || 'Untitled'}
-        </div>
+        <div className="min-w-0 flex-1 truncate text-sm"><button onClick={() => navigate('/canvas')} className="text-[var(--color-text-faint)] hover:text-[var(--color-text)]">‹ Canvas</button><span className="mx-1.5 text-[var(--color-text-faint)]">/</span><span className="text-[var(--color-text-dim)]">{doc.title || 'Untitled'}</span></div>
         <Presence peers={peers} />
         <div className="relative">
           <button

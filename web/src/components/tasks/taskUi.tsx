@@ -3,6 +3,15 @@
 import { colorOf } from '../../lib/boardColors'
 import type { Project, Task, TaskLabel, TaskPriority, TaskState } from '../../lib/types'
 
+export function TasksGlyph({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="12" cy="12" r="9" />
+      <path d="m8.5 12 2.5 2.5 5-5.5" />
+    </svg>
+  )
+}
+
 export const PRIORITY_LABELS: Record<TaskPriority, string> = {
   0: 'No priority',
   1: 'Urgent',

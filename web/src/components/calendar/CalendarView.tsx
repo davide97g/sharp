@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useStore } from '../../store'
 import { api } from '../../lib/api'
 import { toastError, toastInfo } from '../../lib/toast'
@@ -7,6 +7,7 @@ import { dayjs, dayKey, dayHeading, startOfWeek, weekHeading } from '../../lib/c
 import { AgendaList } from './AgendaList'
 import { WeekGrid } from './WeekGrid'
 import { ScheduleMeetingModal } from './ScheduleMeetingModal'
+import { MiniMonth } from './MiniMonth'
 
 // Rolling window that mirrors the server's sync range (-30d / +90d).
 function windowRange() {
@@ -31,11 +32,17 @@ export function CalendarView() {
   const setSelectedDate = useStore((s) => s.setCalendarSelectedDate)
   const loadCalendar = useStore((s) => s.loadCalendar)
   const loadCalendarConnections = useStore((s) => s.loadCalendarConnections)
+  const connections = useStore((s) => s.calendarConnections)
+  const calendarRange = useStore((s) => s.calendarRange)
+  const navigate = useNavigate()
+  const location = useLocation()
 
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [scheduling, setScheduling] = useState(false)
   const [view, setView] = useState<ViewMode>(initialView)
+  const [sideOpen, setSideOpen] = useState(false)
+  const [busyCalendar, setBusyCalendar] = useState<string | null>(null)
 
   function changeView(next: ViewMode) {
     setView(next)
@@ -75,6 +82,17 @@ export function CalendarView() {
     }
   }
 
+  async function toggleCalendar(id: string, selected: boolean) {
+    setBusyCalendar(id)
+    try {
+      await api.calendar.setCalendarSelected(id, selected)
+      await loadCalendarConnections()
+      if (calendarRange) await loadCalendar(calendarRange.from, calendarRange.to)
+    } catch (error) {
+      toastError(error instanceof Error ? error.message : 'Could not update calendar.')
+    } finally { setBusyCalendar(null) }
+  }
+
   const weekStart = startOfWeek(selectedDate ?? dayjs())
   const title =
     view === 'week'
@@ -90,7 +108,13 @@ export function CalendarView() {
         : ''
 
   return (
-    <main className="flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
+    <main className="flex min-w-0 flex-1 bg-[var(--color-ink)]">
+      <aside className={`${sideOpen ? 'flex' : 'hidden'} w-72 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-panel)] p-3 lg:flex`}>
+        <MiniMonth selectedDate={selectedDate ?? dayKey(dayjs())} eventDays={new Set(items.map((item) => dayKey(item.start_at)))} onSelect={setSelectedDate} />
+        <section className="mt-5 border-t border-[var(--color-border)] pt-4"><h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">Calendars</h2><div className="mb-2 flex items-center gap-2 text-sm text-[var(--color-text-dim)]"><span className="h-3 w-3 rounded-full bg-[var(--color-accent)]" />sharp meetings</div>{connections.flatMap((connection) => connection.calendars).map((calendar) => <label key={calendar.id} className="flex min-h-9 items-center gap-2 text-sm text-[var(--color-text-dim)]"><input type="checkbox" checked={calendar.selected} disabled={busyCalendar === calendar.id} onChange={(event) => void toggleCalendar(calendar.id, event.target.checked)} className="accent-[var(--color-accent)]" /><span className="h-3 w-3 rounded-full" style={{ background: calendar.color ?? 'var(--color-text-faint)' }} /><span className="truncate">{calendar.summary || 'Calendar'}</span></label>)}</section>
+        <section className="mt-5 border-t border-[var(--color-border)] pt-4"><h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">Accounts</h2><button onClick={() => navigate('/settings/accounts', { state: { from: `${location.pathname}${location.search}` } })} className="min-h-10 w-full rounded-lg border border-[var(--color-border)] px-3 text-sm text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)]">{connections.length ? 'Manage Google' : 'Connect Google'}</button></section>
+      </aside>
+      <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex min-h-14 flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-3 py-2 sm:flex-nowrap sm:gap-3 sm:px-5">
         <div className="min-w-0 flex-1">
           <span className="font-semibold">{title}</span>
@@ -100,6 +124,7 @@ export function CalendarView() {
             </span>
           )}
         </div>
+        <button type="button" onClick={() => setSideOpen((open) => !open)} className="flex h-11 w-11 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-text-dim)] hover:bg-[var(--color-panel)] lg:hidden" aria-label="Toggle calendar controls"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M3 9h18M8 2v4M16 2v4" /></svg></button>
         <div className="order-3 flex w-full items-center gap-1.5 sm:order-none sm:w-auto">
           <div className="flex items-center rounded-md border border-[var(--color-border)] p-0.5">
             {(['day', 'week'] as ViewMode[]).map((mode) => (
@@ -167,6 +192,7 @@ export function CalendarView() {
       )}
 
       {scheduling && <ScheduleMeetingModal onClose={() => setScheduling(false)} />}
+      </div>
     </main>
   )
 }

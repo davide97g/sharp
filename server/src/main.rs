@@ -574,6 +574,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(routes::docs::list_channel_trash),
         )
         .route("/docs/search", get(routes::docs::search_docs))
+        .route("/docs/recent", get(routes::docs::recent_docs))
         .route(
             "/docs/:id",
             get(routes::docs::get_doc)

@@ -168,6 +168,7 @@ export type VoiceRoom = Record<
 >
 
 export type VoiceStageMode = 'expanded' | 'compact' | 'mini' | 'full'
+export type RailPosition = 'left' | 'bottom'
 
 type VoiceState = {
   channelId: string | null
@@ -338,6 +339,9 @@ type State = {
 
   // chat layout preference: null until the user has chosen (triggers first-run chooser)
   chatLayout: ChatLayout | null
+
+  // Device-local desktop navigation preference.
+  railPosition: RailPosition
 
   // ephemeral voice rooms + this connection's active call
   voiceRooms: Record<string, VoiceRoom>
@@ -581,6 +585,7 @@ type State = {
 
   // profile + chat layout
   setChatLayout: (layout: ChatLayout) => Promise<void>
+  setRailPosition: (position: RailPosition) => void
   updateProfile: (input: { display_name?: string }) => Promise<void>
   uploadAvatar: (file: Blob, onProgress?: (f: number) => void) => Promise<void>
   removeAvatar: () => Promise<void>
@@ -607,12 +612,21 @@ function emptyChannelMessages(): ChannelMessages {
 }
 
 const NOISE_SUPPRESSION_KEY = 'sharp.noiseSuppression'
+const RAIL_POSITION_KEY = 'sharp.railPosition'
 
 function storedNoiseSuppression(): boolean {
   try {
     return window.localStorage.getItem(NOISE_SUPPRESSION_KEY) !== '0'
   } catch {
     return true
+  }
+}
+
+function storedRailPosition(): RailPosition {
+  try {
+    return window.localStorage.getItem(RAIL_POSITION_KEY) === 'bottom' ? 'bottom' : 'left'
+  } catch {
+    return 'left'
   }
 }
 
@@ -714,6 +728,7 @@ export const useStore = create<State>((set, get) => ({
   notificationState: initialNotificationState(),
   notifHasMore: false,
   chatLayout: null,
+  railPosition: storedRailPosition(),
   voiceRooms: {},
   activeMeetings: {},
   voice: emptyVoiceState(),
@@ -2527,6 +2542,15 @@ export const useStore = create<State>((set, get) => ({
     } catch (e) {
       set({ chatLayout: prev })
       if (e instanceof Error) toastError(e.message)
+    }
+  },
+
+  setRailPosition(position) {
+    set({ railPosition: position })
+    try {
+      window.localStorage.setItem(RAIL_POSITION_KEY, position)
+    } catch {
+      // The preference is still usable for this session if storage is unavailable.
     }
   },
 

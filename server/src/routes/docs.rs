@@ -1103,3 +1103,68 @@ pub async fn search_docs(
 
     Ok(Json(json!({ "results": results })))
 }
+
+#[derive(Deserialize)]
+pub struct RecentDocsQuery {
+    pub kind: Option<String>,
+    pub limit: Option<i64>,
+}
+
+/// Recently updated visible workspace docs. This is intentionally workspace-wide:
+/// module hubs must not fan out one request per channel to construct a recent list.
+pub async fn recent_docs(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Query(params): Query<RecentDocsQuery>,
+) -> AppResult<Json<serde_json::Value>> {
+    if let Some(kind) = &params.kind {
+        validate_kind(kind)?;
+    }
+    let limit = params.limit.unwrap_or(30).clamp(1, 100);
+    let sql = format!(
+        "SELECT {cols}, c.name AS channel_name
+         FROM docs d
+         JOIN channels c ON c.id = d.channel_id
+         JOIN channel_members cm ON cm.channel_id = d.channel_id AND cm.user_id = $1
+         WHERE d.deleted_at IS NULL
+           AND ($2::text IS NULL OR d.kind = $2)
+         ORDER BY d.updated_at DESC
+         LIMIT $3",
+        cols = DOC_COLS_D,
+    );
+    let rows = sqlx::query(&sql)
+        .bind(auth.id)
+        .bind(params.kind)
+        .bind(limit)
+        .fetch_all(&state.pool)
+        .await?;
+
+    let mut raws = Vec::with_capacity(rows.len());
+    for row in &rows {
+        raws.push((parse_raw_doc(row)?, row.try_get::<String, _>("channel_name")?));
+    }
+    let ids: Vec<Uuid> = raws.iter().map(|(raw, _)| raw.id).collect();
+    let overrides = fetch_viewer_overrides(&state.pool, &ids, auth.id).await?;
+    let mut channel_roles = HashMap::new();
+    let mut docs = Vec::new();
+    for (raw, channel_name) in raws {
+        let channel_role = if let Some(role) = channel_roles.get(&raw.channel_id) {
+            *role
+        } else {
+            let role = member_role(&state.pool, raw.channel_id, auth.id).await?;
+            channel_roles.insert(raw.channel_id, role);
+            role
+        };
+        let Some(channel_role) = channel_role else { continue };
+        let role = compute_role(
+            &raw,
+            auth.id,
+            channel_role,
+            overrides.get(&raw.id).map(|s| s.as_str()),
+        );
+        if role != DocRole::None {
+            docs.push(json!({ "doc": doc_view(&raw, role.as_str()), "channel_name": channel_name }));
+        }
+    }
+    Ok(Json(json!({ "docs": docs })))
+}

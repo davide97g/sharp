@@ -194,7 +194,7 @@ export function DocEditorInner({
       const res = await api.docSearch(q, 12)
       // doclink is doc-scoped (navigates to /d/); canvases are excluded.
       results = res.results
-        .filter((d) => d.kind !== 'canvas')
+        .filter((d) => d.kind === 'doc')
         .map((d) => ({
           id: d.id,
           title: d.title || 'Untitled',
@@ -204,7 +204,7 @@ export function DocEditorInner({
       const state = useStore.getState()
       const all = Object.values(state.docsByChannel).flat()
       results = all
-        .filter((d) => !d.deleted_at && d.kind !== 'canvas')
+        .filter((d) => !d.deleted_at && d.kind === 'doc')
         .sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1))
         .slice(0, 12)
         .map((d) => ({ id: d.id, title: d.title || 'Untitled' }))

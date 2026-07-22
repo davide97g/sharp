@@ -9,6 +9,7 @@ import type {
   DocMentionsResponse,
   DocRolesResponse,
   DocSearchResponse,
+  RecentDocsResponse,
   DocsResponse,
   E2eeBackup,
   E2eeBackupInput,
@@ -881,6 +882,11 @@ export const api = {
     const params = new URLSearchParams({ q, limit: String(limit) })
     if (docId) params.set('doc_id', docId)
     return request<DocSearchResponse>(`/docs/search?${params.toString()}`)
+  },
+  recentDocs(kind?: 'doc' | 'canvas' | 'board', limit = 30) {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (kind) params.set('kind', kind)
+    return request<RecentDocsResponse>(`/docs/recent?${params.toString()}`)
   },
 
   // --- Sharpy: AI workspace assistant ---

@@ -1,12 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
-import { DocsSidebar } from './docs/DocsSidebar'
-import { CanvasSidebar } from './canvas/CanvasSidebar'
-import { BoardSidebar } from './board/BoardSidebar'
-import { TasksSidebar, TasksGlyph } from './tasks/TasksSidebar'
-import { MeetingsSidebar } from './meetings/MeetingsSidebar'
-import { CalendarSidebar } from './calendar/CalendarSidebar'
+import { TasksGlyph } from './tasks/taskUi'
 import { CompactSidebar } from './CompactSidebar'
 import { ThreadPanel } from './ThreadPanel'
 import { SharpyPanel } from './SharpyPanel'
@@ -38,6 +33,7 @@ export function AppShell() {
   const setQuickSwitcher = useStore((s) => s.setQuickSwitcher)
   const setSearchOpen = useStore((s) => s.setSearchOpen)
   const channels = useStore((s) => s.channels)
+  const railPosition = useStore((s) => s.railPosition)
   const inVoice = useStore((s) => s.voice.channelId !== null)
   const location = useLocation()
   const isMobile = useIsMobile()
@@ -56,13 +52,16 @@ export function AppShell() {
     location.pathname.startsWith('/tasks') || location.pathname.startsWith('/t/')
   const meetingsMode = location.pathname.startsWith('/meetings')
   const calendarMode = location.pathname.startsWith('/calendar')
+  const sharpyMode = location.pathname.startsWith('/sharpy')
   const helpMode = location.pathname.startsWith('/help')
   const settingsMode = location.pathname.startsWith('/settings')
-  const mode: 'chat' | 'docs' | 'canvas' | 'board' | 'tasks' | 'meetings' | 'calendar' | 'help' =
+  const mode: 'chat' | 'docs' | 'canvas' | 'board' | 'tasks' | 'meetings' | 'calendar' | 'sharpy' | 'help' =
     helpMode
       ? 'help'
       : calendarMode
         ? 'calendar'
+        : sharpyMode
+          ? 'sharpy'
         : meetingsMode
           ? 'meetings'
           : tasksMode
@@ -76,6 +75,7 @@ export function AppShell() {
                   : 'chat'
 
   const setInboxOpen = useStore((s) => s.setInboxOpen)
+  const bottomRail = !isMobile && !settingsMode && railPosition === 'bottom'
 
   // Navigation cues: a mid tick when the mode rail switches (chat/docs/canvas),
   // a near-subliminal tick when moving between channels/docs within a mode. The
@@ -126,62 +126,49 @@ export function AppShell() {
         return
       }
 
-      if (e.key === '\\' && !e.repeat && !isEditableTarget(e.target) && !isMobile) {
+      if (e.key === '\\' && !e.repeat && !isEditableTarget(e.target) && !isMobile && mode === 'chat') {
         e.preventDefault()
         toggleSidebar()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [setQuickSwitcher, setSearchOpen, toggleSidebar, isMobile])
+  }, [setQuickSwitcher, setSearchOpen, toggleSidebar, isMobile, mode])
 
   return (
-    <div className={`flex h-full w-full overflow-hidden ${isMobile ? 'flex-col' : ''}`}>
-      {!settingsMode && !isMobile && (
-        <>
-          <ModeRail
-            mode={mode}
-            sidebarOpen={sidebarOpen}
-            onToggleSidebar={toggleSidebar}
-          />
-          {mode !== 'help' && (
-            <div
-              id="app-sidebar"
-              className="sidebar-shell relative"
-              data-open={sidebarOpen}
-            >
-              {sidebarOpen ? (
-                calendarMode ? (
-                  <CalendarSidebar />
-                ) : meetingsMode ? (
-                  <MeetingsSidebar />
-                ) : tasksMode ? (
-                  <TasksSidebar />
-                ) : boardMode ? (
-                  <BoardSidebar />
-                ) : canvasMode ? (
-                  <CanvasSidebar />
-                ) : docsMode ? (
-                  <DocsSidebar />
-                ) : (
-                  <Sidebar />
-                )
-              ) : (
-                <CompactSidebar mode={mode} />
-              )}
-            </div>
-          )}
-        </>
+    <div className={`flex h-full w-full overflow-hidden ${isMobile || bottomRail ? 'flex-col' : ''}`}>
+      {!settingsMode && !isMobile && !bottomRail && (
+        <ModeRail
+          mode={mode}
+          orientation="vertical"
+          sidebarOpen={sidebarOpen}
+          onToggleSidebar={toggleSidebar}
+        />
       )}
-      <div
-        className={`relative flex min-h-0 min-w-0 flex-1 overflow-hidden ${
-          isMobile && !settingsMode ? 'mobile-main' : ''
-        }`}
-      >
-        <Outlet />
-        {!settingsMode && mode === 'chat' && <ThreadPanel />}
-        <SharpyPanel />
+      <div className={`flex min-h-0 min-w-0 flex-1 overflow-hidden ${isMobile && !settingsMode ? 'mobile-main' : ''}`}>
+        {!settingsMode && !isMobile && mode === 'chat' && (
+          <div
+            id="app-sidebar"
+            className="sidebar-shell relative"
+            data-open={sidebarOpen}
+          >
+            {sidebarOpen ? <Sidebar /> : <CompactSidebar />}
+          </div>
+        )}
+        <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+          <Outlet />
+          {!settingsMode && mode === 'chat' && <ThreadPanel />}
+          <SharpyPanel />
+        </div>
       </div>
+      {!settingsMode && !isMobile && bottomRail && (
+        <ModeRail
+          mode={mode}
+          orientation="horizontal"
+          sidebarOpen={sidebarOpen}
+          onToggleSidebar={toggleSidebar}
+        />
+      )}
       {!settingsMode && isMobile && <MobileTabBar />}
       {inVoice && <VideoStage />}
       <QuickSwitcher />
@@ -195,10 +182,12 @@ export function AppShell() {
 
 function ModeRail({
   mode,
+  orientation,
   sidebarOpen,
   onToggleSidebar,
 }: {
-  mode: 'chat' | 'docs' | 'canvas' | 'board' | 'tasks' | 'meetings' | 'calendar' | 'help'
+  mode: 'chat' | 'docs' | 'canvas' | 'board' | 'tasks' | 'meetings' | 'calendar' | 'sharpy' | 'help'
+  orientation: 'vertical' | 'horizontal'
   sidebarOpen: boolean
   onToggleSidebar: () => void
 }) {
@@ -207,8 +196,6 @@ function ModeRail({
   const [unseenRelease, setUnseenRelease] = useState(hasUnseenRelease)
   const chatUnread = useStore((s) => s.notifUnread)
   const sharpyEnabled = useStore((s) => s.sharpyEnabled)
-  const sharpyOpen = useStore((s) => s.sharpyOpen)
-  const setSharpyOpen = useStore((s) => s.setSharpyOpen)
   const mentions = useStore((s) => s.mentions)
   const me = useStore((s) => s.me)
   const docMentions = mentions.reduce(
@@ -237,7 +224,12 @@ function ModeRail({
   return (
     <nav
       aria-label="Workspace sections"
-      className="flex w-14 shrink-0 flex-col items-center gap-2 border-r border-[var(--color-border)] bg-[var(--color-ink)] py-3"
+      data-orientation={orientation}
+      className={`mode-rail flex shrink-0 items-center gap-2 bg-[var(--color-ink)] ${
+        orientation === 'vertical'
+          ? 'w-14 flex-col border-r border-[var(--color-border)] py-3'
+          : 'h-14 flex-row justify-center border-t border-[var(--color-border)] pb-1 pt-1'
+      }`}
     >
       <RailButton
         active={mode === 'chat'}
@@ -389,8 +381,8 @@ function ModeRail({
       />
       {sharpyEnabled && (
         <RailButton
-          active={sharpyOpen}
-          onClick={() => setSharpyOpen(!sharpyOpen)}
+          active={mode === 'sharpy'}
+          onClick={() => navigate('/sharpy')}
           title="Sharpy"
           label={
             <svg
@@ -410,19 +402,18 @@ function ModeRail({
           }
         />
       )}
-      <div className="mt-auto flex flex-col items-center gap-2">
-        {me ? (
+      {me ? (
           <button
             type="button"
             onClick={() => navigate('/settings/profile', { state: { from: `${location.pathname}${location.search}` } })}
             aria-label={`Open settings for ${me.display_name}`}
             title={me.display_name}
-            className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl outline-none transition-colors hover:bg-[var(--color-panel)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-ink)]"
+            className={`mode-rail-control flex h-11 w-11 cursor-pointer items-center justify-center rounded-xl outline-none transition-colors hover:bg-[var(--color-panel)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-ink)] ${orientation === 'vertical' ? 'mt-auto' : ''}`}
           >
             <Avatar id={me.id} name={me.display_name} size={32} nicknameCard={false} />
           </button>
-        ) : null}
-        <button
+      ) : null}
+      {mode === 'chat' && <button
           type="button"
           onClick={onToggleSidebar}
           aria-controls="app-sidebar"
@@ -430,13 +421,12 @@ function ModeRail({
           aria-keyshortcuts="\\"
           aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
           title={`${sidebarOpen ? 'Collapse' : 'Expand'} sidebar (\\)`}
-          className="micro-icon-button flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-faint)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-ink)]"
+          className="mode-rail-control micro-icon-button flex h-11 w-11 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-faint)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-ink)]"
         >
           <span className="micro-icon-glyph">
             <SidebarToggleIcon open={sidebarOpen} />
           </span>
-        </button>
-      </div>
+        </button>}
     </nav>
   )
 }
@@ -480,7 +470,7 @@ function RailButton({
     <button
       onClick={onClick}
       title={title}
-      className={`micro-icon-button relative flex h-10 w-10 items-center justify-center rounded-xl text-lg font-extrabold transition ${
+      className={`mode-rail-control micro-icon-button relative flex h-11 w-11 items-center justify-center rounded-xl text-lg font-extrabold transition ${
         active
           ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)] ring-1 ring-[var(--color-accent)]'
           : 'text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]'

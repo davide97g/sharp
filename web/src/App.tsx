@@ -31,6 +31,7 @@ import { CalendarView } from './components/calendar/CalendarView'
 import { HelpArea } from './components/help/HelpArea'
 import { PasskeySetupPrompt } from './components/PasskeySetupPrompt'
 import { UserSettingsPage } from './components/UserSettingsModal'
+import { SharpyPage } from './components/sharpy/SharpyPage'
 // tldraw is a large dependency; keep it out of the main bundle by loading the
 // canvas editor lazily (only fetched when a whiteboard is actually opened).
 const CanvasEditor = lazy(() =>
@@ -158,6 +159,7 @@ export function App() {
           <Route path="meetings/:meetingId" element={<MeetingDetailView />} />
           <Route path="calendar" element={<CalendarView />} />
           <Route path="calendar/:date" element={<CalendarView />} />
+          <Route path="sharpy" element={<SharpyPage />} />
           <Route path="help" element={<HelpArea />} />
           <Route path="help/:tab" element={<HelpArea />} />
           <Route path="settings" element={<Navigate to="/settings/profile" replace />} />

@@ -563,6 +563,8 @@ export type DocRolesResponse = { roles: DocRoleEntry[] }
 export type DocMentionsResponse = { mentions: DocMention[] }
 export type DocSearchResult = Doc & { channel_name: string; snippet: string }
 export type DocSearchResponse = { results: DocSearchResult[] }
+export type RecentDoc = { doc: Doc; channel_name: string }
+export type RecentDocsResponse = { docs: RecentDoc[] }
 
 // Doc WS payloads
 export type DocCreatedPayload = { doc: Doc }

@@ -133,6 +133,8 @@ export function ProjectView() {
   return (
     <div className="relative flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
       <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border)] px-5">
+        <button onClick={() => navigate('/tasks')} className="text-sm text-[var(--color-text-faint)] hover:text-[var(--color-text)]">‹ Tasks</button>
+        <span className="text-[var(--color-text-faint)]">/</span>
         <span className="text-lg">{project.icon || '🎯'}</span>
         <span className="min-w-0 truncate font-semibold">{project.name}</span>
         <span className="font-mono text-xs text-[var(--color-text-faint)]">{project.key}</span>
