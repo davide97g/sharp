@@ -36,9 +36,10 @@ export function Avatar({
   // so profile edits reflect live everywhere; fall back to the props for users
   // not in the directory.
   const stored = useStore((s) => s.users[id])
+  const currentUser = useStore((s) => (s.me?.id === id ? s.me : null))
   const nickname = useStore((s) => s.nicknames[id])
-  const displayName = nickname?.trim() || stored?.display_name || name
-  const avatarUrl = stored?.avatar_url ?? null
+  const displayName = nickname?.trim() || stored?.display_name || currentUser?.display_name || name
+  const avatarUrl = stored?.avatar_url ?? currentUser?.avatar_url ?? null
 
   const [src, setSrc] = useState<string | null>(null)
 

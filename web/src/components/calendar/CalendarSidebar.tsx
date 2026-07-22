@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useStore } from '../../store'
 import { api } from '../../lib/api'
 import { toastError } from '../../lib/toast'
 import { dayKey, dayjs } from '../../lib/calendar'
 import { MiniMonth } from './MiniMonth'
 import { ScheduleMeetingModal } from './ScheduleMeetingModal'
-import { UserSettingsModal } from '../UserSettingsModal'
 
 export function CalendarSidebar() {
   const connections = useStore((s) => s.calendarConnections)
@@ -15,9 +15,10 @@ export function CalendarSidebar() {
   const setSelectedDate = useStore((s) => s.setCalendarSelectedDate)
   const calendarRange = useStore((s) => s.calendarRange)
   const loadCalendar = useStore((s) => s.loadCalendar)
+  const navigate = useNavigate()
+  const location = useLocation()
 
   const [scheduling, setScheduling] = useState(false)
-  const [showAccounts, setShowAccounts] = useState(false)
   const [busyCal, setBusyCal] = useState<string | null>(null)
 
   useEffect(() => {
@@ -116,7 +117,7 @@ export function CalendarSidebar() {
           {connections.length === 0 ? (
             <button
               type="button"
-              onClick={() => setShowAccounts(true)}
+              onClick={() => navigate('/settings/accounts', { state: { from: `${location.pathname}${location.search}` } })}
               className="flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
             >
               Connect Google
@@ -127,7 +128,7 @@ export function CalendarSidebar() {
                 <button
                   key={conn.id}
                   type="button"
-                  onClick={() => setShowAccounts(true)}
+                  onClick={() => navigate('/settings/accounts', { state: { from: `${location.pathname}${location.search}` } })}
                   className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left text-xs hover:bg-[var(--color-panel-2)]"
                 >
                   <span
@@ -151,15 +152,6 @@ export function CalendarSidebar() {
       </div>
 
       {scheduling && <ScheduleMeetingModal onClose={() => setScheduling(false)} />}
-      {showAccounts && (
-        <UserSettingsModal
-          initialTab="accounts"
-          onClose={() => {
-            setShowAccounts(false)
-            void loadCalendarConnections()
-          }}
-        />
-      )}
     </aside>
   )
 }

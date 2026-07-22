@@ -6,8 +6,6 @@ import type { Channel, Doc } from '../../lib/types'
 
 export function BoardSidebar() {
   const channels = useStore((s) => s.channels)
-  const me = useStore((s) => s.me)
-  const logout = useStore((s) => s.logout)
   const location = useLocation()
 
   const activeBoardId = location.pathname.match(/^\/b\/([^/]+)/)?.[1] ?? null
@@ -74,22 +72,6 @@ export function BoardSidebar() {
         </div>
       </nav>
 
-      <div className="flex items-center gap-2 border-t border-[var(--color-border)] px-3 py-3">
-        <span className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--color-accent)] text-xs font-semibold text-white">
-          {(me?.display_name ?? '?').slice(0, 1).toUpperCase()}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{me?.display_name}</div>
-          <div className="truncate text-[11px] text-[var(--color-text-faint)]">{me?.email}</div>
-        </div>
-        <button
-          onClick={logout}
-          title="Sign out"
-          className="rounded-md px-2 py-1 text-xs text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
-        >
-          ⎋
-        </button>
-      </div>
     </aside>
   )
 }

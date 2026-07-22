@@ -22,6 +22,7 @@ import { hasUnseenRelease } from '../lib/whatsNew'
 import { useIsMobile } from '../lib/useMediaQuery'
 import { useStore } from '../store'
 import { RestoreEncryptionModal } from './RestoreEncryptionModal'
+import { Avatar } from './Avatar'
 
 const SIDEBAR_OPEN_KEY = 'sharp.sidebarOpen'
 
@@ -56,6 +57,7 @@ export function AppShell() {
   const meetingsMode = location.pathname.startsWith('/meetings')
   const calendarMode = location.pathname.startsWith('/calendar')
   const helpMode = location.pathname.startsWith('/help')
+  const settingsMode = location.pathname.startsWith('/settings')
   const mode: 'chat' | 'docs' | 'canvas' | 'board' | 'tasks' | 'meetings' | 'calendar' | 'help' =
     helpMode
       ? 'help'
@@ -135,7 +137,7 @@ export function AppShell() {
 
   return (
     <div className={`flex h-full w-full overflow-hidden ${isMobile ? 'flex-col' : ''}`}>
-      {!isMobile && (
+      {!settingsMode && !isMobile && (
         <>
           <ModeRail
             mode={mode}
@@ -173,18 +175,18 @@ export function AppShell() {
       )}
       <div
         className={`relative flex min-h-0 min-w-0 flex-1 overflow-hidden ${
-          isMobile ? 'mobile-main' : ''
+          isMobile && !settingsMode ? 'mobile-main' : ''
         }`}
       >
         <Outlet />
-        {mode === 'chat' && <ThreadPanel />}
+        {!settingsMode && mode === 'chat' && <ThreadPanel />}
         <SharpyPanel />
       </div>
-      {isMobile && <MobileTabBar />}
+      {!settingsMode && isMobile && <MobileTabBar />}
       {inVoice && <VideoStage />}
       <QuickSwitcher />
       <SearchPalette />
-      {mode === 'chat' && <InboxPanel />}
+      {!settingsMode && mode === 'chat' && <InboxPanel />}
       {onboarding && <Onboarding onClose={() => setOnboarding(false)} />}
       <RestoreEncryptionModal />
     </div>
@@ -201,12 +203,14 @@ function ModeRail({
   onToggleSidebar: () => void
 }) {
   const navigate = useNavigate()
+  const location = useLocation()
   const [unseenRelease, setUnseenRelease] = useState(hasUnseenRelease)
   const chatUnread = useStore((s) => s.notifUnread)
   const sharpyEnabled = useStore((s) => s.sharpyEnabled)
   const sharpyOpen = useStore((s) => s.sharpyOpen)
   const setSharpyOpen = useStore((s) => s.setSharpyOpen)
   const mentions = useStore((s) => s.mentions)
+  const me = useStore((s) => s.me)
   const docMentions = mentions.reduce(
     (n, m) => n + (!m.read_at && m.doc.kind === 'doc' ? 1 : 0),
     0,
@@ -406,20 +410,33 @@ function ModeRail({
           }
         />
       )}
-      <button
-        type="button"
-        onClick={onToggleSidebar}
-        aria-controls="app-sidebar"
-        aria-expanded={sidebarOpen}
-        aria-keyshortcuts="\\"
-        aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
-        title={`${sidebarOpen ? 'Collapse' : 'Expand'} sidebar (\\)`}
-        className="micro-icon-button mt-auto flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-faint)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-ink)]"
-      >
-        <span className="micro-icon-glyph">
-          <SidebarToggleIcon open={sidebarOpen} />
-        </span>
-      </button>
+      <div className="mt-auto flex flex-col items-center gap-2">
+        {me ? (
+          <button
+            type="button"
+            onClick={() => navigate('/settings/profile', { state: { from: `${location.pathname}${location.search}` } })}
+            aria-label={`Open settings for ${me.display_name}`}
+            title={me.display_name}
+            className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl outline-none transition-colors hover:bg-[var(--color-panel)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-ink)]"
+          >
+            <Avatar id={me.id} name={me.display_name} size={32} nicknameCard={false} />
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={onToggleSidebar}
+          aria-controls="app-sidebar"
+          aria-expanded={sidebarOpen}
+          aria-keyshortcuts="\\"
+          aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+          title={`${sidebarOpen ? 'Collapse' : 'Expand'} sidebar (\\)`}
+          className="micro-icon-button flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-faint)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-ink)]"
+        >
+          <span className="micro-icon-glyph">
+            <SidebarToggleIcon open={sidebarOpen} />
+          </span>
+        </button>
+      </div>
     </nav>
   )
 }

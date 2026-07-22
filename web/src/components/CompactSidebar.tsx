@@ -1,9 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useStore } from '../store'
 import { channelLabel } from '../lib/util'
 import { Avatar } from './Avatar'
-import { UserSettingsModal } from './UserSettingsModal'
 import type { Channel } from '../lib/types'
 
 type Mode = 'chat' | 'docs' | 'canvas' | 'board' | 'tasks' | 'meetings' | 'calendar'
@@ -12,10 +11,8 @@ export function CompactSidebar({ mode }: { mode: Mode }) {
   const channels = useStore((s) => s.channels)
   const nicknames = useStore((s) => s.nicknames)
   const online = useStore((s) => s.online)
-  const me = useStore((s) => s.me)
   const setQuickSwitcher = useStore((s) => s.setQuickSwitcher)
   const location = useLocation()
-  const [showSettings, setShowSettings] = useState(false)
 
   const activeContentId =
     location.pathname.match(/^\/(?:d|x|b)\/([^/]+)/)?.[1] ?? null
@@ -130,19 +127,6 @@ export function CompactSidebar({ mode }: { mode: Mode }) {
           ))}
       </nav>
 
-      <div className="flex shrink-0 justify-center border-t border-[var(--color-border)] py-3">
-        <button
-          type="button"
-          onClick={() => setShowSettings(true)}
-          aria-label={me ? `Open settings for ${me.display_name}` : 'Open settings'}
-          title={me?.display_name ?? 'Settings'}
-          className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-xl outline-none hover:bg-[var(--color-panel-2)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
-        >
-          {me && <Avatar id={me.id} name={me.display_name} size={34} />}
-        </button>
-      </div>
-
-      {showSettings && <UserSettingsModal onClose={() => setShowSettings(false)} />}
     </aside>
   )
 }

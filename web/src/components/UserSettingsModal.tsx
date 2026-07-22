@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import type {
@@ -47,12 +48,34 @@ type Tab =
   | 'accounts'
   | 'about'
 
+const SETTINGS_TABS: Tab[] = [
+  'profile',
+  'chat',
+  'appearance',
+  'meetings',
+  'accounts',
+  'security',
+  'encryption',
+  'workspace',
+  'about',
+]
+
+function isSettingsTab(value: string | undefined): value is Tab {
+  return SETTINGS_TABS.includes(value as Tab)
+}
+
+export function UserSettingsPage() {
+  return <UserSettingsModal page />
+}
+
 export function UserSettingsModal({
   onClose,
   initialTab,
+  page = false,
 }: {
-  onClose: () => void
+  onClose?: () => void
   initialTab?: Tab
+  page?: boolean
 }) {
   const me = useStore((s) => s.me)
   const chatLayout = useStore((s) => s.chatLayout)
@@ -61,7 +84,11 @@ export function UserSettingsModal({
   const removeAvatar = useStore((s) => s.removeAvatar)
   const setChatLayout = useStore((s) => s.setChatLayout)
 
-  const [tab, setTab] = useState<Tab>(initialTab ?? 'profile')
+  const navigate = useNavigate()
+  const location = useLocation()
+  const { section } = useParams<{ section?: string }>()
+  const [modalTab, setModalTab] = useState<Tab>(initialTab ?? 'profile')
+  const tab = page && isSettingsTab(section) ? section : modalTab
   const [theme, setTheme] = useState<ThemePreset>(() => getThemePreset())
   const [name, setName] = useState(me?.display_name ?? '')
   const [savingName, setSavingName] = useState(false)
@@ -77,6 +104,20 @@ export function UserSettingsModal({
   const fileRef = useRef<HTMLInputElement>(null)
   const gifSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mountedRef = useRef(true)
+
+  function selectTab(next: Tab) {
+    if (page) navigate(`/settings/${next}`, { replace: true, state: location.state })
+    else setModalTab(next)
+  }
+
+  function closeSettings() {
+    if (onClose) {
+      onClose()
+      return
+    }
+    const from = (location.state as { from?: unknown } | null)?.from
+    navigate(typeof from === 'string' && from.startsWith('/') ? from : '/', { replace: true })
+  }
 
   useEffect(() => {
     if (tab !== 'workspace' || gifLoadAttempted) return
@@ -242,39 +283,7 @@ export function UserSettingsModal({
     await updateGifSettings(body)
   }
 
-  return (
-    <Modal title="Settings" onClose={onClose} wide>
-      <div className="mb-4 flex gap-1 overflow-x-auto border-b border-[var(--color-border)]">
-        <TabBtn active={tab === 'profile'} onClick={() => setTab('profile')}>
-          Profile
-        </TabBtn>
-        <TabBtn active={tab === 'chat'} onClick={() => setTab('chat')}>
-          Chat
-        </TabBtn>
-        <TabBtn active={tab === 'appearance'} onClick={() => setTab('appearance')}>
-          Appearance
-        </TabBtn>
-        <TabBtn active={tab === 'meetings'} onClick={() => setTab('meetings')}>
-          Meetings
-        </TabBtn>
-        <TabBtn active={tab === 'accounts'} onClick={() => setTab('accounts')}>
-          Accounts
-        </TabBtn>
-        <TabBtn active={tab === 'security'} onClick={() => setTab('security')}>
-          Security
-        </TabBtn>
-        <TabBtn active={tab === 'encryption'} onClick={() => setTab('encryption')}>
-          Encryption
-        </TabBtn>
-        <TabBtn active={tab === 'workspace'} onClick={() => setTab('workspace')}>
-          Workspace
-        </TabBtn>
-        <TabBtn active={tab === 'about'} onClick={() => setTab('about')}>
-          About
-        </TabBtn>
-      </div>
-
-      {tab === 'profile' ? (
+  const content = tab === 'profile' ? (
         <div className="flex flex-col gap-5">
           {/* avatar */}
           <div>
@@ -290,7 +299,7 @@ export function UserSettingsModal({
               />
             ) : (
               <div className="flex items-center gap-4">
-                <Avatar id={me.id} name={me.display_name} size={72} />
+                <Avatar id={me.id} name={me.display_name} size={72} nicknameCard={false} />
                 <div className="flex flex-col gap-2">
                   <button
                     onClick={() => fileRef.current?.click()}
@@ -567,9 +576,224 @@ export function UserSettingsModal({
             Workspace-wide settings — every member can edit them.
           </p>
         </div>
-      )}
+      )
+
+  if (page) {
+    return (
+      <SettingsPageShell
+        activeTab={tab}
+        email={me.email ?? ''}
+        name={me.display_name}
+        userId={me.id}
+        onClose={closeSettings}
+        onSelect={selectTab}
+      >
+        {content}
+      </SettingsPageShell>
+    )
+  }
+
+  return (
+    <Modal title="Settings" onClose={closeSettings} wide>
+      <div className="mb-4 flex gap-1 overflow-x-auto border-b border-[var(--color-border)]">
+        {SETTINGS_TABS.map((item) => (
+          <TabBtn key={item} active={tab === item} onClick={() => selectTab(item)}>
+            {SETTINGS_META[item].label}
+          </TabBtn>
+        ))}
+      </div>
+      {content}
     </Modal>
   )
+}
+
+const SETTINGS_META: Record<Tab, { label: string; description: string; group: string }> = {
+  profile: { label: 'My profile', description: 'How you appear across Sharp.', group: 'Personal' },
+  chat: { label: 'Chat', description: 'Choose how conversations feel and flow.', group: 'Personal' },
+  appearance: { label: 'Appearance', description: 'Tune Sharp to your space and style.', group: 'Personal' },
+  meetings: { label: 'Meetings', description: 'Control voice and meeting effects.', group: 'Personal' },
+  accounts: { label: 'Connected accounts', description: 'Manage calendar connections and external accounts.', group: 'Account' },
+  security: { label: 'Security', description: 'Protect your account with passkeys.', group: 'Account' },
+  encryption: { label: 'Encryption', description: 'Manage trusted devices and encrypted backups.', group: 'Account' },
+  workspace: { label: 'Workspace', description: 'Shared GIF and automation controls.', group: 'Workspace' },
+  about: { label: 'About Sharp', description: 'Version details, updates, and product information.', group: 'Sharp' },
+}
+
+function SettingsPageShell({
+  activeTab,
+  children,
+  email,
+  name,
+  onClose,
+  onSelect,
+  userId,
+}: {
+  activeTab: Tab
+  children: React.ReactNode
+  email: string
+  name: string
+  onClose: () => void
+  onSelect: (tab: Tab) => void
+  userId: string
+}) {
+  const logout = useStore((state) => state.logout)
+  const headingRef = useRef<HTMLHeadingElement>(null)
+
+  useEffect(() => {
+    headingRef.current?.focus({ preventScroll: true })
+    document.getElementById('settings-content')?.scrollTo({ top: 0 })
+  }, [activeTab])
+
+  const groups = ['Personal', 'Account', 'Workspace', 'Sharp']
+
+  return (
+    <div className="settings-page flex min-h-0 flex-1 overflow-hidden bg-[var(--color-ink)] text-[var(--color-text)]">
+      <aside className="hidden w-[18rem] shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-panel)] md:flex">
+        <div className="border-b border-[var(--color-border)] px-6 pb-5 pt-[max(1.5rem,calc(var(--safe-top)+1rem))]">
+          <div className="flex items-center gap-3">
+            <Avatar id={userId} name={name} size={46} nicknameCard={false} />
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold">{name}</div>
+              <div className="truncate text-xs text-[var(--color-text-faint)]">{email}</div>
+            </div>
+          </div>
+        </div>
+        <nav aria-label="Settings sections" className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
+          {groups.map((group) => (
+            <div key={group} className="mb-5 last:mb-0">
+              <div className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
+                {group}
+              </div>
+              {SETTINGS_TABS.filter((item) => SETTINGS_META[item].group === group).map((item) => (
+                <SettingsNavButton
+                  key={item}
+                  active={activeTab === item}
+                  label={SETTINGS_META[item].label}
+                  tab={item}
+                  onClick={() => onSelect(item)}
+                />
+              ))}
+            </div>
+          ))}
+        </nav>
+        <div className="border-t border-[var(--color-border)] p-4 pb-[max(1rem,var(--safe-bottom))]">
+          <button
+            type="button"
+            onClick={logout}
+            className="flex min-h-11 w-full cursor-pointer items-center rounded-xl px-3 text-sm font-medium text-[#ff8a80] outline-none transition-colors hover:bg-[#ff6b5f]/10 focus-visible:ring-2 focus-visible:ring-[#ff8a80]"
+          >
+            Sign out
+          </button>
+        </div>
+      </aside>
+
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="shrink-0 border-b border-[var(--color-border)] bg-[var(--color-panel)] px-[max(1rem,var(--safe-left))] pt-[max(0.75rem,var(--safe-top))] md:hidden">
+          <div className="flex min-h-12 items-center gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close settings"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-dim)] outline-none hover:bg-[var(--color-panel-2)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+            >
+              <CloseIcon />
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold">Settings</div>
+              <div className="truncate text-xs text-[var(--color-text-faint)]">{name}</div>
+            </div>
+            <Avatar id={userId} name={name} size={34} nicknameCard={false} />
+          </div>
+          <label className="block pb-3 pt-2">
+            <span className="sr-only">Settings section</span>
+            <select
+              value={activeTab}
+              onChange={(event) => onSelect(event.target.value as Tab)}
+              className="min-h-11 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 text-base font-medium text-[var(--color-text)] outline-none focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent-soft)]"
+            >
+              {SETTINGS_TABS.map((item) => (
+                <option key={item} value={item}>{SETTINGS_META[item].label}</option>
+              ))}
+            </select>
+          </label>
+        </header>
+
+        <main
+          id="settings-content"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-[var(--color-ink)] px-[max(1rem,var(--safe-left))] pb-[max(2rem,var(--safe-bottom))] pr-[max(1rem,var(--safe-right))] md:px-10 md:pb-12 lg:px-16"
+        >
+          <div className="mx-auto w-full max-w-[48rem] pb-10 pt-7 md:pt-12">
+            <div className="mb-8 flex items-start justify-between gap-6">
+              <div>
+                <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--color-accent-hover)]">
+                  {SETTINGS_META[activeTab].group}
+                </p>
+                <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-bold tracking-tight outline-none md:text-3xl">
+                  {SETTINGS_META[activeTab].label}
+                </h1>
+                <p className="mt-2 max-w-xl text-sm leading-6 text-[var(--color-text-dim)]">
+                  {SETTINGS_META[activeTab].description}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close settings"
+                title="Close settings"
+                className="hidden h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-panel)] text-[var(--color-text-dim)] outline-none transition-colors hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] md:flex"
+              >
+                <CloseIcon />
+              </button>
+            </div>
+            <section className="settings-content-card rounded-2xl border border-[var(--color-border)] bg-[var(--color-panel)] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.18)] sm:p-6">
+              {children}
+            </section>
+          </div>
+        </main>
+      </div>
+    </div>
+  )
+}
+
+function SettingsNavButton({ active, label, onClick, tab }: { active: boolean; label: string; onClick: () => void; tab: Tab }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-current={active ? 'page' : undefined}
+      className={`mb-0.5 flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-xl px-3 text-left text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+        active
+          ? 'bg-[var(--color-accent-soft)] text-[var(--color-text)]'
+          : 'text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]'
+      }`}
+    >
+      <SettingsIcon tab={tab} />
+      <span>{label}</span>
+    </button>
+  )
+}
+
+function SettingsIcon({ tab }: { tab: Tab }) {
+  const paths: Record<Tab, React.ReactNode> = {
+    profile: <><circle cx="12" cy="8" r="3" /><path d="M5 21a7 7 0 0 1 14 0" /></>,
+    chat: <path d="M4 5h16v11H8l-4 4V5Z" />,
+    appearance: <><circle cx="12" cy="12" r="3" /><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4" /></>,
+    meetings: <><rect x="3" y="6" width="13" height="12" rx="2" /><path d="m16 10 5-3v10l-5-3" /></>,
+    accounts: <><circle cx="8" cy="8" r="3" /><path d="M2 20a6 6 0 0 1 12 0M16 8h6M19 5v6" /></>,
+    security: <><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></>,
+    encryption: <><path d="M12 3 5 6v5c0 4.5 2.8 8.2 7 10 4.2-1.8 7-5.5 7-10V6l-7-3Z" /><path d="m9 12 2 2 4-4" /></>,
+    workspace: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
+    about: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7h.01" /></>,
+  }
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0">
+      {paths[tab]}
+    </svg>
+  )
+}
+
+function CloseIcon() {
+  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="m6 6 12 12M18 6 6 18" /></svg>
 }
 
 function EncryptionSettingsTab({ userId }: { userId: string }) {
