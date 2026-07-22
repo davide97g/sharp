@@ -4,7 +4,9 @@
 // server URL (persisted in localStorage), since `VITE_API_URL` is left unset for
 // desktop builds. Plugins are registered so the web frontend can use them via the
 // JS API when running inside Tauri:
-//   - tauri-plugin-notification: new-message notifications when the window is unfocused
+//   - tauri-plugin-notifications: local notifications when the window is unfocused,
+//     plus macOS APNs remote push (closed-app) — the token is registered from the
+//     web layer (`web/src/lib/apns.ts`) and only works in a signed/notarized build
 //   - tauri-plugin-shell:        opening external links / browser login in the system browser
 //   - tauri-plugin-deep-link:    receiving the `sharp://auth?...` browser-login callback
 
@@ -24,7 +26,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_notifications::init())
         .plugin(tauri_plugin_deep_link::init())
         .setup(|_app| {
             // Register the `sharp://` scheme at runtime for dev on Linux/Windows

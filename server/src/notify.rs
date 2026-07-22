@@ -541,7 +541,12 @@ pub async fn push_event(
             expo_push::send_to_user(state, user_id, title, body, expo_channel, kind).await;
         }
     };
-    tokio::join!(web, expo);
+    let apns = async {
+        if web_allowed {
+            crate::apns::send_to_user(state, user_id, title, body, path, tag).await;
+        }
+    };
+    tokio::join!(web, expo, apns);
 }
 
 /// Public entry point: best-effort, never fails message creation.
@@ -678,7 +683,22 @@ async fn dispatch_inner(
                     .await;
                 }
             };
-            tokio::join!(web, expo);
+            // Native macOS (Tauri) push shares the web-push visibility gate: a
+            // closed/backgrounded desktop app has no visible session.
+            let apns = async {
+                if web_allowed {
+                    crate::apns::send_to_user(
+                        state,
+                        uid,
+                        &title,
+                        &body,
+                        &notification_path(&notif),
+                        &push::tag_for(&notif),
+                    )
+                    .await;
+                }
+            };
+            tokio::join!(web, expo, apns);
         }
     }
 
@@ -772,7 +792,20 @@ async fn dispatch_poll_ended_inner(
                     .await;
                 }
             };
-            tokio::join!(web, expo);
+            let apns = async {
+                if web_allowed {
+                    crate::apns::send_to_user(
+                        state,
+                        uid,
+                        &title,
+                        &body,
+                        &notification_path(&notification),
+                        &push::tag_for(&notification),
+                    )
+                    .await;
+                }
+            };
+            tokio::join!(web, expo, apns);
         }
     }
     Ok(())
@@ -862,7 +895,20 @@ async fn dispatch_task_event(
                     .await;
             }
         };
-        tokio::join!(web, expo);
+        let apns = async {
+            if web_allowed {
+                crate::apns::send_to_user(
+                    state,
+                    recipient,
+                    &title,
+                    &body,
+                    &notification_path(&notif),
+                    &push::tag_for(&notif),
+                )
+                .await;
+            }
+        };
+        tokio::join!(web, expo, apns);
     }
     Ok(())
 }
@@ -893,13 +939,18 @@ mod push {
         (title, notif.preview.clone())
     }
 
-    pub async fn send_to_user(state: &SharedState, user_id: Uuid, notif: &Notification) {
-        let (title, body) = title_and_body(notif);
-        let tag = match (&notif.task_id, &notif.channel_id) {
+    /// Collapse-tag for a notification (APNs `thread-id` / web-push `tag`).
+    pub fn tag_for(notif: &Notification) -> String {
+        match (&notif.task_id, &notif.channel_id) {
             (Some(task_id), _) => format!("sharp-task-{task_id}"),
             (None, Some(channel_id)) => format!("sharp-{channel_id}"),
             (None, None) => "sharp".to_string(),
-        };
+        }
+    }
+
+    pub async fn send_to_user(state: &SharedState, user_id: Uuid, notif: &Notification) {
+        let (title, body) = title_and_body(notif);
+        let tag = tag_for(notif);
         let payload = json!({
             "title": title,
             "body": body,

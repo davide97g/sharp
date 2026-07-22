@@ -132,6 +132,15 @@ services:
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@sharp.app}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      # APNs for the native macOS desktop app — inert unless all four are set.
+      # Needs a paid Apple Developer account: Team ID, the .p8 auth key ID +
+      # contents (or APNS_PRIVATE_KEY_PATH to a mounted file), and the app bundle
+      # id. APNS_ENV=production targets api.push.apple.com (else sandbox).
+      APNS_TEAM_ID: ${APNS_TEAM_ID:-}
+      APNS_KEY_ID: ${APNS_KEY_ID:-}
+      APNS_PRIVATE_KEY: ${APNS_PRIVATE_KEY:-}
+      APNS_BUNDLE_ID: ${APNS_BUNDLE_ID:-dev.sharp.app}
+      APNS_ENV: ${APNS_ENV:-production}
       # Sharpy AI assistant (OpenAI-compatible LLM + embeddings) — disabled when
       # AI_API_KEY is unset. Base URL works with OpenAI, DeepSeek, Ollama, etc.
       AI_API_KEY: ${AI_API_KEY:-}

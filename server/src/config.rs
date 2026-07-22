@@ -37,6 +37,9 @@ pub struct Config {
     pub webauthn: Option<WebauthnConfig>,
     /// GitHub task sync. `None` when `GITHUB_WEBHOOK_SECRET` is unset — inert.
     pub github: Option<GithubConfig>,
+    /// Apple Push Notification service (token-based) for the native macOS desktop
+    /// app. `None` unless all `APNS_*` credentials are set — inert otherwise.
+    pub apns: Option<ApnsConfig>,
 }
 
 #[derive(Clone)]
@@ -105,6 +108,20 @@ pub struct WebauthnConfig {
     /// Exact browser origins allowed to complete ceremonies.
     pub origins: Vec<String>,
     pub rp_name: String,
+}
+
+#[derive(Clone)]
+pub struct ApnsConfig {
+    /// Apple Developer Team ID — the JWT `iss` claim.
+    pub team_id: String,
+    /// The `.p8` auth-key ID — the JWT header `kid`.
+    pub key_id: String,
+    /// The `.p8` private key contents (PKCS#8 PEM), used to sign the ES256 JWT.
+    pub private_key: String,
+    /// App bundle id — the `apns-topic` header (e.g. `dev.sharp.app`).
+    pub bundle_id: String,
+    /// true → `api.push.apple.com`; false → `api.sandbox.push.apple.com`.
+    pub production: bool,
 }
 
 #[derive(Clone)]
@@ -296,6 +313,28 @@ impl Config {
                 .unwrap_or_default(),
         });
 
+        // APNs is enabled only when all four credentials are present. The private
+        // key may be given inline (`APNS_PRIVATE_KEY`) or via a path to the `.p8`
+        // (`APNS_PRIVATE_KEY_PATH`). `APNS_ENV=production` targets the prod host.
+        let apns_private_key = env_opt("APNS_PRIVATE_KEY").or_else(|| {
+            env_opt("APNS_PRIVATE_KEY_PATH").and_then(|path| std::fs::read_to_string(path).ok())
+        });
+        let apns = match (
+            env_opt("APNS_TEAM_ID"),
+            env_opt("APNS_KEY_ID"),
+            apns_private_key,
+            env_opt("APNS_BUNDLE_ID"),
+        ) {
+            (Some(team_id), Some(key_id), Some(private_key), Some(bundle_id)) => Some(ApnsConfig {
+                team_id,
+                key_id,
+                private_key,
+                bundle_id,
+                production: env_opt("APNS_ENV").as_deref() == Some("production"),
+            }),
+            _ => None,
+        };
+
         Ok(Config {
             database_url,
             jwt_secret,
@@ -316,6 +355,7 @@ impl Config {
             google,
             webauthn,
             github,
+            apns,
         })
     }
 }

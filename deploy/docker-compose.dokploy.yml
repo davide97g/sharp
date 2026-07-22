@@ -119,6 +119,13 @@ services:
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@sharp.davideghiotto.it}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      # APNs (native macOS desktop app) — inert unless all set. Requires a paid
+      # Apple Developer account: Team ID, .p8 auth-key ID + contents, bundle id.
+      APNS_TEAM_ID: ${APNS_TEAM_ID:-}
+      APNS_KEY_ID: ${APNS_KEY_ID:-}
+      APNS_PRIVATE_KEY: ${APNS_PRIVATE_KEY:-}
+      APNS_BUNDLE_ID: ${APNS_BUNDLE_ID:-dev.sharp.app}
+      APNS_ENV: ${APNS_ENV:-production}
       # GIF search (server-side proxy). Key can also be saved from the in-app
       # Settings → Workspace tab (persisted in Postgres); these are the env
       # fallbacks. GIPHY is the default provider; Tenor is legacy-only.

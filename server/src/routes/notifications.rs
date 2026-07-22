@@ -486,6 +486,53 @@ pub async fn expo_register(
     Ok(StatusCode::NO_CONTENT)
 }
 
+// ---- APNs (native macOS desktop) push ----
+
+#[derive(Deserialize)]
+pub struct ApnsRegisterRequest {
+    /// Hex APNs device token from the macOS shell's remote-notification callback.
+    pub token: String,
+}
+
+pub async fn apns_register(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Json(body): Json<ApnsRegisterRequest>,
+) -> AppResult<StatusCode> {
+    let token = body.token.trim();
+    // APNs device tokens are lowercase hex, historically 64 chars but not fixed.
+    if token.is_empty() || token.len() > 200 || !token.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(AppError::BadRequest("invalid APNs device token".to_string()));
+    }
+    sqlx::query(
+        "INSERT INTO apns_tokens (user_id, token) VALUES ($1, $2)
+         ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id",
+    )
+    .bind(auth.id)
+    .bind(token)
+    .execute(&state.pool)
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct ApnsUnregisterRequest {
+    pub token: String,
+}
+
+pub async fn apns_unregister(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Json(body): Json<ApnsUnregisterRequest>,
+) -> AppResult<StatusCode> {
+    sqlx::query("DELETE FROM apns_tokens WHERE token = $1 AND user_id = $2")
+        .bind(body.token.trim())
+        .bind(auth.id)
+        .execute(&state.pool)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[derive(Deserialize)]
 pub struct ExpoUnregisterRequest {
     pub token: String,

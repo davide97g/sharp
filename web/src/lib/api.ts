@@ -751,6 +751,13 @@ export const api = {
   unsubscribePush(endpoint: string) {
     return request<void>('/push/unsubscribe', { method: 'POST', body: { endpoint } })
   },
+  // Native macOS (Tauri) APNs device-token registration.
+  registerApns(token: string) {
+    return request<void>('/push/apns/register', { method: 'POST', body: { token } })
+  },
+  unregisterApns(token: string) {
+    return request<void>('/push/apns/unregister', { method: 'POST', body: { token } })
+  },
 
   // --- search ---
   search(q: string, limit = 20, channelId?: string) {

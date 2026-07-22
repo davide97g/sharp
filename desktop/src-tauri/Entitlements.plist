@@ -6,5 +6,11 @@
   <true/>
   <key>com.apple.security.device.camera</key>
   <true/>
+  <!-- Remote push (APNs). Requires a Developer-ID signed + notarized build whose
+       explicit App ID has the Push Notifications capability, plus an embedded
+       provisioning profile carrying this entitlement. Use "development" for
+       sandbox testing. Unsigned/ad-hoc builds cannot use this — remove it there. -->
+  <key>com.apple.developer.aps-environment</key>
+  <string>production</string>
 </dict>
 </plist>

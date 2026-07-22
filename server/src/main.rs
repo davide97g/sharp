@@ -1,4 +1,5 @@
 mod ai;
+mod apns;
 mod auth;
 mod calendar_crypto;
 mod calendar_sync;
@@ -123,6 +124,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!(
         "web push {}",
         if vapid.is_some() {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
+
+    tracing::info!(
+        "apns push {}",
+        if config.apns.is_some() {
             "enabled"
         } else {
             "disabled"
@@ -465,6 +475,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/push/expo/unregister",
             post(routes::notifications::expo_unregister),
+        )
+        .route(
+            "/push/apns/register",
+            post(routes::notifications::apns_register),
+        )
+        .route(
+            "/push/apns/unregister",
+            post(routes::notifications::apns_unregister),
         )
         .route("/search", get(routes::search::search))
         // --- Tasks (Linear-lite planner) ---

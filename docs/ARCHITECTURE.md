@@ -1014,6 +1014,8 @@ push_subscriptions(id uuid PK, user_id uuid, endpoint text UNIQUE NOT NULL,
   p256dh text NOT NULL, auth text NOT NULL, created_at timestamptz)
 expo_push_tokens(id uuid PK, user_id uuid REFERENCES users(id), token text UNIQUE NOT NULL,
   platform text NOT NULL DEFAULT 'ios', created_at timestamptz)
+apns_tokens(id uuid PK, user_id uuid REFERENCES users(id), token text UNIQUE NOT NULL,
+  platform text NOT NULL DEFAULT 'macos', created_at timestamptz)  -- migration 0027; native macOS push
 app_meta(key text PK, value text NOT NULL)           -- e.g. auto-generated VAPID keys
 ```
 
@@ -1069,6 +1071,8 @@ PrefsUpdate = Partial<Pick<Prefs, notify_*|dnd_scheduled|dnd_start|dnd_end|tz_of
 | POST | `/push/unsubscribe` | `{endpoint}` → `204` |
 | POST | `/push/expo/register` | `{token, platform?: 'ios'}` → `204` (upsert by token) |
 | POST | `/push/expo/unregister` | `{token}` → `204` |
+| POST | `/push/apns/register` | `{token}` → `204` (hex APNs device token, upsert; native macOS desktop) |
+| POST | `/push/apns/unregister` | `{token}` → `204` |
 
 Uploads and downloads are **always proxied through the server** (never presigned to the
 browser) so channel-membership auth is enforced on every read. The web client fetches
@@ -1112,12 +1116,28 @@ Controls (all enforced server-side in `notify.rs`; the client mirrors DND for to
   sound, DND mode + quiet hours, per-type toggles, per-channel mode).
 
 Delivery: in-app inbox (bell + dropdown) + arrival toast; OS notification when the app is
-open but unfocused (Web Notification API, or `tauri-plugin-notification` in the desktop
+open but unfocused (Web Notification API, or `tauri-plugin-notifications` in the desktop
 shell); **web push** (service worker `web/public/sw.js`) when the tab is closed and the
 recipient has no visible web session on any replica. A hidden tab may keep its WebSocket;
 the service worker still receives the VAPID push. iOS/iPadOS setup is offered only from an
 installed Home Screen PWA and notification permission is requested directly from the user's
 Enable action. Logout unregisters that device's subscription.
+
+### Native macOS push (APNs)
+
+The Tauri desktop shell registers for APNs so it receives push **while closed**, not only
+while running. `web/src/lib/apns.ts` calls the `tauri-plugin-notifications` push API on
+launch, gets the hex device token, and POSTs it to `/push/apns/register` (stored in
+`apns_tokens`). The server (`server/src/apns.rs`) signs a token-based ES256 provider JWT
+from the `.p8` key (cached ~50 min per Apple's 20–60 min rule) and POSTs to
+`api.push.apple.com` (or the sandbox host); dead tokens (410 / `BadDeviceToken`) are pruned.
+APNs delivery shares the web-push gate — sent only when the recipient has **no visible
+session**. Configured via `APNS_TEAM_ID` / `APNS_KEY_ID` / `APNS_PRIVATE_KEY` (or
+`APNS_PRIVATE_KEY_PATH`) / `APNS_BUNDLE_ID` / `APNS_ENV`; the whole channel is **inert**
+unless all are set (mirrors VAPID/Expo). **Requires a signed + notarized build** whose App
+ID has the Push Notifications capability and whose entitlements include
+`com.apple.developer.aps-environment` — client registration fails on unsigned/ad-hoc builds,
+which then fall back silently to the WebSocket + local-notification + web-push paths.
 
 ### Mobile push (Expo)
 

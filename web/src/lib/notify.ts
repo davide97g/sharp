@@ -9,6 +9,7 @@
 // web push (the OS handles background delivery).
 
 import { api, apiBase } from './api'
+import { registerApnsIfDesktop, unregisterApnsIfDesktop } from './apns'
 
 export const isTauri =
   typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
@@ -85,7 +86,7 @@ export function isWebNotifyGranted(): boolean {
 export async function requestNotifyPermission(): Promise<boolean> {
   if (isTauri) {
     try {
-      const m = await import('@tauri-apps/plugin-notification')
+      const m = await import('@choochmeque/tauri-plugin-notifications-api')
       let granted = await m.isPermissionGranted()
       if (!granted) granted = (await m.requestPermission()) === 'granted'
       return granted
@@ -117,7 +118,7 @@ export async function showOsNotification(
   const tag = opts?.tag
   if (isTauri) {
     try {
-      const m = await import('@tauri-apps/plugin-notification')
+      const m = await import('@choochmeque/tauri-plugin-notifications-api')
       if (await m.isPermissionGranted()) {
         m.sendNotification({ title, body })
         return
@@ -227,7 +228,12 @@ function watchForAppUpdates(reg: ServiceWorkerRegistration) {
 
 /** Register the service worker and subscribe this browser to web push. */
 export async function initPush(): Promise<NotificationSetupState> {
-  if (isTauri) return 'subscribed' // desktop relies on native notifications
+  if (isTauri) {
+    // Desktop uses native notifications; also register for APNs so a closed app
+    // gets push (best-effort — a no-op on unsigned builds).
+    void registerApnsIfDesktop()
+    return 'subscribed'
+  }
   const initial = initialNotificationState()
   if (initial === 'install-required' || initial === 'unsupported' || initial === 'denied') {
     return initial
@@ -284,7 +290,11 @@ export async function enableNotifications(): Promise<NotificationSetupState> {
  * clear local auth immediately without racing the authenticated cleanup fetch.
  */
 export async function disablePush(tokenOverride?: string | null): Promise<NotificationSetupState> {
-  if (isTauri || !('serviceWorker' in navigator)) return initialNotificationState()
+  if (isTauri) {
+    void unregisterApnsIfDesktop()
+    return initialNotificationState()
+  }
+  if (!('serviceWorker' in navigator)) return initialNotificationState()
   try {
     const reg = await navigator.serviceWorker.getRegistration('/sw.js')
     const sub = await reg?.pushManager.getSubscription()
