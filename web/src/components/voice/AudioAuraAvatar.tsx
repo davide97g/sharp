@@ -1,4 +1,5 @@
 import { useEffect, useRef, type CSSProperties } from 'react'
+import { type AudioAuraStyle, useAudioAuraStyle } from '../../lib/meetingEffects'
 import { useStore } from '../../store'
 import { Avatar } from '../Avatar'
 
@@ -32,23 +33,42 @@ export function AudioAuraAvatar({
   enabled: boolean
 }) {
   const client = useStore((state) => state.voice.client)
+  const me = useStore((state) => state.me)
+  const auraStyle = useAudioAuraStyle(me?.id)
   const rootRef = useRef<HTMLDivElement>(null)
+  const envelopeRef = useRef(0)
   const connKey = connIds.join('\u0000')
 
   useEffect(() => {
     const root = rootRef.current
     if (!root) return
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    if (!enabled || !speaking || !client || reducedMotion) {
-      applyLevel(root, enabled && speaking ? 0.32 : 0, 0, size)
+    if (!enabled) {
+      envelopeRef.current = 0
+      applyLevel(root, 0, 0, size)
+      return
+    }
+
+    if (reducedMotion || !client) {
+      envelopeRef.current = speaking ? 0.32 : 0
+      applyLevel(root, envelopeRef.current, 0, size)
       return
     }
 
     let frame = 0
     const update = (now: number) => {
-      const level = client.getVoiceLevel(connIds)
-      applyLevel(root, level, now, size)
-      frame = requestAnimationFrame(update)
+      const rawLevel = speaking ? client.getVoiceLevel(connIds) : 0
+      const previous = envelopeRef.current
+      // Fast attack gives instant acknowledgement. Slow release bridges syllables
+      // and avoids a distracting on/off flicker around speaking detection thresholds.
+      const response = rawLevel > previous ? 0.72 : 0.055
+      const next = previous + (rawLevel - previous) * response
+      envelopeRef.current = next < 0.004 ? 0 : next
+      applyLevel(root, envelopeRef.current, now, size)
+
+      if (speaking || envelopeRef.current > 0) {
+        frame = requestAnimationFrame(update)
+      }
     }
     frame = requestAnimationFrame(update)
     return () => cancelAnimationFrame(frame)
@@ -60,10 +80,10 @@ export function AudioAuraAvatar({
   return (
     <div
       ref={rootRef}
-      className={`voice-aura-avatar ${enabled ? 'is-enabled' : ''} ${speaking ? 'is-speaking' : ''}`}
+      className={`voice-aura-avatar aura-${auraStyle} ${enabled ? 'is-enabled' : ''} ${speaking ? 'is-speaking' : ''}`}
       style={{ ...RESTING_STYLE, width: size, height: size, borderRadius: radius }}
     >
-      <AuraLayers />
+      <AuraLayers style={auraStyle} />
       <div className="voice-aura-avatar-body">
         <Avatar id={userId} name={name} size={size} />
       </div>
@@ -71,31 +91,40 @@ export function AudioAuraAvatar({
   )
 }
 
-export function AudioAuraPreview({ size = 54 }: { size?: number }) {
+export function AudioAuraPreview({
+  size = 54,
+  variant = 'helios',
+  level = 0.78,
+}: {
+  size?: number
+  variant?: AudioAuraStyle
+  level?: number
+}) {
   const radius = Math.max(6, Math.round(size * 0.28))
+  const energy = Math.min(1, Math.max(0, level))
   return (
     <div
       aria-hidden="true"
-      className="voice-aura-avatar is-enabled is-speaking is-preview"
+      className={`voice-aura-avatar aura-${variant} is-enabled is-speaking is-preview`}
       style={
         {
           ...RESTING_STYLE,
-          '--voice-level': 0.78,
-          '--voice-scale': 1.1,
-          '--voice-lift': '-3px',
-          '--voice-tilt': '-1.5deg',
-          '--voice-glow': '27px',
-          '--voice-ring-scale': 1.11,
-          '--voice-orbit-radius': `${Math.round(size * 0.17)}px`,
-          '--voice-orbit-duration': '720ms',
-          '--voice-aura-opacity': 0.92,
+          '--voice-level': energy,
+          '--voice-scale': 1 + energy * 0.12,
+          '--voice-lift': `${-energy * 3}px`,
+          '--voice-tilt': `${-energy * 1.4}deg`,
+          '--voice-glow': `${Math.round(8 + energy * 28)}px`,
+          '--voice-ring-scale': 0.98 + energy * 0.18,
+          '--voice-orbit-radius': `${Math.round(size * (0.08 + energy * 0.12))}px`,
+          '--voice-orbit-duration': `${Math.round(1250 - energy * 660)}ms`,
+          '--voice-aura-opacity': Math.min(1, 0.2 + energy),
           width: size,
           height: size,
           borderRadius: radius,
         } as AuraStyle
       }
     >
-      <AuraLayers />
+      <AuraLayers style={variant} />
       <div className="voice-aura-avatar-body">
         <div
           className="flex h-full w-full items-center justify-center bg-[#6d5dfc] font-semibold text-white"
@@ -108,16 +137,28 @@ export function AudioAuraPreview({ size = 54 }: { size?: number }) {
   )
 }
 
-function AuraLayers() {
+function AuraLayers({ style }: { style: AudioAuraStyle }) {
+  if (style === 'kinetic-type') {
+    return (
+      <span className="voice-aura-type" aria-hidden="true">
+        <i>OH</i><i>YEAH</i><i>LOUD</i><i>!</i>
+      </span>
+    )
+  }
+
+  if (style === 'voiceprint') {
+    return (
+      <span className="voice-aura-wave" aria-hidden="true">
+        {Array.from({ length: 11 }, (_, index) => <i key={index} />)}
+      </span>
+    )
+  }
+
   return (
     <>
       <span className="voice-aura-halo" aria-hidden="true" />
       <span className="voice-aura-echo" aria-hidden="true" />
-      <span className="voice-aura-orbit" aria-hidden="true">
-        <i />
-        <i />
-        <i />
-      </span>
+      {style === 'helios' && <span className="voice-aura-flare" aria-hidden="true" />}
     </>
   )
 }

@@ -13,12 +13,22 @@ import { CreatePollModal } from './CreatePollModal'
 import type { Attachment, Channel, GifResult } from '../lib/types'
 import type { EncryptedAttachment } from '../lib/types'
 import { encryptAttachmentFile, MAX_ENCRYPTED_FILE_BYTES } from '../lib/e2ee/attachments'
+import {
+  isRecordingSupported,
+  MAX_RECORDING_MS,
+  recordingFileName,
+  VoiceRecorder,
+} from '../lib/audioRecording'
+import { VoiceRecorderBar } from './voice/VoiceRecorderBar'
+import { VoicePreviewPlayer } from './AudioMessage'
 
 type Pending = {
   id: string
   name: string
   size: number
   isImage: boolean
+  isVoice?: boolean
+  file?: File
   previewUrl?: string
   progress: number
   attachment?: Attachment
@@ -122,6 +132,12 @@ export function Composer({
   const [dismissedGifCommand, setDismissedGifCommand] = useState<string | null>(null)
   const [pollOpen, setPollOpen] = useState(false)
   const isGuest = useStore((s) => s.isGuest)
+
+  // --- voice message recording ---
+  const [recorder, setRecorder] = useState<VoiceRecorder | null>(null)
+  const [recordMs, setRecordMs] = useState(0)
+  const recorderRef = useRef<VoiceRecorder | null>(null)
+  const [recordingSupported] = useState(isRecordingSupported)
 
   const gifCommand = /^\/gif(?:\s+(.*))?$/.exec(value)
   const slashGifOpen = gifEnabled && gifCommand !== null && dismissedGifCommand !== value
@@ -358,17 +374,18 @@ export function Composer({
   }, [])
 
   const uploadOne = useCallback(
-    (file: File) => {
+    (file: File, opts?: { voice?: boolean }) => {
       if (encrypted && file.size > MAX_ENCRYPTED_FILE_BYTES) {
         toastError('Encrypted attachments are limited to 50 MB because encryption happens in memory.')
         return
       }
       const id = String(++counterRef.current)
       const isImage = file.type.startsWith('image/')
+      const isVoice = opts?.voice ?? false
       const previewUrl = isImage ? URL.createObjectURL(file) : undefined
       setPending((p) => [
         ...p,
-        { id, name: file.name, size: file.size, isImage, previewUrl, progress: 0 },
+        { id, name: file.name, size: file.size, isImage, isVoice, file: isVoice ? file : undefined, previewUrl, progress: 0 },
       ])
       void (async () => {
         const prepared = encrypted ? await encryptAttachmentFile(file) : null
@@ -415,6 +432,66 @@ export function Composer({
       return p.filter((x) => x.id !== id)
     })
   }
+
+  async function startRecording() {
+    if (recorderRef.current) return
+    const rec = new VoiceRecorder()
+    recorderRef.current = rec
+    try {
+      await rec.start()
+    } catch {
+      recorderRef.current = null
+      rec.cancel()
+      toastError('Could not access the microphone.')
+      return
+    }
+    if (recorderRef.current !== rec) {
+      // Cancelled while permission was pending.
+      rec.cancel()
+      return
+    }
+    setRecordMs(0)
+    setRecorder(rec)
+  }
+
+  async function stopRecording() {
+    const rec = recorderRef.current
+    if (!rec) return
+    recorderRef.current = null
+    setRecorder(null)
+    const blob = await rec.stop()
+    if (!blob || blob.size === 0) return
+    const file = new File([blob], recordingFileName(rec.mimeType), { type: rec.mimeType })
+    uploadOne(file, { voice: true })
+  }
+
+  function cancelRecording() {
+    const rec = recorderRef.current
+    recorderRef.current = null
+    setRecorder(null)
+    rec?.cancel()
+  }
+
+  // Drive the elapsed timer and enforce the hard duration cap.
+  useEffect(() => {
+    if (!recorder) return
+    const timer = setInterval(() => {
+      const ms = recorder.elapsedMs()
+      setRecordMs(ms)
+      if (ms >= MAX_RECORDING_MS) void stopRecording()
+    }, 200)
+    return () => clearInterval(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recorder])
+
+  // Release the mic if the composer unmounts or switches chats mid-recording.
+  useEffect(() => {
+    return () => {
+      recorderRef.current?.cancel()
+      recorderRef.current = null
+      setRecorder(null)
+    }
+  }, [draftKey])
 
   const uploading = pending.some((p) => !p.attachment && !p.error)
   const readyIds = pending.filter((p) => p.attachment).map((p) => p.attachment!.id)
@@ -724,7 +801,31 @@ export function Composer({
 
         {pending.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
-            {pending.map((p) => (
+            {pending.map((p) =>
+              p.isVoice && p.file ? (
+                <div key={p.id} className="relative flex items-center gap-1">
+                  <VoicePreviewPlayer file={p.file} />
+                  {!p.attachment && !p.error && (
+                    <div className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden rounded bg-[var(--color-border)]">
+                      <div
+                        className="h-full bg-[var(--color-accent)]"
+                        style={{ width: `${Math.max(5, p.progress * 100)}%` }}
+                      />
+                    </div>
+                  )}
+                  {p.error && (
+                    <span className="text-[10px] text-red-500">failed</span>
+                  )}
+                  <button
+                    onClick={() => removePending(p.id)}
+                    title="Remove"
+                    aria-label="Remove voice message"
+                    className="rounded px-1 text-xs text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
               <div
                 key={p.id}
                 className="composer-attachment relative flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] p-1.5 pr-2"
@@ -770,6 +871,14 @@ export function Composer({
           </div>
         )}
 
+        {recorder ? (
+          <VoiceRecorderBar
+            recorder={recorder}
+            elapsedMs={recordMs}
+            onStop={() => void stopRecording()}
+            onCancel={cancelRecording}
+          />
+        ) : (
         <div className="flex items-end gap-2">
           <button
             onClick={() => fileRef.current?.click()}
@@ -813,6 +922,17 @@ export function Composer({
               <PollIcon />
             </button>
           ) : null}
+          {recordingSupported && (
+            <button
+              type="button"
+              onClick={() => void startRecording()}
+              title="Record a voice message"
+              aria-label="Record a voice message"
+              className="mb-0.5 flex h-11 w-11 items-center justify-center rounded-md text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] md:h-auto md:w-auto md:px-2 md:py-1.5"
+            >
+              <MicGlyph />
+            </button>
+          )}
           <textarea
             ref={ref}
             rows={1}
@@ -834,6 +954,7 @@ export function Composer({
             Send
           </button>
         </div>
+        )}
       </div>
       {pollOpen ? (
         <CreatePollModal mode="channel" channelId={channel.id} onClose={() => setPollOpen(false)} />
@@ -846,6 +967,16 @@ function PollIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
       <path d="M5 20V10M12 20V4M19 20v-7" />
+    </svg>
+  )
+}
+
+function MicGlyph() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M5 10a7 7 0 0 0 14 0" />
+      <path d="M12 17v5" />
     </svg>
   )
 }

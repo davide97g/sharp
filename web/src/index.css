@@ -1243,6 +1243,16 @@ input[type='range'].range-slider::-moz-range-track {
   animation: sharp-pulse 1.4s ease-in-out infinite;
 }
 
+/* Recording indicator dot in the composer voice recorder. */
+.voice-rec-dot {
+  animation: sharp-pulse 1.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-rec-dot {
+    animation: none;
+  }
+}
+
 /* ── Live interaction choreography ────────────────────────────────────── */
 /* Fresh realtime messages arrive with one spring and a fast accent sweep. */
 @keyframes sharp-message-arrive {
@@ -1651,16 +1661,33 @@ input[type='range'].range-slider::-moz-range-track {
   .voice-mini-widget:hover { transform: translateY(-3px) rotate(-1deg) scale(1.035); box-shadow: 0 24px 54px -24px var(--color-accent); }
 }
 
-/* Audio Aura: microphone energy becomes avatar physics, never layout movement. */
-@keyframes sharp-aura-spectrum {
-  to { transform: rotate(1turn); }
+/* Audio Aura: five voice-reactive personalities, never layout movement. */
+@keyframes sharp-aura-breathe {
+  0%, 100% { transform: translate3d(0, -1px, 0) scale(1.04); }
+  45% { transform: translate3d(0, -4px, 0) scale(1.13); }
 }
-@keyframes sharp-aura-orbit {
-  to { transform: rotate(1turn); }
+@keyframes sharp-aura-sun-turn { to { transform: rotate(1turn) scale(var(--voice-ring-scale)); } }
+@keyframes sharp-aura-sun-flare {
+  0%, 100% { transform: rotate(-4deg) scale(calc(.92 + var(--voice-level) * .12)); opacity: .52; }
+  50% { transform: rotate(5deg) scale(calc(1.02 + var(--voice-level) * .18)); opacity: .92; }
 }
-@keyframes sharp-aura-preview-beat {
-  0%, 100% { transform: translate3d(0, -1px, 0) scale(1.05) rotate(-1deg); }
-  48% { transform: translate3d(0, -5px, 0) scale(1.14) rotate(1.8deg); }
+@keyframes sharp-aura-mercury {
+  0%, 100% { border-radius: 42% 58% 64% 36% / 48% 38% 62% 52%; transform: rotate(-8deg) scale(var(--voice-ring-scale)); }
+  33% { border-radius: 67% 33% 45% 55% / 36% 66% 34% 64%; transform: rotate(5deg) scale(calc(var(--voice-ring-scale) + .05)); }
+  66% { border-radius: 34% 66% 37% 63% / 64% 43% 57% 36%; transform: rotate(12deg) scale(calc(var(--voice-ring-scale) - .02)); }
+}
+@keyframes sharp-aura-wave {
+  0%, 100% { transform: scaleY(calc(.24 + var(--voice-level) * .28)); }
+  45% { transform: scaleY(calc(.5 + var(--voice-level) * .74)); }
+}
+@keyframes sharp-aura-word {
+  0%, 18%, 100% { opacity: 0; transform: translate3d(var(--word-x), 5px, 0) rotate(var(--word-r)) scale(.55); }
+  28%, 72% { opacity: calc(.45 + var(--voice-level) * .55); transform: translate3d(var(--word-x), var(--word-y), 0) rotate(var(--word-r)) scale(calc(.8 + var(--voice-level) * .28)); }
+  82% { opacity: 0; transform: translate3d(var(--word-x), calc(var(--word-y) - 7px), 0) rotate(var(--word-r)) scale(1.08); }
+}
+@keyframes sharp-aura-eclipse {
+  0% { opacity: calc(.2 + var(--voice-level) * .58); transform: scale(.88); }
+  70%, 100% { opacity: 0; transform: scale(calc(1.12 + var(--voice-level) * .32)); }
 }
 .voice-aura-avatar {
   position: relative;
@@ -1674,85 +1701,165 @@ input[type='range'].range-slider::-moz-range-track {
   width: 100%;
   height: 100%;
   transform: translate3d(0, var(--voice-lift), 0) scale(var(--voice-scale)) rotate(var(--voice-tilt));
-  transition: transform 110ms cubic-bezier(0.22, 1, 0.36, 1), filter 160ms ease-out;
+  transition: transform 520ms cubic-bezier(0.16, 1, 0.3, 1), filter 620ms ease-out;
   will-change: transform;
 }
 .voice-aura-avatar.is-enabled.is-speaking .voice-aura-avatar-body {
   filter: saturate(1.16) brightness(1.05);
+  transition-duration: 85ms, 110ms;
 }
 .voice-aura-halo,
 .voice-aura-echo,
-.voice-aura-orbit {
+.voice-aura-flare,
+.voice-aura-wave,
+.voice-aura-type {
   position: absolute;
   inset: 0;
   z-index: 1;
   pointer-events: none;
   opacity: 0;
+  transition: opacity 680ms cubic-bezier(0.16, 1, 0.3, 1), transform 540ms cubic-bezier(0.16, 1, 0.3, 1);
 }
-.voice-aura-halo {
-  inset: -5px;
-  border-radius: inherit;
-  background: conic-gradient(
-    from 45deg,
-    #4fbf9f,
-    #62d8ff 22%,
-    #796cff 45%,
-    #ff6fae 67%,
-    #ffd166 83%,
-    #4fbf9f
-  );
-  box-shadow:
-    0 0 var(--voice-glow) color-mix(in srgb, #796cff 62%, transparent),
-    0 0 var(--voice-glow) color-mix(in srgb, #4fbf9f 60%, transparent);
-  filter: blur(2px);
-  transform: scale(var(--voice-ring-scale));
-  transition: opacity 160ms ease-out, transform 110ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-.voice-aura-echo {
-  inset: -9px;
-  border: 2px solid color-mix(in srgb, #62d8ff 78%, transparent);
-  border-radius: inherit;
-  box-shadow: inset 0 0 12px color-mix(in srgb, #ff6fae 45%, transparent);
-  transform: scale(var(--voice-ring-scale));
-  transition: opacity 160ms ease-out, transform 110ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-.voice-aura-avatar.is-enabled.is-speaking .voice-aura-halo {
-  opacity: var(--voice-aura-opacity);
-  animation: sharp-aura-spectrum var(--voice-orbit-duration) linear infinite;
-}
-.voice-aura-avatar.is-enabled.is-speaking .voice-aura-echo {
-  opacity: var(--voice-aura-opacity);
-}
-.voice-aura-orbit {
-  z-index: 4;
-  inset: 50%;
-  opacity: var(--voice-aura-opacity);
-  animation: sharp-aura-orbit var(--voice-orbit-duration) linear infinite reverse;
-}
-.voice-aura-orbit i {
-  position: absolute;
-  left: -2px;
-  top: -2px;
-  width: 4px;
-  height: 4px;
-  border-radius: 999px;
-  background: #fff;
-  box-shadow: 0 0 7px 2px currentColor;
-}
-.voice-aura-orbit i:nth-child(1) {
-  color: #62d8ff;
-  transform: rotate(15deg) translateX(calc(50% + var(--voice-orbit-radius)));
-}
-.voice-aura-orbit i:nth-child(2) {
-  color: #ff6fae;
-  transform: rotate(142deg) translateX(calc(50% + var(--voice-orbit-radius)));
-}
-.voice-aura-orbit i:nth-child(3) {
-  color: #ffd166;
-  transform: rotate(264deg) translateX(calc(50% + var(--voice-orbit-radius)));
+.voice-aura-avatar.is-enabled.is-speaking > .voice-aura-halo,
+.voice-aura-avatar.is-enabled.is-speaking > .voice-aura-echo,
+.voice-aura-avatar.is-enabled.is-speaking > .voice-aura-flare,
+.voice-aura-avatar.is-enabled.is-speaking > .voice-aura-wave,
+.voice-aura-avatar.is-enabled.is-speaking > .voice-aura-type {
+  transition-duration: 75ms, 95ms;
 }
 .voice-aura-avatar.is-preview .voice-aura-avatar-body {
-  animation: sharp-aura-preview-beat 920ms cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  animation: sharp-aura-breathe 920ms cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+/* 01 Helios — hot corona, voice becomes sunlight. */
+.aura-helios .voice-aura-halo {
+  inset: -8px;
+  border-radius: inherit;
+  background: conic-gradient(from 20deg, #fff5c7, #ffad4d 14%, #ff5d8f 32%, #836dff 53%, #50d8ff 72%, #fff5c7);
+  box-shadow: 0 0 var(--voice-glow) color-mix(in srgb, #ff7a59 65%, transparent);
+  filter: blur(1.5px) saturate(1.22);
+  transform: scale(var(--voice-ring-scale));
+}
+.aura-helios .voice-aura-halo::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border-radius: inherit;
+  background: var(--color-panel, #1b1220);
+}
+.aura-helios .voice-aura-echo {
+  inset: -13px;
+  border: 1px solid color-mix(in srgb, #ffc76f 72%, transparent);
+  border-radius: inherit;
+  box-shadow: 0 0 18px color-mix(in srgb, #ff5d8f 38%, transparent);
+  transform: scale(calc(.94 + var(--voice-level) * .2));
+}
+.aura-helios .voice-aura-flare {
+  inset: -19px;
+  border-radius: 46%;
+  background: repeating-conic-gradient(from 4deg, #ffd97a 0 2deg, transparent 2deg 13deg, #ff6e8d 13deg 15deg, transparent 15deg 28deg);
+  filter: blur(.45px) drop-shadow(0 0 5px #ff8b61);
+  -webkit-mask: radial-gradient(circle, transparent 0 54%, #000 58% 72%, transparent 76%);
+  mask: radial-gradient(circle, transparent 0 54%, #000 58% 72%, transparent 76%);
+}
+.aura-helios.is-enabled.is-speaking .voice-aura-halo { opacity: var(--voice-aura-opacity); animation: sharp-aura-sun-turn 2.2s linear infinite; }
+.aura-helios.is-enabled.is-speaking .voice-aura-echo { opacity: calc(var(--voice-aura-opacity) * .72); }
+.aura-helios.is-enabled.is-speaking .voice-aura-flare { opacity: var(--voice-aura-opacity); animation: sharp-aura-sun-flare 780ms ease-in-out infinite; }
+
+/* 02 Mercury — viscous chrome with colored refraction. */
+.aura-mercury .voice-aura-halo {
+  inset: -12px;
+  border-radius: 42% 58% 64% 36% / 48% 38% 62% 52%;
+  background: conic-gradient(from 210deg, #ecffff, #86a8ff 17%, #c3ffec 34%, #ffffff 49%, #ff96ca 67%, #8e7dff 82%, #ecffff);
+  box-shadow: inset 8px -7px 13px rgba(32, 10, 61, .48), 0 0 var(--voice-glow) rgba(132, 232, 255, .5);
+  filter: contrast(1.12) saturate(1.28);
+  transform: rotate(-8deg) scale(var(--voice-ring-scale));
+  animation: sharp-aura-mercury 1.55s ease-in-out infinite;
+  animation-play-state: paused;
+}
+.aura-mercury .voice-aura-echo {
+  inset: -16px -11px -10px -15px;
+  border-radius: 58% 42% 36% 64% / 44% 61% 39% 56%;
+  background: linear-gradient(145deg, rgba(255,255,255,.52), rgba(111,91,255,.12) 42%, rgba(255,93,175,.42));
+  filter: blur(6px);
+  animation: sharp-aura-mercury 2.1s -430ms ease-in-out infinite reverse;
+  animation-play-state: paused;
+}
+.aura-mercury.is-enabled.is-speaking .voice-aura-halo { opacity: var(--voice-aura-opacity); animation-play-state: running; }
+.aura-mercury.is-enabled.is-speaking .voice-aura-echo { opacity: calc(var(--voice-aura-opacity) * .78); animation-play-state: running; }
+.aura-mercury.is-enabled.is-speaking .voice-aura-avatar-body { transform: scale(calc(1 + var(--voice-level) * .08)); }
+
+/* 03 Voiceprint — audio made graphic, tuned like a tiny studio monitor. */
+.voice-aura-wave {
+  z-index: 1;
+  inset: 50% auto auto 50%;
+  width: 158%;
+  height: 112%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+}
+.voice-aura-wave i {
+  width: 4.5%;
+  height: 84%;
+  border-radius: 999px;
+  background: linear-gradient(to bottom, #66e6ff, #8c72ff 48%, #ff70b5);
+  box-shadow: 0 0 9px color-mix(in srgb, #796cff 58%, transparent);
+  transform-origin: center;
+  animation: sharp-aura-wave 540ms cubic-bezier(.45, 0, .3, 1) infinite;
+  animation-play-state: paused;
+}
+.voice-aura-wave i:nth-child(2n) { animation-duration: 680ms; animation-delay: -190ms; }
+.voice-aura-wave i:nth-child(3n) { animation-duration: 430ms; animation-delay: -310ms; }
+.voice-aura-wave i:nth-child(4n) { animation-duration: 790ms; animation-delay: -90ms; }
+.aura-voiceprint.is-enabled.is-speaking .voice-aura-wave { opacity: var(--voice-aura-opacity); }
+.aura-voiceprint.is-enabled.is-speaking .voice-aura-wave i { animation-play-state: running; }
+.aura-voiceprint.is-enabled.is-speaking .voice-aura-avatar-body { transform: scale(calc(1 + var(--voice-level) * .06)); filter: saturate(1.08); }
+
+/* 04 Kinetic Type — conversation literally breaks the frame. */
+.voice-aura-type { z-index: 4; overflow: visible; }
+.voice-aura-type i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  color: #fff;
+  font: 900 clamp(7px, calc(5px + var(--voice-level) * 5px), 12px)/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: -.08em;
+  text-shadow: 2px 2px 0 #6c5cff, 0 0 11px #ff66b3;
+  animation: sharp-aura-word 1.4s cubic-bezier(.2,.8,.2,1) infinite;
+  animation-play-state: paused;
+}
+.voice-aura-type i:nth-child(1) { --word-x: -155%; --word-y: -210%; --word-r: -12deg; animation-delay: -.18s; }
+.voice-aura-type i:nth-child(2) { --word-x: 32%; --word-y: -245%; --word-r: 9deg; animation-delay: -.92s; color: #8fefff; }
+.voice-aura-type i:nth-child(3) { --word-x: -176%; --word-y: 125%; --word-r: 8deg; animation-delay: -.58s; color: #ffd466; }
+.voice-aura-type i:nth-child(4) { --word-x: 105%; --word-y: 80%; --word-r: -8deg; animation-delay: -1.22s; font-size: 17px; color: #ff77bd; }
+.aura-kinetic-type.is-enabled.is-speaking .voice-aura-type { opacity: var(--voice-aura-opacity); }
+.aura-kinetic-type.is-enabled.is-speaking .voice-aura-type i { animation-play-state: running; }
+.aura-kinetic-type.is-enabled.is-speaking .voice-aura-avatar-body { animation-timing-function: steps(2, jump-none); }
+
+/* 05 Eclipse — restrained black halo, then one clean shockwave. */
+.aura-eclipse .voice-aura-halo {
+  inset: -8px;
+  border: 3px solid rgba(5, 4, 9, .96);
+  border-radius: inherit;
+  background: transparent;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.72), 0 8px var(--voice-glow) rgba(100, 223, 255, .36);
+  transform: scale(calc(.98 + var(--voice-level) * .15));
+}
+.aura-eclipse .voice-aura-echo {
+  inset: -13px;
+  border: 1.5px solid color-mix(in srgb, #b7f3ff 82%, transparent);
+  border-radius: inherit;
+  box-shadow: inset 0 0 12px rgba(255,255,255,.2);
+}
+.aura-eclipse.is-enabled.is-speaking .voice-aura-halo { opacity: var(--voice-aura-opacity); }
+.aura-eclipse.is-enabled.is-speaking .voice-aura-echo { animation: sharp-aura-eclipse 1.08s ease-out infinite; }
+.aura-eclipse.is-enabled.is-speaking .voice-aura-avatar-body { transform: scale(calc(1 + var(--voice-level) * .045)); filter: grayscale(.18) contrast(1.06); }
+
+@media (hover: hover) and (pointer: fine) {
+  .aura-kinetic-type.is-preview:hover .voice-aura-type i { animation-duration: .8s; }
 }
 @media (prefers-reduced-motion: reduce) {
   .voice-aura-avatar-body {
@@ -1760,12 +1867,40 @@ input[type='range'].range-slider::-moz-range-track {
     transition: none;
   }
   .voice-aura-avatar.is-enabled.is-speaking .voice-aura-halo,
-  .voice-aura-avatar.is-enabled.is-speaking .voice-aura-orbit,
+  .voice-aura-avatar.is-enabled.is-speaking .voice-aura-echo,
+  .voice-aura-avatar.is-enabled.is-speaking .voice-aura-flare,
+  .voice-aura-avatar.is-enabled.is-speaking .voice-aura-wave i,
+  .voice-aura-avatar.is-enabled.is-speaking .voice-aura-type i,
   .voice-aura-avatar.is-preview .voice-aura-avatar-body {
     animation: none;
   }
-  .voice-aura-orbit { display: none; }
+  .voice-aura-type { display: none; }
 }
+
+/* Aura direction study. Dev-only route; production settings reuse same effects. */
+.aura-showcase-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: .55;
+}
+.aura-showcase-card-helios::before { background: radial-gradient(circle at 50% 38%, rgba(255, 122, 80, .16), transparent 36%); }
+.aura-showcase-card-mercury::before { background: radial-gradient(ellipse at 45% 34%, rgba(117, 230, 255, .14), transparent 38%); }
+.aura-showcase-card-voiceprint::before { background: linear-gradient(180deg, rgba(109, 92, 252, .09), transparent 58%); }
+.aura-showcase-card-kinetic-type::before { background: linear-gradient(155deg, rgba(255, 79, 153, .1), transparent 42%); }
+.aura-showcase-card-eclipse::before { background: radial-gradient(circle at 50% 38%, rgba(200, 246, 255, .08), rgba(0, 0, 0, .18) 42%, transparent 58%); }
+.aura-showcase-grid {
+  position: absolute;
+  inset: 16% 4% 12%;
+  opacity: .22;
+  background-image: linear-gradient(rgba(255,255,255,.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.1) 1px, transparent 1px);
+  background-size: 24px 24px;
+  -webkit-mask: radial-gradient(circle, #000, transparent 68%);
+  mask: radial-gradient(circle, #000, transparent 68%);
+}
+.aura-showcase-card:hover .voice-aura-avatar { transform: scale(1.08); }
+.aura-showcase-card .voice-aura-avatar { transition: transform 240ms cubic-bezier(.22, 1, .36, 1); }
 
 /* Notification sheen; huddle start gets a stronger one-time heartbeat. */
 @keyframes sharp-toast-sheen {

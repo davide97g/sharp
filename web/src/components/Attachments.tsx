@@ -5,6 +5,7 @@ import { toastError } from '../lib/toast'
 import { fmtBytes } from '../lib/util'
 import type { Attachment } from '../lib/types'
 import { ImageLightbox } from './ImageLightbox'
+import { isAudio, VoiceMessagePlayer } from './AudioMessage'
 
 // SVG is excluded from inline rendering — it can carry script; treat it as a
 // download instead (matches the server, which serves non-safe types as downloads).
@@ -24,6 +25,8 @@ export function AttachmentList({ attachments }: { attachments: Attachment[] }) {
       {attachments.map((a) =>
         isInlineImage(a.content_type) ? (
           <AuthedImage key={a.id} att={a} />
+        ) : isAudio(a.content_type) ? (
+          <VoiceMessagePlayer key={a.id} att={a} />
         ) : (
           <FileChip key={a.id} att={a} />
         ),
