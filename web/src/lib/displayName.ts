@@ -1,6 +1,23 @@
-import { useStore } from '../store'
+import { useStore, streamShieldOn } from '../store'
 import type { Channel } from './types'
 import { channelLabel } from './util'
+
+const EMPTY_NICKNAMES: Record<string, string> = {}
+
+/**
+ * The nicknames map for display, honoring the streaming-mode "show plain names"
+ * setting — while shielded (and the setting is on), personal nicknames are
+ * hidden without ever touching the stored map.
+ */
+export function effectiveNicknames(s: {
+  nicknames: Record<string, string>
+  streamRevertNicknames: boolean
+  streamManual: boolean
+  streamPauseUntil: number | null
+  voice: { screenStatus: 'off' | 'starting' | 'on' }
+}): Record<string, string> {
+  return s.streamRevertNicknames && streamShieldOn(s) ? EMPTY_NICKNAMES : s.nicknames
+}
 
 /** Resolve a user's name for the current viewer (nickname → directory → fallback). */
 export function displayNameFor(
@@ -23,7 +40,7 @@ export function displayNameFor(
 export function useDisplayName(userId: string | null | undefined, fallback?: string | null): string {
   return useStore((s) =>
     displayNameFor(userId, {
-      nicknames: s.nicknames,
+      nicknames: effectiveNicknames(s),
       users: s.users,
       fallback: fallback ?? null,
     }),
@@ -32,7 +49,7 @@ export function useDisplayName(userId: string | null | undefined, fallback?: str
 
 /** Live channel label (DM nicknames apply). */
 export function useChannelLabel(ch: Channel | null | undefined): string {
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   if (!ch) return ''
   return channelLabel(ch, nicknames)
 }

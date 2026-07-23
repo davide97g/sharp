@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { useStore } from '../store'
+import { useStore, streamShieldOn } from '../store'
 import { Avatar } from './Avatar'
 import { fmtDayDivider, fmtRelative, sameDay } from '../lib/util'
 import { isTauri } from '../lib/notify'
@@ -328,6 +328,9 @@ function InboxRow({ n, onOpen }: { n: Notification; onOpen: () => void }) {
   const unread = !n.read_at
   const meta = KIND_META[n.kind]
   const preview = gifPreviewText(n.preview)
+  const shielded =
+    useStore(streamShieldOn) &&
+    (n.kind === 'dm' || n.channel_kind === 'dm' || n.channel_kind === 'private')
   const where = n.task_identifier
     ? n.task_identifier
     : n.channel_kind === 'dm'
@@ -344,7 +347,7 @@ function InboxRow({ n, onOpen }: { n: Notification; onOpen: () => void }) {
           : 'hover:bg-[var(--color-panel-2)]'
       }`}
     >
-      <div className="relative shrink-0">
+      <div className={`relative shrink-0 ${shielded ? 'stream-blur' : ''}`}>
         <Avatar id={n.actor.id} name={n.actor.display_name} size={36} />
         <span
           className={`absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full ring-2 ring-[var(--color-panel)] ${meta.accent}`}
@@ -353,7 +356,7 @@ function InboxRow({ n, onOpen }: { n: Notification; onOpen: () => void }) {
           <KindGlyph kind={n.kind} />
         </span>
       </div>
-      <div className="min-w-0 flex-1">
+      <div className={`min-w-0 flex-1 ${shielded ? 'stream-blur' : ''}`}>
         <div className="flex items-baseline justify-between gap-2">
           <p className="min-w-0 truncate text-sm text-[var(--color-text)]">
             <span className="font-semibold">{n.actor.display_name}</span>{' '}

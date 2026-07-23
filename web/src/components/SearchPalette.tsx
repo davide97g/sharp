@@ -1,6 +1,7 @@
+import { effectiveNicknames } from '../lib/displayName'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { useStore } from '../store'
+import { useStore, streamShieldOn } from '../store'
 import { api } from '../lib/api'
 import { channelLabel, fmtTime, fmtDayDivider } from '../lib/util'
 import { toastError } from '../lib/toast'
@@ -64,7 +65,7 @@ function messageSnippet(result: SearchResult, query: string): string {
 
 export function SearchPalette() {
   const open = useStore((s) => s.searchOpen)
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   const setOpen = useStore((s) => s.setSearchOpen)
   const setFocus = useStore((s) => s.setFocus)
   const channels = useStore((s) => s.channels)
@@ -244,6 +245,16 @@ export function SearchPalette() {
     }
   }
 
+  const shielded = useStore(streamShieldOn)
+
+  // Hits from private channels/DMs blur while streaming; unknown channels
+  // (e.g. local encrypted-DM results) count as private.
+  function rowShielded(row: Row): boolean {
+    if (!shielded) return false
+    const kind = channels.find((c) => c.id === row.data.channel_id)?.kind
+    return kind !== 'public'
+  }
+
   function locationLabel(row: Row): string {
     if (row.kind === 'message') {
       const ch = channels.find((c) => c.id === row.data.channel_id)
@@ -345,17 +356,19 @@ export function SearchPalette() {
                   }`}
                 >
                   {row.kind === 'message' ? (
-                    <Avatar
-                      id={row.data.user.id}
-                      name={row.data.user.display_name}
-                      size={28}
-                    />
+                    <span className={rowShielded(row) ? 'stream-blur' : undefined}>
+                      <Avatar
+                        id={row.data.user.id}
+                        name={row.data.user.display_name}
+                        size={28}
+                      />
+                    </span>
                   ) : (
                     <span className="flex h-7 w-7 items-center justify-center text-lg">
                       {row.data.icon || (row.data.kind === 'canvas' ? '🎨' : row.data.kind === 'board' ? '🗂️' : '📄')}
                     </span>
                   )}
-                  <div className="min-w-0 flex-1">
+                  <div className={`min-w-0 flex-1 ${rowShielded(row) ? 'stream-blur' : ''}`}>
                     <div className="mb-0.5 flex items-center gap-2 text-[11px]">
                       <span className="truncate font-medium text-[var(--color-accent-hover)]">
                         {locationLabel(row)}

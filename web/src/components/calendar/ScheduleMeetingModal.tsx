@@ -1,3 +1,4 @@
+import { effectiveNicknames } from '../../lib/displayName'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../lib/api'
 import { toastError, toastSuccess } from '../../lib/toast'
@@ -33,7 +34,7 @@ export function ScheduleMeetingModal({
   meeting?: ScheduledMeeting
 }) {
   const channels = useStore((s) => s.channels)
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   const users = useStore((s) => s.users)
   const membersByChannel = useStore((s) => s.members)
   const loadMembers = useStore((s) => s.loadMembers)

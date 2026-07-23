@@ -1,3 +1,4 @@
+import { effectiveNicknames } from '../lib/displayName'
 import { useEffect, useMemo, useState } from 'react'
 import { Modal } from './Modal'
 import { Avatar } from './Avatar'
@@ -18,7 +19,7 @@ export function ChannelSettingsModal({
   onClose: () => void
 }) {
   const channel = useStore((s) => s.channels.find((c) => c.id === channelId))
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   const [tab, setTab] = useState<'about' | 'members' | 'triggers'>('about')
 
   // The channel can vanish under us (deleted, or we were removed from a
@@ -313,7 +314,7 @@ function MembersTab({ channelId }: { channelId: string }) {
   const channel = useStore((s) => s.channels.find((c) => c.id === channelId))
   const members = useStore((s) => s.members[channelId])
   const users = useStore((s) => s.users)
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   const me = useStore((s) => s.me)
   const loadMembers = useStore((s) => s.loadMembers)
   const addChannelMembers = useStore((s) => s.addChannelMembers)

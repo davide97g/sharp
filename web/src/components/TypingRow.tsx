@@ -1,9 +1,9 @@
-import { displayNameFor } from '../lib/displayName'
+import { displayNameFor, effectiveNicknames } from '../lib/displayName'
 import { useStore } from '../store'
 
 export function TypingRow({ channelId }: { channelId: string }) {
   const typing = useStore((s) => s.typing[channelId])
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   const users = useStore((s) => s.users)
   const names = typing
     ? Object.entries(typing).map(([userId, t]) =>

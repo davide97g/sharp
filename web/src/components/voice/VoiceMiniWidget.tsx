@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import { displayNameFor } from '../../lib/displayName'
+import { displayNameFor, effectiveNicknames } from '../../lib/displayName'
 import { channelLabel } from '../../lib/util'
 import { useStore } from '../../store'
 import { useAudioAuraPreference } from '../../lib/meetingEffects'
@@ -60,7 +60,7 @@ export function VoiceMiniWidget() {
   const remoteScreenStreams = useStore((s) => s.voice.remoteScreenStreams)
   const myConnId = useStore((s) => s.myConnId)
   const users = useStore((s) => s.users)
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   const me = useStore((s) => s.me)
   const audioAuraEnabled = useAudioAuraPreference(me?.id) === true
   const channel = useStore((s) =>

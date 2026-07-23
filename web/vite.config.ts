@@ -39,7 +39,9 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        // IPv4 explicitly: `localhost` can resolve to ::1 first and hit an
+        // unrelated dev server that grabbed the IPv6 side of port 3000.
+        target: 'http://127.0.0.1:3000',
         changeOrigin: true,
         ws: true,
       },

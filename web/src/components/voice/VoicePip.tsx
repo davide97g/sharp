@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { displayNameFor } from '../../lib/displayName'
+import { displayNameFor, effectiveNicknames } from '../../lib/displayName'
 import { channelLabel } from '../../lib/util'
 import {
   closeElementPip,
@@ -195,7 +195,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
   const me = useStore((s) => s.me)
   const audioAuraEnabled = useAudioAuraPreference(me?.id) === true
   const users = useStore((s) => s.users)
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   const channel = useStore((s) =>
     s.channels.find((candidate) => candidate.id === channelId),
   )

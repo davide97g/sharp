@@ -1,3 +1,4 @@
+import { effectiveNicknames } from '../lib/displayName'
 import { Fragment, useMemo, useState, type ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -374,7 +375,7 @@ export function Markdown({
   highlight?: string
 }) {
   const users = useStore((s) => s.users)
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   // Known display names + personal nicknames, longest-first, for greedy
   // multi-word mention matching (mirrors server mention detection).
   const names = useMemo(() => {

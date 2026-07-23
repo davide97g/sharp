@@ -8,7 +8,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store'
-import { useDisplayName } from '../lib/displayName'
+import { useDisplayName, effectiveNicknames } from '../lib/displayName'
 import { Avatar } from './Avatar'
 
 type Anchor = { top: number; left: number; bottom: number; right: number }
@@ -101,7 +101,7 @@ function UserCardPopover({
   onClose: () => void
 }) {
   const users = useStore((s) => s.users)
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   const setNickname = useStore((s) => s.setNickname)
   const clearNickname = useStore((s) => s.clearNickname)
   const realName = users[userId]?.display_name ?? fallbackName

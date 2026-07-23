@@ -5,7 +5,7 @@ import { api } from '../../lib/api'
 import { isTranscriptionSupported } from '../../lib/speech'
 import { useIsMobile } from '../../lib/useMediaQuery'
 import { useStore, type VoiceStageMode } from '../../store'
-import { displayNameFor } from '../../lib/displayName'
+import { displayNameFor, effectiveNicknames } from '../../lib/displayName'
 import { channelLabel } from '../../lib/util'
 import { toastError, toastSuccess } from '../../lib/toast'
 import {
@@ -105,7 +105,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
   const audioAuraPreference = useAudioAuraPreference(me?.id)
   const audioAuraEnabled = audioAuraPreference === true
   const users = useStore((s) => s.users)
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   const isGuest = useStore((s) => s.isGuest)
   const channel = useStore((s) => s.channels.find((candidate) => candidate.id === channelId))
   const toggleTranscription = useStore((s) => s.toggleTranscription)

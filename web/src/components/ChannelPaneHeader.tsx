@@ -1,3 +1,4 @@
+import { effectiveNicknames } from '../lib/displayName'
 import { useCallback, useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { channelLabel } from '../lib/util'
@@ -21,7 +22,7 @@ export function ChannelPaneHeader({
   actions?: React.ReactNode
 }) {
   const online = useStore((s) => s.online)
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   const isDm = channel.kind === 'dm'
   const encrypted = useStore((state) => state.dmEncryption[channel.id] === true)
   const me = useStore((state) => state.me)

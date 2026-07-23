@@ -5,6 +5,7 @@ import type { SharpySource } from '../../lib/types'
 import { useStore } from '../../store'
 import { Markdown } from '../Markdown'
 import { SharpyCitationChips } from './SharpyCitationChips'
+import { StreamShield } from '../stream/StreamShield'
 
 const SUGGESTED_PROMPTS = [
   'What did we decide about ',
@@ -121,6 +122,7 @@ export function SharpyPage() {
   const isEmpty = !loading && messages.length === 0 && !streaming
 
   return (
+    <StreamShield label="Sharpy hidden">
     <div className="relative flex min-h-0 flex-1 overflow-hidden bg-[var(--color-ink)]">
       <aside
         id="sharpy-history"
@@ -283,6 +285,7 @@ export function SharpyPage() {
         </div>
       </main>
     </div>
+    </StreamShield>
   )
 }
 

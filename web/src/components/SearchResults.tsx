@@ -1,3 +1,4 @@
+import { effectiveNicknames } from '../lib/displayName'
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
@@ -8,7 +9,7 @@ import { fmtTime, fmtDayDivider } from '../lib/util'
 import { toastError } from '../lib/toast'
 import { channelLabel } from '../lib/util'
 import { localSearchResult, searchLocal } from '../lib/e2ee/search'
-import { useStore } from '../store'
+import { useStore, streamShieldOn } from '../store'
 
 type Tab = 'messages' | 'docs'
 
@@ -22,8 +23,17 @@ export function SearchResults() {
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
   const channels = useStore((s) => s.channels)
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   const setFocus = useStore((s) => s.setFocus)
+  const shielded = useStore(streamShieldOn)
+
+  // Hits from private channels/DMs blur while streaming; unknown channels
+  // (e.g. local encrypted-DM results) count as private.
+  function hitShielded(channelId: string): boolean {
+    if (!shielded) return false
+    const kind = channels.find((c) => c.id === channelId)?.kind
+    return kind !== 'public'
+  }
 
   useEffect(() => {
     if (!q.trim()) {
@@ -121,7 +131,7 @@ export function SearchResults() {
                 className="flex w-full items-start gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] p-3 text-left transition hover:border-[var(--color-accent)]"
               >
                 <span className="text-xl">{d.icon || (d.kind === 'canvas' ? '🎨' : d.kind === 'board' ? '🗂️' : '📄')}</span>
-                <div className="min-w-0 flex-1">
+                <div className={`min-w-0 flex-1 ${hitShielded(d.channel_id) ? 'stream-blur' : ''}`}>
                   <div className="mb-0.5 flex items-center gap-2">
                     <span className="truncate font-semibold">{d.title || 'Untitled'}</span>
                     <span className="shrink-0 text-[11px] text-[var(--color-accent-hover)]">
@@ -151,19 +161,21 @@ export function SearchResults() {
                 }}
                 className="block w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] p-3 text-left transition hover:border-[var(--color-text-faint)]"
               >
-                <div className="mb-1.5 flex items-center gap-2 text-xs text-[var(--color-text-faint)]">
-                  <span className="font-medium text-[var(--color-accent-hover)]">
-                    {r.local ? '🔒 ' : '#'}{r.channel_name}
-                  </span>
-                  <span>·</span>
-                  <span>{fmtDayDivider(r.created_at)}</span>
-                  <span>at {fmtTime(r.created_at)}</span>
-                </div>
-                <div className="flex gap-2.5">
-                  <Avatar id={r.user.id} name={r.user.display_name} size={28} />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold">{r.user.display_name}</div>
-                    <Markdown content={r.content} />
+                <div className={hitShielded(r.channel_id) ? 'stream-blur' : undefined}>
+                  <div className="mb-1.5 flex items-center gap-2 text-xs text-[var(--color-text-faint)]">
+                    <span className="font-medium text-[var(--color-accent-hover)]">
+                      {r.local ? '🔒 ' : '#'}{r.channel_name}
+                    </span>
+                    <span>·</span>
+                    <span>{fmtDayDivider(r.created_at)}</span>
+                    <span>at {fmtTime(r.created_at)}</span>
+                  </div>
+                  <div className="flex gap-2.5">
+                    <Avatar id={r.user.id} name={r.user.display_name} size={28} />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold">{r.user.display_name}</div>
+                      <Markdown content={r.content} />
+                    </div>
                   </div>
                 </div>
               </button>

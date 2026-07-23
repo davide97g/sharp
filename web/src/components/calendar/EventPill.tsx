@@ -1,3 +1,4 @@
+import { effectiveNicknames } from '../../lib/displayName'
 import { useEffect, useRef, useState } from 'react'
 import type { CalendarItem } from '../../lib/types'
 import { timeRange, withinJoinWindow } from '../../lib/calendar'
@@ -9,7 +10,7 @@ export function EventPill({ item }: { item: CalendarItem }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const channels = useStore((s) => s.channels)
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   const joinScheduledMeeting = useStore((s) => s.joinScheduledMeeting)
 
   const isNative = item.source === 'native'

@@ -1,6 +1,7 @@
+import { effectiveNicknames } from '../lib/displayName'
 import { useMemo } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { useStore } from '../store'
+import { useStore, streamShieldOn } from '../store'
 import { channelLabel } from '../lib/util'
 import { Avatar } from './Avatar'
 import { SidebarToggleIcon } from './Sidebar'
@@ -8,8 +9,9 @@ import { SidebarToggleIcon } from './Sidebar'
 /** Collapsed chat-only sidebar. Module hubs never inherit channel navigation. */
 export function CompactSidebar({ onToggle }: { onToggle?: () => void }) {
   const channels = useStore((s) => s.channels)
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   const online = useStore((s) => s.online)
+  const shielded = useStore(streamShieldOn)
   const location = useLocation()
   const active = location.pathname.match(/^\/c\/([^/]+)/)?.[1]
   const items = useMemo(
@@ -48,33 +50,37 @@ export function CompactSidebar({ onToggle }: { onToggle?: () => void }) {
               key={channel.id}
               to={`/c/${channel.id}`}
               aria-label={channelLabel(channel, nicknames)}
-              title={channelLabel(channel, nicknames)}
+              title={shielded ? undefined : channelLabel(channel, nicknames)}
               className={`relative flex h-11 w-11 items-center justify-center rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
                 active === channel.id
                   ? 'bg-[var(--color-accent-soft)] ring-1 ring-[var(--color-accent)]'
                   : 'hover:bg-[var(--color-panel-2)]'
               }`}
             >
-              <Avatar
-                id={channel.dm_user.id}
-                name={channel.dm_user.display_name}
-                size={32}
-                online={online.has(channel.dm_user.id)}
-              />
+              <span className={shielded ? 'stream-blur' : undefined}>
+                <Avatar
+                  id={channel.dm_user.id}
+                  name={channel.dm_user.display_name}
+                  size={32}
+                  online={online.has(channel.dm_user.id)}
+                />
+              </span>
             </NavLink>
           ) : (
             <NavLink
               key={channel.id}
               to={`/c/${channel.id}`}
               aria-label={`#${channel.name}`}
-              title={`#${channel.name}`}
+              title={shielded && channel.kind === 'private' ? undefined : `#${channel.name}`}
               className={`flex h-11 w-11 items-center justify-center rounded-xl text-xs font-bold outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
                 active === channel.id
                   ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)] ring-1 ring-[var(--color-accent)]'
                   : 'text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)]'
               }`}
             >
-              #{channel.name.slice(0, 1)}
+              <span className={shielded && channel.kind === 'private' ? 'stream-blur' : undefined}>
+                #{channel.name.slice(0, 1)}
+              </span>
             </NavLink>
           ),
         )}

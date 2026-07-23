@@ -1192,6 +1192,14 @@ input[type='range'].range-slider::-moz-range-track {
   animation: sharp-fade-in 120ms ease;
 }
 
+/* Streaming mode: inline labels/snippets that must not be readable on a shared
+   screen. Blur only — the parent row keeps its click behavior. */
+.stream-blur {
+  filter: blur(6px);
+  user-select: none;
+  pointer-events: none;
+}
+
 /* Inbox slide-over */
 @keyframes sharp-inbox-in {
   from {

@@ -1,20 +1,22 @@
+import { effectiveNicknames } from '../lib/displayName'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useStore } from '../store'
+import { useStore, streamShieldOn } from '../store'
 import { channelLabel, fuzzyScore } from '../lib/util'
 import { toastError } from '../lib/toast'
 import { sound } from '../lib/sound'
 import type { DocKind } from '../lib/types'
 
+// `priv` marks entries whose label must blur while the streaming shield is on.
 type Item =
-  | { kind: 'channel'; id: string; label: string; sub: string; icon: string }
-  | { kind: 'user'; id: string; label: string; sub: string; icon: string }
-  | { kind: 'doc'; id: string; label: string; sub: string; icon: string; docKind: DocKind }
-  | { kind: 'task'; id: string; label: string; sub: string; icon: string; path: string }
+  | { kind: 'channel'; id: string; label: string; sub: string; icon: string; priv?: boolean }
+  | { kind: 'user'; id: string; label: string; sub: string; icon: string; priv?: boolean }
+  | { kind: 'doc'; id: string; label: string; sub: string; icon: string; docKind: DocKind; priv?: boolean }
+  | { kind: 'task'; id: string; label: string; sub: string; icon: string; path: string; priv?: boolean }
 
 export function QuickSwitcher() {
   const open = useStore((s) => s.quickSwitcherOpen)
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   const setOpen = useStore((s) => s.setQuickSwitcher)
   const channels = useStore((s) => s.channels)
   const users = useStore((s) => s.users)
@@ -24,6 +26,7 @@ export function QuickSwitcher() {
   const docsByChannel = useStore((s) => s.docsByChannel)
   const navigate = useNavigate()
 
+  const shielded = useStore(streamShieldOn)
   const [q, setQ] = useState('')
   const [sel, setSel] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -47,6 +50,7 @@ export function QuickSwitcher() {
             label: channelLabel(c, nicknames),
             sub: 'Direct message',
             icon: online.has(c.dm_user?.id ?? '') ? '🟢' : '💬',
+            priv: true,
           }
         : {
             kind: 'channel',
@@ -54,6 +58,7 @@ export function QuickSwitcher() {
             label: c.name,
             sub: c.is_member ? 'Channel' : 'Public channel',
             icon: '#',
+            priv: c.kind === 'private',
           },
     )
     const dmUserIds = new Set(
@@ -69,7 +74,11 @@ export function QuickSwitcher() {
         icon: online.has(u.id) ? '🟢' : '👤',
       }))
     const chanName: Record<string, string> = {}
-    for (const c of channels) chanName[c.id] = c.kind === 'dm' ? channelLabel(c, nicknames) : c.name
+    const chanPriv: Record<string, boolean> = {}
+    for (const c of channels) {
+      chanName[c.id] = c.kind === 'dm' ? channelLabel(c, nicknames) : c.name
+      chanPriv[c.id] = c.kind !== 'public'
+    }
     const docItems: Item[] = Object.values(docsByChannel)
       .flat()
       .filter((d) => !d.deleted_at)
@@ -80,6 +89,7 @@ export function QuickSwitcher() {
         sub: `${d.kind === 'canvas' ? 'Canvas' : 'Doc'} · #${chanName[d.channel_id] ?? ''}`,
         icon: d.icon || (d.kind === 'canvas' ? '🎨' : '📄'),
         docKind: d.kind,
+        priv: chanPriv[d.channel_id] ?? false,
       }))
     return [...chanItems, ...userItems, ...docItems]
   }, [channels, users, me, online, docsByChannel, nicknames])
@@ -220,7 +230,7 @@ export function QuickSwitcher() {
               <span className="flex h-6 w-6 items-center justify-center text-sm text-[var(--color-text-faint)]">
                 {it.icon}
               </span>
-              <span className="min-w-0 flex-1">
+              <span className={`min-w-0 flex-1 ${shielded && it.priv ? 'stream-blur' : ''}`}>
                 <span className="block truncate text-sm font-medium">{it.label}</span>
                 <span className="block truncate text-[11px] text-[var(--color-text-faint)]">
                   {it.sub}

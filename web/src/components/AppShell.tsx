@@ -15,7 +15,8 @@ import { isOnboardingDone } from '../lib/onboarding'
 import { sound } from '../lib/sound'
 import { hasUnseenRelease } from '../lib/whatsNew'
 import { useIsMobile } from '../lib/useMediaQuery'
-import { useStore } from '../store'
+import { useStore, streamShieldOn } from '../store'
+import { StreamBanner } from './stream/StreamBanner'
 import { RestoreEncryptionModal } from './RestoreEncryptionModal'
 import { Avatar } from './Avatar'
 
@@ -150,11 +151,13 @@ export function AppShell() {
     if (mode !== 'chat') setInboxOpen(false)
   }, [mode, setInboxOpen])
 
-  // total unread -> document title
+  // total unread -> document title (hidden while the streaming shield is on —
+  // the tab title is visible in a shared screen's window chrome)
+  const shielded = useStore(streamShieldOn)
   const totalUnread = channels.reduce((sum, c) => sum + (c.unread_count || 0), 0)
   useEffect(() => {
-    document.title = totalUnread > 0 ? `(${totalUnread}) sharp` : 'sharp'
-  }, [totalUnread])
+    document.title = totalUnread > 0 && !shielded ? `(${totalUnread}) sharp` : 'sharp'
+  }, [totalUnread, shielded])
 
   const toggleSidebar = useCallback(() => {
     setSidebarOpen((open) => !open)
@@ -203,7 +206,9 @@ export function AppShell() {
   }, [setQuickSwitcher, setSearchOpen, toggleSidebar, isMobile, mode, navigate])
 
   return (
-    <div className={`relative flex h-full w-full overflow-hidden ${isMobile ? 'flex-col' : ''}`}>
+    <div className="flex h-full w-full flex-col overflow-hidden">
+      <StreamBanner />
+      <div className={`relative flex min-h-0 w-full flex-1 overflow-hidden ${isMobile ? 'flex-col' : ''}`}>
       {!settingsMode && !isMobile && !dockRail && (
         <ModeRail mode={mode} orientation="vertical" />
       )}
@@ -276,6 +281,7 @@ export function AppShell() {
       {!settingsMode && mode === 'chat' && <InboxPanel />}
       {onboarding && <Onboarding onClose={() => setOnboarding(false)} />}
       <RestoreEncryptionModal />
+      </div>
     </div>
   )
 }

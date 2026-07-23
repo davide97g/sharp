@@ -1,3 +1,4 @@
+import { effectiveNicknames } from '../lib/displayName'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useStore } from '../store'
@@ -15,6 +16,7 @@ import { GearIcon, LockIcon } from './icons'
 import { DuckSuggest } from './DuckSuggest'
 import { ScheduleMeetingModal } from './calendar/ScheduleMeetingModal'
 import { ActivePollBanner } from './ActivePollBanner'
+import { StreamShield } from './stream/StreamShield'
 import { useIsMobile } from '../lib/useMediaQuery'
 import { channelLabel, sameDay, withinMinutes } from '../lib/util'
 
@@ -23,7 +25,7 @@ export function MessagePane() {
   const navigate = useNavigate()
   const isMobile = useIsMobile()
   const me = useStore((s) => s.me)
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   const channels = useStore((s) => s.channels)
   const channel = channels.find((c) => c.id === channelId)
   const cm = useStore((s) => (channelId ? s.byChannel[channelId] : undefined))
@@ -358,7 +360,7 @@ export function MessagePane() {
       ? 'Start huddle'
       : 'Join voice'
 
-  return (
+  const pane = (
     <div className="relative flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
       {/* header */}
       <header className="flex h-14 items-center gap-2 border-b border-[var(--color-border)] px-3 sm:px-4">
@@ -551,6 +553,16 @@ export function MessagePane() {
       {needsLayoutChoice && <ChatLayoutChooser />}
     </div>
   )
+
+  // Private conversations never reach a shared screen unshielded.
+  if (isDm || channel.kind === 'private') {
+    return (
+      <StreamShield label={isDm ? 'Direct message hidden' : 'Private channel hidden'}>
+        {pane}
+      </StreamShield>
+    )
+  }
+  return pane
 }
 
 function JumpToMessages({

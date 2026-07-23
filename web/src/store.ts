@@ -225,6 +225,44 @@ export function dndActive(s: {
   return a < b ? cur >= a && cur < b : cur >= a || cur < b
 }
 
+/** Streaming mode is on: manual toggle, or actively sharing the screen in a call. */
+export function streamingActive(s: {
+  streamManual: boolean
+  voice: { screenStatus: 'off' | 'starting' | 'on' }
+}): boolean {
+  return s.streamManual || s.voice.screenStatus === 'on'
+}
+
+/** The privacy shield is enforcing right now (streaming and not inside a reveal window). */
+export function streamShieldOn(s: {
+  streamManual: boolean
+  streamPauseUntil: number | null
+  voice: { screenStatus: 'off' | 'starting' | 'on' }
+}): boolean {
+  if (!streamingActive(s)) return false
+  return !(s.streamPauseUntil && Date.now() < s.streamPauseUntil)
+}
+
+/**
+ * Alerts from this channel must stay off-screen while shielded (private/DM only).
+ * Server web-push fires outside the app and can't be gated here — this covers
+ * in-app toasts, sounds, and client-routed OS notifications only.
+ */
+function streamShieldsChannel(
+  st: {
+    channels: Channel[]
+    streamManual: boolean
+    streamPauseUntil: number | null
+    voice: { screenStatus: 'off' | 'starting' | 'on' }
+  },
+  channelId: string | null | undefined,
+): boolean {
+  if (!streamShieldOn(st)) return false
+  if (!channelId) return false
+  const kind = st.channels.find((c) => c.id === channelId)?.kind
+  return kind === 'private' || kind === 'dm'
+}
+
 type State = {
   // auth
   token: string | null
@@ -344,6 +382,14 @@ type State = {
   railPosition: RailPosition
   // Bottom dock only: slide away until the cursor nears the bottom edge.
   dockAutoHide: boolean
+
+  // --- streaming mode (privacy shield) ---
+  // Manual arm for external capture (OBS etc.); in-app screen share arms it automatically.
+  streamManual: boolean
+  // Reveal window expiry (epoch ms) after the user confirms "reveal for 10 min"; ephemeral.
+  streamPauseUntil: number | null
+  // While shielded, ignore personal nicknames and show plain display names.
+  streamRevertNicknames: boolean
 
   // ephemeral voice rooms + this connection's active call
   voiceRooms: Record<string, VoiceRoom>
@@ -589,6 +635,10 @@ type State = {
   setChatLayout: (layout: ChatLayout) => Promise<void>
   setRailPosition: (position: RailPosition) => void
   setDockAutoHide: (autoHide: boolean) => void
+  setStreamManual: (on: boolean) => void
+  setStreamRevertNicknames: (on: boolean) => void
+  revealStreamContent: () => void
+  clearStreamReveal: () => void
   updateProfile: (input: { display_name?: string }) => Promise<void>
   uploadAvatar: (file: Blob, onProgress?: (f: number) => void) => Promise<void>
   removeAvatar: () => Promise<void>
@@ -617,6 +667,8 @@ function emptyChannelMessages(): ChannelMessages {
 const NOISE_SUPPRESSION_KEY = 'sharp.noiseSuppression'
 const RAIL_POSITION_KEY = 'sharp.railPosition'
 const DOCK_AUTOHIDE_KEY = 'sharp.dockAutoHide'
+const STREAM_MANUAL_KEY = 'sharp.streamManual'
+const STREAM_REVERT_NICKS_KEY = 'sharp.streamRevertNicknames'
 
 function storedNoiseSuppression(): boolean {
   try {
@@ -638,6 +690,22 @@ function storedRailPosition(): RailPosition {
 function storedDockAutoHide(): boolean {
   try {
     return window.localStorage.getItem(DOCK_AUTOHIDE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function storedStreamManual(): boolean {
+  try {
+    return window.localStorage.getItem(STREAM_MANUAL_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function storedStreamRevertNicknames(): boolean {
+  try {
+    return window.localStorage.getItem(STREAM_REVERT_NICKS_KEY) === '1'
   } catch {
     return false
   }
@@ -743,6 +811,9 @@ export const useStore = create<State>((set, get) => ({
   chatLayout: null,
   railPosition: storedRailPosition(),
   dockAutoHide: storedDockAutoHide(),
+  streamManual: storedStreamManual(),
+  streamPauseUntil: null,
+  streamRevertNicknames: storedStreamRevertNicknames(),
   voiceRooms: {},
   activeMeetings: {},
   voice: emptyVoiceState(),
@@ -1939,6 +2010,11 @@ export const useStore = create<State>((set, get) => ({
               localScreenStream: stream,
               screenStatus: stream ? 'on' : 'off',
             },
+            // A reveal grant is scoped to one sharing session: any share
+            // start/stop drops it, so a new session always begins shielded
+            // (call-leave paths reset voice without this callback, so clearing
+            // on start covers stale grants too).
+            streamPauseUntil: null,
           }
         })
       },
@@ -2577,6 +2653,33 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
+  setStreamManual(on) {
+    // Turning the mode off also drops any reveal grant so re-arming starts shielded.
+    set({ streamManual: on, ...(on ? {} : { streamPauseUntil: null }) })
+    try {
+      window.localStorage.setItem(STREAM_MANUAL_KEY, on ? '1' : '0')
+    } catch {
+      // The preference is still usable for this session if storage is unavailable.
+    }
+  },
+
+  setStreamRevertNicknames(on) {
+    set({ streamRevertNicknames: on })
+    try {
+      window.localStorage.setItem(STREAM_REVERT_NICKS_KEY, on ? '1' : '0')
+    } catch {
+      // The preference is still usable for this session if storage is unavailable.
+    }
+  },
+
+  revealStreamContent() {
+    set({ streamPauseUntil: Date.now() + 10 * 60_000 })
+  },
+
+  clearStreamReveal() {
+    set({ streamPauseUntil: null })
+  },
+
   async updateProfile(input) {
     const user = await api.updateProfile(input)
     set((s) => ({ me: user, users: { ...s.users, [user.id]: user } }))
@@ -2897,7 +3000,8 @@ export const useStore = create<State>((set, get) => ({
             huddleStarted &&
             channel?.kind === 'dm' &&
             me &&
-            p.participant.user_id !== me.id
+            p.participant.user_id !== me.id &&
+            !streamShieldOn(get())
           ) {
             const who = channel.dm_user?.display_name ?? 'Someone'
             toastNotify('started a huddle', {
@@ -3351,7 +3455,12 @@ export const useStore = create<State>((set, get) => ({
           window.location.pathname === deepLink
         const visibleHere =
           typeof document === 'undefined' || document.visibilityState === 'visible'
-        if (!viewing && !dndActive(get()) && visibleHere) {
+        if (
+          !viewing &&
+          !dndActive(get()) &&
+          visibleHere &&
+          !streamShieldsChannel(get(), mention.doc.channel_id)
+        ) {
           const docTitle = mention.doc.title || 'Untitled'
           const who = mention.from_user.display_name
           const isCanvas = mention.doc.kind === 'canvas'
@@ -3400,7 +3509,12 @@ export const useStore = create<State>((set, get) => ({
         const st = get()
         const visibleHere =
           typeof document === 'undefined' || document.visibilityState === 'visible'
-        if (!dndActive(st) && !focusedHere && visibleHere) {
+        // A brand-new DM channel may not be in the list yet, so the dm kind
+        // check can't rely on the channel lookup alone.
+        const shielded =
+          (notification.kind === 'dm' && streamShieldOn(st)) ||
+          streamShieldsChannel(st, notification.channel_id)
+        if (!dndActive(st) && !focusedHere && visibleHere && !shielded) {
           const title =
             notification.kind === 'dm'
               ? notification.actor.display_name

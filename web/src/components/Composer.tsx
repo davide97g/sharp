@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
+import { effectiveNicknames } from '../lib/displayName'
 import { api } from '../lib/api'
 import { resolveEmojiShortcode, searchEmojis } from '../lib/emoji'
 import { buildGifToken, gifPreviewText } from '../lib/gif'
@@ -119,7 +120,7 @@ export function Composer({
   const replyAuthorName = useStore((s) => {
     if (!activeReply) return null
     return (
-      s.nicknames[activeReply.user.id]?.trim() || activeReply.user.display_name
+      effectiveNicknames(s)[activeReply.user.id]?.trim() || activeReply.user.display_name
     )
   })
 

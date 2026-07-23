@@ -1,5 +1,6 @@
 // Keyboard-filterable dropdown menus for task properties — the Linear pattern:
 // click (or hotkey) opens a small palette, type to filter, Enter/click to pick.
+import { effectiveNicknames } from '../../lib/displayName'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useStore } from '../../store'
 import { colorOf } from '../../lib/boardColors'
@@ -211,7 +212,7 @@ export function AssigneePicker({
   onPick: (userId: string | null) => void
 }) {
   const users = useStore((s) => s.users)
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   const [open, setOpen] = useState(false)
   const current = assigneeId ? users[assigneeId] : null
   const currentLabel = current

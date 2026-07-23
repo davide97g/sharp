@@ -1,6 +1,7 @@
+import { effectiveNicknames } from '../lib/displayName'
 import { useMemo, useState } from 'react'
 import { NavLink, useNavigate, useParams } from 'react-router-dom'
-import { useStore } from '../store'
+import { useStore, streamShieldOn } from '../store'
 import { channelLabel } from '../lib/util'
 import { CreateChannelModal } from './CreateChannelModal'
 import { BrowseChannelsModal } from './BrowseChannelsModal'
@@ -16,7 +17,7 @@ export function Sidebar({
   onToggle?: () => void
 }) {
   const channels = useStore((s) => s.channels)
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   const online = useStore((s) => s.online)
   const voiceRooms = useStore((s) => s.voiceRooms)
   const setQuickSwitcher = useStore((s) => s.setQuickSwitcher)
@@ -217,6 +218,7 @@ function ChannelRow({
   const { channelId } = useParams()
   const active = channelId === channel.id
   const unread = channel.unread_count > 0
+  const shielded = useStore(streamShieldOn) && channel.kind === 'private'
   return (
     <NavLink
       to={`/c/${channel.id}`}
@@ -229,7 +231,7 @@ function ChannelRow({
       }`}
     >
       <span className="text-[var(--color-text-faint)]">#</span>
-      <span className={`min-w-0 flex-1 truncate ${unread && !active ? 'font-semibold' : ''}`}>
+      <span className={`min-w-0 flex-1 truncate ${unread && !active ? 'font-semibold' : ''} ${shielded ? 'stream-blur' : ''}`}>
         {channel.name}
       </span>
       {channel.kind === 'private' && (
@@ -252,7 +254,7 @@ function ChannelRow({
         <GearIcon />
       </button>
       {unread && !active && (
-        <span className="rounded-full bg-[var(--color-accent)] px-1.5 py-0.5 text-[10px] font-bold text-white">
+        <span className={`rounded-full bg-[var(--color-accent)] px-1.5 py-0.5 text-[10px] font-bold text-white ${shielded ? 'stream-blur' : ''}`}>
           {channel.unread_count}
         </span>
       )}
@@ -270,9 +272,10 @@ function DmRow({
   voiceRoom?: VoiceRoom
 }) {
   const { channelId } = useParams()
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   const active = channelId === channel.id
   const unread = channel.unread_count > 0
+  const shielded = useStore(streamShieldOn)
   return (
     <NavLink
       to={`/c/${channel.id}`}
@@ -286,12 +289,12 @@ function DmRow({
         className="h-2 w-2 shrink-0 rounded-full"
         style={{ backgroundColor: online ? '#4fbf9f' : '#4b4b56' }}
       />
-      <span className={`min-w-0 flex-1 truncate ${unread && !active ? 'font-semibold text-[var(--color-text)]' : ''}`}>
+      <span className={`min-w-0 flex-1 truncate ${unread && !active ? 'font-semibold text-[var(--color-text)]' : ''} ${shielded ? 'stream-blur' : ''}`}>
         {channelLabel(channel, nicknames)}
       </span>
       <VoiceRoomIndicator room={voiceRoom} />
       {unread && !active && (
-        <span className="ml-auto rounded-full bg-[var(--color-accent)] px-1.5 py-0.5 text-[10px] font-bold text-white">
+        <span className={`ml-auto rounded-full bg-[var(--color-accent)] px-1.5 py-0.5 text-[10px] font-bold text-white ${shielded ? 'stream-blur' : ''}`}>
           {channel.unread_count}
         </span>
       )}

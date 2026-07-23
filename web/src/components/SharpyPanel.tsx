@@ -6,6 +6,7 @@ import { fmtRelative } from '../lib/util'
 import { Markdown } from './Markdown'
 import type { SharpySource } from '../lib/types'
 import { SharpyCitationChips } from './sharpy/SharpyCitationChips'
+import { StreamShield } from './stream/StreamShield'
 
 const SUGGESTED_PROMPTS = [
   'What did we decide about ',
@@ -105,6 +106,8 @@ export function SharpyPanel() {
       aria-modal={isMobile ? true : undefined}
       aria-label="Sharpy assistant"
     >
+      {/* Sharpy answers are grounded in workspace content, so the whole panel shields. */}
+      <StreamShield label="Sharpy hidden">
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--color-border)] px-3 sm:px-4">
         <div className="flex min-w-0 items-center gap-2">
           <span className="text-[var(--color-accent-hover)]" aria-hidden>
@@ -248,6 +251,7 @@ export function SharpyPanel() {
           </div>
         </>
       )}
+      </StreamShield>
     </aside>
   )
 }

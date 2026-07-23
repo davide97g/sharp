@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { useStore } from '../store'
+import { useStore, streamShieldOn } from '../store'
 import { api } from '../lib/api'
 import type {
   ChannelNotifyMode,
@@ -53,6 +53,7 @@ type Tab =
   | 'notifications'
   | 'appearance'
   | 'meetings'
+  | 'streaming'
   | 'security'
   | 'encryption'
   | 'workspace'
@@ -65,6 +66,7 @@ const SETTINGS_TABS: Tab[] = [
   'notifications',
   'appearance',
   'meetings',
+  'streaming',
   'accounts',
   'security',
   'encryption',
@@ -371,7 +373,7 @@ export function UserSettingsModal({
           <PersonalVoiceTriggers />
 
           <div className="text-[11px] text-[var(--color-text-faint)]">
-            Signed in as {me.email}
+            Signed in as <MaskedEmail email={me.email ?? ''} />
           </div>
         </div>
       ) : tab === 'chat' ? (
@@ -428,6 +430,8 @@ export function UserSettingsModal({
         </div>
       ) : tab === 'meetings' ? (
         <MeetingEffectsSettings userId={me.id} />
+      ) : tab === 'streaming' ? (
+        <StreamingSettings />
       ) : tab === 'accounts' ? (
         <AccountsTab />
       ) : tab === 'security' ? (
@@ -653,6 +657,7 @@ const SETTINGS_META: Record<Tab, { label: string; description: string; group: st
   notifications: { label: 'Notifications', description: 'Control what alerts you, where, and when.', group: 'Personal' },
   appearance: { label: 'Appearance', description: 'Tune Sharp to your space and style.', group: 'Personal' },
   meetings: { label: 'Meetings', description: 'Control voice and meeting effects.', group: 'Personal' },
+  streaming: { label: 'Streaming', description: 'Hide private content while sharing your screen.', group: 'Personal' },
   accounts: { label: 'Connected accounts', description: 'Manage calendar connections and external accounts.', group: 'Account' },
   security: { label: 'Security', description: 'Protect your account with passkeys.', group: 'Account' },
   encryption: { label: 'Encryption', description: 'Manage trusted devices and encrypted backups.', group: 'Account' },
@@ -695,7 +700,9 @@ function SettingsPageShell({
             <Avatar id={userId} name={name} size={46} nicknameCard={false} />
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold">{name}</div>
-              <div className="truncate text-xs text-[var(--color-text-faint)]">{email}</div>
+              <div className="truncate text-xs text-[var(--color-text-faint)]">
+                <MaskedEmail email={email} />
+              </div>
             </div>
           </div>
         </div>
@@ -821,6 +828,7 @@ function SettingsIcon({ tab }: { tab: Tab }) {
     notifications: <><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></>,
     appearance: <><circle cx="12" cy="12" r="3" /><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4" /></>,
     meetings: <><rect x="3" y="6" width="13" height="12" rx="2" /><path d="m16 10 5-3v10l-5-3" /></>,
+    streaming: <><circle cx="12" cy="12" r="2" /><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2" /></>,
     accounts: <><circle cx="8" cy="8" r="3" /><path d="M2 20a6 6 0 0 1 12 0M16 8h6M19 5v6" /></>,
     security: <><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></>,
     encryption: <><path d="M12 3 5 6v5c0 4.5 2.8 8.2 7 10 4.2-1.8 7-5.5 7-10V6l-7-3Z" /><path d="m9 12 2 2 4-4" /></>,
@@ -831,6 +839,61 @@ function SettingsIcon({ tab }: { tab: Tab }) {
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0">
       {paths[tab]}
     </svg>
+  )
+}
+
+/** The signed-in email never reaches a shared screen — masked whenever the shield is on. */
+function MaskedEmail({ email }: { email: string }) {
+  const shielded = useStore(streamShieldOn)
+  if (shielded) return <span aria-label="Email hidden while streaming">•••••• hidden while streaming</span>
+  return <>{email}</>
+}
+
+function StreamingSettings() {
+  const streamManual = useStore((s) => s.streamManual)
+  const setStreamManual = useStore((s) => s.setStreamManual)
+  const revertNicknames = useStore((s) => s.streamRevertNicknames)
+  const setStreamRevertNicknames = useStore((s) => s.setStreamRevertNicknames)
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+        Streaming mode
+      </div>
+      <p className="-mt-2 text-[11px] text-[var(--color-text-faint)]">
+        While active, private channels, direct messages, previews, and your email are
+        hidden from the screen. It arms automatically when you share your screen in a
+        call; turn it on manually when streaming with external software (OBS, etc.).
+      </p>
+      <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] px-3 py-2">
+        <div>
+          <div className="text-sm font-medium text-[var(--color-text)]">Streaming mode (manual)</div>
+          <div className="text-[11px] text-[var(--color-text-faint)]">
+            Keep the privacy shield on even without an in-app screen share.
+          </div>
+        </div>
+        <Toggle checked={streamManual} onChange={setStreamManual} label="Streaming mode (manual)" />
+      </div>
+      <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] px-3 py-2">
+        <div>
+          <div className="text-sm font-medium text-[var(--color-text)]">
+            Show plain names while streaming
+          </div>
+          <div className="text-[11px] text-[var(--color-text-faint)]">
+            Hide your personal nicknames and show everyone&apos;s real display name instead.
+          </div>
+        </div>
+        <Toggle
+          checked={revertNicknames}
+          onChange={setStreamRevertNicknames}
+          label="Show plain names while streaming"
+        />
+      </div>
+      <p className="text-[11px] text-[var(--color-text-faint)]">
+        Saved on this device. You can reveal hidden content for 10 minutes at a time
+        from the overlay while streaming.
+      </p>
+    </div>
   )
 }
 

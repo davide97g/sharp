@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { avatarColor, initials } from '../lib/util'
 import { fetchAttachmentBlob } from '../lib/api'
 import { useStore } from '../store'
+import { effectiveNicknames } from '../lib/displayName'
 import { UserChip } from './UserCard'
 
 // The avatar API requires a Bearer header, so <img src> can't load it directly.
@@ -37,7 +38,7 @@ export function Avatar({
   // not in the directory.
   const stored = useStore((s) => s.users[id])
   const currentUser = useStore((s) => (s.me?.id === id ? s.me : null))
-  const nickname = useStore((s) => s.nicknames[id])
+  const nickname = useStore((s) => effectiveNicknames(s)[id])
   const displayName = nickname?.trim() || stored?.display_name || currentUser?.display_name || name
   const avatarUrl = stored?.avatar_url ?? currentUser?.avatar_url ?? null
 

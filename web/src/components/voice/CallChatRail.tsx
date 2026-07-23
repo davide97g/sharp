@@ -1,3 +1,4 @@
+import { effectiveNicknames } from '../../lib/displayName'
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import { useStore } from '../../store'
 import { channelLabel, sameDay, withinMinutes } from '../../lib/util'
@@ -12,7 +13,7 @@ import { TypingRow } from '../TypingRow'
 // channel's messages independently of whichever channel is open on the route.
 export function CallChatRail({ channelId }: { channelId: string }) {
   const channel = useStore((s) => s.channels.find((c) => c.id === channelId))
-  const nicknames = useStore((s) => s.nicknames)
+  const nicknames = useStore(effectiveNicknames)
   const cm = useStore((s) => s.byChannel[channelId])
   const online = useStore((s) => s.online)
   const chatLayout = useStore((s) => s.chatLayout)
