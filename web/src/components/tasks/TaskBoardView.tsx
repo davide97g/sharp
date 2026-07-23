@@ -84,6 +84,9 @@ function TaskColumn({
   onNewTask: (stateId: string) => void
 }) {
   const swatch = colorOf(column.state.color)
+  // Subtle status-color wash: tint the panel + border with a low-alpha mix of the
+  // state's accent so columns read by color even when a workspace theme is set.
+  const tint = swatch.fg
   const columnRef = useCallback(
     (el: HTMLElement | null) => dnd.registerColumn(column.state.id, el),
     [dnd, column.state.id],
@@ -117,9 +120,16 @@ function TaskColumn({
   return (
     <div
       ref={columnRef}
-      className="flex max-h-full w-[300px] shrink-0 flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)]"
+      className="flex max-h-full w-[300px] shrink-0 flex-col overflow-hidden rounded-xl border"
+      style={{
+        borderColor: `color-mix(in srgb, ${tint} 20%, var(--color-border))`,
+        background: `linear-gradient(to bottom, color-mix(in srgb, ${tint} 8%, var(--color-panel)), color-mix(in srgb, ${tint} 3%, var(--color-panel)) 160px)`,
+      }}
     >
-      <div className="flex items-center gap-2 px-3 pb-2 pt-3">
+      <div
+        className="flex items-center gap-2 px-3 pb-2 pt-3"
+        style={{ boxShadow: `inset 0 2px 0 color-mix(in srgb, ${tint} 55%, transparent)` }}
+      >
         <span
           className="flex min-w-0 select-none items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-semibold"
           style={{ backgroundColor: swatch.bg, color: swatch.fg }}
