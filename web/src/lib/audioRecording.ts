@@ -24,8 +24,13 @@ export function isRecordingSupported(): boolean {
   )
 }
 
-export function recordingFileName(mimeType: string): string {
-  return mimeType.includes('mp4') ? 'voice-message.m4a' : 'voice-message.webm'
+// Voice-message filename carries the clip length as a `-<sec>s` suffix (e.g.
+// `voice-message-33s.webm`) so the receiving player can show the duration
+// before fetching any bytes. AudioMessage parses it back out.
+export function recordingFileName(mimeType: string, durationSec?: number): string {
+  const ext = mimeType.includes('mp4') ? 'm4a' : 'webm'
+  const secs = durationSec && durationSec > 0 ? `-${Math.round(durationSec)}s` : ''
+  return `voice-message${secs}.${ext}`
 }
 
 async function captureAudio(deviceId?: string | null): Promise<MediaStream> {

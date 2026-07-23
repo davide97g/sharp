@@ -467,9 +467,12 @@ export function Composer({
     if (!rec) return
     recorderRef.current = null
     setRecorder(null)
+    const durationSec = rec.elapsedMs() / 1000
     const blob = await rec.stop()
     if (!blob || blob.size === 0) return
-    const file = new File([blob], recordingFileName(rec.mimeType), { type: rec.mimeType })
+    const file = new File([blob], recordingFileName(rec.mimeType, durationSec), {
+      type: rec.mimeType,
+    })
     uploadOne(file, { voice: true })
   }
 
