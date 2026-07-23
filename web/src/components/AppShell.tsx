@@ -97,6 +97,12 @@ export function AppShell() {
                   ? 'docs'
                   : 'chat'
 
+  // On mobile, hide the bottom tab bar while a conversation is open (`/c/…`) so
+  // the composer + safe area own the bottom edge — WhatsApp/Slack pattern. The
+  // top back button and channel tabs already carry navigation in that view.
+  const inChatDetail = /^\/c\//.test(location.pathname)
+  const showMobileTabBar = isMobile && !settingsMode && !inChatDetail
+
   const setInboxOpen = useStore((s) => s.setInboxOpen)
   const dockEdge: 'bottom' | 'top' | null =
     railPosition === 'bottom' ? 'bottom' : railPosition === 'top' ? 'top' : null
@@ -201,7 +207,7 @@ export function AppShell() {
       {!settingsMode && !isMobile && !dockRail && (
         <ModeRail mode={mode} orientation="vertical" />
       )}
-      <div className={`flex min-h-0 min-w-0 flex-1 overflow-hidden ${isMobile && !settingsMode ? 'mobile-main' : ''}`}>
+      <div className={`flex min-h-0 min-w-0 flex-1 overflow-hidden ${showMobileTabBar ? 'mobile-main' : ''}`}>
         {!settingsMode && !isMobile && mode === 'chat' && (
           <div
             id="app-sidebar"
@@ -263,7 +269,7 @@ export function AppShell() {
           </div>
         </div>
       )}
-      {!settingsMode && isMobile && <MobileTabBar />}
+      {showMobileTabBar && <MobileTabBar />}
       {inVoice && <VideoStage />}
       <QuickSwitcher />
       <SearchPalette />

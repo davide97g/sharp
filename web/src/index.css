@@ -158,6 +158,26 @@ body,
   a {
     -webkit-tap-highlight-color: transparent;
   }
+
+  /* Denser messages on phones: smaller body text and tighter chat bubbles so
+     more conversation fits without the oversized-bubble look. */
+  .md {
+    font-size: 0.875rem;
+    line-height: 1.45;
+  }
+
+  .chat-bubble {
+    padding-block: 0.375rem;
+    padding-inline: 0.625rem;
+    border-radius: 1rem;
+  }
+
+  /* Composer owns the bottom edge when the tab bar is hidden in a conversation.
+     Reclaim horizontal room and clear the home indicator. */
+  .composer-wrap {
+    padding-inline: max(0.625rem, var(--safe-left), var(--safe-right));
+    padding-bottom: max(0.5rem, var(--safe-bottom));
+  }
 }
 
 /* full-width draggable strip over the traffic lights (Tauri/macOS only) */

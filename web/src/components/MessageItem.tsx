@@ -373,7 +373,7 @@ export function MessageItem({
             <div className="w-full min-w-[16rem]">{editor}</div>
           ) : (
             <div
-              className={`min-w-0 rounded-2xl px-3 py-2 ring-inset transition-[box-shadow] duration-200 ease-in-out ${
+              className={`chat-bubble min-w-0 rounded-2xl px-3 py-2 ring-inset transition-[box-shadow] duration-200 ease-in-out ${
                 actioned || isFocused
                   ? 'ring-2 ring-[var(--color-accent)]'
                   : 'ring-0 ring-white/10 group-hover:ring-1'

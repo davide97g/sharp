@@ -5,7 +5,7 @@ import { resolveEmojiShortcode, searchEmojis } from '../lib/emoji'
 import { buildGifToken, gifPreviewText } from '../lib/gif'
 import { toastError } from '../lib/toast'
 import { fmtBytes } from '../lib/util'
-import { useCoarsePointer } from '../lib/useMediaQuery'
+import { useCoarsePointer, useIsMobile } from '../lib/useMediaQuery'
 import { Avatar } from './Avatar'
 import { GifPicker, type GifPickerHandle } from './GifPicker'
 import { DuckStreakBar } from './DuckStreakBar'
@@ -132,6 +132,9 @@ export function Composer({
   const [dismissedGifCommand, setDismissedGifCommand] = useState<string | null>(null)
   const [pollOpen, setPollOpen] = useState(false)
   const isGuest = useStore((s) => s.isGuest)
+  const isMobile = useIsMobile()
+  // Mobile "+" sheet holding attach / GIF / poll so the input row stays roomy.
+  const [plusOpen, setPlusOpen] = useState(false)
 
   // --- voice message recording ---
   const [recorder, setRecorder] = useState<VoiceRecorder | null>(null)
@@ -181,6 +184,11 @@ export function Composer({
   useEffect(() => {
     if (focusRequest?.key === draftKey) ref.current?.focus()
   }, [focusRequest, draftKey])
+
+  // Close the mobile "+" sheet when moving to a different chat or leaving mobile.
+  useEffect(() => {
+    setPlusOpen(false)
+  }, [draftKey, isMobile])
 
   // Populate the picker. People (@) resolve from the already-loaded directory
   // (channel members first); emoji (:) from the local shortcode index; resources
@@ -879,14 +887,7 @@ export function Composer({
             onCancel={cancelRecording}
           />
         ) : (
-        <div className="flex items-end gap-2">
-          <button
-            onClick={() => fileRef.current?.click()}
-            title="Attach files"
-            className="mb-0.5 flex h-11 w-11 items-center justify-center rounded-md text-lg leading-none text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] md:h-auto md:w-auto md:px-2 md:py-1.5"
-          >
-            📎
-          </button>
+        <div className="flex items-end gap-1.5 md:gap-2">
           <input
             ref={fileRef}
             type="file"
@@ -897,42 +898,127 @@ export function Composer({
               e.target.value = ''
             }}
           />
-          {gifEnabled && (
-            <button
-              type="button"
-              onMouseDown={(event) => event.stopPropagation()}
-              onClick={() => {
-                setTrigger(null)
-                setManualGifOpen((open) => !open)
-              }}
-              title="Send a GIF"
-              className="mb-0.5 flex h-11 w-11 items-center justify-center rounded-md text-xs font-bold leading-none text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] md:h-auto md:w-auto md:px-2 md:py-1.5"
-            >
-              GIF
-            </button>
+
+          {/* Mobile: one "+" that opens a sheet with attach / GIF / poll, so the
+              text field keeps the full width. Desktop keeps the inline buttons. */}
+          {isMobile ? (
+            (() => {
+              const canPoll = channel.kind !== 'dm' && !isGuest && canPost
+              return (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTrigger(null)
+                      setPlusOpen((open) => !open)
+                    }}
+                    aria-label="Add attachment, GIF, or poll"
+                    aria-expanded={plusOpen}
+                    className={`mb-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+                      plusOpen
+                        ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]'
+                        : 'text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]'
+                    }`}
+                  >
+                    <PlusIcon open={plusOpen} />
+                  </button>
+                  {plusOpen && (
+                    <>
+                      <button
+                        type="button"
+                        aria-hidden
+                        tabIndex={-1}
+                        onClick={() => setPlusOpen(false)}
+                        className="fixed inset-0 z-30 cursor-default"
+                      />
+                      <div
+                        role="menu"
+                        className="absolute bottom-full left-0 z-40 mb-2 min-w-44 overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1.5 shadow-2xl"
+                      >
+                        <PlusItem
+                          icon={<PaperclipGlyph />}
+                          label="Photo or file"
+                          onClick={() => {
+                            setPlusOpen(false)
+                            fileRef.current?.click()
+                          }}
+                        />
+                        {gifEnabled && (
+                          <PlusItem
+                            icon={<span className="text-xs font-bold leading-none">GIF</span>}
+                            label="GIF"
+                            onClick={() => {
+                              setPlusOpen(false)
+                              setTrigger(null)
+                              setManualGifOpen(true)
+                            }}
+                          />
+                        )}
+                        {canPoll && (
+                          <PlusItem
+                            icon={<PollIcon />}
+                            label="Poll"
+                            onClick={() => {
+                              setPlusOpen(false)
+                              setPollOpen(true)
+                            }}
+                          />
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )
+            })()
+          ) : (
+            <>
+              <button
+                onClick={() => fileRef.current?.click()}
+                title="Attach files"
+                aria-label="Attach files"
+                className="mb-0.5 flex items-center justify-center rounded-md px-2 py-1.5 text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
+              >
+                <PaperclipGlyph />
+              </button>
+              {gifEnabled && (
+                <button
+                  type="button"
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={() => {
+                    setTrigger(null)
+                    setManualGifOpen((open) => !open)
+                  }}
+                  title="Send a GIF"
+                  className="mb-0.5 flex items-center justify-center rounded-md px-2 py-1.5 text-xs font-bold leading-none text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
+                >
+                  GIF
+                </button>
+              )}
+              {channel.kind !== 'dm' && !isGuest && canPost ? (
+                <button
+                  type="button"
+                  onClick={() => setPollOpen(true)}
+                  title="Create a poll"
+                  aria-label="Create a poll"
+                  className="mb-0.5 flex items-center justify-center rounded-md px-2 py-1.5 text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+                >
+                  <PollIcon />
+                </button>
+              ) : null}
+              {recordingSupported && (
+                <button
+                  type="button"
+                  onClick={() => void startRecording()}
+                  title="Record a voice message"
+                  aria-label="Record a voice message"
+                  className="mb-0.5 flex items-center justify-center rounded-md px-2 py-1.5 text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+                >
+                  <MicGlyph />
+                </button>
+              )}
+            </>
           )}
-          {channel.kind !== 'dm' && !isGuest && canPost ? (
-            <button
-              type="button"
-              onClick={() => setPollOpen(true)}
-              title="Create a poll"
-              aria-label="Create a poll"
-              className="mb-0.5 flex h-11 w-11 items-center justify-center rounded-md text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] md:h-auto md:w-auto md:px-2 md:py-1.5"
-            >
-              <PollIcon />
-            </button>
-          ) : null}
-          {recordingSupported && (
-            <button
-              type="button"
-              onClick={() => void startRecording()}
-              title="Record a voice message"
-              aria-label="Record a voice message"
-              className="mb-0.5 flex h-11 w-11 items-center justify-center rounded-md text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] md:h-auto md:w-auto md:px-2 md:py-1.5"
-            >
-              <MicGlyph />
-            </button>
-          )}
+
           <textarea
             ref={ref}
             rows={1}
@@ -945,14 +1031,40 @@ export function Composer({
             placeholder={placeholder ?? 'Message'}
             className="composer-textarea min-h-11 max-h-[260px] flex-1 resize-none bg-transparent py-2.5 text-base text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:outline-none md:min-h-0 md:py-1.5 md:text-sm"
           />
-          <button
-            onClick={doSend}
-            disabled={!canSend}
-            title={uploading ? 'Waiting for uploads…' : 'Send (Enter)'}
-            className="composer-send mb-0.5 min-h-11 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-[var(--color-accent-hover)] disabled:opacity-40 md:min-h-0"
-          >
-            Send
-          </button>
+
+          {/* Mobile: an icon that flips between voice-record (empty) and send —
+              the WhatsApp affordance. Desktop keeps the labelled Send button. */}
+          {isMobile ? (
+            !canSend && recordingSupported && !value.trim() && readyIds.length === 0 ? (
+              <button
+                type="button"
+                onClick={() => void startRecording()}
+                aria-label="Record a voice message"
+                className="mb-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--color-text-faint)] transition hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+              >
+                <MicGlyph />
+              </button>
+            ) : (
+              <button
+                onClick={doSend}
+                disabled={!canSend}
+                aria-label="Send message"
+                title={uploading ? 'Waiting for uploads…' : 'Send'}
+                className="composer-send mb-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent)] text-white transition hover:bg-[var(--color-accent-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+              >
+                <SendIcon />
+              </button>
+            )
+          ) : (
+            <button
+              onClick={doSend}
+              disabled={!canSend}
+              title={uploading ? 'Waiting for uploads…' : 'Send (Enter)'}
+              className="composer-send mb-0.5 min-h-11 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-[var(--color-accent-hover)] disabled:opacity-40 md:min-h-0"
+            >
+              Send
+            </button>
+          )}
         </div>
         )}
       </div>
@@ -978,5 +1090,65 @@ function MicGlyph() {
       <path d="M5 10a7 7 0 0 0 14 0" />
       <path d="M12 17v5" />
     </svg>
+  )
+}
+
+function PaperclipGlyph() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M21.4 11.05 12.2 20.3a5 5 0 0 1-7.07-7.07l9.19-9.19a3.33 3.33 0 1 1 4.71 4.71l-9.2 9.2a1.67 1.67 0 0 1-2.36-2.36l8.49-8.49" />
+    </svg>
+  )
+}
+
+// Rotates from a plus into a close (×) while the sheet is open.
+function PlusIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      className="transition-transform duration-200"
+      style={{ transform: open ? 'rotate(45deg)' : 'none' }}
+      aria-hidden
+    >
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  )
+}
+
+function SendIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M3.4 20.4 21 12 3.4 3.6 3.39 10.2 15 12l-11.61 1.8z" />
+    </svg>
+  )
+}
+
+function PlusItem({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: React.ReactNode
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-[var(--color-text)] hover:bg-[var(--color-panel-2)] active:bg-[var(--color-panel-2)]"
+    >
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center text-[var(--color-text-dim)]">
+        {icon}
+      </span>
+      <span>{label}</span>
+    </button>
   )
 }
