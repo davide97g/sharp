@@ -1192,12 +1192,31 @@ input[type='range'].range-slider::-moz-range-track {
   animation: sharp-fade-in 120ms ease;
 }
 
-/* Streaming mode: inline labels/snippets that must not be readable on a shared
+/* Privacy Shield: inline labels/snippets that must not be readable on a shared
    screen. Blur only — the parent row keeps its click behavior. */
 .stream-blur {
   filter: blur(6px);
   user-select: none;
   pointer-events: none;
+}
+
+/* Slow breathing halo behind the shield glyph on the overlay card. */
+@keyframes shield-halo {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(245, 158, 11, 0);
+  }
+}
+.shield-halo {
+  animation: shield-halo 2.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .shield-halo {
+    animation: none;
+  }
 }
 
 /* Inbox slide-over */

@@ -557,7 +557,11 @@ export function MessagePane() {
   // Private conversations never reach a shared screen unshielded.
   if (isDm || channel.kind === 'private') {
     return (
-      <StreamShield label={isDm ? 'Direct message hidden' : 'Private channel hidden'}>
+      <StreamShield
+        label={isDm ? 'Direct message hidden' : 'Private channel hidden'}
+        channelId={channel.id}
+        channelName={isDm ? channelLabel(channel, nicknames) : `#${channel.name}`}
+      >
         {pane}
       </StreamShield>
     )

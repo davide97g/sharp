@@ -26,13 +26,17 @@ export function SearchResults() {
   const nicknames = useStore(effectiveNicknames)
   const setFocus = useStore((s) => s.setFocus)
   const shielded = useStore(streamShieldOn)
+  const revealChannels = useStore((s) => s.streamRevealChannels)
 
   // Hits from private channels/DMs blur while streaming; unknown channels
-  // (e.g. local encrypted-DM results) count as private.
+  // (e.g. local encrypted-DM results) count as private. A live per-channel
+  // reveal window unblurs that conversation's hits.
   function hitShielded(channelId: string): boolean {
     if (!shielded) return false
     const kind = channels.find((c) => c.id === channelId)?.kind
-    return kind !== 'public'
+    if (kind === 'public') return false
+    const until = revealChannels[channelId]
+    return !(until && Date.now() < until)
   }
 
   useEffect(() => {

@@ -11,7 +11,15 @@ export function CompactSidebar({ onToggle }: { onToggle?: () => void }) {
   const channels = useStore((s) => s.channels)
   const nicknames = useStore(effectiveNicknames)
   const online = useStore((s) => s.online)
-  const shielded = useStore(streamShieldOn)
+  const shieldOn = useStore(streamShieldOn)
+  const revealChannels = useStore((s) => s.streamRevealChannels)
+  // Per-row check (can't call hooks inside the map): shield on and no live
+  // reveal window for this conversation.
+  const chanShielded = (id: string) => {
+    if (!shieldOn) return false
+    const until = revealChannels[id]
+    return !(until && Date.now() < until)
+  }
   const location = useLocation()
   const active = location.pathname.match(/^\/c\/([^/]+)/)?.[1]
   const items = useMemo(
@@ -50,14 +58,14 @@ export function CompactSidebar({ onToggle }: { onToggle?: () => void }) {
               key={channel.id}
               to={`/c/${channel.id}`}
               aria-label={channelLabel(channel, nicknames)}
-              title={shielded ? undefined : channelLabel(channel, nicknames)}
+              title={chanShielded(channel.id) ? undefined : channelLabel(channel, nicknames)}
               className={`relative flex h-11 w-11 items-center justify-center rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
                 active === channel.id
                   ? 'bg-[var(--color-accent-soft)] ring-1 ring-[var(--color-accent)]'
                   : 'hover:bg-[var(--color-panel-2)]'
               }`}
             >
-              <span className={shielded ? 'stream-blur' : undefined}>
+              <span className={chanShielded(channel.id) ? 'stream-blur' : undefined}>
                 <Avatar
                   id={channel.dm_user.id}
                   name={channel.dm_user.display_name}
@@ -71,14 +79,14 @@ export function CompactSidebar({ onToggle }: { onToggle?: () => void }) {
               key={channel.id}
               to={`/c/${channel.id}`}
               aria-label={`#${channel.name}`}
-              title={shielded && channel.kind === 'private' ? undefined : `#${channel.name}`}
+              title={chanShielded(channel.id) && channel.kind === 'private' ? undefined : `#${channel.name}`}
               className={`flex h-11 w-11 items-center justify-center rounded-xl text-xs font-bold outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
                 active === channel.id
                   ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)] ring-1 ring-[var(--color-accent)]'
                   : 'text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)]'
               }`}
             >
-              <span className={shielded && channel.kind === 'private' ? 'stream-blur' : undefined}>
+              <span className={chanShielded(channel.id) && channel.kind === 'private' ? 'stream-blur' : undefined}>
                 #{channel.name.slice(0, 1)}
               </span>
             </NavLink>

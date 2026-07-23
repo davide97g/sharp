@@ -7,12 +7,13 @@ import { toastError } from '../lib/toast'
 import { sound } from '../lib/sound'
 import type { DocKind } from '../lib/types'
 
-// `priv` marks entries whose label must blur while the streaming shield is on.
+// `priv` marks entries whose label must blur while the Privacy Shield is on;
+// `chanId` lets a per-conversation reveal window unblur them.
 type Item =
-  | { kind: 'channel'; id: string; label: string; sub: string; icon: string; priv?: boolean }
-  | { kind: 'user'; id: string; label: string; sub: string; icon: string; priv?: boolean }
-  | { kind: 'doc'; id: string; label: string; sub: string; icon: string; docKind: DocKind; priv?: boolean }
-  | { kind: 'task'; id: string; label: string; sub: string; icon: string; path: string; priv?: boolean }
+  | { kind: 'channel'; id: string; label: string; sub: string; icon: string; priv?: boolean; chanId?: string }
+  | { kind: 'user'; id: string; label: string; sub: string; icon: string; priv?: boolean; chanId?: string }
+  | { kind: 'doc'; id: string; label: string; sub: string; icon: string; docKind: DocKind; priv?: boolean; chanId?: string }
+  | { kind: 'task'; id: string; label: string; sub: string; icon: string; path: string; priv?: boolean; chanId?: string }
 
 export function QuickSwitcher() {
   const open = useStore((s) => s.quickSwitcherOpen)
@@ -27,6 +28,12 @@ export function QuickSwitcher() {
   const navigate = useNavigate()
 
   const shielded = useStore(streamShieldOn)
+  const revealChannels = useStore((s) => s.streamRevealChannels)
+  const itemShielded = (it: Item) => {
+    if (!shielded || !it.priv) return false
+    const until = it.chanId ? revealChannels[it.chanId] : undefined
+    return !(until && Date.now() < until)
+  }
   const [q, setQ] = useState('')
   const [sel, setSel] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -51,6 +58,7 @@ export function QuickSwitcher() {
             sub: 'Direct message',
             icon: online.has(c.dm_user?.id ?? '') ? '🟢' : '💬',
             priv: true,
+            chanId: c.id,
           }
         : {
             kind: 'channel',
@@ -59,6 +67,7 @@ export function QuickSwitcher() {
             sub: c.is_member ? 'Channel' : 'Public channel',
             icon: '#',
             priv: c.kind === 'private',
+            chanId: c.id,
           },
     )
     const dmUserIds = new Set(
@@ -90,6 +99,7 @@ export function QuickSwitcher() {
         icon: d.icon || (d.kind === 'canvas' ? '🎨' : '📄'),
         docKind: d.kind,
         priv: chanPriv[d.channel_id] ?? false,
+        chanId: d.channel_id,
       }))
     return [...chanItems, ...userItems, ...docItems]
   }, [channels, users, me, online, docsByChannel, nicknames])
@@ -230,7 +240,7 @@ export function QuickSwitcher() {
               <span className="flex h-6 w-6 items-center justify-center text-sm text-[var(--color-text-faint)]">
                 {it.icon}
               </span>
-              <span className={`min-w-0 flex-1 ${shielded && it.priv ? 'stream-blur' : ''}`}>
+              <span className={`min-w-0 flex-1 ${itemShielded(it) ? 'stream-blur' : ''}`}>
                 <span className="block truncate text-sm font-medium">{it.label}</span>
                 <span className="block truncate text-[11px] text-[var(--color-text-faint)]">
                   {it.sub}

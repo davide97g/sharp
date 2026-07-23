@@ -858,18 +858,19 @@ function StreamingSettings() {
   return (
     <div className="flex flex-col gap-5">
       <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-        Streaming mode
+        Privacy Shield
       </div>
       <p className="-mt-2 text-[11px] text-[var(--color-text-faint)]">
-        While active, private channels, direct messages, previews, and your email are
-        hidden from the screen. It arms automatically when you share your screen in a
-        call; turn it on manually when streaming with external software (OBS, etc.).
+        While you share your screen, the Privacy Shield hides private channels, direct
+        messages, previews, and your email from everyone watching. It arms automatically
+        during in-app screen shares; turn it on manually when streaming with external
+        software (OBS, etc.).
       </p>
       <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] px-3 py-2">
         <div>
           <div className="text-sm font-medium text-[var(--color-text)]">Streaming mode (manual)</div>
           <div className="text-[11px] text-[var(--color-text-faint)]">
-            Keep the privacy shield on even without an in-app screen share.
+            Keep the Privacy Shield armed even without an in-app screen share.
           </div>
         </div>
         <Toggle checked={streamManual} onChange={setStreamManual} label="Streaming mode (manual)" />
@@ -880,7 +881,8 @@ function StreamingSettings() {
             Show plain names while streaming
           </div>
           <div className="text-[11px] text-[var(--color-text-faint)]">
-            Hide your personal nicknames and show everyone&apos;s real display name instead.
+            Hide your personal nicknames and show real display names the whole time
+            you&apos;re streaming — even while revealed content is visible.
           </div>
         </div>
         <Toggle
@@ -890,8 +892,8 @@ function StreamingSettings() {
         />
       </div>
       <p className="text-[11px] text-[var(--color-text-faint)]">
-        Saved on this device. You can reveal hidden content for 10 minutes at a time
-        from the overlay while streaming.
+        Saved on this device. From a hidden conversation you can pause the shield for
+        10 minutes — for just that conversation, or for everything.
       </p>
     </div>
   )

@@ -1,7 +1,7 @@
 import { effectiveNicknames } from '../lib/displayName'
 import { useMemo, useState } from 'react'
 import { NavLink, useNavigate, useParams } from 'react-router-dom'
-import { useStore, streamShieldOn } from '../store'
+import { useStore, streamChannelShielded } from '../store'
 import { channelLabel } from '../lib/util'
 import { CreateChannelModal } from './CreateChannelModal'
 import { BrowseChannelsModal } from './BrowseChannelsModal'
@@ -218,7 +218,8 @@ function ChannelRow({
   const { channelId } = useParams()
   const active = channelId === channel.id
   const unread = channel.unread_count > 0
-  const shielded = useStore(streamShieldOn) && channel.kind === 'private'
+  const shielded =
+    useStore((s) => streamChannelShielded(s, channel.id)) && channel.kind === 'private'
   return (
     <NavLink
       to={`/c/${channel.id}`}
@@ -275,7 +276,7 @@ function DmRow({
   const nicknames = useStore(effectiveNicknames)
   const active = channelId === channel.id
   const unread = channel.unread_count > 0
-  const shielded = useStore(streamShieldOn)
+  const shielded = useStore((s) => streamChannelShielded(s, channel.id))
   return (
     <NavLink
       to={`/c/${channel.id}`}

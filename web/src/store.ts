@@ -233,34 +233,48 @@ export function streamingActive(s: {
   return s.streamManual || s.voice.screenStatus === 'on'
 }
 
-/** The privacy shield is enforcing right now (streaming and not inside a reveal window). */
-export function streamShieldOn(s: {
+type StreamShieldState = {
   streamManual: boolean
-  streamPauseUntil: number | null
+  streamRevealAllUntil: number | null
+  streamRevealChannels: Record<string, number>
   voice: { screenStatus: 'off' | 'starting' | 'on' }
-}): boolean {
+}
+
+/** The privacy shield is enforcing right now (streaming and not inside an "everything" reveal window). */
+export function streamShieldOn(s: StreamShieldState): boolean {
   if (!streamingActive(s)) return false
-  return !(s.streamPauseUntil && Date.now() < s.streamPauseUntil)
+  return !(s.streamRevealAllUntil && Date.now() < s.streamRevealAllUntil)
 }
 
 /**
- * Alerts from this channel must stay off-screen while shielded (private/DM only).
- * Server web-push fires outside the app and can't be gated here — this covers
- * in-app toasts, sounds, and client-routed OS notifications only.
+ * Whether this channel's content must stay hidden right now. A per-channel
+ * reveal window lifts the shield for that conversation only; no channel id
+ * (e.g. local encrypted-DM search hits) stays hidden while the shield is on.
  */
-function streamShieldsChannel(
-  st: {
-    channels: Channel[]
-    streamManual: boolean
-    streamPauseUntil: number | null
-    voice: { screenStatus: 'off' | 'starting' | 'on' }
-  },
+export function streamChannelShielded(
+  s: StreamShieldState,
   channelId: string | null | undefined,
 ): boolean {
-  if (!streamShieldOn(st)) return false
+  if (!streamShieldOn(s)) return false
+  if (!channelId) return true
+  const until = s.streamRevealChannels[channelId]
+  return !(until && Date.now() < until)
+}
+
+/**
+ * Alerts from this channel must stay off-screen while shielded (private/DM only,
+ * honoring per-channel reveal windows). Server web-push fires outside the app
+ * and can't be gated here — this covers in-app toasts, sounds, and
+ * client-routed OS notifications only.
+ */
+function streamShieldsChannel(
+  st: StreamShieldState & { channels: Channel[] },
+  channelId: string | null | undefined,
+): boolean {
   if (!channelId) return false
   const kind = st.channels.find((c) => c.id === channelId)?.kind
-  return kind === 'private' || kind === 'dm'
+  if (kind !== 'private' && kind !== 'dm') return false
+  return streamChannelShielded(st, channelId)
 }
 
 type State = {
@@ -386,9 +400,11 @@ type State = {
   // --- streaming mode (privacy shield) ---
   // Manual arm for external capture (OBS etc.); in-app screen share arms it automatically.
   streamManual: boolean
-  // Reveal window expiry (epoch ms) after the user confirms "reveal for 10 min"; ephemeral.
-  streamPauseUntil: number | null
-  // While shielded, ignore personal nicknames and show plain display names.
+  // "Reveal everything" window expiry (epoch ms); ephemeral, never persisted.
+  streamRevealAllUntil: number | null
+  // Per-conversation reveal windows (channelId → epoch ms expiry); ephemeral.
+  streamRevealChannels: Record<string, number>
+  // While streaming (shield on or paused), ignore personal nicknames and show plain display names.
   streamRevertNicknames: boolean
 
   // ephemeral voice rooms + this connection's active call
@@ -637,8 +653,10 @@ type State = {
   setDockAutoHide: (autoHide: boolean) => void
   setStreamManual: (on: boolean) => void
   setStreamRevertNicknames: (on: boolean) => void
-  revealStreamContent: () => void
-  clearStreamReveal: () => void
+  revealStreamAll: () => void
+  revealStreamChannel: (channelId: string) => void
+  clearStreamReveals: () => void
+  expireStreamReveals: () => void
   updateProfile: (input: { display_name?: string }) => Promise<void>
   uploadAvatar: (file: Blob, onProgress?: (f: number) => void) => Promise<void>
   removeAvatar: () => Promise<void>
@@ -812,7 +830,8 @@ export const useStore = create<State>((set, get) => ({
   railPosition: storedRailPosition(),
   dockAutoHide: storedDockAutoHide(),
   streamManual: storedStreamManual(),
-  streamPauseUntil: null,
+  streamRevealAllUntil: null,
+  streamRevealChannels: {},
   streamRevertNicknames: storedStreamRevertNicknames(),
   voiceRooms: {},
   activeMeetings: {},
@@ -2010,11 +2029,12 @@ export const useStore = create<State>((set, get) => ({
               localScreenStream: stream,
               screenStatus: stream ? 'on' : 'off',
             },
-            // A reveal grant is scoped to one sharing session: any share
-            // start/stop drops it, so a new session always begins shielded
+            // Reveal grants are scoped to one sharing session: any share
+            // start/stop drops them, so a new session always begins shielded
             // (call-leave paths reset voice without this callback, so clearing
             // on start covers stale grants too).
-            streamPauseUntil: null,
+            streamRevealAllUntil: null,
+            streamRevealChannels: {},
           }
         })
       },
@@ -2654,8 +2674,11 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setStreamManual(on) {
-    // Turning the mode off also drops any reveal grant so re-arming starts shielded.
-    set({ streamManual: on, ...(on ? {} : { streamPauseUntil: null }) })
+    // Turning the mode off also drops any reveal grants so re-arming starts shielded.
+    set({
+      streamManual: on,
+      ...(on ? {} : { streamRevealAllUntil: null, streamRevealChannels: {} }),
+    })
     try {
       window.localStorage.setItem(STREAM_MANUAL_KEY, on ? '1' : '0')
     } catch {
@@ -2672,12 +2695,37 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
-  revealStreamContent() {
-    set({ streamPauseUntil: Date.now() + 10 * 60_000 })
+  revealStreamAll() {
+    set({ streamRevealAllUntil: Date.now() + 10 * 60_000 })
   },
 
-  clearStreamReveal() {
-    set({ streamPauseUntil: null })
+  revealStreamChannel(channelId) {
+    set((s) => ({
+      streamRevealChannels: {
+        ...s.streamRevealChannels,
+        [channelId]: Date.now() + 10 * 60_000,
+      },
+    }))
+  },
+
+  clearStreamReveals() {
+    set({ streamRevealAllUntil: null, streamRevealChannels: {} })
+  },
+
+  // Prune lapsed reveal windows so subscribers re-render and re-blur the moment
+  // a window expires (called from the banner's 1s tick while any window is open).
+  expireStreamReveals() {
+    const s = get()
+    const now = Date.now()
+    const allLapsed = s.streamRevealAllUntil !== null && s.streamRevealAllUntil <= now
+    const lapsedChannels = Object.entries(s.streamRevealChannels).filter(([, t]) => t <= now)
+    if (!allLapsed && lapsedChannels.length === 0) return
+    const streamRevealChannels = { ...s.streamRevealChannels }
+    for (const [id] of lapsedChannels) delete streamRevealChannels[id]
+    set({
+      ...(allLapsed ? { streamRevealAllUntil: null } : {}),
+      streamRevealChannels,
+    })
   },
 
   async updateProfile(input) {
@@ -3512,7 +3560,7 @@ export const useStore = create<State>((set, get) => ({
         // A brand-new DM channel may not be in the list yet, so the dm kind
         // check can't rely on the channel lookup alone.
         const shielded =
-          (notification.kind === 'dm' && streamShieldOn(st)) ||
+          (notification.kind === 'dm' && streamChannelShielded(st, notification.channel_id)) ||
           streamShieldsChannel(st, notification.channel_id)
         if (!dndActive(st) && !focusedHere && visibleHere && !shielded) {
           const title =

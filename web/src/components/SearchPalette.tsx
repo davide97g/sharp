@@ -246,13 +246,17 @@ export function SearchPalette() {
   }
 
   const shielded = useStore(streamShieldOn)
+  const revealChannels = useStore((s) => s.streamRevealChannels)
 
   // Hits from private channels/DMs blur while streaming; unknown channels
-  // (e.g. local encrypted-DM results) count as private.
+  // (e.g. local encrypted-DM results) count as private. A live per-channel
+  // reveal window unblurs that conversation's hits.
   function rowShielded(row: Row): boolean {
     if (!shielded) return false
     const kind = channels.find((c) => c.id === row.data.channel_id)?.kind
-    return kind !== 'public'
+    if (kind === 'public') return false
+    const until = revealChannels[row.data.channel_id]
+    return !(until && Date.now() < until)
   }
 
   function locationLabel(row: Row): string {

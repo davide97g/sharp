@@ -4,6 +4,7 @@ import { useIsMobile } from '../lib/useMediaQuery'
 import { MessageItem } from './MessageItem'
 import { Composer } from './Composer'
 import { StreamShield } from './stream/StreamShield'
+import type { Channel } from '../lib/types'
 
 export function ThreadPanel() {
   const thread = useStore((s) => s.thread)
@@ -43,7 +44,7 @@ export function ThreadPanel() {
       aria-modal={isMobile ? true : undefined}
       aria-label="Thread"
     >
-      <ThreadShield privateChannel={channel ? channel.kind !== 'public' : false}>
+      <ThreadShield channel={channel ?? null}>
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--color-border)] px-3 sm:px-4">
         <div className="flex min-w-0 items-center gap-2">
           {isMobile && (
@@ -135,12 +136,20 @@ export function ThreadPanel() {
 
 /** Threads from private channels/DMs shield like their parent pane. */
 function ThreadShield({
-  privateChannel,
+  channel,
   children,
 }: {
-  privateChannel: boolean
+  channel: Channel | null
   children: React.ReactNode
 }) {
-  if (!privateChannel) return <>{children}</>
-  return <StreamShield label="Private thread hidden">{children}</StreamShield>
+  if (!channel || channel.kind === 'public') return <>{children}</>
+  return (
+    <StreamShield
+      label="Private thread hidden"
+      channelId={channel.id}
+      channelName={channel.kind === 'dm' ? channel.dm_user?.display_name : `#${channel.name}`}
+    >
+      {children}
+    </StreamShield>
+  )
 }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { useStore, streamShieldOn } from '../store'
+import { useStore, streamChannelShielded } from '../store'
 import { Avatar } from './Avatar'
 import { fmtDayDivider, fmtRelative, sameDay } from '../lib/util'
 import { isTauri } from '../lib/notify'
@@ -329,7 +329,7 @@ function InboxRow({ n, onOpen }: { n: Notification; onOpen: () => void }) {
   const meta = KIND_META[n.kind]
   const preview = gifPreviewText(n.preview)
   const shielded =
-    useStore(streamShieldOn) &&
+    useStore((s) => streamChannelShielded(s, n.channel_id)) &&
     (n.kind === 'dm' || n.channel_kind === 'dm' || n.channel_kind === 'private')
   const where = n.task_identifier
     ? n.task_identifier
