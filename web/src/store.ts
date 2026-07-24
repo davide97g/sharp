@@ -13,6 +13,7 @@ import {
   saveVoiceVideoDevice,
 } from './lib/voicePrefs'
 import { isTranscriptionSupported, PhraseRecognizer } from './lib/speech'
+import { getAudioAuraStyle, setAudioAuraStyle, type AudioAuraStyle } from './lib/meetingEffects'
 import { WsClient } from './lib/ws'
 import { cmpId } from './lib/util'
 import { gifPreviewText } from './lib/gif'
@@ -163,6 +164,7 @@ export type VoiceRoom = Record<
     screen_stream_id: string | null
     hand_raised: boolean
     hand_raised_at: number | null
+    aura_style: string | null
     joined_at: string
   }
 >
@@ -560,6 +562,7 @@ type State = {
   toggleNoiseSuppression: () => Promise<void>
   setVoiceVideoBackground: (background: VideoBackground) => Promise<void>
   toggleVoiceHand: () => void
+  setVoiceAuraStyle: (style: AudioAuraStyle) => void
   toggleTranscription: () => void
   toggleVoiceCamera: () => void
   toggleVoiceScreen: () => Promise<void>
@@ -1924,6 +1927,7 @@ export const useStore = create<State>((set, get) => ({
       }))
       ws.send('voice.join', {
         channel_id: channelId,
+        aura_style: getAudioAuraStyle(get().me?.id),
         ...(opts?.linkToken ? { link_token: opts.linkToken } : {}),
       })
     } catch (error) {
@@ -2180,6 +2184,16 @@ export const useStore = create<State>((set, get) => ({
     if (nextRaised) sound.handRaise()
     set((s) => ({ voice: { ...s.voice, handRaised: nextRaised } }))
     get().ws?.send('voice.hand', { channel_id: channelId, raised: nextRaised })
+  },
+
+  setVoiceAuraStyle(style) {
+    const me = get().me
+    if (me) setAudioAuraStyle(me.id, style)
+    // Broadcast the pick so every participant sees this signature on our avatar.
+    const { channelId, status } = get().voice
+    if (channelId && status === 'connected') {
+      get().ws?.send('voice.aura', { channel_id: channelId, aura_style: style })
+    }
   },
 
   toggleTranscription() {
@@ -3025,6 +3039,7 @@ export const useStore = create<State>((set, get) => ({
                   screen_stream_id: p.participant.screen_stream_id,
                   hand_raised: p.participant.hand_raised,
                   hand_raised_at: p.participant.hand_raised_at,
+                  aura_style: p.participant.aura_style,
                   joined_at: p.participant.joined_at,
               },
             },
@@ -3128,6 +3143,7 @@ export const useStore = create<State>((set, get) => ({
                 screen_stream_id: p.participant.screen_stream_id,
                 hand_raised: p.participant.hand_raised,
                 hand_raised_at: p.participant.hand_raised_at,
+                aura_style: p.participant.aura_style,
                 joined_at: p.participant.joined_at,
                 },
               },
@@ -3820,6 +3836,7 @@ function voiceRoomFromParticipants(
       screen_stream_id: participant.screen_stream_id,
       hand_raised: participant.hand_raised,
       hand_raised_at: participant.hand_raised_at,
+      aura_style: participant.aura_style,
       joined_at: participant.joined_at,
     }
   }

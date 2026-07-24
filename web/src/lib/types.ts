@@ -309,6 +309,8 @@ export type VoiceParticipant = {
   hand_raised: boolean
   // Unix epoch milliseconds when the hand was raised; null while lowered.
   hand_raised_at: number | null
+  // Audio-aura style this participant broadcasts; null falls back to the viewer's local style.
+  aura_style: string | null
   joined_at: string
 }
 

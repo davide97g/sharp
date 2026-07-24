@@ -40,7 +40,6 @@ import { NavigationPicker } from './NavigationPicker'
 import { VoiceTriggerEditor } from './VoiceTriggerEditor'
 import {
   setAudioAuraPreference,
-  setAudioAuraStyle,
   useAudioAuraPreference,
   useAudioAuraStyle,
   type AudioAuraStyle,
@@ -1701,6 +1700,7 @@ function NotificationsSettings() {
 function MeetingEffectsSettings({ userId }: { userId: string }) {
   const preference = useAudioAuraPreference(userId)
   const auraStyle = useAudioAuraStyle(userId)
+  const setVoiceAuraStyle = useStore((s) => s.setVoiceAuraStyle)
   const enabled = preference === true
 
   const auraOptions: Array<{
@@ -1775,7 +1775,7 @@ function MeetingEffectsSettings({ userId }: { userId: string }) {
                   name="audio-aura-style"
                   value={option.id}
                   checked={selected}
-                  onChange={() => setAudioAuraStyle(userId, option.id)}
+                  onChange={() => setVoiceAuraStyle(option.id)}
                   className="sr-only"
                 />
                 <span className="flex h-[72px] w-[72px] shrink-0 items-center justify-center rounded-2xl bg-[radial-gradient(circle,#796cff18,transparent_72%)]">

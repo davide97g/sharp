@@ -668,7 +668,7 @@ proxy to an OpenAI-compatible transcription provider.
 All ids are strings in JSON (UUIDs). A WebSocket connection id is the peer identity.
 
 ```ts
-VoiceParticipant = { conn_id: string, user_id: string, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null, hand_raised: boolean, hand_raised_at: number | null, annotation_color: string, joined_at: string }
+VoiceParticipant = { conn_id: string, user_id: string, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null, hand_raised: boolean, hand_raised_at: number | null, annotation_color: string, aura_style: string | null, joined_at: string }
 MediaCredentials = { provider: 'livekit', server_url: string, participant_token: string, participant_identity: string }
 VoiceRoomSnapshot = { channel_id: string, participants: VoiceParticipant[], active_meeting_id: string | null, annotations_allowed: boolean, media?: MediaCredentials }
 ```
@@ -679,9 +679,10 @@ The existing envelope remains `{"type": string, "payload": object}` in both dire
 
 Client → server:
 
-- `voice.join` `{channel_id, link_token?}` — `channel_id` is the room UUID for wire
+- `voice.join` `{channel_id, link_token?, aura_style?}` — `channel_id` is the room UUID for wire
   compatibility. Authenticated link visitors send `link_token` as admission proof without
-  replacing their account session.
+  replacing their account session. `aura_style` seeds the participant's broadcast audio-aura pick
+  (see `voice.aura`).
 - `voice.leave` `{channel_id}`
 - `voice.mute` `{channel_id, muted: boolean}`
 - `voice.transcribe` `{channel_id, enabled: boolean}` — opt in or out of sending
@@ -697,6 +698,11 @@ Client → server:
 - `voice.hand` `{channel_id, raised: boolean}` — raise or lower the participant's hand.
   Idempotent (a request that matches the current state is a no-op with no broadcast).
   Guests may send it. Unmuting via `voice.mute` also lowers a raised hand automatically.
+- `voice.aura` `{channel_id, aura_style: string}` — broadcast the participant's audio-aura pick
+  so every viewer renders their avatar with it. Validated against
+  `helios|mercury|voiceprint|kinetic-type|eclipse`; an absent/unknown value clears the broadcast
+  (`aura_style=null`, viewers fall back to their own local style). Also sent as `aura_style` on
+  `voice.join`. Broadcasts `voice.participant_updated`.
 - `voice.poll_create` `{room_id, question, options, multi, expires_at?}`
 - `voice.poll_vote` `{room_id, poll_id, option_ids}` — an empty option list retracts the vote.
 - `voice.poll_close` `{room_id, poll_id}` — creator only.
@@ -720,8 +726,11 @@ Server → client:
 - `hello` payload is extended with `conn_id: string` and
   `voice_rooms: VoiceRoomSnapshot[]`, where each snapshot is
   `{channel_id, participants: VoiceParticipant[], active_meeting_id, annotations_allowed}` and each participant is
-  `{conn_id, user_id, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null, hand_raised: boolean, hand_raised_at: number | null, annotation_color: string, joined_at: string}`.
+  `{conn_id, user_id, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null, hand_raised: boolean, hand_raised_at: number | null, annotation_color: string, aura_style: string | null, joined_at: string}`.
   `annotation_color` is a CSS hex color assigned server-side at join (a fixed 12-hue palette).
+  `aura_style` is the audio-aura signature the participant broadcasts so every viewer sees
+  their pick; `null` falls back to the viewer's own local style. One of
+  `helios|mercury|voiceprint|kinetic-type|eclipse` (validated server-side; unknown values become `null`).
   `hand_raised_at` is Unix epoch milliseconds set when the hand was raised and `null` while lowered.
   `display_name` is filled server-side for everyone (users from the `users` table,
   guests from their token) so clients can render names without `/users` access; `guest`
@@ -917,7 +926,7 @@ receives a limited guest JWT bound to that room — no chat, no other REST.
   `VoiceConfigAuth` to distinguish both token kinds; config/transcription succeed for guests
   while trigger management returns 403. On the main WS, a guest may only send `ping`
   plus `voice.join`, `voice.leave`, `voice.mute`, `voice.camera`, `voice.screen`,
-  `voice.hand`, `voice.transcribe`, and `voice.phrase`, and only when the event's
+  `voice.hand`, `voice.aura`, `voice.transcribe`, and `voice.phrase`, and only when the event's
   `channel_id` matches its bound channel. Remaining guest permissions are enforced by the
   voice handlers. Guest
   connect/disconnect does **not** emit presence.

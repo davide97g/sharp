@@ -18,7 +18,7 @@ function styleStorageKey(userId: string): string {
   return `${STYLE_STORAGE_PREFIX}${encodeURIComponent(userId)}`
 }
 
-function isAudioAuraStyle(value: string | null): value is AudioAuraStyle {
+export function isAudioAuraStyle(value: string | null): value is AudioAuraStyle {
   return value === 'helios' ||
     value === 'mercury' ||
     value === 'voiceprint' ||

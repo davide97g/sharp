@@ -1,5 +1,10 @@
 import { useEffect, useRef, type CSSProperties } from 'react'
-import { type AudioAuraStyle, useAudioAuraStyle } from '../../lib/meetingEffects'
+import {
+  DEFAULT_AUDIO_AURA_STYLE,
+  isAudioAuraStyle,
+  type AudioAuraStyle,
+  useAudioAuraStyle,
+} from '../../lib/meetingEffects'
 import { useStore } from '../../store'
 import { Avatar } from '../Avatar'
 
@@ -34,7 +39,24 @@ export function AudioAuraAvatar({
 }) {
   const client = useStore((state) => state.voice.client)
   const me = useStore((state) => state.me)
-  const auraStyle = useAudioAuraStyle(me?.id)
+  // The style this participant broadcasts to the room (null until they pick one).
+  const broadcastStyle = useStore((state) => {
+    const channelId = state.voice.channelId
+    if (!channelId) return null
+    const room = state.voiceRooms[channelId]
+    if (!room) return null
+    for (const connId of connIds) {
+      const style = room[connId]?.aura_style
+      if (style) return style
+    }
+    return null
+  })
+  // Everyone sees the broadcaster's own pick; absent that, fall back to the
+  // local viewer's chosen style so pre-broadcast participants still animate.
+  const localStyle = useAudioAuraStyle(me?.id)
+  const auraStyle: AudioAuraStyle = isAudioAuraStyle(broadcastStyle)
+    ? broadcastStyle
+    : localStyle ?? DEFAULT_AUDIO_AURA_STYLE
   const rootRef = useRef<HTMLDivElement>(null)
   const envelopeRef = useRef(0)
   const connKey = connIds.join('\u0000')

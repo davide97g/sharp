@@ -48,7 +48,21 @@ pub struct VoiceParticipant {
     pub hand_raised_at: Option<i64>,
     /// CSS hex color assigned at join for this participant's pen annotations.
     pub annotation_color: String,
+    /// Audio-aura style this participant broadcasts to the room, so every viewer
+    /// sees their chosen signature. `None` falls back to the viewer's local style.
+    pub aura_style: Option<String>,
     pub joined_at: DateTime<Utc>,
+}
+
+/// The audio-aura styles a client may broadcast. Validated server-side so an
+/// arbitrary value never reaches other clients' avatar class names.
+const AURA_STYLES: [&str; 5] = ["helios", "mercury", "voiceprint", "kinetic-type", "eclipse"];
+
+fn sanitize_aura_style(payload: &Value) -> Option<String> {
+    let value = payload.get("aura_style").and_then(Value::as_str)?;
+    AURA_STYLES
+        .contains(&value)
+        .then(|| value.to_string())
 }
 
 pub struct VoicePhrase {
@@ -348,6 +362,7 @@ pub async fn handle_voice_event(
         "voice.leave" => handle_leave(state, user_id, conn_id, &payload, tx).await,
         "voice.mute" => handle_mute(state, conn_id, &payload, tx).await,
         "voice.transcribe" => handle_transcribe(state, conn_id, &payload, tx).await,
+        "voice.aura" => handle_aura(state, conn_id, &payload, tx).await,
         "voice.phrase" => handle_phrase(state, conn_id, &payload, tx).await,
         "voice.camera" => handle_camera(state, conn_id, &payload, tx).await,
         "voice.screen" => handle_screen(state, conn_id, &payload, tx).await,
@@ -1101,6 +1116,7 @@ async fn handle_join(
                 hand_raised: false,
                 hand_raised_at: None,
                 annotation_color,
+                aura_style: sanitize_aura_style(payload),
                 joined_at: Utc::now(),
             };
             room.participants.insert(conn_id, participant.clone());
@@ -1254,6 +1270,31 @@ async fn handle_mute(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &W
                     participant.hand_raised = false;
                     participant.hand_raised_at = None;
                 }
+                participant.clone()
+            })
+    };
+    let Some(participant) = participant else {
+        send_error(tx, channel_id, "not_in_room");
+        return;
+    };
+
+    broadcast_participant_updated(state, channel_id, participant).await;
+}
+
+async fn handle_aura(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &WsSender) {
+    let Some(channel_id) = channel_id(payload) else {
+        return;
+    };
+    // An absent/unknown style clears the broadcast, reverting viewers to their
+    // own local fallback style for this participant.
+    let aura_style = sanitize_aura_style(payload);
+    let participant = {
+        let mut guard = state.voice_rooms.lock().unwrap();
+        guard
+            .get_mut(&channel_id)
+            .and_then(|room| room.participants.get_mut(&conn_id))
+            .map(|participant| {
+                participant.aura_style = aura_style;
                 participant.clone()
             })
     };
@@ -2282,6 +2323,7 @@ mod tests {
             hand_raised: false,
             hand_raised_at: None,
             annotation_color: ANNOTATION_PALETTE[0].to_string(),
+            aura_style: None,
             joined_at: Utc::now(),
         }
     }
@@ -2316,6 +2358,7 @@ mod tests {
             hand_raised: false,
             hand_raised_at: None,
             annotation_color: ANNOTATION_PALETTE[0].to_string(),
+            aura_style: None,
             joined_at: Utc::now(),
         }
     }

@@ -215,6 +215,7 @@ fn is_client_voice_event(event_type: &str) -> bool {
             | "voice.transcribe"
             | "voice.phrase"
             | "voice.hand"
+            | "voice.aura"
             | "voice.poll_create"
             | "voice.poll_vote"
             | "voice.poll_close"
