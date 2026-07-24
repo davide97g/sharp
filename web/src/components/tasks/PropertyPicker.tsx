@@ -6,7 +6,7 @@ import { useStore } from '../../store'
 import { colorOf } from '../../lib/boardColors'
 import type { Project, TaskLabel, TaskPriority } from '../../lib/types'
 import { Avatar } from '../Avatar'
-import { Popover } from '../../ui'
+import { Button, CheckIcon, CloseIcon, IconButton, Input, MenuItem, Popover } from '../../ui'
 import { PRIORITIES, PRIORITY_LABELS, PriorityIcon, StateDot } from './taskUi'
 
 type Item = {
@@ -69,31 +69,31 @@ export function PickerMenu({
   // this renders only the palette content (search + filtered list + footer).
   return (
     <>
-      <input
+      <Input
         ref={inputRef}
+        uiSize="sm"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={onKey}
         placeholder={placeholder}
-        className="mb-1 min-h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-ink)] px-2 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+        className="mb-1"
       />
       <div className="max-h-64 overflow-y-auto">
         {filtered.length === 0 && (
-          <div className="px-2 py-2 text-xs text-[var(--color-text-faint)]">No matches</div>
+          <div className="px-3 py-2 text-sm text-text-faint">No matches</div>
         )}
         {filtered.map((item, i) => (
-          <button
+          <MenuItem
             key={item.id}
-            onClick={() => onPick(item.id)}
+            active={i === cursor}
             onMouseEnter={() => setCursor(i)}
-            className={`flex min-h-9 w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
-              i === cursor ? 'bg-[var(--color-panel-2)]' : ''
-            } ${item.selected ? 'text-[var(--color-accent-hover)]' : 'text-[var(--color-text)]'}`}
+            onClick={() => onPick(item.id)}
+            icon={item.icon && <span className="flex w-4 shrink-0 justify-center">{item.icon}</span>}
+            trailing={item.selected ? <CheckIcon size={14} className="text-accent" /> : undefined}
+            className={item.selected ? 'text-accent-hover' : undefined}
           >
-            {item.icon && <span className="flex w-4 shrink-0 justify-center">{item.icon}</span>}
-            <span className="min-w-0 flex-1 truncate">{item.label}</span>
-            {item.selected && <span className="text-xs">✓</span>}
-          </button>
+            {item.label}
+          </MenuItem>
         ))}
       </div>
       {footer}
@@ -119,13 +119,14 @@ export function PickerShell({
       onClose={() => setOpen(false)}
       width="w-60"
       trigger={
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
+          className="min-h-9 font-normal"
           onClick={() => setOpen(!open)}
-          className="flex min-h-9 cursor-pointer items-center gap-1.5 rounded-md px-2 text-left text-sm text-[var(--color-text-dim)] transition-colors hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
         >
           {trigger}
-        </button>
+        </Button>
       }
     >
       {children}
@@ -334,8 +335,9 @@ export function LabelsPicker({
         }}
         onClose={() => setOpen(false)}
         footer={
-          <div className="mt-1 flex items-center gap-1 border-t border-[var(--color-border)] pt-1.5">
-            <input
+          <div className="mt-1 flex items-center gap-1 border-t border-border pt-1.5">
+            <Input
+              uiSize="sm"
               value={creating}
               onChange={(e) => setCreating(e.target.value)}
               onKeyDown={(e) => {
@@ -346,14 +348,11 @@ export function LabelsPicker({
                 e.stopPropagation()
               }}
               placeholder="New label…"
-              className="min-w-0 flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-ink)] px-2 py-1 text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none"
+              className="min-w-0 flex-1"
             />
-            <button
-              onClick={() => void createLabel()}
-              className="rounded-md px-2 py-1 text-xs text-[var(--color-accent-hover)] hover:bg-[var(--color-panel-2)]"
-            >
+            <Button variant="ghost" size="xs" onClick={() => void createLabel()}>
               Add
-            </button>
+            </Button>
           </div>
         }
       />
@@ -377,14 +376,9 @@ export function DuePicker({
         className="rounded-md border border-transparent bg-transparent px-1.5 py-1 text-sm text-[var(--color-text-dim)] hover:border-[var(--color-border)] focus:border-[var(--color-accent)] focus:outline-none [color-scheme:dark]"
       />
       {due && (
-        <button
-          onClick={() => onPick(null)}
-          title="Clear due date"
-        aria-label="Clear due date"
-        className="flex h-9 w-9 cursor-pointer items-center justify-center rounded text-[var(--color-text-faint)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="m6 6 12 12M18 6 6 18" /></svg>
-        </button>
+        <IconButton label="Clear due date" onClick={() => onPick(null)}>
+          <CloseIcon size={14} />
+        </IconButton>
       )}
     </div>
   )

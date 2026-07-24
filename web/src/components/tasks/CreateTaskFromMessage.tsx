@@ -7,7 +7,7 @@ import { useStore } from '../../store'
 import type { Message, Project } from '../../lib/types'
 import { Modal } from '../Modal'
 import { NewTaskModal } from './NewTaskModal'
-import { Button } from '../../ui'
+import { Button, ListRow } from '../../ui'
 
 export function CreateTaskFromMessage({
   message,
@@ -51,15 +51,16 @@ export function CreateTaskFromMessage({
       <Modal title="Create task in…" onClose={onClose}>
         <div className="space-y-1">
           {active.map((p) => (
-            <button
+            <ListRow
               key={p.id}
+              size="lg"
               onClick={() => setProject(p)}
-              className="flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-lg border border-[var(--color-border)] px-3 py-2 text-left transition-colors hover:border-[var(--color-accent)] hover:bg-[var(--color-panel-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+              className="border border-border hover:border-accent"
+              leading={<span className="text-lg">{p.icon || '🎯'}</span>}
+              trailing={<span className="font-mono text-2xs text-text-faint">{p.key}</span>}
             >
-              <span className="text-lg">{p.icon || '🎯'}</span>
-              <span className="min-w-0 flex-1 truncate text-sm font-medium">{p.name}</span>
-              <span className="font-mono text-2xs text-[var(--color-text-faint)]">{p.key}</span>
-            </button>
+              <span className="font-medium">{p.name}</span>
+            </ListRow>
           ))}
         </div>
       </Modal>

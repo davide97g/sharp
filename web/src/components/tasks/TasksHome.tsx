@@ -9,7 +9,7 @@ import type { Project } from '../../lib/types'
 import { Modal } from '../Modal'
 import { TaskRow } from './TaskListView'
 import { isOpen, stateOf, TasksGlyph } from './taskUi'
-import { Button, Card, EmptyState, Field, Input, ModalFooter, SectionLabel } from '../../ui'
+import { Button, Card, EmptyState, Field, Input, ModalFooter, SearchIcon, SectionLabel } from '../../ui'
 
 export function TasksHome() {
   const [params, setParams] = useSearchParams()
@@ -63,7 +63,16 @@ export function TasksHome() {
             </Button>
           </header>
           <div className="mt-6 flex flex-wrap gap-2">
-            <label className="relative min-w-[min(100%,20rem)] flex-1"><svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-faint)]" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg><input autoFocus value={query} onChange={(event) => setQueryParam(event.target.value)} placeholder="Search tasks…" className="min-h-11 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] pl-10 pr-3 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]" /></label>
+            <Input
+              autoFocus
+              uiSize="lg"
+              surface="panel"
+              prefix={<SearchIcon size={16} />}
+              value={query}
+              onChange={(event) => setQueryParam(event.target.value)}
+              placeholder="Search tasks…"
+              className="min-w-[min(100%,20rem)] flex-1 rounded-xl"
+            />
             <FilterPill active={!showAll} onClick={() => setShowAll(false)}>Open</FilterPill>
             <FilterPill active={showAll} onClick={() => setShowAll(true)}>All</FilterPill>
           </div>

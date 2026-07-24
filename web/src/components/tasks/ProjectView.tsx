@@ -10,7 +10,7 @@ import { TaskListView } from './TaskListView'
 import { TaskPeek } from './TaskPeek'
 import { PRIORITIES, PRIORITY_LABELS, PriorityIcon, StateDot } from './taskUi'
 import { Avatar } from '../Avatar'
-import { Button, CheckIcon, Menu, MenuItem } from '../../ui'
+import { Button, CheckIcon, ChevronLeftIcon, IconButton, Menu, MenuItem, PlusIcon } from '../../ui'
 
 const VIEW_KEY = 'sharp.taskView.' // + projectId → 'list' | 'board'
 
@@ -132,14 +132,14 @@ export function ProjectView() {
     <div className="relative flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
       <header className="shrink-0">
         <div className="flex h-14 items-center gap-2 border-b border-[var(--color-border)] px-3 sm:px-5">
-          <button onClick={() => navigate('/tasks')} aria-label="Back to Tasks" className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-faint)] transition-colors hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] md:hidden"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg></button>
-          <div className="min-w-0 flex flex-1 items-center gap-2"><button onClick={() => navigate('/tasks')} className="max-md:hidden min-h-11 shrink-0 cursor-pointer rounded-lg px-2 text-sm text-[var(--color-text-faint)] transition-colors hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">‹ Tasks</button><span className="max-md:hidden text-[var(--color-text-faint)]">/</span><span className="shrink-0 text-lg">{project.icon || '🎯'}</span><span className="min-w-0 truncate font-semibold">{project.name}</span><span className="hidden font-mono text-xs text-[var(--color-text-faint)] sm:inline">{project.key}</span></div>
+          <IconButton size="xl" label="Back to Tasks" onClick={() => navigate('/tasks')} className="md:hidden"><ChevronLeftIcon size={18} /></IconButton>
+          <div className="min-w-0 flex flex-1 items-center gap-2"><Button variant="ghost" size="sm" onClick={() => navigate('/tasks')} className="max-md:hidden min-h-11 font-normal text-text-faint">‹ Tasks</Button><span className="max-md:hidden text-[var(--color-text-faint)]">/</span><span className="shrink-0 text-lg">{project.icon || '🎯'}</span><span className="min-w-0 truncate font-semibold">{project.name}</span><span className="hidden font-mono text-xs text-[var(--color-text-faint)] sm:inline">{project.key}</span></div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <div className="flex overflow-hidden rounded-lg border border-[var(--color-border)]">
               <ViewToggle active={view === 'list'} onClick={() => switchView('list')} title="List view"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M4 6h16M4 12h16M4 18h16" /></svg></ViewToggle>
               <ViewToggle active={view === 'board'} onClick={() => switchView('board')} title="Board view"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="4" y="4" width="4" height="16" rx="1" /><rect x="10" y="4" width="4" height="11" rx="1" /><rect x="16" y="4" width="4" height="7" rx="1" /></svg></ViewToggle>
             </div>
-            <Button size="md" className="min-h-11" onClick={() => setNewTask({})} title="New task (c)" aria-label="New task" iconLeft={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>}><span className="hidden sm:inline">New task</span></Button>
+            <Button size="md" className="min-h-11" onClick={() => setNewTask({})} title="New task (c)" aria-label="New task" iconLeft={<PlusIcon size={14} strokeWidth={2.5} />}><span className="hidden sm:inline">New task</span></Button>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-border-soft)] px-3 py-2 sm:px-5">

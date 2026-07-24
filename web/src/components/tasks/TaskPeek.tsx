@@ -16,7 +16,7 @@ import {
 } from './PropertyPicker'
 import { TaskRow } from './TaskListView'
 import { branchNameFor, PRIORITY_LABELS } from './taskUi'
-import { Button, CloseIcon, IconButton, SectionLabel as UISectionLabel, useDismiss } from '../../ui'
+import { Badge, Button, CloseIcon, IconButton, ListRow, SectionLabel as UISectionLabel, Textarea, TrashIcon, useDismiss } from '../../ui'
 
 export function TaskPeek({
   project,
@@ -108,29 +108,27 @@ export function TaskPeek({
         <span className="font-mono text-xs text-[var(--color-text-faint)]">
           {detail.identifier}
         </span>
-        <button
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 text-2xs font-normal"
           onClick={copyBranch}
           title="Copy git branch name"
-          className="flex h-9 cursor-pointer items-center gap-1 rounded-md border border-[var(--color-border)] px-2 text-2xs text-[var(--color-text-dim)] transition-colors hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
-        >
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M6 3v12a3 3 0 1 0 3 3" />
-            <circle cx="6" cy="18" r="3" />
-            <circle cx="18" cy="6" r="3" />
-            <path d="M18 9a9 9 0 0 1-9 9" />
-          </svg>
-          Copy branch
-        </button>
-        <div className="ml-auto flex items-center gap-1">
-          <button
-            onClick={remove}
-            title="Delete task"
-            className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-[var(--color-text-faint)] transition-colors hover:bg-[var(--color-panel-2)] hover:text-[var(--board-red-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+          iconLeft={
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M6 3v12a3 3 0 1 0 3 3" />
+              <circle cx="6" cy="18" r="3" />
+              <circle cx="18" cy="6" r="3" />
+              <path d="M18 9a9 9 0 0 1-9 9" />
             </svg>
-          </button>
+          }
+        >
+          Copy branch
+        </Button>
+        <div className="ml-auto flex items-center gap-1">
+          <IconButton label="Delete task" variant="danger" onClick={remove}>
+            <TrashIcon size={14} />
+          </IconButton>
           <IconButton label="Close" onClick={onClose}>
             <CloseIcon />
           </IconButton>
@@ -190,7 +188,7 @@ export function TaskPeek({
           {/* description */}
           <div className="mt-3">
             {editingDescription ? (
-              <textarea
+              <Textarea
                 autoFocus
                 value={descDraft}
                 onChange={(e) => setDescDraft(e.target.value)}
@@ -201,7 +199,6 @@ export function TaskPeek({
                 }}
                 rows={Math.min(16, Math.max(4, descDraft.split('\n').length + 1))}
                 placeholder="Add a description… (markdown)"
-                className="w-full resize-y rounded-lg border border-[var(--color-accent)] bg-[var(--color-panel-2)] px-3 py-2 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:outline-none"
               />
             ) : (
               <div
@@ -226,21 +223,18 @@ export function TaskPeek({
               <SectionLabel>GitHub</SectionLabel>
               <div className="space-y-1">
                 {detail.github_links.map((link) => (
-                  <a
+                  <ListRow
                     key={link.id}
+                    as="a"
                     href={link.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-sm text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)]"
+                    className="border border-border text-text-dim"
+                    leading={<GithubLinkBadge state={link.state} kind={link.kind} />}
+                    trailing={<span className="text-2xs text-text-faint">{link.repo}</span>}
                   >
-                    <GithubLinkBadge state={link.state} kind={link.kind} />
-                    <span className="min-w-0 flex-1 truncate">
-                      {link.title || link.ref}
-                    </span>
-                    <span className="shrink-0 text-2xs text-[var(--color-text-faint)]">
-                      {link.repo}
-                    </span>
-                  </a>
+                    {link.title || link.ref}
+                  </ListRow>
                 ))}
               </div>
             </div>
@@ -284,7 +278,7 @@ export function TaskPeek({
 
       {/* comment composer */}
       <div className="border-t border-[var(--color-border)] p-3">
-        <div className="flex items-end gap-2"><textarea
+        <div className="flex items-end gap-2"><Textarea
           value={comment}
           onChange={(e) => setComment(e.target.value)}
           onKeyDown={(e) => {
@@ -295,7 +289,7 @@ export function TaskPeek({
           }}
           rows={2}
           placeholder="Leave a comment…"
-          className="min-h-18 min-w-0 flex-1 resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+          className="min-h-18 min-w-0 flex-1 resize-none"
         />
         <Button className="min-h-9" onClick={() => void submitComment()} disabled={!comment.trim()}>Send</Button></div>
       </div>
@@ -334,21 +328,18 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 }
 
 function GithubLinkBadge({ state, kind }: { state: string; kind: string }) {
-  const color =
+  const tone =
     state === 'merged'
-      ? 'var(--board-purple-fg)'
+      ? 'accent'
       : state === 'closed'
-        ? 'var(--board-red-fg)'
+        ? 'danger'
         : state === 'draft'
-          ? 'var(--color-text-faint)'
-          : 'var(--board-green-fg)'
+          ? 'neutral'
+          : 'success'
   return (
-    <span
-      className="rounded-full px-1.5 py-px text-3xs font-semibold"
-      style={{ color, border: `1px solid ${color}` }}
-    >
+    <Badge variant="outline" tone={tone}>
       {kind === 'branch' ? 'branch' : state || kind}
-    </span>
+    </Badge>
   )
 }
 
@@ -411,8 +402,9 @@ function CommentItem({
           )}
         </div>
         {editing ? (
-          <textarea
+          <Textarea
             autoFocus
+            uiSize="sm"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={async (e) => {
@@ -430,7 +422,7 @@ function CommentItem({
               }
             }}
             rows={2}
-            className="mt-1 w-full resize-none rounded-md border border-[var(--color-accent)] bg-[var(--color-panel-2)] px-2 py-1 text-sm focus:outline-none"
+            className="mt-1 resize-none"
           />
         ) : (
           <div className="text-sm">

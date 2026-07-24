@@ -595,6 +595,9 @@ function OverlaysSection() {
           <MenuItem icon={<CopyIcon />} trailing={<Kbd>⌘C</Kbd>} onClick={() => setMenu(false)}>
             Duplicate
           </MenuItem>
+          <MenuItem icon={<CheckIcon className="text-accent" />} active onClick={() => setMenu(false)}>
+            Keyboard-cursor (active)
+          </MenuItem>
           <MenuItem icon={<ExternalLinkIcon />} disabled>
             Open in new tab
           </MenuItem>

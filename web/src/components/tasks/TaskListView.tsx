@@ -5,7 +5,7 @@ import { colorOf } from '../../lib/boardColors'
 import type { Project, Task } from '../../lib/types'
 import { Avatar } from '../Avatar'
 import { DueBadge, LabelChip, PriorityIcon, StateDot } from './taskUi'
-import { IconButton } from '../../ui'
+import { IconButton, PlusIcon } from '../../ui'
 
 export function TaskListView({
   project,
@@ -46,9 +46,7 @@ export function TaskListView({
                 label={`New task in ${state.name}`}
                 onClick={() => onNewTask(state.id)}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
+                <PlusIcon size={14} />
               </IconButton>
             </div>
             {sectionTasks.map((task) => (

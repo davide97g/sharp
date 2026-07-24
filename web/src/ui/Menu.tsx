@@ -11,7 +11,9 @@ export function MenuItem({
   icon,
   danger,
   disabled,
+  active,
   onClick,
+  onMouseEnter,
   className,
   children,
   trailing,
@@ -19,7 +21,10 @@ export function MenuItem({
   icon?: ReactNode
   danger?: boolean
   disabled?: boolean
+  /** keyboard-cursor highlight (same fill as hover) for filterable menus */
+  active?: boolean
   onClick?: () => void
+  onMouseEnter?: () => void
   className?: string
   children: ReactNode
   trailing?: ReactNode
@@ -30,8 +35,10 @@ export function MenuItem({
       role="menuitem"
       disabled={disabled}
       onClick={onClick}
+      onMouseEnter={onMouseEnter}
       className={cn(
         'flex min-h-11 w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm text-text outline-none hover:bg-panel-2 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60 disabled:hover:bg-transparent',
+        active && 'bg-panel-2',
         danger && 'text-danger-fg hover:bg-danger-soft',
         className,
       )}

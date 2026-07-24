@@ -6,7 +6,7 @@ import { Avatar } from '../Avatar'
 import { colorOf } from '../../lib/boardColors'
 import { DueBadge, LabelChip, PriorityIcon } from './taskUi'
 import { useTaskDnd, type TaskColumnData } from './useTaskDnd'
-import { IconButton } from '../../ui'
+import { IconButton, PlusIcon } from '../../ui'
 
 export function TaskBoardView({
   project,
@@ -144,9 +144,7 @@ function TaskColumn({
           label={`New task in ${column.state.name}`}
           onClick={() => onNewTask(column.state.id)}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-            <path d="M12 5v14M5 12h14" />
-          </svg>
+          <PlusIcon size={16} />
         </IconButton>
       </div>
       <div className="flex min-h-[8px] flex-col gap-1.5 overflow-y-auto px-2 pb-3">{items}</div>

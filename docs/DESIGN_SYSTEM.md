@@ -85,7 +85,7 @@ Composites:
 | `SlideOver` | `side:'right'`, `width`, `title`, `onClose`, `portal?`, `footer?` | notification center / card panel pattern; Escape built in |
 | `Popover` | `open`, `onClose`, `align:'start'\|'end'`, `side:'bottom'\|'top'`, `width` — positioned panel + dismiss | all dropdown panels |
 | `useDismiss` | `{ref, onClose, escape=true, outside=true}` | THE click-outside/Escape hook; never re-implement |
-| `Menu` / `MenuItem` | Menu wraps Popover with `role="menu"`; MenuItem: `icon?`, `danger`, `disabled` | the 3 duplicate MenuItem defs |
+| `Menu` / `MenuItem` | Menu wraps Popover with `role="menu"`; MenuItem: `icon?`, `danger`, `disabled`, `active` (keyboard-cursor highlight), `trailing?`, `onMouseEnter?` | the 3 duplicate MenuItem defs + filterable pickers |
 | `Card` | `interactive` (hover border-accent + focus ring), `padding: 'md'\|'sm'\|'lg'\|'none'`, `as` | panel surface recipe |
 | `PanelHeader` | `title`, `subtitle?`, `icon?`, `actions?`, `onClose?` | h-14 border-b header + close X |
 | `EmptyState` | `icon?`, `title`, `description?`, `action?`, `variant: 'centered'\|'dashed'\|'inline'` | 6 local EmptyState copies |
