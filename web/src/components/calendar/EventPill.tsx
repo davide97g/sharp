@@ -1,7 +1,7 @@
 import { effectiveNicknames } from '../../lib/displayName'
 import { useRef, useState } from 'react'
 import type { CalendarItem } from '../../lib/types'
-import { timeRange, withinJoinWindow } from '../../lib/calendar'
+import { timeRange } from '../../lib/calendar'
 import { useStore } from '../../store'
 import { channelLabel } from '../../lib/util'
 import { EventDetail } from './EventDetail'
@@ -21,11 +21,8 @@ export function EventPill({ item }: { item: CalendarItem }) {
   const channel = isNative
     ? channels.find((c) => c.id === item.meeting.channel_id)
     : undefined
-  const canJoin =
-    item.source === 'native' &&
-    !cancelled &&
-    !!item.join_path &&
-    withinJoinWindow(item.start_at, item.end_at)
+  // Joinable any time (even early or late) as long as it isn't cancelled.
+  const canJoin = item.source === 'native' && !cancelled && !!item.join_path
 
   useDismiss({ ref: rootRef, onClose: () => setOpen(false), enabled: open })
 

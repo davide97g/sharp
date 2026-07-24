@@ -8,7 +8,7 @@ import { NewTaskModal } from './NewTaskModal'
 import { TaskBoardView } from './TaskBoardView'
 import { TaskListView } from './TaskListView'
 import { TaskPeek } from './TaskPeek'
-import { PRIORITIES, PRIORITY_LABELS, PriorityIcon, StateDot, isOpen, stateOf } from './taskUi'
+import { PRIORITIES, PRIORITY_LABELS, PriorityIcon, StateDot } from './taskUi'
 import { Avatar } from '../Avatar'
 import { Button, Popover } from '../../ui'
 
@@ -38,7 +38,6 @@ export function ProjectView() {
   const [filterState, setFilterState] = useState<string | null>(null)
   const [filterAssignee, setFilterAssignee] = useState<string | null>(null)
   const [filterPriority, setFilterPriority] = useState<TaskPriority | null>(null)
-  const [showClosed, setShowClosed] = useState(false)
 
   useEffect(() => {
     if (!project) return
@@ -80,14 +79,12 @@ export function ProjectView() {
 
   const tasks = useMemo(() => {
     return allTasks.filter((t) => {
-      const st = stateOf(project, t)
-      if (!showClosed && !isOpen(st) && !filterState) return false
       if (filterState && t.state_id !== filterState) return false
       if (filterAssignee && t.assignee_id !== filterAssignee) return false
       if (filterPriority !== null && t.priority !== filterPriority) return false
       return true
     })
-  }, [allTasks, project, filterState, filterAssignee, filterPriority, showClosed])
+  }, [allTasks, project, filterState, filterAssignee, filterPriority])
 
   // Peek task from the /t/:key/:num route.
   const peekTask = useMemo(
@@ -145,7 +142,7 @@ export function ProjectView() {
             <Button size="md" className="min-h-11" onClick={() => setNewTask({})} title="New task (c)" aria-label="New task" iconLeft={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>}><span className="hidden sm:inline">New task</span></Button>
           </div>
         </div>
-        <div className="flex items-center gap-2 overflow-x-auto border-b border-[var(--color-border-soft)] px-3 py-2 sm:px-5">
+        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-border-soft)] px-3 py-2 sm:px-5">
           <FilterChip
             label="State"
             active={!!filterState}
@@ -182,16 +179,6 @@ export function ProjectView() {
             onPick={(id) => setFilterPriority(Number(id) as TaskPriority)}
             current={filterPriority !== null ? String(filterPriority) : null}
           />
-          <button
-            onClick={() => setShowClosed((v) => !v)}
-            className={`min-h-9 shrink-0 cursor-pointer rounded-full border px-3 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
-              showClosed
-                ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]'
-                : 'border-[var(--color-border)] text-[var(--color-text-faint)] hover:bg-[var(--color-panel)]'
-            }`}
-          >
-            Closed
-          </button>
         </div>
       </header>
 
@@ -278,6 +265,7 @@ function FilterChip({
         onClose={() => setOpen(false)}
         align="end"
         width="w-48"
+        className="max-h-72 overflow-y-auto"
         trigger={
           <span className="flex items-center">
             <button

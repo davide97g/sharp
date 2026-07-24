@@ -2,9 +2,34 @@ import { useState } from 'react'
 import type { CalendarItem } from '../../lib/types'
 import { timeRange } from '../../lib/calendar'
 import { useStore } from '../../store'
-import { toastError } from '../../lib/toast'
+import { toastError, toastSuccess } from '../../lib/toast'
 import { ScheduleMeetingModal } from './ScheduleMeetingModal'
 import { SectionLabel } from '../../ui'
+
+/** First http(s) URL found in free text (e.g. a meeting link in the description). */
+function firstUrl(text: string | null | undefined): string | null {
+  if (!text) return null
+  return text.match(/https?:\/\/[^\s<>"')]+/)?.[0] ?? null
+}
+
+/**
+ * The shareable link for a calendar item:
+ *   - native call meeting → absolute URL of its in-app join path
+ *   - otherwise           → the first link in the description (external meet link)
+ *   - google              → the event's Google Calendar link
+ * `external` meetings open in a new tab rather than routing into the app.
+ */
+function inviteLink(item: CalendarItem): { url: string; external: boolean } | null {
+  if (item.source === 'native') {
+    if (item.join_path) {
+      return { url: window.location.origin + item.join_path, external: false }
+    }
+    const url = firstUrl(item.meeting.description)
+    return url ? { url, external: true } : null
+  }
+  const url = firstUrl(item.description) ?? item.html_link
+  return url ? { url, external: true } : null
+}
 
 const RSVP_OPTIONS: { value: string; label: string }[] = [
   { value: 'accepted', label: 'Yes' },
@@ -28,6 +53,7 @@ export function EventDetail({ item }: { item: CalendarItem }) {
   const accent = color ?? 'var(--color-accent)'
   const cancelled = isNative && item.meeting.status === 'cancelled'
   const canEdit = isNative && !cancelled && me?.id === item.meeting.creator.id
+  const link = cancelled ? null : inviteLink(item)
 
   async function rsvp(response: string) {
     if (!isNative) return
@@ -35,6 +61,16 @@ export function EventDetail({ item }: { item: CalendarItem }) {
       await rsvpMeeting(item.meeting.id, response)
     } catch (e) {
       toastError(e instanceof Error ? e.message : 'Could not update RSVP.')
+    }
+  }
+
+  async function copyLink() {
+    if (!link) return
+    try {
+      await navigator.clipboard.writeText(link.url)
+      toastSuccess('Invite link copied.')
+    } catch {
+      toastError('Could not copy the link.')
     }
   }
 
@@ -128,6 +164,28 @@ export function EventDetail({ item }: { item: CalendarItem }) {
         </button>
       )}
 
+      {!cancelled && (isNative ? !item.join_path : true) && link?.external && (
+        <a
+          href={link.url}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="mt-2 block rounded-md bg-[var(--color-accent)] px-2 py-1.5 text-center text-xs font-semibold text-white hover:bg-[var(--color-accent-hover)]"
+        >
+          Join meeting
+        </a>
+      )}
+
+      {link && (
+        <button
+          type="button"
+          onClick={() => void copyLink()}
+          className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-[var(--color-border)] px-2 py-1.5 text-xs font-medium text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
+        >
+          <LinkIcon />
+          Copy invite link
+        </button>
+      )}
+
       {canEdit && (
         <button
           type="button"
@@ -156,6 +214,15 @@ export function EventDetail({ item }: { item: CalendarItem }) {
         />
       )}
     </>
+  )
+}
+
+function LinkIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </svg>
   )
 }
 

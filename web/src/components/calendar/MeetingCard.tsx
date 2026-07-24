@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ScheduledMeeting } from '../../lib/types'
 import { api } from '../../lib/api'
 import { useStore } from '../../store'
-import { timeRange, dayHeading, dayKey, withinJoinWindow } from '../../lib/calendar'
+import { timeRange, dayHeading, dayKey } from '../../lib/calendar'
 import { toastError } from '../../lib/toast'
 
 const RSVP_OPTIONS: { value: string; label: string }[] = [
@@ -53,11 +53,6 @@ export function MeetingCard({
   const endIso = meeting?.end_at ?? iso
   const allDay = meeting?.all_day ?? false
   const cancelled = meeting?.status === 'cancelled'
-  const canJoin =
-    !!meeting &&
-    !cancelled &&
-    !!meeting.join_path &&
-    withinJoinWindow(startIso, endIso)
 
   async function rsvp(response: string) {
     if (!meeting) return
@@ -106,9 +101,8 @@ export function MeetingCard({
             <button
               type="button"
               onClick={() => joinScheduledMeeting(meeting.join_path)}
-              disabled={!canJoin}
-              title={canJoin ? 'Join the call' : 'Available near the start time'}
-              className="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-40"
+              title="Join the call"
+              className="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[var(--color-accent-hover)]"
             >
               Join
             </button>
