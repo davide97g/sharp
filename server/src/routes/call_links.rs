@@ -12,7 +12,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 /// Generate a fresh 32-byte URL-safe random voice-link token.
-fn generate_link_token() -> String {
+pub(crate) fn generate_link_token() -> String {
     let mut bytes = [0u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut bytes);
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)

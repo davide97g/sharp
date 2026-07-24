@@ -279,7 +279,7 @@ export function ScheduleMeetingModal({
               onChange={(e) => setContext(e.target.value)}
               className="mt-2"
             >
-              <option value="none">None (calendar only)</option>
+              <option value="none">Standalone meeting (generates a meet link)</option>
               <option value="standalone">Standalone call</option>
               {memberChannels.length > 0 && (
                 <optgroup label="Channels">

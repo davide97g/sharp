@@ -4,32 +4,8 @@ import { timeRange } from '../../lib/calendar'
 import { useStore } from '../../store'
 import { toastError, toastSuccess } from '../../lib/toast'
 import { ScheduleMeetingModal } from './ScheduleMeetingModal'
+import { Markdown } from '../Markdown'
 import { SectionLabel } from '../../ui'
-
-/** First http(s) URL found in free text (e.g. a meeting link in the description). */
-function firstUrl(text: string | null | undefined): string | null {
-  if (!text) return null
-  return text.match(/https?:\/\/[^\s<>"')]+/)?.[0] ?? null
-}
-
-/**
- * The shareable link for a calendar item:
- *   - native call meeting → absolute URL of its in-app join path
- *   - otherwise           → the first link in the description (external meet link)
- *   - google              → the event's Google Calendar link
- * `external` meetings open in a new tab rather than routing into the app.
- */
-function inviteLink(item: CalendarItem): { url: string; external: boolean } | null {
-  if (item.source === 'native') {
-    if (item.join_path) {
-      return { url: window.location.origin + item.join_path, external: false }
-    }
-    const url = firstUrl(item.meeting.description)
-    return url ? { url, external: true } : null
-  }
-  const url = firstUrl(item.description) ?? item.html_link
-  return url ? { url, external: true } : null
-}
 
 const RSVP_OPTIONS: { value: string; label: string }[] = [
   { value: 'accepted', label: 'Yes' },
@@ -53,7 +29,12 @@ export function EventDetail({ item }: { item: CalendarItem }) {
   const accent = color ?? 'var(--color-accent)'
   const cancelled = isNative && item.meeting.status === 'cancelled'
   const canEdit = isNative && !cancelled && me?.id === item.meeting.creator.id
-  const link = cancelled ? null : inviteLink(item)
+  // Sharp-generated meetings expose an in-app meet link (like Google Meet).
+  // Google-imported events do not — their content stays read-only.
+  const meetUrl =
+    isNative && item.join_path && !cancelled
+      ? window.location.origin + item.join_path
+      : null
 
   async function rsvp(response: string) {
     if (!isNative) return
@@ -65,9 +46,9 @@ export function EventDetail({ item }: { item: CalendarItem }) {
   }
 
   async function copyLink() {
-    if (!link) return
+    if (!meetUrl) return
     try {
-      await navigator.clipboard.writeText(link.url)
+      await navigator.clipboard.writeText(meetUrl)
       toastSuccess('Invite link copied.')
     } catch {
       toastError('Could not copy the link.')
@@ -106,9 +87,13 @@ export function EventDetail({ item }: { item: CalendarItem }) {
 
       {((item.source === 'google' && item.description) ||
         (isNative && item.meeting.description)) && (
-        <p className="mb-2 max-h-32 overflow-y-auto whitespace-pre-wrap text-xs leading-5 text-[var(--color-text-dim)]">
-          {item.source === 'google' ? item.description : item.meeting.description}
-        </p>
+        <div className="mb-2 max-h-32 overflow-y-auto text-xs leading-5 text-[var(--color-text-dim)] [&_a]:break-all [&_a]:text-[var(--color-accent-hover)] [&_a:hover]:underline">
+          <Markdown
+            content={
+              (item.source === 'google' ? item.description : item.meeting.description) ?? ''
+            }
+          />
+        </div>
       )}
 
       {isNative && item.meeting.attendees.length > 0 && (
@@ -164,18 +149,7 @@ export function EventDetail({ item }: { item: CalendarItem }) {
         </button>
       )}
 
-      {!cancelled && (isNative ? !item.join_path : true) && link?.external && (
-        <a
-          href={link.url}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="mt-2 block rounded-md bg-[var(--color-accent)] px-2 py-1.5 text-center text-xs font-semibold text-white hover:bg-[var(--color-accent-hover)]"
-        >
-          Join meeting
-        </a>
-      )}
-
-      {link && (
+      {meetUrl && (
         <button
           type="button"
           onClick={() => void copyLink()}

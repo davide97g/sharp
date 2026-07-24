@@ -686,6 +686,25 @@ pub async fn create_meeting(
 
     let description = body.description.unwrap_or_default();
 
+    // Every native meeting is joinable in-app like a generated Meet link. When no
+    // channel or existing call is bound, provision a fresh standalone call room so
+    // the meeting always resolves to a `/call/{token}` join path.
+    let mut standalone_call_id = body.standalone_call_id;
+    if body.channel_id.is_none() && standalone_call_id.is_none() {
+        let token = crate::routes::call_links::generate_link_token();
+        standalone_call_id = Some(
+            sqlx::query_scalar(
+                "INSERT INTO standalone_calls (title, link_token, created_by)
+                 VALUES ($1, $2, $3) RETURNING id",
+            )
+            .bind(&title)
+            .bind(&token)
+            .bind(auth.id)
+            .fetch_one(&state.pool)
+            .await?,
+        );
+    }
+
     let meeting_id: Uuid = sqlx::query_scalar(
         "INSERT INTO scheduled_meetings
            (channel_id, standalone_call_id, creator_id, title, description,
@@ -693,7 +712,7 @@ pub async fn create_meeting(
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
     )
     .bind(body.channel_id)
-    .bind(body.standalone_call_id)
+    .bind(standalone_call_id)
     .bind(auth.id)
     .bind(&title)
     .bind(&description)
