@@ -179,6 +179,47 @@ export function useVoicePip(hasFallbackVideo: boolean): VoicePipController {
   }
 }
 
+// Observe the live pixel size of a portalled element inside the PiP window. Uses
+// the PiP window's own ResizeObserver + resize event so tiles re-flow when the
+// user drags the PiP window's edges. Callback ref re-attaches across the
+// screen-share ↔ grid branch swap.
+function usePipMeasure() {
+  const [size, setSize] = useState({ width: 320, height: 200 })
+  const cleanup = useRef<(() => void) | undefined>(undefined)
+  const ref = useCallback((el: HTMLElement | null) => {
+    cleanup.current?.()
+    cleanup.current = undefined
+    if (!el) return
+    const win = el.ownerDocument.defaultView ?? window
+    const measure = () => setSize({ width: el.clientWidth, height: el.clientHeight })
+    measure()
+    const RO = (win as unknown as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver
+    const ro = RO ? new RO(measure) : null
+    ro?.observe(el)
+    win.addEventListener('resize', measure)
+    cleanup.current = () => {
+      ro?.disconnect()
+      win.removeEventListener('resize', measure)
+    }
+  }, [])
+  return [ref, size] as const
+}
+
+// Meet-style tile packing: pick the column/row split that makes each cell as
+// large (and as square) as possible for the current window size and count.
+function bestGrid(count: number, width: number, height: number, gap: number) {
+  if (count <= 1) return { cols: 1, rows: 1 }
+  let best = { cols: 1, rows: count, score: 0 }
+  for (let cols = 1; cols <= count; cols++) {
+    const rows = Math.ceil(count / cols)
+    const cellW = (width - (cols - 1) * gap) / cols
+    const cellH = (height - (rows - 1) * gap) / rows
+    const score = Math.min(cellW, cellH)
+    if (score > best.score) best = { cols, rows, score }
+  }
+  return best
+}
+
 function PipStage({ onReturn }: { onReturn: () => void }) {
   const channelId = useStore((s) => s.voice.channelId)
   const room = useStore((s) => (channelId ? s.voiceRooms[channelId] : undefined))
@@ -274,6 +315,20 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
       : `# ${channel.name}`
     : 'Call'
 
+  const [measureRef, size] = usePipMeasure()
+  const gap = 6
+
+  // Grid mode: adaptive cols/rows + tile-derived avatar size.
+  const { cols, rows } = bestGrid(participants.length, size.width, size.height, gap)
+  const cellW = (size.width - (cols - 1) * gap) / cols
+  const cellH = (size.height - (rows - 1) * gap) / rows
+  const gridAvatarSize = Math.round(
+    Math.max(28, Math.min(120, Math.min(cellW, cellH) * 0.42)),
+  )
+
+  // Screen-share mode: filmstrip avatars track the window height.
+  const stripAvatarSize = Math.round(Math.max(22, Math.min(48, size.height * 0.11)))
+
   return (
     <main className="flex h-screen w-screen flex-col overflow-hidden bg-[var(--color-ink)] text-[var(--color-text)]">
       <header className="flex h-9 shrink-0 items-center gap-2 border-b border-[var(--color-border)] px-2.5">
@@ -290,7 +345,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
       </header>
 
       {screenShare ? (
-        <div className="flex min-h-0 flex-1 flex-col gap-1.5 p-1.5">
+        <div ref={measureRef} className="flex min-h-0 flex-1 flex-col gap-1.5 p-1.5">
           <PipScreenTile
             name={resolveName(screenShare.userId, screenShare.displayName)}
             stream={screenShare.stream}
@@ -316,7 +371,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
                     <AudioAuraAvatar
                       userId={participant.userId}
                       name={name}
-                      size={28}
+                      size={stripAvatarSize}
                       connIds={participant.connIds}
                       speaking={participant.speaking}
                       enabled={audioAuraEnabled}
@@ -328,9 +383,14 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
           )}
         </div>
       ) : (
-        <div className={`grid min-h-0 flex-1 auto-rows-fr gap-1.5 p-1.5 ${
-          participants.length <= 1 ? 'grid-cols-1' : 'grid-cols-2'
-        }`}>
+        <div
+          ref={measureRef}
+          className="grid min-h-0 flex-1 gap-1.5 p-1.5"
+          style={{
+            gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+            gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
+          }}
+        >
           {participants.map((participant) => {
             const local = participant.cameraConnId === myConnId
             const stream = local
@@ -350,6 +410,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
                 handRaised={participant.handRaised}
                 connIds={participant.connIds}
                 audioAuraEnabled={audioAuraEnabled}
+                avatarSize={gridAvatarSize}
               />
             )
           })}
@@ -410,6 +471,7 @@ function PipTile({
   handRaised,
   connIds,
   audioAuraEnabled,
+  avatarSize,
 }: {
   userId: string
   name: string
@@ -420,6 +482,7 @@ function PipTile({
   handRaised: boolean
   connIds: string[]
   audioAuraEnabled: boolean
+  avatarSize: number
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const hasVideo = Boolean(stream?.getVideoTracks().length)
@@ -450,7 +513,7 @@ function PipTile({
           <AudioAuraAvatar
             userId={userId}
             name={name}
-            size={44}
+            size={avatarSize}
             connIds={connIds}
             speaking={speaking}
             enabled={audioAuraEnabled}
