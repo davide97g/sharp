@@ -65,7 +65,8 @@ export function NavigationPicker({
           >
             <LayoutThumbnail position={option.position} />
             <span className="mt-2 block px-1 text-sm font-semibold text-[var(--color-text)]">{option.title}</span>
-            <span className="block px-1 text-[11px] text-[var(--color-text-faint)]">{option.description}</span>
+            {/* TODO(ds): ChoiceCard is the DS radio-card, but it drops the px-1 label indent and the ring-offset here; left as-is to preserve exact look. */}
+            <span className="block px-1 text-2xs text-[var(--color-text-faint)]">{option.description}</span>
           </button>
         )
       })}

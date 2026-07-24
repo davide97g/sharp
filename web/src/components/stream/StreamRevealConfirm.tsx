@@ -1,5 +1,5 @@
 import { useStore } from '../../store'
-import { Modal } from '../Modal'
+import { Button, Modal } from '../../ui'
 
 /**
  * Choose how much of the Privacy Shield to pause for 10 minutes: just one
@@ -18,7 +18,15 @@ export function StreamRevealConfirm({
   const revealStreamChannel = useStore((s) => s.revealStreamChannel)
 
   return (
-    <Modal title="Pause the Privacy Shield?" onClose={onClose}>
+    <Modal
+      title="Pause the Privacy Shield?"
+      onClose={onClose}
+      footer={
+        <Button variant="ghost" onClick={onClose}>
+          Keep everything hidden
+        </Button>
+      }
+    >
       <p className="text-sm text-[var(--color-text-dim)]">
         Revealed content is visible to anyone watching your screen for the next
         10 minutes. The shield re-arms on its own when time runs out.
@@ -40,7 +48,7 @@ export function StreamRevealConfirm({
               <span className="block text-sm font-semibold text-[var(--color-text)]">
                 Just this conversation
               </span>
-              <span className="block truncate text-[11px] text-[var(--color-text-faint)]">
+              <span className="block truncate text-2xs text-[var(--color-text-faint)]">
                 {channelName ? `Reveal ${channelName} only` : 'Reveal only the open conversation'}
                 {' — everything else stays hidden'}
               </span>
@@ -53,26 +61,17 @@ export function StreamRevealConfirm({
             revealStreamAll()
             onClose()
           }}
-          className="group flex items-center gap-3 rounded-xl border border-red-500/30 bg-red-500/5 px-3.5 py-3 text-left transition hover:border-red-500/70 hover:bg-red-500/10"
+          className="group flex items-center gap-3 rounded-xl border border-danger/30 bg-danger/5 px-3.5 py-3 text-left transition hover:border-danger/70 hover:bg-danger/10"
         >
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-500/15 text-red-400">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-danger/15 text-danger-fg">
             <EyeIcon />
           </span>
           <span className="min-w-0">
             <span className="block text-sm font-semibold text-[var(--color-text)]">Everything</span>
-            <span className="block text-[11px] text-[var(--color-text-faint)]">
+            <span className="block text-2xs text-[var(--color-text-faint)]">
               All private chats, previews, and your email become visible
             </span>
           </span>
-        </button>
-      </div>
-      <div className="mt-4 flex justify-end">
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-md px-4 py-2 text-sm font-semibold text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
-        >
-          Keep everything hidden
         </button>
       </div>
     </Modal>

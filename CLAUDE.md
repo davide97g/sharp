@@ -8,6 +8,8 @@ sharp — self-hosted Slack replacement. Chat, collaborative docs & canvas, plus
 
 **`docs/ARCHITECTURE.md` is the single source of truth** for the v1 contract: DB schema, wire types, every REST endpoint, every WS event, validation rules. Read it before any change that touches the API surface, and keep it updated when the contract changes — server, web, and desktop are all built against it.
 
+**`docs/DESIGN_SYSTEM.md` is the single source of truth for UI construction.** All visual building blocks live in `web/src/ui/` (import from the barrel `../ui`) — buttons, inputs, modals, menus, badges, list rows, empty states, tokens, z-index bands, type scale. Read it before writing any styled JSX; never inline a class recipe a primitive already covers, never hard-code hex colors (theme presets break), extend the primitive + `/design` gallery + doc together when a variant is missing. Live catalog: `/design` route in dev builds.
+
 ## Commands
 
 ```bash

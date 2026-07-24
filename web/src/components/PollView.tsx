@@ -114,7 +114,7 @@ export function PollView({
           <h3 className={`${compact ? 'text-sm' : 'text-[15px]'} break-words font-semibold leading-snug text-[var(--color-text)]`}>
             {question}
           </h3>
-          <p className="mt-0.5 text-[11px] text-[var(--color-text-faint)]">
+          <p className="mt-0.5 text-2xs text-[var(--color-text-faint)]">
             {closed
               ? closedReason === 'expired'
                 ? 'Poll ended'
@@ -173,7 +173,7 @@ export function PollView({
         })}
       </div>
 
-      <div className="text-[11px] text-[var(--color-text-faint)]">
+      <div className="text-2xs text-[var(--color-text-faint)]">
         {totalVoters} {totalVoters === 1 ? 'person voted' : 'people voted'}
       </div>
     </div>

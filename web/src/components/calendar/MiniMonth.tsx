@@ -37,7 +37,7 @@ export function MiniMonth({
             type="button"
             onClick={() => setAnchor(dayjs().startOf('month'))}
             title="Jump to current month"
-            className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
+            className="rounded px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
           >
             Today
           </button>
@@ -54,7 +54,7 @@ export function MiniMonth({
         {WEEKDAY_INITIALS.map((d, i) => (
           <div
             key={i}
-            className="py-1 text-center text-[10px] font-semibold text-[var(--color-text-faint)]"
+            className="py-1 text-center text-3xs font-semibold text-[var(--color-text-faint)]"
           >
             {d}
           </div>

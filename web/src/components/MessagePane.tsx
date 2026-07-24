@@ -446,7 +446,7 @@ export function MessagePane() {
           >
             <VoiceIcon connecting={inThisVoiceRoom && voiceStatus === 'connecting'} />
             {voiceOccupancy > 0 && (
-              <span className="hidden text-[11px] font-semibold tabular-nums sm:inline">
+              <span className="hidden text-2xs font-semibold tabular-nums sm:inline">
                 {voiceOccupancy}
               </span>
             )}

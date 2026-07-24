@@ -1,4 +1,5 @@
 import { Avatar } from '../Avatar'
+import { Card } from '../../ui'
 
 export function HubCard({
   icon,
@@ -22,9 +23,11 @@ export function HubCard({
   onChannel?: () => void
 }) {
   return (
-    <button
+    <Card
+      as="button"
+      interactive
       onClick={onOpen}
-      className="group flex min-h-40 flex-col gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-4 text-left transition duration-200 hover:border-[var(--color-accent)] hover:bg-[var(--color-panel-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+      className="group flex min-h-40 flex-col gap-3 text-left duration-200"
     >
       <div className="flex items-center gap-2">
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]">
@@ -33,7 +36,7 @@ export function HubCard({
         <span className="min-w-0 flex-1 truncate font-semibold">{title || 'Untitled'}</span>
       </div>
       {preview && <p className="line-clamp-2 text-sm text-[var(--color-text-dim)]">{preview}</p>}
-      <div className="mt-auto flex min-h-5 items-center gap-2 text-[11px] text-[var(--color-text-faint)]">
+      <div className="mt-auto flex min-h-5 items-center gap-2 text-2xs text-[var(--color-text-faint)]">
         {channel && (
           <span
             onClick={(event) => {
@@ -48,6 +51,6 @@ export function HubCard({
         {updatedAt && <span>{updatedAt}</span>}
         {creatorId && <Avatar id={creatorId} name={creatorName ?? 'Creator'} size={18} />}
       </div>
-    </button>
+    </Card>
   )
 }

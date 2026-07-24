@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { sound } from '../lib/sound'
 import { useIsMobile } from '../lib/useMediaQuery'
 import { useStore, type VoiceStageMode } from '../store'
+import { IconButton } from '../ui'
 import { PollView, callPollToViewModel } from './PollView'
 
 /**
@@ -88,19 +89,14 @@ export function CallPollOverlay({ mode }: { mode: VoiceStageMode }) {
           <button
             type="button"
             onClick={() => closeCallPoll(poll.id)}
-            className="min-h-9 shrink-0 rounded-md px-2 text-[11px] font-semibold text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
+            className="min-h-9 shrink-0 rounded-md px-2 text-2xs font-semibold text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
           >
             Close
           </button>
         ) : null}
-        <button
-          type="button"
-          onClick={() => setMinimized(true)}
-          aria-label="Minimize poll"
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
-        >
+        <IconButton label="Minimize poll" onClick={() => setMinimized(true)} className="shrink-0">
           <MinimizeIcon />
-        </button>
+        </IconButton>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         <PollView {...callPollToViewModel(poll, meId, (optionIds) => voteCallPoll(poll.id, optionIds), true)} />

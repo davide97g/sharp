@@ -172,7 +172,7 @@ export function Splash({ ready, onDone }: { ready: boolean; onDone: () => void }
 
   return (
     <div
-      className="splash fixed inset-0 z-[100] flex items-center justify-center"
+      className="splash fixed inset-0 z-(--z-toast) flex items-center justify-center"
       data-exiting={exiting ? '' : undefined}
       data-handoff={handoff ? '' : undefined}
       aria-hidden

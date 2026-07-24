@@ -5,6 +5,7 @@ import { colorOf } from '../../lib/boardColors'
 import type { Project, Task } from '../../lib/types'
 import { Avatar } from '../Avatar'
 import { DueBadge, LabelChip, PriorityIcon, StateDot } from './taskUi'
+import { IconButton } from '../../ui'
 
 export function TaskListView({
   project,
@@ -34,24 +35,21 @@ export function TaskListView({
         const swatch = colorOf(state.color)
         return (
           <section key={state.id}>
-            <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-panel)] px-5 py-1.5">
-              <StateDot state={state} />
-              <span className="text-sm font-semibold" style={{ color: swatch.fg }}>
-                {state.name}
-              </span>
+            <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 sm:px-5">
+              <span className="flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-semibold" style={{ backgroundColor: swatch.bg, color: swatch.fg }}><StateDot state={state} size={10} />{state.name}</span>
               <span className="text-xs text-[var(--color-text-faint)]">
                 {sectionTasks.length}
               </span>
-              <button
-                type="button"
+              <IconButton
+                size="sm"
+                className="ml-auto"
+                label={`New task in ${state.name}`}
                 onClick={() => onNewTask(state.id)}
-                aria-label={`New task in ${state.name}`}
-                className="ml-auto flex h-5 w-5 items-center justify-center rounded text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
                   <path d="M12 5v14M5 12h14" />
                 </svg>
-              </button>
+              </IconButton>
             </div>
             {sectionTasks.map((task) => (
               <TaskRow key={task.id} task={task} onOpen={onOpenTask} />
@@ -82,11 +80,11 @@ export function TaskRow({
   return (
     <button
       onClick={() => onOpen(task)}
-      className="flex w-full items-center gap-2.5 border-b border-[var(--color-border)] px-5 py-1.5 text-left hover:bg-[var(--color-panel)]"
+      className="flex min-h-11 w-full cursor-pointer items-center gap-2.5 border-b border-[var(--color-border)] px-3 py-2 text-left transition-colors hover:bg-[var(--color-panel)] focus-visible:bg-[var(--color-panel)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] sm:px-5"
     >
       <PriorityIcon p={task.priority} />
       {showIdentifier && (
-        <span className="w-[4.5rem] shrink-0 font-mono text-[11px] text-[var(--color-text-faint)]">
+        <span className="max-sm:hidden w-[4.5rem] shrink-0 font-mono text-2xs text-[var(--color-text-faint)]">
           {task.identifier}
         </span>
       )}

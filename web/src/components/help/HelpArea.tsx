@@ -38,6 +38,7 @@ export function HelpArea() {
               </svg>
             </div>
             <div>
+              {/* TODO(ds): kept as-is — SectionLabel uses tracking-wider; this kicker's tracking-[0.16em] has no parity. */}
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-text-faint)]">sharp guide</p>
               <h1 className="text-xl font-bold text-[var(--color-text)]">Help</h1>
             </div>
@@ -98,8 +99,9 @@ function WhatsNew() {
         >
           <div className="mb-5 flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border-soft)] pb-5">
             <div>
+              {/* TODO(ds): "Latest" kept bespoke — no Badge parity (px-2.5 py-1 / font-bold / tracking-[0.12em] vs Badge px-2 py-0.5 / font-semibold / tracking-wide). */}
               {index === 0 && (
-                <span className="mb-2 inline-flex rounded-full bg-[var(--color-accent-soft)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--color-accent-hover)]">
+                <span className="mb-2 inline-flex rounded-full bg-[var(--color-accent-soft)] px-2.5 py-1 text-3xs font-bold uppercase tracking-[0.12em] text-[var(--color-accent-hover)]">
                   Latest
                 </span>
               )}

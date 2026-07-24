@@ -238,7 +238,7 @@ export function BoardEditorInner({
       {/* drag ghosts */}
       {dnd.cardGhost && ghostCard && (
         <div
-          className="pointer-events-none fixed z-[60] rounded-lg shadow-2xl"
+          className="pointer-events-none fixed z-(--z-overlay) rounded-lg shadow-2xl"
           style={{
             left: dnd.cardGhost.x,
             top: dnd.cardGhost.y,
@@ -263,7 +263,7 @@ export function BoardEditorInner({
       )}
       {dnd.colGhost && (
         <div
-          className="pointer-events-none fixed z-[60] rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-3 shadow-2xl"
+          className="pointer-events-none fixed z-(--z-overlay) rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-3 shadow-2xl"
           style={{ left: dnd.colGhost.x, top: dnd.colGhost.y, width: dnd.colGhost.width, opacity: 0.92 }}
         >
           <span

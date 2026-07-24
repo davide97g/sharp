@@ -37,11 +37,14 @@ export function StreamShield({
         {children}
       </div>
       <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[var(--color-ink)]/30 p-4">
+        {/* TODO(ds): the amber shield halo/label is a constant decorative shield
+            identity (not state-driven), left as-is to preserve the brand look;
+            could map to warning tokens if the DS adds a shield accent. */}
         <div className="flex w-full max-w-sm flex-col items-center gap-3 rounded-2xl border border-amber-500/25 bg-[var(--color-panel)]/85 px-6 py-7 text-center shadow-2xl backdrop-blur-md">
           <span className="shield-halo flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-amber-500/25 to-amber-500/5 text-amber-400">
             <ShieldIcon />
           </span>
-          <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-amber-500/90">
+          <div className="text-3xs font-bold uppercase tracking-[0.22em] text-amber-500/90">
             Privacy Shield
           </div>
           <div className="text-sm font-semibold text-[var(--color-text)]">{label}</div>

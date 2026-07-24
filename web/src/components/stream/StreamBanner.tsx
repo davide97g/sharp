@@ -38,9 +38,12 @@ export function StreamBanner() {
   const countdown = fullyPaused ? allRemaining : Math.max(0, ...channelRemaining)
 
   const tone = fullyPaused
-    ? 'border-red-500/40 bg-gradient-to-r from-red-500/25 via-red-500/10 to-transparent text-red-400'
-    : 'border-amber-500/35 bg-gradient-to-r from-amber-500/20 via-amber-500/[0.07] to-transparent text-amber-500'
+    ? 'border-danger/40 bg-gradient-to-r from-danger/25 via-danger/10 to-transparent text-danger-fg'
+    : 'border-warning-fg/35 bg-gradient-to-r from-warning/20 via-warning/[0.07] to-transparent text-warning-fg'
 
+  // TODO(ds): kept as a bespoke banner — ui Banner can't express the pulsing
+  // live dot + directional gradient + inline countdown/actions. Only the
+  // state-driven status colors were mapped to danger/warning tokens.
   return (
     <div
       role="status"
@@ -57,7 +60,7 @@ export function StreamBanner() {
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-current opacity-60 motion-reduce:animate-none" />
         <span className="relative inline-flex h-2 w-2 rounded-full bg-current" />
       </span>
-      <span className="text-[10px] font-bold uppercase tracking-[0.18em]">Privacy Shield</span>
+      <span className="text-3xs font-bold uppercase tracking-[0.18em]">Privacy Shield</span>
       <span className="min-w-0 flex-1 truncate font-medium opacity-90">
         {fullyPaused
           ? `paused — everything visible (${formatCountdown(countdown)})`
@@ -69,7 +72,7 @@ export function StreamBanner() {
         <button
           type="button"
           onClick={clearStreamReveals}
-          className="rounded-full border border-current/40 px-2.5 py-0.5 font-semibold transition hover:bg-red-500/10"
+          className="rounded-full border border-current/40 px-2.5 py-0.5 font-semibold transition hover:bg-danger/10"
         >
           Re-shield now
         </button>

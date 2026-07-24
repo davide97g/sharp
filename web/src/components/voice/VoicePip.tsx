@@ -309,7 +309,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
                     title={name}
                     className={`shrink-0 ${
                       participant.speaking && !audioAuraEnabled
-                        ? 'rounded-full ring-2 ring-[#4fbf9f]'
+                        ? 'rounded-full ring-2 ring-success'
                         : ''
                     }`}
                   >
@@ -434,7 +434,7 @@ function PipTile({
   return (
     <article
       className={`relative flex min-h-0 overflow-hidden rounded-xl border bg-[var(--color-panel)] ${
-        speaking ? 'border-[#4fbf9f] ring-2 ring-[#4fbf9f]/30' : 'border-[var(--color-border)]'
+        speaking ? 'border-success ring-2 ring-success/30' : 'border-[var(--color-border)]'
       }`}
     >
       {hasVideo ? (
@@ -457,13 +457,16 @@ function PipTile({
           />
         </div>
       )}
-      <div className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-black/80 to-transparent px-2 pb-1.5 pt-5 text-[11px] font-medium text-white">
+      <div className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-black/80 to-transparent px-2 pb-1.5 pt-5 text-2xs font-medium text-white">
         <span className="truncate">
           {name}{local ? ' (you)' : ''}
         </span>
         {(handRaised || muted) && (
           <span className="ml-auto flex items-center gap-1">
             {handRaised && (
+              // TODO(ds): solid-amber hand-raise badge with dark text has no
+              // warning-token parity (warning-fg is amber-on-transparent);
+              // kept as the conventional raised-hand attention color.
               <span
                 className="rounded-full bg-amber-400/90 p-1 text-[#3a2a00]"
                 title="Hand raised"
@@ -515,11 +518,11 @@ function PipScreenTile({
           className="h-full w-full object-contain"
         />
       ) : (
-        <div className="flex h-full w-full items-center justify-center text-[11px] text-[var(--color-text-dim)]">
+        <div className="flex h-full w-full items-center justify-center text-2xs text-[var(--color-text-dim)]">
           Waiting for screen…
         </div>
       )}
-      <div className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-black/80 to-transparent px-2 pb-1.5 pt-5 text-[11px] font-medium text-white">
+      <div className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-black/80 to-transparent px-2 pb-1.5 pt-5 text-2xs font-medium text-white">
         <span className="truncate">{local ? 'Your screen' : `${name}'s screen`}</span>
       </div>
     </article>
@@ -551,7 +554,7 @@ function PipControl({
       onClick={onClick}
       className={`flex h-9 w-9 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50 ${
         danger
-          ? 'bg-red-500/20 text-red-300 hover:bg-red-500/30'
+          ? 'bg-danger-soft text-danger-fg hover:bg-danger-soft'
           : active
             ? 'bg-[var(--color-accent)] text-white'
             : 'bg-[var(--color-panel-2)] text-[var(--color-text)] hover:bg-[var(--color-border)]'

@@ -6,6 +6,7 @@ import { Avatar } from '../Avatar'
 import { colorOf } from '../../lib/boardColors'
 import { DueBadge, LabelChip, PriorityIcon } from './taskUi'
 import { useTaskDnd, type TaskColumnData } from './useTaskDnd'
+import { IconButton } from '../../ui'
 
 export function TaskBoardView({
   project,
@@ -41,7 +42,7 @@ export function TaskBoardView({
   const ghostTask = dnd.ghost ? tasks.find((t) => t.id === dnd.ghost?.taskId) : null
 
   return (
-    <div ref={scrollRef} className="flex flex-1 gap-3 overflow-x-auto px-5 pb-5 pt-4">
+    <div ref={scrollRef} className="flex flex-1 gap-3 overflow-x-auto px-3 pb-5 pt-4 sm:px-5 max-sm:snap-x max-sm:snap-mandatory">
       {columns.map((col) => (
         <TaskColumn
           key={col.state.id}
@@ -120,7 +121,7 @@ function TaskColumn({
   return (
     <div
       ref={columnRef}
-      className="flex max-h-full w-[300px] shrink-0 flex-col overflow-hidden rounded-xl border"
+      className="flex max-h-full w-[280px] shrink-0 flex-col overflow-hidden rounded-xl border max-sm:w-[85vw] max-sm:max-w-[320px] max-sm:snap-start"
       style={{
         borderColor: `color-mix(in srgb, ${tint} 20%, var(--color-border))`,
         background: `linear-gradient(to bottom, color-mix(in srgb, ${tint} 8%, var(--color-panel)), color-mix(in srgb, ${tint} 3%, var(--color-panel)) 160px)`,
@@ -128,7 +129,7 @@ function TaskColumn({
     >
       <div
         className="flex items-center gap-2 px-3 pb-2 pt-3"
-        style={{ boxShadow: `inset 0 2px 0 color-mix(in srgb, ${tint} 55%, transparent)` }}
+        style={{ boxShadow: `inset 0 1px 0 color-mix(in srgb, ${tint} 45%, transparent)` }}
       >
         <span
           className="flex min-w-0 select-none items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-semibold"
@@ -137,16 +138,16 @@ function TaskColumn({
           <span className="truncate">{column.state.name}</span>
         </span>
         <span className="text-xs text-[var(--color-text-faint)]">{column.tasks.length}</span>
-        <button
-          type="button"
+        <IconButton
+          size="sm"
+          className="ml-auto"
+          label={`New task in ${column.state.name}`}
           onClick={() => onNewTask(column.state.id)}
-          aria-label={`New task in ${column.state.name}`}
-          className="ml-auto flex h-6 w-6 items-center justify-center rounded-md text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
             <path d="M12 5v14M5 12h14" />
           </svg>
-        </button>
+        </IconButton>
       </div>
       <div className="flex min-h-[8px] flex-col gap-1.5 overflow-y-auto px-2 pb-3">{items}</div>
     </div>
@@ -173,11 +174,19 @@ function TaskCard({
   return (
     <div
       ref={cardRef}
+      role="button"
+      tabIndex={0}
       onPointerDown={(e) => dnd.startDrag(e, task.id)}
       onClick={() => {
         if (!dnd.consumeSuppressClick()) onOpen(task)
       }}
-      className={dragging ? 'opacity-30' : ''}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onOpen(task)
+        }
+      }}
+      className={`${dragging ? 'opacity-30' : ''} cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]`}
     >
       <TaskCardTile project={project} task={task} dragging={dragging} />
     </div>
@@ -199,11 +208,11 @@ export function TaskCardTile({
   const labels = taskLabels.filter((l) => task.label_ids.includes(l.id))
   return (
     <div
-      className={`cursor-pointer select-none rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] p-2.5 transition hover:border-[var(--color-accent)] ${
+      className={`cursor-pointer select-none rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2.5 transition-colors hover:border-[var(--color-accent)] focus-within:ring-2 focus-within:ring-[var(--color-accent)] ${
         dragging ? '' : 'active:cursor-grabbing'
       }`}
     >
-      <div className="mb-1 flex items-center gap-1.5 text-[11px] text-[var(--color-text-faint)]">
+      <div className="mb-1 flex items-center gap-1.5 text-2xs text-[var(--color-text-faint)]">
         <span className="font-mono">{task.identifier}</span>
         {assignee && (
           <span className="ml-auto">
@@ -211,29 +220,25 @@ export function TaskCardTile({
           </span>
         )}
       </div>
-      <div className="mb-1.5 flex items-start gap-1.5">
+      <div className="flex items-start gap-1.5">
         <span className="mt-0.5 shrink-0">
           <PriorityIcon p={task.priority} size={13} />
         </span>
-        <span className="min-w-0 flex-1 text-sm leading-snug text-[var(--color-text)]">
+        <span className="line-clamp-2 min-w-0 flex-1 text-sm leading-snug text-[var(--color-text)]">
           {task.title}
         </span>
       </div>
       {(labels.length > 0 || task.due_date || task.comment_count > 0 || task.sub_count > 0) && (
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {labels.map((l) => (
             <LabelChip key={l.id} label={l} />
           ))}
           {task.due_date && <DueBadge due={task.due_date} />}
           {task.sub_count > 0 && (
-            <span className="text-[10px] text-[var(--color-text-faint)]">
-              ⑃ {task.sub_count}
-            </span>
+            <span className="flex items-center gap-1 text-2xs text-[var(--color-text-faint)]"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M6 3v12a3 3 0 1 0 3 3" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="6" r="3" /><path d="M18 9a9 9 0 0 1-9 9" /></svg>{task.sub_count}</span>
           )}
           {task.comment_count > 0 && (
-            <span className="text-[10px] text-[var(--color-text-faint)]">
-              💬 {task.comment_count}
-            </span>
+            <span className="flex items-center gap-1 text-2xs text-[var(--color-text-faint)]"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M20 15a4 4 0 0 1-4 4H9l-5 3v-7a4 4 0 0 1-2-3.5V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" /></svg>{task.comment_count}</span>
           )}
           {project.id !== task.project_id && null}
         </div>

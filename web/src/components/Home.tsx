@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Kbd } from '../ui'
 import { useIsMobile } from '../lib/useMediaQuery'
 import { useStore } from '../store'
 import { Sidebar } from './Sidebar'
@@ -118,7 +119,7 @@ export function Home() {
         </form>
 
         <p className="home-sidebar-hint">
-          <kbd>\</kbd>
+          <Kbd>\</Kbd>
           <span>Toggle sidebar</span>
         </p>
       </main>
@@ -143,7 +144,7 @@ function WelcomeAction({
         {icon}
       </span>
       <span>{label}</span>
-      {shortcut ? <kbd>{shortcut}</kbd> : <ChevronIcon />}
+      {shortcut ? <Kbd>{shortcut}</Kbd> : <ChevronIcon />}
     </button>
   )
 }

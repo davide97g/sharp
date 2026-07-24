@@ -28,6 +28,7 @@ import { createBackup, restoreBackup } from '../lib/e2ee/backup'
 import { isTauri, openPasskeyManagement } from '../lib/desktopAuth'
 import { isPasskeyCancellation, registerPasskey, supportsPasskeys } from '../lib/passkeys'
 import { getSoundSettings, setSoundSettings, sound, subscribeSoundSettings } from '../lib/sound'
+import { Button, Input, Select, SectionLabel, Spinner } from '../ui'
 import { Modal } from './Modal'
 import { Avatar } from './Avatar'
 import { AvatarCropper } from './AvatarCropper'
@@ -305,9 +306,7 @@ export function UserSettingsModal({
         <div className="flex flex-col gap-5">
           {/* avatar */}
           <div>
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-              Profile picture
-            </div>
+            <SectionLabel size="xs" className="mb-2">Profile picture</SectionLabel>
             {cropFile ? (
               <AvatarCropper
                 file={cropFile}
@@ -319,21 +318,13 @@ export function UserSettingsModal({
               <div className="flex items-center gap-4">
                 <Avatar id={me.id} name={me.display_name} size={72} nicknameCard={false} />
                 <div className="flex flex-col gap-2">
-                  <button
-                    onClick={() => fileRef.current?.click()}
-                    disabled={savingAvatar}
-                    className="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
-                  >
+                  <Button size="sm" onClick={() => fileRef.current?.click()} disabled={savingAvatar}>
                     Upload photo
-                  </button>
+                  </Button>
                   {me.avatar_url && (
-                    <button
-                      onClick={onRemove}
-                      disabled={savingAvatar}
-                      className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] disabled:opacity-50"
-                    >
+                    <Button variant="outline" size="sm" onClick={onRemove} disabled={savingAvatar}>
                       Remove photo
-                    </button>
+                    </Button>
                   )}
                 </div>
                 <input
@@ -349,40 +340,32 @@ export function UserSettingsModal({
 
           {/* display name */}
           <div>
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-              Display name
-            </label>
+            <SectionLabel as="label" size="xs" className="mb-2 block">Display name</SectionLabel>
             <div className="flex gap-2">
-              <input
+              <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 maxLength={80}
                 onKeyDown={(e) => e.key === 'Enter' && saveName()}
-                className="flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
+                className="flex-1"
               />
-              <button
-                onClick={saveName}
-                disabled={!nameDirty || savingName}
-                className="rounded-md bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
-              >
+              <Button onClick={saveName} disabled={!nameDirty || savingName}>
                 {savingName ? 'Saving…' : 'Save'}
-              </button>
+              </Button>
             </div>
           </div>
 
           <PersonalVoiceTriggers />
 
-          <div className="text-[11px] text-[var(--color-text-faint)]">
+          <div className="text-2xs text-[var(--color-text-faint)]">
             Signed in as <MaskedEmail email={me.email ?? ''} />
           </div>
         </div>
       ) : tab === 'chat' ? (
         <div className="flex flex-col gap-3">
-          <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-            Direct message layout
-          </div>
+          <SectionLabel size="xs">Direct message layout</SectionLabel>
           <ChatLayoutPicker value={chatLayout} onChange={(l) => void setChatLayout(l)} />
-          <p className="text-[11px] text-[var(--color-text-faint)]">
+          <p className="text-2xs text-[var(--color-text-faint)]">
             Applies to 1:1 conversations. Channels always use the classic layout.
           </p>
         </div>
@@ -390,9 +373,7 @@ export function UserSettingsModal({
         <NotificationsSettings />
       ) : tab === 'appearance' ? (
         <div className="flex flex-col gap-3">
-          <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-            Theme
-          </div>
+          <SectionLabel size="xs">Theme</SectionLabel>
           <ThemePicker
             value={theme}
             onChange={(preset) => {
@@ -400,13 +381,11 @@ export function UserSettingsModal({
               setThemePreset(preset)
             }}
           />
-          <p className="text-[11px] text-[var(--color-text-faint)]">
+          <p className="text-2xs text-[var(--color-text-faint)]">
             Saved on this device. Themes change colors only — layout stays the same.
           </p>
           <div className="mt-3 border-t border-[var(--color-border)] pt-5">
-            <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-              Navigation
-            </div>
+            <SectionLabel size="xs" className="mb-3">Navigation</SectionLabel>
             <NavigationPicker value={railPosition} onChange={setRailPosition} />
             {railPosition !== 'left' && (
               <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] px-3 py-2">
@@ -414,7 +393,7 @@ export function UserSettingsModal({
                   <div className="text-sm font-medium text-[var(--color-text)]">
                     Automatically hide the dock
                   </div>
-                  <div className="text-[11px] text-[var(--color-text-faint)]">
+                  <div className="text-2xs text-[var(--color-text-faint)]">
                     {railPosition === 'top'
                       ? 'The dock tucks into a notch. Move the cursor to the notch to show it.'
                       : 'The dock slides away. Move the cursor to the bottom edge to show it.'}
@@ -423,7 +402,7 @@ export function UserSettingsModal({
                 <DockAutoHideSwitch checked={dockAutoHide} onChange={setDockAutoHide} />
               </div>
             )}
-            <p className="mt-3 text-[11px] text-[var(--color-text-faint)]">
+            <p className="mt-3 text-2xs text-[var(--color-text-faint)]">
               Desktop only. Mobile always uses its bottom tabs.
             </p>
           </div>
@@ -445,49 +424,39 @@ export function UserSettingsModal({
           className="flex min-h-48 items-center justify-center text-[var(--color-text-faint)]"
           aria-label="Loading GIF settings"
         >
-          <span className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--color-border)] border-t-[var(--color-accent)]" />
+          <Spinner />
         </div>
       ) : !gifSettings ? (
         <div className="flex min-h-48 flex-col items-center justify-center gap-3 text-sm text-[var(--color-text-dim)]">
           <span>Could not load GIF settings.</span>
-          <button
-            type="button"
-            onClick={() => setGifLoadAttempted(false)}
-            className="rounded-md border border-[var(--color-border)] px-3 py-1.5 hover:bg-[var(--color-panel-2)]"
-          >
+          <Button variant="outline" size="sm" onClick={() => setGifLoadAttempted(false)}>
             Retry
-          </button>
+          </Button>
         </div>
       ) : (
         <div className="flex flex-col gap-5">
-          <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-            GIFs
-          </div>
+          <SectionLabel size="xs">GIFs</SectionLabel>
 
           <div>
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-              Provider
-            </label>
-            <select
+            <SectionLabel as="label" size="xs" className="mb-2 block">Provider</SectionLabel>
+            <Select
               value={gifSettings.provider}
               onChange={(event) =>
                 setGifSettings((settings) =>
                   settings ? { ...settings, provider: event.target.value } : settings,
                 )
               }
-              className="w-full cursor-default rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm text-[var(--color-text-dim)] opacity-80 focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
+              className="cursor-default text-[var(--color-text-dim)] opacity-80"
             >
               <option value="giphy">GIPHY</option>
               <option value="tenor">Tenor (legacy — no new API clients)</option>
-            </select>
+            </Select>
           </div>
 
           <div>
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-              API key
-            </label>
+            <SectionLabel as="label" size="xs" className="mb-2 block">API key</SectionLabel>
             <div className="flex items-center gap-2">
-              <input
+              <Input
                 type="password"
                 value={gifApiKey}
                 onChange={(event) => setGifApiKey(event.target.value)}
@@ -498,7 +467,7 @@ export function UserSettingsModal({
                       ? 'Tenor API key'
                       : 'GIPHY API key'
                 }
-                className="min-w-0 flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
+                className="min-w-0 flex-1"
               />
               {gifSettings.has_api_key ? (
                 <button
@@ -541,10 +510,8 @@ export function UserSettingsModal({
           {gifSettings.duck_enabled ? (
             <>
               <div>
-                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-                  Suggestion slow mode
-                </label>
-                <select
+                <SectionLabel as="label" size="xs" className="mb-2 block">Suggestion slow mode</SectionLabel>
+                <Select
                   value={gifSettings.duck_cooldown_secs}
                   onChange={(event) =>
                     setGifSettings((settings) =>
@@ -556,23 +523,20 @@ export function UserSettingsModal({
                         : settings,
                     )
                   }
-                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
                 >
                   <option value={30}>30 seconds</option>
                   <option value={60}>1 minute</option>
                   <option value={120}>2 minutes</option>
                   <option value={300}>5 minutes</option>
-                </select>
+                </Select>
                 <p className="mt-1.5 text-xs text-[var(--color-text-faint)]">
                   Minimum wait between duck suggestions in a channel.
                 </p>
               </div>
 
               <div>
-                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-                  Suggestion context
-                </label>
-                <select
+                <SectionLabel as="label" size="xs" className="mb-2 block">Suggestion context</SectionLabel>
+                <Select
                   value={gifSettings.duck_context}
                   onChange={(event) =>
                     setGifSettings((settings) =>
@@ -584,12 +548,11 @@ export function UserSettingsModal({
                         : settings,
                     )
                   }
-                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
                 >
                   <option value="1m">Last 1 minute</option>
                   <option value="2m">Last 2 minutes</option>
                   <option value="3m">Last 3 minutes</option>
-                </select>
+                </Select>
                 <p className="mt-1.5 text-xs text-[var(--color-text-faint)]">
                   How much recent chat the duck reads when picking a GIF.
                 </p>
@@ -605,18 +568,13 @@ export function UserSettingsModal({
           </div>
 
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => void saveGifSettings()}
-              disabled={gifSaving}
-              className="rounded-md bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
-            >
+            <Button onClick={() => void saveGifSettings()} disabled={gifSaving}>
               {gifSaving ? 'Saving…' : 'Save'}
-            </button>
+            </Button>
             {gifSaved ? <span className="text-xs text-[var(--color-text-dim)]">Saved</span> : null}
           </div>
 
-          <p className="text-[11px] text-[var(--color-text-faint)]">
+          <p className="text-2xs text-[var(--color-text-faint)]">
             Workspace-wide settings — every member can edit them.
           </p>
         </div>
@@ -709,7 +667,7 @@ function SettingsPageShell({
         <nav aria-label="Settings sections" className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
           {groups.map((group) => (
             <div key={group} className="mb-5 last:mb-0">
-              <div className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
+              <div className="mb-1.5 px-3 text-3xs font-bold uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
                 {group}
               </div>
               {SETTINGS_TABS.filter((item) => SETTINGS_META[item].group === group).map((item) => (
@@ -728,7 +686,7 @@ function SettingsPageShell({
           <button
             type="button"
             onClick={logout}
-            className="flex min-h-11 w-full cursor-pointer items-center rounded-xl px-3 text-sm font-medium text-[#ff8a80] outline-none transition-colors hover:bg-[#ff6b5f]/10 focus-visible:ring-2 focus-visible:ring-[#ff8a80]"
+            className="flex min-h-11 w-full cursor-pointer items-center rounded-xl px-3 text-sm font-medium text-danger-fg outline-none transition-colors hover:bg-danger-soft focus-visible:ring-2 focus-visible:ring-danger-fg"
           >
             Sign out
           </button>
@@ -773,7 +731,7 @@ function SettingsPageShell({
           <div className="mx-auto w-full max-w-[48rem] pb-10 pt-7 md:pt-12">
             <div className="mb-8 flex items-start justify-between gap-6">
               <div>
-                <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--color-accent-hover)]">
+                <p className="mb-2 text-3xs font-bold uppercase tracking-[0.18em] text-[var(--color-accent-hover)]">
                   {SETTINGS_META[activeTab].group}
                 </p>
                 <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-bold tracking-tight outline-none md:text-3xl">
@@ -857,10 +815,8 @@ function StreamingSettings() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-        Privacy Shield
-      </div>
-      <p className="-mt-2 text-[11px] text-[var(--color-text-faint)]">
+      <SectionLabel size="xs">Privacy Shield</SectionLabel>
+      <p className="-mt-2 text-2xs text-[var(--color-text-faint)]">
         While you share your screen, the Privacy Shield hides private channels, direct
         messages, previews, and your email from everyone watching. It arms automatically
         during in-app screen shares; turn it on manually when streaming with external
@@ -869,7 +825,7 @@ function StreamingSettings() {
       <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] px-3 py-2">
         <div>
           <div className="text-sm font-medium text-[var(--color-text)]">Streaming mode (manual)</div>
-          <div className="text-[11px] text-[var(--color-text-faint)]">
+          <div className="text-2xs text-[var(--color-text-faint)]">
             Keep the Privacy Shield armed even without an in-app screen share.
           </div>
         </div>
@@ -880,7 +836,7 @@ function StreamingSettings() {
           <div className="text-sm font-medium text-[var(--color-text)]">
             Show plain names while streaming
           </div>
-          <div className="text-[11px] text-[var(--color-text-faint)]">
+          <div className="text-2xs text-[var(--color-text-faint)]">
             Hide your personal nicknames and show real display names the whole time
             you&apos;re streaming — even while revealed content is visible.
           </div>
@@ -891,7 +847,7 @@ function StreamingSettings() {
           label="Show plain names while streaming"
         />
       </div>
-      <p className="text-[11px] text-[var(--color-text-faint)]">
+      <p className="text-2xs text-[var(--color-text-faint)]">
         Saved on this device. From a hidden conversation you can pause the shield for
         10 minutes — for just that conversation, or for everything.
       </p>
@@ -1003,7 +959,7 @@ function EncryptionSettingsTab({ userId }: { userId: string }) {
   return (
     <div className="flex flex-col gap-6">
       <section>
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">This device</div>
+        <SectionLabel size="xs" className="mb-2 block">This device</SectionLabel>
         {local ? (
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] p-3 text-sm">
             <dt className="text-[var(--color-text-faint)]">Name</dt><dd>{local.name}</dd>
@@ -1014,12 +970,12 @@ function EncryptionSettingsTab({ userId }: { userId: string }) {
       </section>
 
       <section>
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">My devices</div>
+        <SectionLabel size="xs" className="mb-2 block">My devices</SectionLabel>
         <div className="divide-y divide-[var(--color-border)] rounded-lg border border-[var(--color-border)]">
           {devices.map((device) => (
             <div key={device.id} className="flex items-center justify-between gap-3 p-3">
-              <div className="min-w-0"><div className="truncate text-sm font-medium">{device.name}{device.id === local?.id ? ' · Current' : ''}</div><div className="text-[11px] text-[var(--color-text-faint)]">Added {new Date(device.created_at).toLocaleDateString()}</div></div>
-              <button type="button" disabled={busy} onClick={() => void revoke(device)} className="shrink-0 text-xs text-red-400 disabled:opacity-50">Revoke</button>
+              <div className="min-w-0"><div className="truncate text-sm font-medium">{device.name}{device.id === local?.id ? ' · Current' : ''}</div><div className="text-2xs text-[var(--color-text-faint)]">Added {new Date(device.created_at).toLocaleDateString()}</div></div>
+              <button type="button" disabled={busy} onClick={() => void revoke(device)} className="shrink-0 text-xs text-danger-fg disabled:opacity-50">Revoke</button>
             </div>
           ))}
           {!devices.length ? <div className="p-3 text-sm text-[var(--color-text-faint)]">No registered devices.</div> : null}
@@ -1027,11 +983,11 @@ function EncryptionSettingsTab({ userId }: { userId: string }) {
       </section>
 
       <section className="flex flex-col gap-3">
-        <div><div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">Backup</div><p className="mt-1 text-xs text-[var(--color-text-dim)]">{backup ? `Saved ${new Date(backup.updated_at).toLocaleString()}` : 'No backup saved'}</p></div>
-        <input type="password" autoComplete="new-password" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} placeholder={backup ? 'New passphrase' : 'Passphrase (8+ characters)'} className="rounded-md border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm" />
-        <input type="password" autoComplete="new-password" value={confirmPassphrase} onChange={(event) => setConfirmPassphrase(event.target.value)} placeholder="Confirm passphrase" className="rounded-md border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm" />
-        <div className="flex flex-wrap gap-2"><button type="button" disabled={busy || !passphrase || !confirmPassphrase} onClick={() => void saveBackup()} className="rounded-md bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? 'Working…' : backup ? 'Change passphrase' : 'Set passphrase'}</button><button type="button" disabled={busy || !backup} onClick={() => setRestoreOpen((open) => !open)} className="rounded-md border border-[var(--color-border)] px-3 py-2 text-sm disabled:opacity-50">Restore from backup</button></div>
-        {restoreOpen ? <div className="flex gap-2 rounded-lg border border-[var(--color-border)] p-3"><input type="password" autoComplete="current-password" value={restorePassphrase} onChange={(event) => setRestorePassphrase(event.target.value)} placeholder="Backup passphrase" className="min-w-0 flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm" /><button type="button" disabled={busy || !restorePassphrase} onClick={() => void restore()} className="rounded-md bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Restore</button></div> : null}
+        <div><SectionLabel size="xs">Backup</SectionLabel><p className="mt-1 text-xs text-[var(--color-text-dim)]">{backup ? `Saved ${new Date(backup.updated_at).toLocaleString()}` : 'No backup saved'}</p></div>
+        <Input type="password" autoComplete="new-password" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} placeholder={backup ? 'New passphrase' : 'Passphrase (8+ characters)'} />
+        <Input type="password" autoComplete="new-password" value={confirmPassphrase} onChange={(event) => setConfirmPassphrase(event.target.value)} placeholder="Confirm passphrase" />
+        <div className="flex flex-wrap gap-2"><Button disabled={busy || !passphrase || !confirmPassphrase} onClick={() => void saveBackup()}>{busy ? 'Working…' : backup ? 'Change passphrase' : 'Set passphrase'}</Button><Button variant="outline" disabled={busy || !backup} onClick={() => setRestoreOpen((open) => !open)}>Restore from backup</Button></div>
+        {restoreOpen ? <div className="flex gap-2 rounded-lg border border-[var(--color-border)] p-3"><Input type="password" autoComplete="current-password" value={restorePassphrase} onChange={(event) => setRestorePassphrase(event.target.value)} placeholder="Backup passphrase" className="min-w-0 flex-1" /><Button disabled={busy || !restorePassphrase} onClick={() => void restore()}>Restore</Button></div> : null}
       </section>
     </div>
   )
@@ -1103,7 +1059,7 @@ function PasskeySecurityTab() {
     return (
       <div className="flex flex-col gap-3">
         <p className="text-sm text-[var(--color-text-dim)]">Manage passkeys in your system browser so Face ID, Touch ID, Windows Hello, and security keys can verify the Sharp server.</p>
-        <button type="button" onClick={() => void openPasskeyManagement().catch((error) => toastError(error instanceof Error ? error.message : 'Could not open browser.'))} className="self-start rounded-md bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-white">Manage passkeys in browser</button>
+        <Button className="self-start" onClick={() => void openPasskeyManagement().catch((error) => toastError(error instanceof Error ? error.message : 'Could not open browser.'))}>Manage passkeys in browser</Button>
       </div>
     )
   }
@@ -1112,7 +1068,7 @@ function PasskeySecurityTab() {
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">Your passkeys</div>
+        <SectionLabel size="xs" className="mb-1 block">Your passkeys</SectionLabel>
         <p className="text-xs text-[var(--color-text-dim)]">Your password remains available for account recovery.</p>
       </div>
       {passkeys.length === 0 ? <div className="rounded-lg border border-dashed border-[var(--color-border)] p-4 text-sm text-[var(--color-text-faint)]">No passkeys enrolled.</div> : (
@@ -1121,11 +1077,11 @@ function PasskeySecurityTab() {
             <div key={passkey.id} className="flex items-center justify-between gap-3 p-3">
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium text-[var(--color-text)]">{passkey.name}</div>
-                <div className="text-[11px] text-[var(--color-text-faint)]">Added {new Date(passkey.created_at).toLocaleDateString()}{passkey.last_used_at ? ` · Last used ${new Date(passkey.last_used_at).toLocaleDateString()}` : ''}</div>
+                <div className="text-2xs text-[var(--color-text-faint)]">Added {new Date(passkey.created_at).toLocaleDateString()}{passkey.last_used_at ? ` · Last used ${new Date(passkey.last_used_at).toLocaleDateString()}` : ''}</div>
               </div>
               <div className="flex shrink-0 gap-2">
                 <button type="button" onClick={() => void rename(passkey)} className="text-xs text-[var(--color-accent-hover)]">Rename</button>
-                <button type="button" onClick={() => { setRemoveId(passkey.id); setPassword('') }} className="text-xs text-red-400">Remove</button>
+                <button type="button" onClick={() => { setRemoveId(passkey.id); setPassword('') }} className="text-xs text-danger-fg">Remove</button>
               </div>
             </div>
           ))}
@@ -1133,17 +1089,17 @@ function PasskeySecurityTab() {
       )}
       <div className="flex flex-col gap-2 rounded-lg border border-[var(--color-border)] p-3">
         <div className="text-sm font-semibold">Add passkey</div>
-        <input value={name} maxLength={80} onChange={(event) => setName(event.target.value)} placeholder="Passkey name" className="rounded-md border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm" />
-        <input type="password" autoComplete="current-password" value={removeId ? '' : password} onChange={(event) => setPassword(event.target.value)} placeholder="Confirm current password" disabled={removeId !== null} className="rounded-md border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm disabled:opacity-40" />
-        <button type="button" disabled={busy || !!removeId || !name.trim() || !password} onClick={() => void add()} className="self-start rounded-md bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? 'Working…' : 'Add passkey'}</button>
+        <Input value={name} maxLength={80} onChange={(event) => setName(event.target.value)} placeholder="Passkey name" />
+        <Input type="password" autoComplete="current-password" value={removeId ? '' : password} onChange={(event) => setPassword(event.target.value)} placeholder="Confirm current password" disabled={removeId !== null} />
+        <Button className="self-start" disabled={busy || !!removeId || !name.trim() || !password} onClick={() => void add()}>{busy ? 'Working…' : 'Add passkey'}</Button>
       </div>
       {removeId && (
-        <div className="flex flex-col gap-2 rounded-lg border border-red-500/40 bg-red-500/5 p-3">
+        <div className="flex flex-col gap-2 rounded-lg border border-danger-fg/40 bg-danger-soft p-3">
           <div className="text-sm font-semibold">Remove passkey?</div>
-          <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Confirm current password" className="rounded-md border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm" />
+          <Input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Confirm current password" />
           <div className="flex gap-2">
-            <button type="button" disabled={busy || !password} onClick={() => void remove()} className="rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Remove</button>
-            <button type="button" onClick={() => { setRemoveId(null); setPassword('') }} className="rounded-md border border-[var(--color-border)] px-3 py-2 text-sm">Cancel</button>
+            <Button variant="danger" disabled={busy || !password} onClick={() => void remove()}>Remove</Button>
+            <Button variant="outline" onClick={() => { setRemoveId(null); setPassword('') }}>Cancel</Button>
           </div>
         </div>
       )}
@@ -1188,7 +1144,7 @@ function AboutTab() {
           </span>
           <div className="min-w-0">
             <div className="text-sm font-semibold">sharp</div>
-            <div className="text-[11px] text-[var(--color-text-faint)]">
+            <div className="text-2xs text-[var(--color-text-faint)]">
               Self-hosted team chat, docs, canvas, and calls.
             </div>
           </div>
@@ -1200,15 +1156,13 @@ function AboutTab() {
           <dd className="break-all font-mono text-[13px]">{__BUILD_ID__}</dd>
         </dl>
       </div>
-      <p className="text-[11px] leading-5 text-[var(--color-text-faint)]">
+      <p className="text-2xs leading-5 text-[var(--color-text-faint)]">
         The build id changes on every deploy. If it matches your latest deploy, this
         device is running the newest version — updates are picked up automatically
         within moments of reopening the app.
       </p>
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-panel-2)] p-4">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-          Display diagnostics
-        </div>
+        <SectionLabel size="xs" className="mb-2 block">Display diagnostics</SectionLabel>
         <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
           <dt className="text-[var(--color-text-faint)]">Window</dt>
           <dd className="font-mono text-[13px] tabular-nums">{diag.window}</dd>
@@ -1219,7 +1173,7 @@ function AboutTab() {
           <dt className="text-[var(--color-text-faint)]">Mode</dt>
           <dd className="font-mono text-[13px]">{diag.mode}</dd>
         </dl>
-        <p className="mt-3 text-[11px] leading-5 text-[var(--color-text-faint)]">
+        <p className="mt-3 text-2xs leading-5 text-[var(--color-text-faint)]">
           When installed on iOS, window height should match screen height and the
           top/bottom safe insets should be non-zero. A shorter window means iOS
           launched the app with a stale viewport — the app self-corrects; rotating
@@ -1285,13 +1239,11 @@ function AccountsTab() {
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-          Connected calendars
-        </div>
+        <SectionLabel size="xs" className="mb-2 block">Connected calendars</SectionLabel>
 
         {loading ? (
           <div className="flex min-h-24 items-center justify-center text-[var(--color-text-faint)]">
-            <span className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--color-border)] border-t-[var(--color-accent)]" />
+            <Spinner />
           </div>
         ) : connections.length === 0 ? (
           <p className="text-sm text-[var(--color-text-dim)]">
@@ -1307,13 +1259,13 @@ function AccountsTab() {
                 <div className="flex items-center gap-2">
                   <span
                     className={`h-2 w-2 shrink-0 rounded-full ${
-                      conn.status === 'active' ? 'bg-[#66c7aa]' : 'bg-[#ff6b5f]'
+                      conn.status === 'active' ? 'bg-success' : 'bg-danger'
                     }`}
                   />
                   <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--color-text)]">
                     {conn.provider_email}
                   </span>
-                  <span className="shrink-0 text-[11px] text-[var(--color-text-faint)]">
+                  <span className="shrink-0 text-2xs text-[var(--color-text-faint)]">
                     {conn.status === 'active' ? 'Active' : 'Needs reconnect'}
                   </span>
                 </div>
@@ -1347,23 +1299,13 @@ function AccountsTab() {
 
                 <div className="mt-2 flex items-center gap-2">
                   {conn.status === 'invalid' && (
-                    <button
-                      type="button"
-                      onClick={() => void connectGoogle()}
-                      disabled={connecting}
-                      className="rounded-md bg-[var(--color-accent)] px-2.5 py-1 text-xs font-semibold text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
-                    >
+                    <Button size="xs" onClick={() => void connectGoogle()} disabled={connecting}>
                       Reconnect
-                    </button>
+                    </Button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => void disconnect(conn.id)}
-                    disabled={busyId === conn.id}
-                    className="rounded-md border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-dim)] hover:bg-[var(--color-panel)] disabled:opacity-50"
-                  >
+                  <Button variant="outline" size="xs" onClick={() => void disconnect(conn.id)} disabled={busyId === conn.id}>
                     Disconnect
-                  </button>
+                  </Button>
                 </div>
               </div>
             ))}
@@ -1371,16 +1313,11 @@ function AccountsTab() {
         )}
       </div>
 
-      <button
-        type="button"
-        onClick={() => void connectGoogle()}
-        disabled={connecting}
-        className="flex items-center justify-center gap-2 self-start rounded-md bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
-      >
+      <Button className="self-start" onClick={() => void connectGoogle()} disabled={connecting}>
         {connecting ? 'Opening Google…' : 'Connect Google Calendar'}
-      </button>
+      </Button>
 
-      <p className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2.5 text-[11px] leading-5 text-[var(--color-text-faint)]">
+      <p className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2.5 text-2xs leading-5 text-[var(--color-text-faint)]">
         Note: a Google Cloud consent screen left in “Testing” mode expires refresh
         tokens after 7 days — publish it to production (or use an Internal app) to
         keep calendars synced.
@@ -1462,12 +1399,10 @@ function GiphyUsageBar({ usage }: { usage: GiphyUsage }) {
   return (
     <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-3">
       <div className="mb-2 flex items-baseline justify-between gap-3">
-        <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-          GIPHY usage
-        </span>
+        <SectionLabel as="span" size="xs">GIPHY usage</SectionLabel>
         <span
           className={`text-xs tabular-nums ${
-            atLimit ? 'text-amber-400' : 'text-[var(--color-text-dim)]'
+            atLimit ? 'text-warning-fg' : 'text-[var(--color-text-dim)]'
           }`}
         >
           {used} / {limit} searches
@@ -1484,7 +1419,7 @@ function GiphyUsageBar({ usage }: { usage: GiphyUsage }) {
         <div
           className={`h-full rounded-full transition-[width] duration-300 ${
             atLimit
-              ? 'bg-amber-400'
+              ? 'bg-warning'
               : pct >= 80
                 ? 'bg-[var(--color-accent-hover)]'
                 : 'bg-[var(--color-accent)]'
@@ -1492,7 +1427,7 @@ function GiphyUsageBar({ usage }: { usage: GiphyUsage }) {
           style={{ width: `${pct}%` }}
         />
       </div>
-      <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-[var(--color-text-faint)]">
+      <div className="mt-2 flex items-center justify-between gap-3 text-2xs text-[var(--color-text-faint)]">
         <span>Sliding 1-hour window · free-tier cap</span>
         <span className="tabular-nums">
           {usage.used === 0
@@ -1515,9 +1450,7 @@ function SoundSettingsSection() {
   const pct = Math.round(settings.volume * 100)
   return (
     <div className="flex flex-col gap-3">
-      <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-        Sounds
-      </div>
+      <SectionLabel size="xs">Sounds</SectionLabel>
       <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] p-3">
         <input
           type="checkbox"
@@ -1538,9 +1471,7 @@ function SoundSettingsSection() {
         </span>
       </label>
       <div>
-        <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-          Volume
-        </label>
+        <SectionLabel as="label" size="xs" className="mb-2 block">Volume</SectionLabel>
         <div className="flex items-center gap-3">
           <input
             type="range"
@@ -1638,11 +1569,9 @@ function NotificationsSettings() {
   return (
     <div className="flex flex-col gap-7">
       <section className="flex flex-col gap-3">
-        <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-          Delivery
-        </div>
+        <SectionLabel size="xs">Delivery</SectionLabel>
         <NotificationSetup />
-        <p className="text-[11px] leading-5 text-[var(--color-text-faint)]">
+        <p className="text-2xs leading-5 text-[var(--color-text-faint)]">
           Push works on this website, installed PWAs (macOS &amp; iOS Home-Screen app), and the
           desktop app. Enable it once per device.
         </p>
@@ -1651,9 +1580,7 @@ function NotificationsSettings() {
       <SoundSettingsSection />
 
       <section className="flex flex-col gap-3">
-        <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-          Do Not Disturb
-        </div>
+        <SectionLabel size="xs">Do Not Disturb</SectionLabel>
         <div className="flex flex-col gap-2">
           {(
             [
@@ -1683,32 +1610,30 @@ function NotificationsSettings() {
         {dndMode === 'scheduled' && (
           <div className="flex flex-wrap items-end gap-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] p-3">
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-                From
-              </span>
-              <input
+              <SectionLabel as="span" size="2xs">From</SectionLabel>
+              <Input
                 type="time"
+                uiSize="sm"
+                surface="panel"
                 value={minutesToHHMM(dndStart, DEFAULT_QUIET_START)}
                 onChange={(e) =>
                   void updateNotifyPrefs({ dnd_start: hhmmToMinutes(e.target.value), tz_offset: tzOffset })
                 }
-                className="rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
               />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-                To
-              </span>
-              <input
+              <SectionLabel as="span" size="2xs">To</SectionLabel>
+              <Input
                 type="time"
+                uiSize="sm"
+                surface="panel"
                 value={minutesToHHMM(dndEnd, DEFAULT_QUIET_END)}
                 onChange={(e) =>
                   void updateNotifyPrefs({ dnd_end: hhmmToMinutes(e.target.value), tz_offset: tzOffset })
                 }
-                className="rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
               />
             </label>
-            <p className="min-w-[8rem] flex-1 text-[11px] leading-5 text-[var(--color-text-faint)]">
+            <p className="min-w-[8rem] flex-1 text-2xs leading-5 text-[var(--color-text-faint)]">
               Uses this device&rsquo;s time zone. Windows past midnight are fine.
             </p>
           </div>
@@ -1716,9 +1641,7 @@ function NotificationsSettings() {
       </section>
 
       <section className="flex flex-col gap-3">
-        <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-          Notify me about
-        </div>
+        <SectionLabel size="xs">Notify me about</SectionLabel>
         {TYPES.map((t) => (
           <label
             key={t.key}
@@ -1740,10 +1663,8 @@ function NotificationsSettings() {
 
       <section className="flex flex-col gap-3">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-            Per-channel
-          </div>
-          <p className="mt-1 text-[11px] text-[var(--color-text-faint)]">
+          <SectionLabel size="xs">Per-channel</SectionLabel>
+          <p className="mt-1 text-2xs text-[var(--color-text-faint)]">
             Override the defaults above for a specific conversation.
           </p>
         </div>
@@ -1757,6 +1678,7 @@ function NotificationsSettings() {
               return (
                 <div key={c.id} className="flex items-center justify-between gap-3 p-3">
                   <span className="min-w-0 truncate text-sm text-[var(--color-text)]">{label}</span>
+                  {/* TODO(ds): kept bespoke — Select primitive is w-full (cn has no tailwind-merge), which breaks this shrink-0 inline row. */}
                   <select
                     value={mode}
                     onChange={(e) => void setChannelMode(c.id, e.target.value as ChannelNotifyMode)}
@@ -1798,9 +1720,7 @@ function MeetingEffectsSettings({ userId }: { userId: string }) {
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-          Speaking effects
-        </div>
+        <SectionLabel size="xs">Speaking effects</SectionLabel>
         <p className="mt-1 text-xs leading-5 text-[var(--color-text-faint)]">
           Optional visual effects shown during calls. Your microphone audio stays on device.
         </p>
@@ -1819,7 +1739,7 @@ function MeetingEffectsSettings({ userId }: { userId: string }) {
           <span id="audio-aura-setting-description" className="mt-1 block text-xs leading-5 text-[var(--color-text-faint)]">
             Speaking volume drives a visual signature around your avatar.
           </span>
-          <span className="mt-1 block text-[10px] font-medium text-[var(--color-text-dim)]">
+          <span className="mt-1 block text-3xs font-medium text-[var(--color-text-dim)]">
             {preference === null ? 'Not decided — you will be asked once in a call.' : enabled ? 'On' : 'Off'}
           </span>
         </span>
@@ -1835,7 +1755,7 @@ function MeetingEffectsSettings({ userId }: { userId: string }) {
         </span>
       </label>
       <fieldset disabled={!enabled} className={`transition-opacity ${enabled ? 'opacity-100' : 'pointer-events-none opacity-45'}`}>
-        <legend className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
+        <legend className="mb-2 text-3xs font-bold uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
           Choose your aura
         </legend>
         <div className="grid gap-2 sm:grid-cols-2">
@@ -1873,7 +1793,7 @@ function MeetingEffectsSettings({ userId }: { userId: string }) {
                   <span className="mt-0.5 block text-[9px] font-bold uppercase tracking-[0.14em] text-[#9c8fff]">
                     {option.mood}
                   </span>
-                  <span className="mt-1 block text-[10px] leading-4 text-[var(--color-text-faint)]">
+                  <span className="mt-1 block text-3xs leading-4 text-[var(--color-text-faint)]">
                     {option.description}
                   </span>
                 </span>
@@ -1886,7 +1806,7 @@ function MeetingEffectsSettings({ userId }: { userId: string }) {
           })}
         </div>
       </fieldset>
-      <p className="text-[11px] leading-5 text-[var(--color-text-faint)]">
+      <p className="text-2xs leading-5 text-[var(--color-text-faint)]">
         Honors your system’s reduced-motion preference by replacing movement with a static glow.
       </p>
     </div>

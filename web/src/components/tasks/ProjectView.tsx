@@ -10,6 +10,7 @@ import { TaskListView } from './TaskListView'
 import { TaskPeek } from './TaskPeek'
 import { PRIORITIES, PRIORITY_LABELS, PriorityIcon, StateDot, isOpen, stateOf } from './taskUi'
 import { Avatar } from '../Avatar'
+import { Button, Popover } from '../../ui'
 
 const VIEW_KEY = 'sharp.taskView.' // + projectId → 'list' | 'board'
 
@@ -132,15 +133,19 @@ export function ProjectView() {
 
   return (
     <div className="relative flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border)] px-5">
-        <button onClick={() => navigate('/tasks')} className="text-sm text-[var(--color-text-faint)] hover:text-[var(--color-text)]">‹ Tasks</button>
-        <span className="text-[var(--color-text-faint)]">/</span>
-        <span className="text-lg">{project.icon || '🎯'}</span>
-        <span className="min-w-0 truncate font-semibold">{project.name}</span>
-        <span className="font-mono text-xs text-[var(--color-text-faint)]">{project.key}</span>
-
-        <div className="ml-auto flex items-center gap-2">
-          {/* filters */}
+      <header className="shrink-0">
+        <div className="flex h-14 items-center gap-2 border-b border-[var(--color-border)] px-3 sm:px-5">
+          <button onClick={() => navigate('/tasks')} aria-label="Back to Tasks" className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-faint)] transition-colors hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] md:hidden"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg></button>
+          <div className="min-w-0 flex flex-1 items-center gap-2"><button onClick={() => navigate('/tasks')} className="max-md:hidden min-h-11 shrink-0 cursor-pointer rounded-lg px-2 text-sm text-[var(--color-text-faint)] transition-colors hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">‹ Tasks</button><span className="max-md:hidden text-[var(--color-text-faint)]">/</span><span className="shrink-0 text-lg">{project.icon || '🎯'}</span><span className="min-w-0 truncate font-semibold">{project.name}</span><span className="hidden font-mono text-xs text-[var(--color-text-faint)] sm:inline">{project.key}</span></div>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <div className="flex overflow-hidden rounded-lg border border-[var(--color-border)]">
+              <ViewToggle active={view === 'list'} onClick={() => switchView('list')} title="List view"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M4 6h16M4 12h16M4 18h16" /></svg></ViewToggle>
+              <ViewToggle active={view === 'board'} onClick={() => switchView('board')} title="Board view"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="4" y="4" width="4" height="16" rx="1" /><rect x="10" y="4" width="4" height="11" rx="1" /><rect x="16" y="4" width="4" height="7" rx="1" /></svg></ViewToggle>
+            </div>
+            <Button size="md" className="min-h-11" onClick={() => setNewTask({})} title="New task (c)" aria-label="New task" iconLeft={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>}><span className="hidden sm:inline">New task</span></Button>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 overflow-x-auto border-b border-[var(--color-border-soft)] px-3 py-2 sm:px-5">
           <FilterChip
             label="State"
             active={!!filterState}
@@ -179,40 +184,13 @@ export function ProjectView() {
           />
           <button
             onClick={() => setShowClosed((v) => !v)}
-            className={`rounded-md px-2 py-1 text-xs ${
+            className={`min-h-9 shrink-0 cursor-pointer rounded-full border px-3 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
               showClosed
-                ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]'
-                : 'text-[var(--color-text-faint)] hover:bg-[var(--color-panel)]'
+                ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]'
+                : 'border-[var(--color-border)] text-[var(--color-text-faint)] hover:bg-[var(--color-panel)]'
             }`}
           >
             Closed
-          </button>
-
-          {/* view toggle */}
-          <div className="flex overflow-hidden rounded-lg border border-[var(--color-border)]">
-            <ViewToggle active={view === 'list'} onClick={() => switchView('list')} title="List view">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                <path d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </ViewToggle>
-            <ViewToggle active={view === 'board'} onClick={() => switchView('board')} title="Board view">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <rect x="4" y="4" width="4" height="16" rx="1" />
-                <rect x="10" y="4" width="4" height="11" rx="1" />
-                <rect x="16" y="4" width="4" height="7" rx="1" />
-              </svg>
-            </ViewToggle>
-          </div>
-
-          <button
-            onClick={() => setNewTask({})}
-            title="New task (c)"
-            className="flex items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-2.5 py-1.5 text-sm font-semibold text-white hover:opacity-90"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            New
           </button>
         </div>
       </header>
@@ -264,7 +242,8 @@ function ViewToggle({
     <button
       onClick={onClick}
       title={title}
-      className={`flex h-7 w-8 items-center justify-center ${
+      aria-pressed={active}
+      className={`flex h-9 w-10 cursor-pointer items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] ${
         active
           ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]'
           : 'text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]'
@@ -293,55 +272,47 @@ function FilterChip({
   const [open, setOpen] = useState(false)
   const currentLabel = options.find((o) => o.id === current)?.label
   return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs ${
-          active
-            ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]'
-            : 'text-[var(--color-text-faint)] hover:bg-[var(--color-panel)]'
-        }`}
-      >
-        {active ? currentLabel : label}
-        {active && (
-          <span
-            role="button"
-            tabIndex={0}
-            onClick={(e) => {
-              e.stopPropagation()
-              onClear()
-            }}
-            className="hover:text-[var(--color-text)]"
-          >
-            ✕
+    <div className="shrink-0">
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        align="end"
+        width="w-48"
+        trigger={
+          <span className="flex items-center">
+            <button
+              onClick={() => setOpen((o) => !o)}
+              className={`flex min-h-9 shrink-0 cursor-pointer items-center gap-1 rounded-full border px-3 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+                active
+                  ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] pr-8 text-[var(--color-accent-hover)]'
+                  : 'border-[var(--color-border)] text-[var(--color-text-faint)] hover:bg-[var(--color-panel)]'
+              }`}
+            >
+              {active ? currentLabel : label}
+            </button>
+            {active && <button type="button" aria-label={`Clear ${label} filter`} onClick={onClear} className="-ml-7 flex h-7 w-7 cursor-pointer items-center justify-center rounded-full text-[var(--color-accent-hover)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="m6 6 12 12M18 6 6 18" /></svg></button>}
           </span>
+        }
+      >
+        {options.length === 0 && (
+          <div className="px-2 py-1.5 text-xs text-[var(--color-text-faint)]">Nothing here</div>
         )}
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full z-40 mt-1 w-48 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1.5 shadow-2xl">
-            {options.length === 0 && (
-              <div className="px-2 py-1.5 text-xs text-[var(--color-text-faint)]">Nothing here</div>
-            )}
-            {options.map((o) => (
-              <button
-                key={o.id}
-                onClick={() => {
-                  onPick(o.id)
-                  setOpen(false)
-                }}
-                className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-[var(--color-panel-2)] ${
-                  o.id === current ? 'text-[var(--color-accent-hover)]' : 'text-[var(--color-text)]'
-                }`}
-              >
-                {o.icon && <span className="flex w-4 justify-center">{o.icon}</span>}
-                <span className="min-w-0 flex-1 truncate">{o.label}</span>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+        {options.map((o) => (
+          <button
+            key={o.id}
+            onClick={() => {
+              onPick(o.id)
+              setOpen(false)
+            }}
+            className={`flex min-h-9 w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-[var(--color-panel-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+              o.id === current ? 'text-[var(--color-accent-hover)]' : 'text-[var(--color-text)]'
+            }`}
+          >
+            {o.icon && <span className="flex w-4 justify-center">{o.icon}</span>}
+            <span className="min-w-0 flex-1 truncate">{o.label}</span>
+          </button>
+        ))}
+      </Popover>
     </div>
   )
 }

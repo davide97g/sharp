@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore, streamChannelShielded } from '../store'
 import { Avatar } from './Avatar'
@@ -10,6 +9,7 @@ import { notificationPath } from '../lib/types'
 import type { Notification, NotificationKind } from '../lib/types'
 import { NotificationSetup } from './NotificationSetup'
 import { Toggle } from './Toggle'
+import { Button, CountBadge, EmptyState, SlideOver } from '../ui'
 
 type Filter = 'all' | NotificationKind
 
@@ -25,13 +25,14 @@ const KIND_META: Record<
   dm: {
     label: 'DMs',
     verb: 'sent a message',
-    accent: 'bg-emerald-500/15 text-emerald-300',
+    accent: 'bg-success-soft text-success-fg',
   },
   reply: {
     label: 'Replies',
     verb: 'replied to your thread',
-    accent: 'bg-amber-500/15 text-amber-300',
+    accent: 'bg-warning-soft text-warning-fg',
   },
+  // TODO(ds): no violet/sky tone tokens exist for these decorative kind accents.
   poll_ended: {
     label: 'Polls',
     verb: 'closed a poll',
@@ -47,6 +48,24 @@ const KIND_META: Record<
     verb: 'commented on your task',
     accent: 'bg-sky-500/15 text-sky-300',
   },
+}
+
+// Shared navigation for a notification: mark it read, focus its message (if any),
+// then route to its target. Used by both the inbox panel and the rail bell preview.
+function useOpenNotification() {
+  const markNotifRead = useStore((s) => s.markNotifRead)
+  const setFocus = useStore((s) => s.setFocus)
+  const navigate = useNavigate()
+  return useCallback(
+    (n: Notification) => {
+      markNotifRead(n.id)
+      if (n.message_id && n.channel_id) {
+        setFocus({ channelId: n.channel_id, messageId: n.message_id, query: '' })
+      }
+      navigate(notificationPath(n))
+    },
+    [markNotifRead, setFocus, navigate],
+  )
 }
 
 export function InboxTrigger({ variant }: { variant: 'row' | 'icon' | 'header' }) {
@@ -70,11 +89,7 @@ export function InboxTrigger({ variant }: { variant: 'row' | 'icon' | 'header' }
         }`}
       >
         <BellIcon dnd={dnd} />
-        {unread > 0 && !dnd && (
-          <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--color-accent)] px-1 text-[10px] font-bold leading-none text-white">
-            {unread > 99 ? '99+' : unread}
-          </span>
-        )}
+        {unread > 0 && !dnd && <CountBadge count={unread} />}
       </button>
     )
   }
@@ -94,7 +109,8 @@ export function InboxTrigger({ variant }: { variant: 'row' | 'icon' | 'header' }
         }`}
       >
         <BellIcon dnd={dnd} />
-        {unread > 0 && !dnd && <CountBadge count={unread} ring="ring-[var(--color-panel)]" />}
+        {/* TODO(ds): ui CountBadge lacks absolute-positioned ring; keep local RingCountBadge. */}
+        {unread > 0 && !dnd && <RingCountBadge count={unread} ring="ring-[var(--color-panel)]" />}
       </button>
     )
   }
@@ -121,15 +137,11 @@ export function InboxTrigger({ variant }: { variant: 'row' | 'icon' | 'header' }
       </span>
       <span className="min-w-0 flex-1 font-medium">Inbox</span>
       {dnd && (
-        <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-text-faint)]">
+        <span className="shrink-0 rounded px-1.5 py-0.5 text-3xs font-medium uppercase tracking-wide text-[var(--color-text-faint)]">
           Quiet
         </span>
       )}
-      {unread > 0 && !dnd && (
-        <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent)] px-1.5 text-[10px] font-bold leading-none text-white">
-          {unread > 99 ? '99+' : unread}
-        </span>
-      )}
+      {unread > 0 && !dnd && <CountBadge count={unread} className="h-5 min-w-5 px-1.5" />}
     </button>
   )
 }
@@ -141,22 +153,13 @@ export function InboxPanel() {
   const unread = useStore((s) => s.notifUnread)
   const dnd = useStore((s) => s.dnd)
   const notifHasMore = useStore((s) => s.notifHasMore)
-  const markNotifRead = useStore((s) => s.markNotifRead)
   const markAllNotifRead = useStore((s) => s.markAllNotifRead)
   const setDnd = useStore((s) => s.setDnd)
   const loadMore = useStore((s) => s.loadMoreNotifications)
-  const setFocus = useStore((s) => s.setFocus)
-  const navigate = useNavigate()
+  const goToNotification = useOpenNotification()
   const [filter, setFilter] = useState<Filter>('all')
 
-  useEffect(() => {
-    if (!open) return
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setInboxOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, setInboxOpen])
+  // Escape close is handled by SlideOver.
 
   useEffect(() => {
     if (!open) setFilter('all')
@@ -189,74 +192,40 @@ export function InboxPanel() {
   }, [notifications])
 
   function openNotification(n: Notification) {
-    markNotifRead(n.id)
     setInboxOpen(false)
-    if (n.message_id && n.channel_id) {
-      setFocus({ channelId: n.channel_id, messageId: n.message_id, query: '' })
-    }
-    navigate(notificationPath(n))
+    goToNotification(n)
   }
 
   if (!open) return null
 
-  return createPortal(
-    <div className="fixed inset-0 z-[60] flex justify-end" role="dialog" aria-modal="true" aria-label="Inbox">
-      <button
-        type="button"
-        aria-label="Close inbox"
-        className="absolute inset-0 cursor-default bg-black/45 backdrop-blur-[2px]"
-        onClick={() => setInboxOpen(false)}
-      />
-      <aside
-        className="inbox-panel relative flex h-full w-full max-w-[26rem] flex-col border-l border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl max-md:max-w-none"
-        style={{
-          paddingTop: 'var(--safe-top)',
-          paddingBottom: 'var(--safe-bottom)',
-          paddingRight: 'var(--safe-right)',
-        }}
-      >
-        {/* header */}
-        <div className="flex items-start justify-between gap-3 border-b border-[var(--color-border)] px-5 pb-3 pt-4">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold tracking-tight text-[var(--color-text)]">
-                Inbox
-              </h2>
-              {unread > 0 && (
-                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--color-accent)] px-1.5 text-[10px] font-bold leading-none text-white">
-                  {unread > 99 ? '99+' : unread}
-                </span>
-              )}
-            </div>
-            <p className="mt-0.5 text-xs text-[var(--color-text-faint)]">
-              Mentions, DMs, replies, and poll results
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              onClick={markAllNotifRead}
-              disabled={unread === 0}
-              className="min-h-11 rounded-md px-2 text-[11px] font-medium text-[var(--color-accent-hover)] transition-colors hover:bg-[var(--color-accent-soft)] disabled:pointer-events-none disabled:opacity-35"
-            >
-              Mark all read
-            </button>
-            <button
-              type="button"
-              onClick={() => setInboxOpen(false)}
-              aria-label="Close"
-              className="flex h-11 w-11 items-center justify-center rounded-md text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
-            >
-              <CloseIcon />
-            </button>
-          </div>
-        </div>
-
+  return (
+    <SlideOver
+      onClose={() => setInboxOpen(false)}
+      title={
+        <span className="flex items-center gap-2">
+          Inbox
+          {unread > 0 && <CountBadge count={unread} className="h-5 min-w-5 px-1.5" />}
+        </span>
+      }
+      subtitle="Mentions, DMs, replies, and poll results"
+      headerActions={
+        // TODO(ds): no accent-text button variant; keep native accent link-button.
+        <button
+          type="button"
+          onClick={markAllNotifRead}
+          disabled={unread === 0}
+          className="min-h-11 rounded-md px-2 text-2xs font-medium text-[var(--color-accent-hover)] transition-colors hover:bg-[var(--color-accent-soft)] disabled:pointer-events-none disabled:opacity-35"
+        >
+          Mark all read
+        </button>
+      }
+    >
+      <div className="flex h-full min-h-0 flex-col">
         {/* quiet mode */}
-        <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-ink)]/50 px-5 py-2.5">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-ink)]/50 px-5 py-2.5">
           <div className="min-w-0">
             <div className="text-xs font-medium text-[var(--color-text)]">Do not disturb</div>
-            <div className="truncate text-[10px] text-[var(--color-text-faint)]">
+            <div className="truncate text-3xs text-[var(--color-text-faint)]">
               Keep the inbox, silence toasts &amp; push
             </div>
           </div>
@@ -264,13 +233,13 @@ export function InboxPanel() {
         </div>
 
         {!isTauri && (
-          <div className="mx-4 mt-3">
+          <div className="mx-4 mt-3 shrink-0">
             <NotificationSetup compact />
           </div>
         )}
 
         {/* filters */}
-        <div className="flex gap-1 overflow-x-auto px-4 py-3">
+        <div className="flex shrink-0 gap-1 overflow-x-auto px-4 py-3">
           <FilterChip
             active={filter === 'all'}
             onClick={() => setFilter('all')}
@@ -291,12 +260,12 @@ export function InboxPanel() {
         {/* list */}
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
           {filtered.length === 0 ? (
-            <EmptyState filter={filter} />
+            <InboxEmpty filter={filter} />
           ) : (
             <>
               {groups.map((group) => (
                 <section key={group.label} className="mb-3">
-                  <h3 className="sticky top-0 z-10 bg-[var(--color-panel)]/95 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)] backdrop-blur-sm">
+                  <h3 className="sticky top-0 z-10 bg-[var(--color-panel)]/95 px-3 py-1.5 text-3xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)] backdrop-blur-sm">
                     {group.label}
                   </h3>
                   <div className="space-y-0.5">
@@ -307,20 +276,165 @@ export function InboxPanel() {
                 </section>
               ))}
               {notifHasMore && filter === 'all' && (
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
                   onClick={loadMore}
-                  className="mx-2 mt-1 w-[calc(100%-1rem)] rounded-lg py-2.5 text-center text-xs font-medium text-[var(--color-text-dim)] transition-colors hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
+                  className="mx-2 mt-1 w-[calc(100%-1rem)] justify-center text-xs"
                 >
                   Load older
-                </button>
+                </Button>
               )}
             </>
           )}
         </div>
-      </aside>
-    </div>,
-    document.body,
+      </div>
+    </SlideOver>
+  )
+}
+
+// A jumping inbox bell for the workspace mode rail: bounces macOS-dock-style when
+// a notification lands, opens the inbox on click, and reveals a 3-item preview on
+// hover where each row navigates directly to its target (no slide-over).
+export function RailInboxBell({
+  orientation,
+  edge = 'bottom',
+  tip,
+}: {
+  orientation: 'vertical' | 'horizontal'
+  edge?: 'bottom' | 'top'
+  tip?: 'above' | 'below'
+}) {
+  const setInboxOpen = useStore((s) => s.setInboxOpen)
+  const inboxOpen = useStore((s) => s.inboxOpen)
+  const unread = useStore((s) => s.notifUnread)
+  const dnd = useStore((s) => s.dnd)
+  const notifications = useStore((s) => s.notifications)
+  const goToNotification = useOpenNotification()
+  const [hover, setHover] = useState(false)
+  const [bounceKey, setBounceKey] = useState(0)
+  const prevUnread = useRef(unread)
+
+  // Bounce whenever the unread count climbs (a new notification arrived). Skips
+  // decrements (marking read) and stays quiet while DND is on.
+  useEffect(() => {
+    if (!dnd && unread > prevUnread.current) setBounceKey((k) => k + 1)
+    prevUnread.current = unread
+  }, [unread, dnd])
+
+  const preview = notifications.slice(0, 3)
+  const showPreview = hover && !inboxOpen && preview.length > 0
+
+  // Reveal the preview on the free side of the rail.
+  const placement =
+    orientation === 'vertical'
+      ? 'left-full top-0 ml-2'
+      : edge === 'top'
+        ? 'top-full right-0 mt-2'
+        : 'bottom-full right-0 mb-2'
+
+  return (
+    <div
+      className="relative"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      <button
+        type="button"
+        onClick={() => setInboxOpen(true)}
+        aria-label={unread > 0 ? `Inbox, ${unread} unread` : 'Inbox'}
+        aria-expanded={inboxOpen}
+        title={tip ? undefined : 'Inbox'}
+        data-tooltip={tip ? 'Inbox' : undefined}
+        data-tip={tip}
+        className={`mode-rail-control micro-icon-button relative flex h-11 w-11 items-center justify-center rounded-xl transition ${
+          inboxOpen
+            ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)] ring-1 ring-[var(--color-accent)]'
+            : 'text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]'
+        }`}
+      >
+        <span
+          key={bounceKey}
+          className={`micro-icon-glyph flex items-center justify-center ${
+            bounceKey > 0 ? 'animate-bell-bounce' : ''
+          }`}
+        >
+          <BellIcon dnd={dnd} size={18} />
+        </span>
+        {unread > 0 && !dnd && <CountBadge count={unread} className="absolute -right-1 -top-1" />}
+      </button>
+      {showPreview && (
+        <div
+          className={`absolute ${placement} z-(--z-popover) w-80 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] shadow-[0_18px_40px_rgba(0,0,0,0.45)]`}
+          role="menu"
+        >
+          <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2">
+            <span className="text-xs font-semibold text-[var(--color-text)]">Latest</span>
+            <button
+              type="button"
+              onClick={() => {
+                setHover(false)
+                setInboxOpen(true)
+              }}
+              className="rounded px-1.5 py-0.5 text-2xs font-medium text-[var(--color-accent-hover)] transition-colors hover:bg-[var(--color-accent-soft)]"
+            >
+              Open inbox
+            </button>
+          </div>
+          <div className="p-1">
+            {preview.map((n) => (
+              <NotifPreviewRow
+                key={n.id}
+                n={n}
+                onOpen={() => {
+                  setHover(false)
+                  goToNotification(n)
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function NotifPreviewRow({ n, onOpen }: { n: Notification; onOpen: () => void }) {
+  const meta = KIND_META[n.kind]
+  const preview = gifPreviewText(n.preview)
+  const unread = !n.read_at
+  const shielded =
+    useStore((s) => streamChannelShielded(s, n.channel_id)) &&
+    (n.kind === 'dm' || n.channel_kind === 'dm' || n.channel_kind === 'private')
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      role="menuitem"
+      className={`flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition-colors ${
+        unread
+          ? 'bg-[var(--color-accent-soft)]/35 hover:bg-[var(--color-accent-soft)]/60'
+          : 'hover:bg-[var(--color-panel-2)]'
+      }`}
+    >
+      <div className={shielded ? 'stream-blur' : ''}>
+        <Avatar id={n.actor.id} name={n.actor.display_name} size={30} />
+      </div>
+      <div className={`min-w-0 flex-1 ${shielded ? 'stream-blur' : ''}`}>
+        <div className="flex items-baseline justify-between gap-2">
+          <p className="min-w-0 truncate text-xs text-[var(--color-text)]">
+            <span className="font-semibold">{n.actor.display_name}</span>{' '}
+            <span className="font-normal text-[var(--color-text-faint)]">{meta.verb}</span>
+          </p>
+          <time className="shrink-0 text-3xs tabular-nums text-[var(--color-text-faint)]">
+            {fmtRelative(n.created_at)}
+          </time>
+        </div>
+        {preview && (
+          <p className="mt-0.5 line-clamp-1 text-2xs text-[var(--color-text-dim)]">{preview}</p>
+        )}
+      </div>
+    </button>
   )
 }
 
@@ -362,7 +476,7 @@ function InboxRow({ n, onOpen }: { n: Notification; onOpen: () => void }) {
             <span className="font-semibold">{n.actor.display_name}</span>{' '}
             <span className="font-normal text-[var(--color-text-faint)]">{meta.verb}</span>
           </p>
-          <time className="shrink-0 text-[10px] tabular-nums text-[var(--color-text-faint)]">
+          <time className="shrink-0 text-3xs tabular-nums text-[var(--color-text-faint)]">
             {fmtRelative(n.created_at)}
           </time>
         </div>
@@ -372,7 +486,7 @@ function InboxRow({ n, onOpen }: { n: Notification; onOpen: () => void }) {
           </p>
         )}
         <div className="mt-1.5 flex items-center gap-1.5">
-          <span className="truncate rounded-md bg-[var(--color-ink)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-faint)]">
+          <span className="truncate rounded-md bg-[var(--color-ink)] px-1.5 py-0.5 text-3xs font-medium text-[var(--color-text-faint)]">
             {where}
           </span>
           {unread && (
@@ -384,7 +498,7 @@ function InboxRow({ n, onOpen }: { n: Notification; onOpen: () => void }) {
   )
 }
 
-function EmptyState({ filter }: { filter: Filter }) {
+function InboxEmpty({ filter }: { filter: Filter }) {
   const copy =
     filter === 'all'
       ? { title: "You're all caught up", sub: 'Mentions, DMs, and replies land here.' }
@@ -398,15 +512,7 @@ function EmptyState({ filter }: { filter: Filter }) {
               ? { title: 'No task activity', sub: 'Task assignments and comments show up here.' }
               : { title: 'No poll results', sub: 'Polls you created or voted in show up here.' }
 
-  return (
-    <div className="flex flex-col items-center px-6 py-16 text-center">
-      <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--color-panel-2)] text-[var(--color-text-faint)] ring-1 ring-[var(--color-border)]">
-        <BellIcon dnd={false} size={22} />
-      </div>
-      <p className="text-sm font-medium text-[var(--color-text-dim)]">{copy.title}</p>
-      <p className="mt-1 text-xs text-[var(--color-text-faint)]">{copy.sub}</p>
-    </div>
-  )
+  return <EmptyState icon={<BellIcon dnd={false} size={22} />} title={copy.title} description={copy.sub} />
 }
 
 function FilterChip({
@@ -424,7 +530,7 @@ function FilterChip({
     <button
       type="button"
       onClick={onClick}
-      className={`flex min-h-11 shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+      className={`flex min-h-11 shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-2xs font-medium transition-colors ${
         active
           ? 'bg-[var(--color-accent)] text-white'
           : 'bg-[var(--color-panel-2)] text-[var(--color-text-dim)] hover:text-[var(--color-text)]'
@@ -455,7 +561,7 @@ function groupByDay(items: Notification[]): { label: string; items: Notification
   return groups
 }
 
-function CountBadge({ count, ring }: { count: number; ring: string }) {
+function RingCountBadge({ count, ring }: { count: number; ring: string }) {
   return (
     <span
       className={`absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--color-accent)] px-1 text-[9px] font-bold leading-none text-white ${ring} ring-2`}
@@ -527,11 +633,3 @@ function KindGlyph({ kind }: { kind: NotificationKind }) {
   }
 }
 
-function CloseIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
-      <path d="M18 6 6 18" />
-      <path d="m6 6 12 12" />
-    </svg>
-  )
-}

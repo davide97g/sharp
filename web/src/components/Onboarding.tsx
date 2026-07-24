@@ -75,7 +75,7 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-[var(--color-ink)] safe-pad">
+    <div className="fixed inset-0 z-(--z-overlay) flex flex-col bg-[var(--color-ink)] safe-pad">
       {/* header: brand + skip + step progress */}
       <div className="flex items-center justify-between px-4 pt-[max(1rem,var(--titlebar-h))] pb-2 sm:px-6 sm:pt-[max(1.5rem,var(--titlebar-h))]">
         <div className="flex items-center gap-2">
@@ -86,6 +86,7 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
             Welcome to sharp
           </span>
         </div>
+        {/* TODO(ds): auth-screen ghost button — ink-tuned hover (bg-panel, not panel-2) differs from Button ghost; kept for parity. */}
         <button
           onClick={skip}
           className="min-h-11 cursor-pointer rounded-md px-3 text-sm text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
@@ -108,7 +109,7 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
               }`}
             >
               <span
-                className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] ${
+                className={`flex h-5 w-5 items-center justify-center rounded-full text-3xs ${
                   i === step
                     ? 'bg-[var(--color-accent)] text-white'
                     : i < step
@@ -154,7 +155,7 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
                     <div className="text-sm font-semibold text-[var(--color-text)]">
                       Do not disturb
                     </div>
-                    <div className="text-[11px] text-[var(--color-text-faint)]">
+                    <div className="text-2xs text-[var(--color-text-faint)]">
                       Keep inbox updates, but silence push and toasts.
                     </div>
                   </div>
@@ -167,7 +168,7 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
                 </label>
               </div>
               {isTauri && (
-                <p className="mt-2 text-[11px] text-[var(--color-text-faint)]">
+                <p className="mt-2 text-2xs text-[var(--color-text-faint)]">
                   On desktop, sharp uses your system notifications.
                 </p>
               )}
@@ -177,6 +178,7 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
       </div>
 
       {/* footer nav */}
+      {/* TODO(ds): auth-screen nav buttons kept bespoke — Back uses ink-tuned ghost (hover bg-panel); Continue/Get started carries the login-primary-action shimmer, neither of which the ui Button provides. */}
       <div className="flex items-center justify-between border-t border-[var(--color-border)] px-4 py-3 sm:px-6 sm:py-4">
         <button
           onClick={back}

@@ -93,7 +93,7 @@ export function MeetingCard({
             {timeRange(startIso, endIso, allDay)}
           </div>
           {cancelled && (
-            <span className="mt-1 inline-block rounded bg-[#ff6b5f]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#ff8a80]">
+            <span className="mt-1 inline-block rounded bg-[#ff6b5f]/10 px-1.5 py-0.5 text-3xs font-semibold text-[#ff8a80]">
               Cancelled
             </span>
           )}
@@ -121,7 +121,7 @@ export function MeetingCard({
                   key={opt.value}
                   type="button"
                   onClick={() => void rsvp(opt.value)}
-                  className={`rounded-md border px-2 py-1 text-[11px] font-medium transition ${
+                  className={`rounded-md border px-2 py-1 text-2xs font-medium transition ${
                     active
                       ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]'
                       : 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)]'
@@ -136,7 +136,7 @@ export function MeetingCard({
       )}
 
       {loaded && !meeting && (
-        <div className="mt-2 text-[11px] text-[var(--color-text-faint)]">
+        <div className="mt-2 text-2xs text-[var(--color-text-faint)]">
           Meeting details unavailable.
         </div>
       )}

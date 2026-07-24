@@ -10,6 +10,7 @@ import { toastError } from '../lib/toast'
 import { channelLabel } from '../lib/util'
 import { localSearchResult, searchLocal } from '../lib/e2ee/search'
 import { useStore, streamShieldOn } from '../store'
+import { Tabs, Skeleton } from '../ui'
 
 type Tab = 'messages' | 'docs'
 
@@ -98,23 +99,26 @@ export function SearchResults() {
         </span>
       </header>
 
-      <div className="flex items-center gap-1 border-b border-[var(--color-border)] px-4">
-        <TabButton active={tab === 'messages'} onClick={() => setTab('messages')}>
-          Messages
-        </TabButton>
-        <TabButton active={tab === 'docs'} onClick={() => setTab('docs')}>
-          Docs
-        </TabButton>
-      </div>
+      <Tabs
+        className="px-4"
+        active={tab}
+        onChange={(k) => setTab(k as Tab)}
+        items={[
+          { key: 'messages', label: 'Messages' },
+          { key: 'docs', label: 'Docs' },
+        ]}
+      />
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {loading ? (
           <div className="space-y-3">
             {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="skeleton h-16 rounded-lg" />
+              <Skeleton key={i} className="h-16 rounded-lg" />
             ))}
           </div>
         ) : results.length === 0 ? (
+          // TODO(ds): ui EmptyState wraps its icon in a 48px chip; this full-page
+          // state uses a bare text-3xl emoji, so kept custom to preserve the look.
           <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
             <div className="text-3xl">🔍</div>
             <p className="text-sm text-[var(--color-text-dim)]">
@@ -138,7 +142,7 @@ export function SearchResults() {
                 <div className={`min-w-0 flex-1 ${hitShielded(d.channel_id) ? 'stream-blur' : ''}`}>
                   <div className="mb-0.5 flex items-center gap-2">
                     <span className="truncate font-semibold">{d.title || 'Untitled'}</span>
-                    <span className="shrink-0 text-[11px] text-[var(--color-accent-hover)]">
+                    <span className="shrink-0 text-2xs text-[var(--color-accent-hover)]">
                       #{d.channel_name}
                     </span>
                   </div>
@@ -188,28 +192,5 @@ export function SearchResults() {
         )}
       </div>
     </div>
-  )
-}
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`-mb-px border-b-2 px-3 py-2.5 text-sm font-medium transition ${
-        active
-          ? 'border-[var(--color-accent)] text-[var(--color-text)]'
-          : 'border-transparent text-[var(--color-text-faint)] hover:text-[var(--color-text-dim)]'
-      }`}
-    >
-      {children}
-    </button>
   )
 }

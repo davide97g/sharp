@@ -205,7 +205,7 @@ function AudioPlayerControls({
               className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-default"
             />
           </div>
-          <span className="shrink-0 text-[11px] tabular-nums text-[var(--color-text-dim)]">
+          <span className="shrink-0 text-2xs tabular-nums text-[var(--color-text-dim)]">
             {total ? fmtTime(shownTime) : '--:--'}
           </span>
         </div>

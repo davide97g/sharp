@@ -10,6 +10,7 @@ import { createPortal } from 'react-dom'
 import { useStore } from '../store'
 import { useDisplayName, effectiveNicknames } from '../lib/displayName'
 import { Avatar } from './Avatar'
+import { Button, Input, SectionLabel } from '../ui'
 
 type Anchor = { top: number; left: number; bottom: number; right: number }
 
@@ -132,6 +133,8 @@ function UserCardPopover({
     setPos({ top, left })
   }, [anchor])
 
+  // TODO(ds): can't use useDismiss here — it lacks the trigger-aware exception
+  // (ignoring mousedown on the trigger) that keeps the toggle from close+reopen.
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
       const target = e.target as Node
@@ -184,7 +187,7 @@ function UserCardPopover({
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-[80] w-[280px] rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-3 shadow-2xl"
+      className="fixed z-(--z-popover) w-[280px] rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-3 shadow-2xl"
       style={{ top: pos.top, left: pos.left }}
       onClick={(e) => e.stopPropagation()}
     >
@@ -195,22 +198,23 @@ function UserCardPopover({
             {displayName}
           </div>
           {existing.trim() && existing.trim() !== realName ? (
-            <div className="truncate text-[11px] text-[var(--color-text-faint)]">
+            <div className="truncate text-2xs text-[var(--color-text-faint)]">
               Also known as {realName}
             </div>
           ) : (
-            <div className="truncate text-[11px] text-[var(--color-text-faint)]">
+            <div className="truncate text-2xs text-[var(--color-text-faint)]">
               {realName}
             </div>
           )}
         </div>
       </div>
 
-      <label className="mt-3 block text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+      <SectionLabel as="label" size="2xs" tone="faint" className="mt-3 block">
         Nickname for you
-      </label>
+      </SectionLabel>
       <div className="mt-1 flex gap-2">
-        <input
+        <Input
+          uiSize="sm"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           maxLength={80}
@@ -218,28 +222,23 @@ function UserCardPopover({
           onKeyDown={(e) => {
             if (e.key === 'Enter') void save()
           }}
-          className="min-w-0 flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-2.5 py-1.5 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
+          className="min-w-0 flex-1"
         />
-        <button
-          type="button"
-          disabled={saving}
-          onClick={() => void save()}
-          className="rounded-md bg-[var(--color-accent)] px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
-        >
+        <Button variant="primary" size="sm" disabled={saving} onClick={() => void save()}>
           {saving ? '…' : 'Save'}
-        </button>
+        </Button>
       </div>
       {existing ? (
         <button
           type="button"
           disabled={saving}
           onClick={() => void clear()}
-          className="mt-2 text-[11px] text-[var(--color-text-faint)] hover:text-[var(--color-text-dim)]"
+          className="mt-2 text-2xs text-[var(--color-text-faint)] hover:text-[var(--color-text-dim)]"
         >
           Clear nickname
         </button>
       ) : (
-        <p className="mt-2 text-[11px] text-[var(--color-text-faint)]">
+        <p className="mt-2 text-2xs text-[var(--color-text-faint)]">
           Only you see this name. Emoji welcome.
         </p>
       )}

@@ -7,6 +7,12 @@ import { meetingChannelLabel, meetingDisplayTitle } from '../../lib/meetingLabel
 import { useStore } from '../../store'
 import { Avatar } from '../Avatar'
 import { Markdown } from '../Markdown'
+import { Button, Spinner, Textarea } from '../../ui'
+
+// TODO(ds): .meeting-kicker / .meeting-label kept as-is — their 0.12–0.14em
+// tracking + 650 weight have no parity with ui SectionLabel (tracking-wider).
+// TODO(ds): local EmptyText kept — its padding-less text-sm has no parity with
+// EmptyState variant="inline" (px-2 py-1.5 text-xs).
 
 type TimelineItem =
   | { kind: 'phrase'; at: string; phrase: MeetingTranscriptPhrase }
@@ -96,13 +102,13 @@ export function MeetingDetailView() {
         <button onClick={() => navigate('/meetings')} className="min-h-11 rounded-lg px-2 text-sm text-[var(--color-text-faint)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]">‹ Meetings</button>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold">{meetingDisplayTitle(meeting, channels)}</div>
-          <div className="truncate text-[10px] text-[var(--color-text-faint)]">
+          <div className="truncate text-3xs text-[var(--color-text-faint)]">
             {meetingChannelLabel(meeting, channels)}
           </div>
         </div>
         <StatusChip meeting={meeting} />
         <button onClick={() => void regenerate()} disabled={meeting.status === 'active'} className="min-h-11 rounded-lg border border-[var(--color-border)] px-3 text-xs text-[var(--color-text-dim)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-40 max-sm:order-3 max-sm:ml-auto">Regenerate</button>
-        <button onClick={() => void remove()} disabled={meeting.status === 'active'} className="min-h-11 rounded-lg px-3 text-xs text-[var(--color-text-faint)] hover:bg-red-500/10 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40 max-sm:order-3">Delete</button>
+        <button onClick={() => void remove()} disabled={meeting.status === 'active'} className="min-h-11 rounded-lg px-3 text-xs text-[var(--color-text-faint)] hover:bg-danger-soft hover:text-danger-fg disabled:cursor-not-allowed disabled:opacity-40 max-sm:order-3">Delete</button>
       </header>
 
       <div className="flex-1 overflow-y-auto">
@@ -146,7 +152,7 @@ function MeetingHeader({ meeting, displayTitle, onSave }: { meeting: MeetingDeta
         aria-label="Meeting title"
         className="mt-3 w-full bg-transparent text-3xl font-semibold tracking-[-0.04em] outline-none placeholder:text-[var(--color-text-faint)] sm:text-4xl"
       />
-      <div className="mt-5 flex flex-wrap gap-x-6 gap-y-2 font-mono text-[11px] tabular-nums text-[var(--color-text-faint)]">
+      <div className="mt-5 flex flex-wrap gap-x-6 gap-y-2 font-mono text-2xs tabular-nums text-[var(--color-text-faint)]">
         <span>{formatDuration(duration)}</span>
         <span>{meeting.participant_count} participants</span>
         <span>{meeting.transcript_count} transcript phrases</span>
@@ -166,12 +172,12 @@ function EditableNotes({ meeting, onSave }: { meeting: MeetingDetail; onSave: (i
     <section>
       <SectionHeading label="Notes" action={editing ? undefined : <button onClick={() => setEditing(true)}>Edit</button>} />
       {pending && !meeting.summary ? (
-        <div className="meeting-surface flex items-center gap-3 text-sm text-[var(--color-text-dim)]">{meeting.status === 'active' ? <span className="h-2 w-2 rounded-full bg-[#ff6b5f]" /> : <Spinner />} {meeting.status === 'active' ? 'Summary and action items will generate when the call ends.' : 'Generating summary and action items…'}</div>
+        <div className="meeting-surface flex items-center gap-3 text-sm text-[var(--color-text-dim)]">{meeting.status === 'active' ? <span className="h-2 w-2 rounded-full bg-[#ff6b5f]" /> : <Spinner size="sm" />} {meeting.status === 'active' ? 'Summary and action items will generate when the call ends.' : 'Generating summary and action items…'}</div>
       ) : editing ? (
         <div className="meeting-surface space-y-5">
-          <label className="block"><span className="meeting-label">Summary</span><textarea value={summary} onChange={(event) => setSummary(event.target.value)} rows={8} className="meeting-textarea" /></label>
-          <label className="block"><span className="meeting-label">Decisions · one per line</span><textarea value={decisions} onChange={(event) => setDecisions(event.target.value)} rows={5} className="meeting-textarea" /></label>
-          <div className="flex justify-end gap-2"><button onClick={() => { setEditing(false); setSummary(meeting.summary); setDecisions(meeting.decisions) }} className="meeting-button">Cancel</button><button onClick={() => { onSave({ summary, decisions }); setEditing(false) }} className="meeting-button-primary">Save notes</button></div>
+          <label className="block"><span className="meeting-label">Summary</span><Textarea value={summary} onChange={(event) => setSummary(event.target.value)} rows={8} className="mt-[0.55rem]" /></label>
+          <label className="block"><span className="meeting-label">Decisions · one per line</span><Textarea value={decisions} onChange={(event) => setDecisions(event.target.value)} rows={5} className="mt-[0.55rem]" /></label>
+          <div className="flex justify-end gap-2"><Button variant="outline" size="sm" onClick={() => { setEditing(false); setSummary(meeting.summary); setDecisions(meeting.decisions) }}>Cancel</Button><Button size="sm" onClick={() => { onSave({ summary, decisions }); setEditing(false) }}>Save notes</Button></div>
         </div>
       ) : (
         <div className="meeting-surface space-y-6">
@@ -207,14 +213,14 @@ function ActionEditor({ meeting, onChange }: { meeting: MeetingDetail; onChange:
             <input type="checkbox" checked={action.completed} onChange={(event) => update(index, { completed: event.target.checked })} className="h-4 w-4 accent-[var(--color-accent)]" aria-label={`Complete ${action.text || 'action item'}`} />
             <input value={action.text} onChange={(event) => update(index, { text: event.target.value })} placeholder="Describe next step" className={`min-w-0 bg-transparent text-sm outline-none ${action.completed ? 'text-[var(--color-text-faint)] line-through' : ''}`} />
             <div className="col-span-2 flex items-center justify-end gap-2 sm:col-span-1">
-              <select value={action.assignee_user_id ?? ''} onChange={(event) => update(index, { assignee_user_id: event.target.value || null })} className="max-w-32 rounded-md border border-[var(--color-border)] bg-[var(--color-panel-2)] px-2 py-1 text-[11px] text-[var(--color-text-dim)] outline-none">
+              <select value={action.assignee_user_id ?? ''} onChange={(event) => update(index, { assignee_user_id: event.target.value || null })} className="max-w-32 rounded-md border border-[var(--color-border)] bg-[var(--color-panel-2)] px-2 py-1 text-2xs text-[var(--color-text-dim)] outline-none">
                 <option value="">Unassigned</option>{attendees.map((attendee) => <option key={attendee.user_id!} value={attendee.user_id!}>{attendee.display_name}</option>)}
               </select>
-              <button onClick={() => { setActions(actions.filter((_, actionIndex) => actionIndex !== index)); setDirty(true) }} className="text-[var(--color-text-faint)] hover:text-red-300" aria-label="Remove action">×</button>
+              <button onClick={() => { setActions(actions.filter((_, actionIndex) => actionIndex !== index)); setDirty(true) }} className="text-[var(--color-text-faint)] hover:text-danger-fg" aria-label="Remove action">×</button>
             </div>
           </div>
         ))}
-        {dirty && <div className="flex justify-end gap-2 border-t border-[var(--color-border)] px-4 py-3"><button onClick={() => { setActions(meeting.actions); setDirty(false) }} className="meeting-button">Discard</button><button onClick={() => void save()} disabled={actions.some((action) => !action.text.trim())} className="meeting-button-primary disabled:opacity-40">Save actions</button></div>}
+        {dirty && <div className="flex justify-end gap-2 border-t border-[var(--color-border)] px-4 py-3"><Button variant="outline" size="sm" onClick={() => { setActions(meeting.actions); setDirty(false) }}>Discard</Button><Button size="sm" onClick={() => void save()} disabled={actions.some((action) => !action.text.trim())}>Save actions</Button></div>}
       </div>
     </section>
   )
@@ -243,14 +249,14 @@ function TranscriptTimeline({ meeting }: { meeting: MeetingDetail }) {
 
 function TimelineRow({ item, startedAt }: { item: TimelineItem; startedAt: string }) {
   if (item.kind !== 'phrase') return (
-    <div className="grid grid-cols-[4.25rem_1rem_1fr] gap-3 px-4 py-2 text-[11px] text-[var(--color-text-faint)]">
+    <div className="grid grid-cols-[4.25rem_1rem_1fr] gap-3 px-4 py-2 text-2xs text-[var(--color-text-faint)]">
       <time className="font-mono tabular-nums">{offsetTime(startedAt, item.at)}</time><span className="mt-1 h-2 w-2 rounded-full border border-[var(--color-text-faint)]" /><span>{item.attendance.display_name} {item.kind === 'join' ? 'joined' : 'left'}</span>
     </div>
   )
   const color = speakerColor(item.phrase.user_id ?? item.phrase.display_name)
   return (
     <div className="group grid grid-cols-[4.25rem_1rem_1fr] gap-3 border-t border-[var(--color-border-soft)] px-4 py-4 first:border-0">
-      <time className="font-mono text-[10px] tabular-nums text-[var(--color-text-faint)]">{offsetTime(startedAt, item.at)}</time>
+      <time className="font-mono text-3xs tabular-nums text-[var(--color-text-faint)]">{offsetTime(startedAt, item.at)}</time>
       <span className="relative"><span className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 opacity-30" style={{ backgroundColor: color }} /><span className="relative block h-2.5 w-2.5 rounded-full ring-4 ring-[var(--color-panel)]" style={{ backgroundColor: color }} /></span>
       <div className="min-w-0"><div className="mb-1 flex items-center gap-2"><span className="text-xs font-semibold" style={{ color }}>{item.phrase.display_name}</span>{item.phrase.guest && <span className="rounded border border-[var(--color-border)] px-1 text-[9px] text-[var(--color-text-faint)]">guest</span>}<time className="font-mono text-[9px] text-[var(--color-text-faint)]">{timeOf(item.at)}</time></div><p className="text-sm leading-6 text-[var(--color-text-dim)]">{item.phrase.text}</p></div>
     </div>
@@ -270,10 +276,9 @@ function AttendancePanel({ meeting }: { meeting: MeetingDetail }) {
 }
 
 function ConsentPanel() { return <section className="rounded-xl border border-[#ff6b5f]/20 bg-[#ff6b5f]/5 p-4"><h2 className="meeting-label text-[#ff8a80]">Consent boundary</h2><p className="mt-3 text-xs leading-5 text-[var(--color-text-faint)]">Attendance covers everyone present after notes began. Transcript contains only speech from participants who explicitly shared their microphone transcript. AI notes may be processed by configured AI provider.</p></section> }
-function StatusChip({ meeting }: { meeting: MeetingDetail }) { return <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold ${meeting.status === 'active' ? 'border-[#ff6b5f]/35 bg-[#ff6b5f]/10 text-[#ff8a80]' : meeting.status === 'interrupted' ? 'border-amber-400/25 bg-amber-400/10 text-amber-300' : 'border-[var(--color-border)] text-[var(--color-text-faint)]'}`}>{meeting.status === 'active' ? '● Live' : meeting.status}</span> }
+function StatusChip({ meeting }: { meeting: MeetingDetail }) { return <span className={`rounded-full border px-2.5 py-1 text-3xs font-semibold ${meeting.status === 'active' ? 'border-[#ff6b5f]/35 bg-[#ff6b5f]/10 text-[#ff8a80]' : meeting.status === 'interrupted' ? 'border-warning-fg/25 bg-warning-soft text-warning-fg' : 'border-[var(--color-border)] text-[var(--color-text-faint)]'}`}>{meeting.status === 'active' ? '● Live' : meeting.status}</span> }
 function SectionHeading({ label, action }: { label: string; action?: React.ReactNode }) { return <div className="mb-3 flex min-h-8 items-center justify-between"><h2 className="meeting-kicker">{label}</h2><div className="text-xs text-[var(--color-accent-hover)] [&_button:hover]:underline">{action}</div></div> }
 function EmptyText({ text }: { text: string }) { return <p className="text-sm text-[var(--color-text-faint)]">{text}</p> }
-function Spinner() { return <span className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--color-border)] border-t-[var(--color-accent)] motion-reduce:animate-none" /> }
 function PageMessage({ children }: { children: React.ReactNode }) { return <main className="flex flex-1 items-center justify-center bg-[var(--color-ink)] text-sm text-[var(--color-text-faint)]">{children}</main> }
 function uniqueMemberAttendees(attendance: MeetingAttendance[]) { const seen = new Set<string>(); return attendance.filter((item) => item.user_id && !seen.has(item.user_id) && Boolean(seen.add(item.user_id))) }
 function uniqueAttendees(attendance: MeetingAttendance[]) { const map = new Map<string, MeetingAttendance & { key: string }>(); for (const item of attendance) { const key = item.user_id ?? `${item.display_name}-${item.guest}`; const existing = map.get(key); if (!existing) map.set(key, { ...item, key }); else { if (new Date(item.joined_at) < new Date(existing.joined_at)) existing.joined_at = item.joined_at; if (!existing.left_at || !item.left_at) existing.left_at = null; else if (new Date(item.left_at) > new Date(existing.left_at)) existing.left_at = item.left_at } } return [...map.values()] }

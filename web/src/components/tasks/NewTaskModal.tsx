@@ -4,6 +4,7 @@ import { toastError } from '../../lib/toast'
 import { useStore } from '../../store'
 import type { Project, Task, TaskPriority } from '../../lib/types'
 import { Modal } from '../Modal'
+import { Button, Textarea } from '../../ui'
 import {
   AssigneePicker,
   DuePicker,
@@ -70,6 +71,8 @@ export function NewTaskModal({
   return (
     <Modal title={`New task · ${project.key}`} onClose={onClose} wide>
       <div className="space-y-3">
+        {/* TODO(ds): Input — kept custom for the text-base font-medium title
+            emphasis (ui Input chrome is text-sm only). */}
         <input
           autoFocus
           value={title}
@@ -78,9 +81,9 @@ export function NewTaskModal({
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void submit()
           }}
           placeholder="Task title"
-          className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-base font-medium text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none"
+          className="min-h-11 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 text-base font-medium text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
         />
-        <textarea
+        <Textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           onKeyDown={(e) => {
@@ -88,7 +91,6 @@ export function NewTaskModal({
           }}
           rows={4}
           placeholder="Description… (markdown)"
-          className="w-full resize-y rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none"
         />
         <div className="flex flex-wrap items-center gap-1">
           <StatePicker project={project} stateId={stateId} onPick={setStateId} />
@@ -107,19 +109,12 @@ export function NewTaskModal({
             </button>
           )}
           <div className="ml-auto flex items-center gap-2">
-            <button
-              onClick={onClose}
-              className="rounded-lg px-3 py-1.5 text-sm text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)]"
-            >
+            <Button variant="ghost" className="min-h-11" onClick={onClose}>
               Cancel
-            </button>
-            <button
-              onClick={() => void submit()}
-              disabled={!title.trim() || busy}
-              className="rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
-            >
+            </Button>
+            <Button className="min-h-11" onClick={() => void submit()} disabled={!title.trim() || busy}>
               Create task
-            </button>
+            </Button>
           </div>
         </div>
       </div>

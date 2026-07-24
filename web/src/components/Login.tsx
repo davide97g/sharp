@@ -6,6 +6,7 @@ import { startBrowserLogin } from '../lib/desktopAuth'
 import { useStore } from '../store'
 import { toastError } from '../lib/toast'
 import { sound } from '../lib/sound'
+import { Button } from '../ui'
 import { BrandLockup, LOGIN_BRAND_ID } from './BrandLockup'
 import { isPasskeyCancellation, loginWithPasskey, supportsPasskeys } from '../lib/passkeys'
 import { getThemePreset, setThemePreset, type ThemePreset } from '../lib/theme'
@@ -397,15 +398,14 @@ export function Login() {
                   </p>
                 )}
 
-                <button
-                  type="submit"
-                  disabled={busy}
-                  className="login-primary-action mt-2 min-h-11 cursor-pointer rounded-lg bg-[var(--color-accent)] px-4 py-2.5 text-base font-semibold text-white transition hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 focus:ring-offset-[var(--color-ink)] disabled:opacity-60 sm:text-sm"
-                >
+                <Button type="submit" size="lg" block disabled={busy} className="login-primary-action mt-2">
                   {busy ? 'Signing in…' : 'Sign in'}
-                </button>
+                </Button>
               </form>
 
+              {/* TODO(ds): secondary auth buttons (passkey / browser / register Back)
+                  use a panel+border, hover-border style with no matching Button
+                  variant (outline fills bg on hover). Left as-is to preserve look. */}
               {passkeysEnabled && (
                 <>
                   <div className="my-4 flex items-center gap-3 text-xs text-[var(--color-text-faint)]">
@@ -480,13 +480,9 @@ export function Login() {
                     index={idx}
                   />
 
-                  <button
-                    type="submit"
-                    disabled={busy}
-                    className="login-primary-action mt-2 min-h-11 cursor-pointer rounded-lg bg-[var(--color-accent)] px-4 py-2.5 text-base font-semibold text-white transition hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 focus:ring-offset-[var(--color-ink)] disabled:opacity-60 sm:text-sm"
-                  >
+                  <Button type="submit" size="lg" block disabled={busy} className="login-primary-action mt-2">
                     {busy ? 'Sending…' : 'Send reset link'}
-                  </button>
+                  </Button>
                 </form>
 
                 <p className="mt-6 text-center text-sm text-[var(--color-text-dim)]">
@@ -515,13 +511,9 @@ export function Login() {
                   </p>
                 </header>
 
-                <button
-                  type="button"
-                  onClick={() => setLoginView('signin')}
-                  className="login-primary-action min-h-11 w-full cursor-pointer rounded-lg bg-[var(--color-accent)] px-4 py-2.5 text-base font-semibold text-white transition hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 focus:ring-offset-[var(--color-ink)] disabled:opacity-60 sm:text-sm"
-                >
+                <Button type="button" size="lg" block onClick={() => setLoginView('signin')} className="login-primary-action">
                   Back to sign in
-                </button>
+                </Button>
               </div>
             )
           ) : issued ? (
@@ -562,7 +554,7 @@ export function Login() {
                         sound.tabSwitch()
                       }}
                       aria-current={i === step ? 'step' : undefined}
-                      className={`mt-1.5 cursor-pointer text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors disabled:cursor-default ${
+                      className={`mt-1.5 cursor-pointer text-3xs font-semibold uppercase tracking-[0.14em] transition-colors disabled:cursor-default ${
                         i === step
                           ? 'text-[var(--color-text)]'
                           : i < step
@@ -583,7 +575,7 @@ export function Login() {
               </div>
 
               <div key={step} className={dirRef.current === 1 ? 'auth-step-next' : 'auth-step-prev'}>
-                <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-accent-hover)]">
+                <p className="mb-1 text-2xs font-semibold uppercase tracking-[0.16em] text-[var(--color-accent-hover)]">
                   {`0${step + 1} — ${REG_STEPS[step].label}`}
                 </p>
                 <h1
@@ -702,17 +694,18 @@ export function Login() {
                     >
                       Back
                     </button>
-                    <button
+                    <Button
                       type="submit"
+                      size="lg"
                       disabled={busy}
-                      className="login-primary-action min-h-11 flex-[2] cursor-pointer rounded-lg bg-[var(--color-accent)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 focus:ring-offset-[var(--color-ink)] disabled:opacity-60"
+                      className="login-primary-action flex-[2]"
                     >
                       {step === REG_STEPS.length - 1
                         ? busy
                           ? 'Cutting your badge…'
                           : 'Create account'
                         : 'Continue'}
-                    </button>
+                    </Button>
                   </div>
                 </form>
               </div>

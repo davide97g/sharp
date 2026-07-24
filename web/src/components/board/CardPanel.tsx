@@ -11,6 +11,7 @@ import {
 } from '../../lib/boardDoc'
 import type { ChannelMember } from '../../lib/types'
 import { AssigneeControl, DateControl, MultiSelectControl, SelectControl } from './PropertyControls'
+import { CloseIcon, IconButton, useDismiss } from '../../ui'
 
 export function CardPanel({
   card,
@@ -34,6 +35,7 @@ export function CardPanel({
   const titleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const descTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const titleRef = useRef<HTMLTextAreaElement>(null)
+  const asideRef = useRef<HTMLElement>(null)
 
   // Grow the title textarea to fit its content so long, wrapped titles aren't
   // clipped to a single line.
@@ -52,13 +54,9 @@ export function CardPanel({
     if (!descFocused.current) setDescription(card.description)
   }, [card.description])
 
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  // Escape-to-close via the shared hook; the flex-1 backdrop keeps its explicit
+  // click-to-close so outside handling stays scoped to this overlay.
+  useDismiss({ ref: asideRef, onClose, outside: false })
 
   function onTitle(v: string) {
     setTitle(v)
@@ -72,21 +70,20 @@ export function CardPanel({
   }
 
   return (
+    // TODO(ds): SlideOver — kept custom because this panel is bg-ink (not bg-panel),
+    // z-40, backdrop-less inline (not portaled with a scrim); adopts useDismiss +
+    // IconButton pieces instead.
     <div className="fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal aria-label="Card">
       <div className="flex-1" onClick={onClose} />
-      <aside className="flex w-full max-w-[420px] flex-col border-l border-[var(--color-border)] bg-[var(--color-ink)] shadow-2xl max-sm:max-w-none">
+      <aside
+        ref={asideRef}
+        className="flex w-full max-w-[420px] flex-col border-l border-[var(--color-border)] bg-[var(--color-ink)] shadow-2xl max-sm:max-w-none"
+      >
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--color-border)] px-4">
           <span className="text-sm font-semibold text-[var(--color-text-dim)]">Card</span>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="flex h-9 w-9 items-center justify-center rounded-md text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
-          </button>
+          <IconButton label="Close" onClick={onClose}>
+            <CloseIcon />
+          </IconButton>
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
@@ -141,13 +138,14 @@ export function CardPanel({
 
         {canEdit && (
           <div className="shrink-0 border-t border-[var(--color-border)] px-4 py-3">
+            {/* TODO(ds): Button has no danger-outline variant; kept custom, hex→danger tokens. */}
             <button
               type="button"
               onClick={() => {
                 deleteCard(ydoc, card.id)
                 onClose()
               }}
-              className="flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm text-[#e05a7d] hover:bg-[#e05a7d]/10"
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm text-danger-fg hover:bg-danger-soft"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
@@ -240,7 +238,7 @@ function Checklist({
       <div className="mb-2 flex items-center justify-between">
         <div className="text-xs font-medium text-[var(--color-text-faint)]">Checklist</div>
         {total > 0 && (
-          <div className="text-[11px] font-medium tabular-nums text-[var(--color-text-faint)]">
+          <div className="text-2xs font-medium tabular-nums text-[var(--color-text-faint)]">
             {done}/{total}
           </div>
         )}
@@ -350,7 +348,7 @@ function ChecklistRow({
           type="button"
           onClick={onDelete}
           aria-label="Delete item"
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--color-text-faint)] opacity-0 hover:text-[#e05a7d] focus:opacity-100 group-hover/item:opacity-100"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--color-text-faint)] opacity-0 hover:text-danger-fg focus:opacity-100 group-hover/item:opacity-100"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M18 6 6 18M6 6l12 12" />

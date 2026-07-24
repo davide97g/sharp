@@ -7,7 +7,7 @@ import { ThreadPanel } from './ThreadPanel'
 import { SharpyPanel } from './SharpyPanel'
 import { QuickSwitcher } from './QuickSwitcher'
 import { SearchPalette } from './SearchPalette'
-import { InboxPanel } from './NotificationCenter'
+import { InboxPanel, RailInboxBell } from './NotificationCenter'
 import { VideoStage } from './voice/VideoStage'
 import { Onboarding } from './Onboarding'
 import { MobileTabBar } from './MobileTabBar'
@@ -19,6 +19,7 @@ import { useStore, streamShieldOn } from '../store'
 import { StreamBanner } from './stream/StreamBanner'
 import { RestoreEncryptionModal } from './RestoreEncryptionModal'
 import { Avatar } from './Avatar'
+import { CountBadge } from '../ui'
 
 const SIDEBAR_OPEN_KEY = 'sharp.sidebarOpen'
 
@@ -104,7 +105,6 @@ export function AppShell() {
   const inChatDetail = /^\/c\//.test(location.pathname)
   const showMobileTabBar = isMobile && !settingsMode && !inChatDetail
 
-  const setInboxOpen = useStore((s) => s.setInboxOpen)
   const dockEdge: 'bottom' | 'top' | null =
     railPosition === 'bottom' ? 'bottom' : railPosition === 'top' ? 'top' : null
   const dockRail = !isMobile && !settingsMode && dockEdge !== null
@@ -145,11 +145,6 @@ export function AppShell() {
     if (prev.mode !== mode) sound.modeSwitch()
     else if (prev.path !== location.pathname) sound.tabSwitch()
   }, [mode, location.pathname])
-
-  // Close the chat inbox when leaving chat mode so it doesn't snap back open.
-  useEffect(() => {
-    if (mode !== 'chat') setInboxOpen(false)
-  }, [mode, setInboxOpen])
 
   // total unread -> document title (hidden while the streaming shield is on —
   // the tab title is visible in a shared screen's window chrome)
@@ -278,7 +273,7 @@ export function AppShell() {
       {inVoice && <VideoStage />}
       <QuickSwitcher />
       <SearchPalette />
-      {!settingsMode && mode === 'chat' && <InboxPanel />}
+      {!settingsMode && <InboxPanel />}
       {onboarding && <Onboarding onClose={() => setOnboarding(false)} />}
       <RestoreEncryptionModal />
       </div>
@@ -528,6 +523,9 @@ function ModeRail({
             </svg>
           }
         />
+      {mode !== 'chat' && (
+        <RailInboxBell orientation={orientation} edge={edge} tip={tip} />
+      )}
       {me ? (
           <button
             type="button"
@@ -579,9 +577,7 @@ function RailButton({
     >
       <span className="micro-icon-glyph flex items-center justify-center">{label}</span>
       {badge !== undefined && badge > 0 && (
-        <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--color-accent)] px-1 text-[10px] font-bold text-white">
-          {badge > 99 ? '99+' : badge}
-        </span>
+        <CountBadge count={badge} className="absolute -right-1 -top-1" />
       )}
       {dot && !(badge !== undefined && badge > 0) && (
         <span className="absolute right-0.5 top-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--color-ink)] bg-[var(--color-accent)]" />

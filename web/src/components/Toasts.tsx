@@ -6,7 +6,7 @@ export function Toasts() {
 
   return (
     <div
-      className="pointer-events-none fixed z-[100] flex flex-col gap-2"
+      className="pointer-events-none fixed z-(--z-toast) flex flex-col gap-2"
       style={{
         right: 'max(1rem, env(safe-area-inset-right, 0px))',
         bottom: 'max(1rem, calc(var(--mobile-tab-h, 0px) + 0.5rem))',
@@ -46,9 +46,9 @@ export function Toasts() {
             onClick={() => dismiss(t.id)}
             className={`pointer-events-auto flex max-w-sm cursor-pointer items-start gap-2 rounded-lg border px-3.5 py-2.5 text-sm shadow-lg animate-in ${
               t.kind === 'error'
-                ? 'border-red-500/40 bg-[#2a1618] text-red-200'
+                ? 'border-danger-fg/40 bg-danger-soft text-danger-fg'
                 : t.kind === 'success'
-                  ? 'border-emerald-500/40 bg-[#132420] text-emerald-200'
+                  ? 'border-success-fg/40 bg-success-soft text-success-fg'
                   : 'border-[var(--color-border)] bg-[var(--color-panel-2)] text-[var(--color-text)]'
             }`}
           >

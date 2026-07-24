@@ -116,11 +116,13 @@ export function StateDot({ state, size = 12 }: { state: TaskState; size?: number
   )
 }
 
+// TODO(ds): Tag withDot — kept custom for the tighter py-px/text-3xs sizing, the
+// title tooltip, and the max-w-24 truncate that ui Tag doesn't express.
 export function LabelChip({ label }: { label: TaskLabel }) {
   const swatch = colorOf(label.color)
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-full border border-[var(--color-border)] px-1.5 py-px text-[10px] text-[var(--color-text-dim)]"
+      className="inline-flex items-center gap-1 rounded-full border border-[var(--color-border)] px-1.5 py-px text-3xs text-[var(--color-text-dim)]"
       title={label.name}
     >
       <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: swatch.fg }} />
@@ -147,7 +149,7 @@ export function DueBadge({ due }: { due: string }) {
   const text = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
   return (
     <span
-      className={`inline-flex items-center gap-1 text-[11px] ${
+      className={`inline-flex items-center gap-1 text-2xs ${
         overdue
           ? 'text-[var(--board-red-fg)]'
           : isToday

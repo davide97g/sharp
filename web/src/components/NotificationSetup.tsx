@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { isTauri } from '../lib/notify'
 import { useStore } from '../store'
+import { Badge, Button } from '../ui'
 
 export function NotificationSetup({ compact = false }: { compact?: boolean }) {
   const state = useStore((s) => s.notificationState)
@@ -65,9 +66,9 @@ export function NotificationSetup({ compact = false }: { compact?: boolean }) {
           <div className="flex items-center gap-2">
             <div className="text-sm font-semibold text-[var(--color-text)]">{title}</div>
             {state === 'subscribed' && (
-              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">
+              <Badge tone="success" uppercase>
                 On
-              </span>
+              </Badge>
             )}
           </div>
           <p className="mt-0.5 text-xs leading-relaxed text-[var(--color-text-faint)]">
@@ -75,23 +76,24 @@ export function NotificationSetup({ compact = false }: { compact?: boolean }) {
           </p>
         </div>
         {state === 'subscribed' ? (
-          <button
-            type="button"
+          <Button
+            variant="outline"
+            size="lg"
             onClick={() => void run(disable)}
             disabled={busy}
-            className="min-h-11 shrink-0 rounded-lg border border-[var(--color-border)] px-3 text-xs font-semibold text-[var(--color-text-dim)] transition-colors hover:border-[var(--color-text-faint)] hover:text-[var(--color-text)] disabled:opacity-50 max-sm:ml-14 max-sm:w-[calc(100%-3.5rem)]"
+            className="max-sm:ml-14 max-sm:w-[calc(100%-3.5rem)]"
           >
             {busy ? 'Turning off…' : 'Disable'}
-          </button>
+          </Button>
         ) : state === 'prompt' || state === 'error' ? (
-          <button
-            type="button"
+          <Button
+            size="lg"
             onClick={() => void run(enable)}
             disabled={busy}
-            className="min-h-11 shrink-0 rounded-lg bg-[var(--color-accent)] px-4 text-xs font-semibold text-white transition-colors hover:bg-[var(--color-accent-hover)] disabled:opacity-50 max-sm:ml-14 max-sm:w-[calc(100%-3.5rem)]"
+            className="max-sm:ml-14 max-sm:w-[calc(100%-3.5rem)]"
           >
             {busy ? 'Enabling…' : state === 'error' ? 'Retry' : 'Enable'}
-          </button>
+          </Button>
         ) : null}
       </div>
     </div>

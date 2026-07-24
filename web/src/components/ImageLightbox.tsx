@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
+import { Overlay } from '../ui'
 
 export function ImageLightbox({
   src,
@@ -27,14 +28,10 @@ export function ImageLightbox({
     }
   }, [onClose])
 
+  // TODO(ds): Overlay does not forward role="dialog"/aria-modal; lightbox keeps
+  // its own Escape handling (capture phase) + body scroll lock above.
   return createPortal(
-    <div
-      className="fixed inset-0 z-[110] flex items-center justify-center bg-black/90 p-4 safe-pad backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-label={alt || 'Image'}
-      onMouseDown={onClose}
-    >
+    <Overlay z="lightbox" scrim="bg-black/90" center className="safe-pad" onBackdrop={onClose}>
       <button
         type="button"
         onClick={onClose}
@@ -51,7 +48,7 @@ export function ImageLightbox({
         className="max-h-full max-w-full object-contain select-none"
         draggable={false}
       />
-    </div>,
+    </Overlay>,
     document.body,
   )
 }

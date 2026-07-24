@@ -68,7 +68,7 @@ export function BadgeCard({
           >
             {displayName || 'Your name'}
           </div>
-          <div className="truncate text-[11px] text-[var(--color-text-faint)]">
+          <div className="truncate text-2xs text-[var(--color-text-faint)]">
             {displayEmail || 'you@sharp.chat'}
           </div>
         </div>
@@ -111,7 +111,7 @@ export function BadgeCard({
           <span className="flex h-7 w-7 items-center justify-center rounded-[30%] bg-[var(--color-accent)] text-sm font-extrabold text-white shadow-[0_0_16px_-4px_var(--color-accent)]">
             #
           </span>
-          <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--color-text-faint)]">
+          <span className="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--color-text-faint)]">
             sharp member
           </span>
         </div>
@@ -137,7 +137,7 @@ export function BadgeCard({
             <div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
               Member since
             </div>
-            <div className="text-[11px] font-semibold text-[var(--color-text-dim)]">Just now</div>
+            <div className="text-2xs font-semibold text-[var(--color-text-dim)]">Just now</div>
           </div>
           <div className="auth-barcode" aria-hidden />
         </div>

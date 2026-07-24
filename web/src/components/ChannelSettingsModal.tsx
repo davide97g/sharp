@@ -4,6 +4,7 @@ import { Modal } from './Modal'
 import { Avatar } from './Avatar'
 import { UserChip } from './UserCard'
 import { ToggleVisual } from './Toggle'
+import { Button, ChoiceCard, Field, Input, Select, Tabs } from '../ui'
 import { useStore } from '../store'
 import { toastError } from '../lib/toast'
 import { channelLabel, visibleEmail } from '../lib/util'
@@ -39,17 +40,16 @@ export function ChannelSettingsModal({
 
   return (
     <Modal title={`#${channel.name}`} onClose={onClose} wide>
-      <div className="mb-4 flex gap-1 border-b border-[var(--color-border)]">
-        <Tab active={tab === 'about'} onClick={() => setTab('about')}>
-          About
-        </Tab>
-        <Tab active={tab === 'members'} onClick={() => setTab('members')}>
-          Members
-        </Tab>
-        <Tab active={tab === 'triggers'} onClick={() => setTab('triggers')}>
-          Voice triggers
-        </Tab>
-      </div>
+      <Tabs
+        className="mb-4"
+        active={tab}
+        onChange={(key) => setTab(key as 'about' | 'members' | 'triggers')}
+        items={[
+          { key: 'about', label: 'About' },
+          { key: 'members', label: 'Members' },
+          { key: 'triggers', label: 'Voice triggers' },
+        ]}
+      />
       {tab === 'about' ? (
         <AboutTab channelId={channelId} onClose={onClose} />
       ) : tab === 'members' ? (
@@ -102,29 +102,6 @@ function VoiceTriggersTab({ channelId }: { channelId: string }) {
         await deleteTrigger(channelId, triggerId)
       }}
     />
-  )
-}
-
-function Tab({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium ${
-        active
-          ? 'border-[var(--color-accent)] text-[var(--color-text)]'
-          : 'border-transparent text-[var(--color-text-dim)] hover:text-[var(--color-text)]'
-      }`}
-    >
-      {children}
-    </button>
   )
 }
 
@@ -184,49 +161,44 @@ function AboutTab({ channelId, onClose }: { channelId: string; onClose: () => vo
 
   return (
     <form onSubmit={save} className="flex flex-col gap-4">
-      <label className="flex flex-col gap-1.5">
-        <span className="text-xs font-medium text-[var(--color-text-dim)]">Name</span>
-        <div className="flex items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 focus-within:border-[var(--color-accent)] focus-within:ring-2 focus-within:ring-[var(--color-accent-soft)]">
-          <span className="text-[var(--color-text-faint)]">#</span>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            disabled={!isOwner}
-            className="flex-1 bg-transparent px-2 py-2.5 text-sm focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
-          />
-        </div>
-        <span className="text-[11px] text-[var(--color-text-faint)]">
-          Lowercase letters, numbers, and hyphens. 1–50 chars.
-        </span>
-      </label>
+      <Field label="Name" hint="Lowercase letters, numbers, and hyphens. 1–50 chars.">
+        <Input
+          prefix="#"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          disabled={!isOwner}
+        />
+      </Field>
 
-      <label className="flex flex-col gap-1.5">
-        <span className="text-xs font-medium text-[var(--color-text-dim)]">Topic</span>
-        <input
+      <Field label="Topic">
+        <Input
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
           disabled={!isOwner}
           placeholder="What's this channel about?"
-          className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)] disabled:cursor-not-allowed disabled:opacity-60"
         />
-      </label>
+      </Field>
 
       <div className="flex flex-col gap-1.5">
         <span className="text-xs font-medium text-[var(--color-text-dim)]">Visibility</span>
         <div className="flex gap-2">
-          <VisibilityOption
-            active={kind === 'public'}
-            onClick={() => setKind('public')}
-            label="Public"
-            desc="Anyone can join"
+          <ChoiceCard
+            selected={kind === 'public'}
+            onSelect={() => setKind('public')}
+            title="Public"
+            description="Anyone can join"
+            selectedStyle="fill"
             disabled={!isOwner}
+            className="flex-1"
           />
-          <VisibilityOption
-            active={kind === 'private'}
-            onClick={() => setKind('private')}
-            label="Private"
-            desc="Invite only"
+          <ChoiceCard
+            selected={kind === 'private'}
+            onSelect={() => setKind('private')}
+            title="Private"
+            description="Invite only"
+            selectedStyle="fill"
             disabled={!isOwner}
+            className="flex-1"
           />
         </div>
       </div>
@@ -242,7 +214,7 @@ function AboutTab({ channelId, onClose }: { channelId: string; onClose: () => vo
         >
           <span className="min-w-0">
             <span className="block text-sm font-medium">Mute this channel</span>
-            <span className="block text-[11px] text-[var(--color-text-faint)]">
+            <span className="block text-2xs text-[var(--color-text-faint)]">
               {muted
                 ? 'Muted — no unread badges, toasts, or push.'
                 : 'Silence unread badges, toasts, and push for this channel.'}
@@ -256,19 +228,15 @@ function AboutTab({ channelId, onClose }: { channelId: string; onClose: () => vo
 
       {isOwner && (
         <div className="flex justify-end pt-1">
-          <button
-            type="submit"
-            disabled={!canSave}
-            className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
-          >
+          <Button type="submit" className="px-4" disabled={!canSave}>
             {busy ? 'Saving…' : 'Save changes'}
-          </button>
+          </Button>
         </div>
       )}
 
       {isOwner && (
-        <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/5 p-3">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-red-400">
+        <div className="mt-2 rounded-lg border border-danger-fg/30 bg-danger-soft p-3">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-danger-fg">
             Danger zone
           </div>
           {confirmDelete ? (
@@ -278,31 +246,22 @@ function AboutTab({ channelId, onClose }: { channelId: string; onClose: () => vo
                 messages and docs? This cannot be undone.
               </p>
               <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setConfirmDelete(false)}
-                  className="rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)]"
-                >
+                <Button variant="outline" onClick={() => setConfirmDelete(false)}>
                   Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={doDelete}
-                  disabled={deleting}
-                  className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
-                >
+                </Button>
+                <Button variant="danger" onClick={doDelete} disabled={deleting}>
                   {deleting ? 'Deleting…' : 'Delete channel'}
-                </button>
+                </Button>
               </div>
             </div>
           ) : (
-            <button
-              type="button"
+            <Button
+              variant="outline"
               onClick={() => setConfirmDelete(true)}
-              className="rounded-lg border border-red-500/40 px-3 py-2 text-sm font-medium text-red-400 hover:bg-red-500/10"
+              className="border-danger-fg/40 text-danger-fg hover:bg-danger-soft hover:text-danger-fg"
             >
               Delete this channel
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -399,13 +358,12 @@ function MembersTab({ channelId }: { channelId: string }) {
   return (
     <div className="flex flex-col gap-3">
       {iAmOwner && (
-        <div className="flex flex-col gap-1.5">
-          <span className="text-xs font-medium text-[var(--color-text-dim)]">Add people</span>
-          <input
+        <Field label="Add people" htmlFor="channel-add-people">
+          <Input
+            id="channel-add-people"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search people to add…"
-            className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
           />
           {query.trim() && (
             <div className="max-h-40 overflow-y-auto rounded-lg border border-[var(--color-border)]">
@@ -428,7 +386,7 @@ function MembersTab({ channelId }: { channelId: string }) {
                         {labelOf(u.id, u.display_name)}
                       </div>
                       {visibleEmail(u, me?.id) && (
-                        <div className="truncate text-[11px] text-[var(--color-text-faint)]">
+                        <div className="truncate text-2xs text-[var(--color-text-faint)]">
                           {visibleEmail(u, me?.id)}
                         </div>
                       )}
@@ -439,7 +397,7 @@ function MembersTab({ channelId }: { channelId: string }) {
               )}
             </div>
           )}
-        </div>
+        </Field>
       )}
 
       <div className="text-xs font-medium text-[var(--color-text-dim)]">
@@ -467,14 +425,16 @@ function MembersTab({ channelId }: { channelId: string }) {
                     {labelOf(u.id, u.display_name)}
                   </UserChip>
                   {visibleEmail(u, me?.id) && (
-                    <div className="truncate text-[11px] text-[var(--color-text-faint)]">
+                    <div className="truncate text-2xs text-[var(--color-text-faint)]">
                       {visibleEmail(u, me?.id)}
                     </div>
                   )}
                 </div>
                 {iAmOwner ? (
                   <div className="flex items-center gap-1">
-                    <select
+                    <Select
+                      uiSize="sm"
+                      surface="panel"
                       value={u.role}
                       disabled={pending === u.id || isLastOwner}
                       onChange={(e) =>
@@ -483,21 +443,21 @@ function MembersTab({ channelId }: { channelId: string }) {
                           e.target.value as 'owner' | 'editor' | 'viewer',
                         )
                       }
-                      className="rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1 text-sm focus:border-[var(--color-accent)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <option value="owner">Owner</option>
                       <option value="editor">Editor</option>
                       <option value="viewer">Viewer</option>
-                    </select>
+                    </Select>
                     {!isLastOwner && (
-                      <button
-                        type="button"
+                      <Button
+                        variant="ghost"
+                        size="xs"
                         disabled={pending === u.id}
                         onClick={() => remove(u.id)}
-                        className="rounded-md px-2.5 py-1 text-xs text-[var(--color-text-dim)] hover:bg-red-500/10 hover:text-red-400 disabled:opacity-50"
+                        className="text-[var(--color-text-dim)] hover:bg-danger-soft hover:text-danger-fg"
                       >
                         Remove
-                      </button>
+                      </Button>
                     )}
                   </div>
                 ) : (
@@ -511,35 +471,5 @@ function MembersTab({ channelId }: { channelId: string }) {
         </div>
       )}
     </div>
-  )
-}
-
-function VisibilityOption({
-  active,
-  onClick,
-  label,
-  desc,
-  disabled = false,
-}: {
-  active: boolean
-  onClick: () => void
-  label: string
-  desc: string
-  disabled?: boolean
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`flex-1 rounded-lg border px-3 py-2 text-left transition ${
-        active
-          ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
-          : 'border-[var(--color-border)] hover:bg-[var(--color-panel-2)]'
-      } disabled:cursor-not-allowed disabled:opacity-60`}
-    >
-      <div className="text-sm font-medium">{label}</div>
-      <div className="text-[11px] text-[var(--color-text-faint)]">{desc}</div>
-    </button>
   )
 }

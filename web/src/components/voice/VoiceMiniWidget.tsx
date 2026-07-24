@@ -228,7 +228,7 @@ export function VoiceMiniWidget() {
       <div className="voice-live-tile relative flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]">
         <WaveformIcon />
         <span
-          className="voice-connected-dot absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-[var(--color-panel)] bg-[#4fbf9f]"
+          className="voice-connected-dot absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-[var(--color-panel)] bg-success"
           aria-label="Connected"
         />
         {anyScreen && !share && (
@@ -255,7 +255,7 @@ export function VoiceMiniWidget() {
               key={participant.userId}
               className={`voice-speaker-avatar rounded-[11px] border-2 border-[var(--color-panel)] ${
                 participant.speaking && !audioAuraEnabled
-                  ? 'is-speaking ring-2 ring-[#4fbf9f]'
+                  ? 'is-speaking ring-2 ring-success'
                   : ''
               }`}
               title={name}
@@ -291,7 +291,7 @@ export function VoiceMiniWidget() {
           }}
           className={`flex h-7 w-7 cursor-pointer items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
             muted
-              ? 'bg-red-500/20 text-red-300 hover:bg-red-500/30'
+              ? 'bg-danger-soft text-danger-fg hover:bg-danger-soft'
               : 'text-[var(--color-text)] hover:bg-[var(--color-border)]'
           }`}
         >
@@ -306,7 +306,7 @@ export function VoiceMiniWidget() {
             event.stopPropagation()
             leaveVoice()
           }}
-          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full bg-red-500/20 text-red-300 outline-none hover:bg-red-500/30 focus-visible:ring-2 focus-visible:ring-red-300"
+          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full bg-danger-soft text-danger-fg outline-none hover:bg-danger-soft focus-visible:ring-2 focus-visible:ring-danger-fg"
         >
           <LeaveIcon />
         </button>

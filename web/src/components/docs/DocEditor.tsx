@@ -6,6 +6,7 @@ import { toastError } from '../../lib/toast'
 import { initials, userColor } from '../../lib/util'
 import type { DocConnStatus } from '../../lib/docSync'
 import type { Doc } from '../../lib/types'
+import { Banner, Button, EditorSkeleton, Menu, MenuItem } from '../../ui'
 import { DocEditorInner, type Peer } from './DocEditorInner'
 import { EmojiPicker } from './EmojiPicker'
 import { ShareToChannelModal } from './ShareToChannelModal'
@@ -102,12 +103,9 @@ export function DocEditor() {
       <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-2 bg-[var(--color-ink)] text-center">
         <div className="text-3xl">🚫</div>
         <p className="max-w-sm text-sm text-[var(--color-text-dim)]">{error}</p>
-        <button
-          onClick={() => navigate('/docs')}
-          className="mt-2 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)]"
-        >
+        <Button variant="outline" size="sm" className="mt-2" onClick={() => navigate('/docs')}>
           Back to docs
-        </button>
+        </Button>
       </div>
     )
   }
@@ -119,12 +117,9 @@ export function DocEditor() {
         <p className="max-w-sm text-sm text-[var(--color-text-dim)]">
           You no longer have access to this doc, or it was deleted.
         </p>
-        <button
-          onClick={() => navigate('/docs')}
-          className="mt-2 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)]"
-        >
+        <Button variant="outline" size="sm" className="mt-2" onClick={() => navigate('/docs')}>
           Back to docs
-        </button>
+        </Button>
       </div>
     )
   }
@@ -134,12 +129,7 @@ export function DocEditor() {
   if (!doc || doc.kind === 'canvas') {
     return (
       <div className="flex min-w-0 flex-1 flex-col bg-[var(--color-ink)]">
-        <div className="mx-auto w-full max-w-3xl px-8 py-10">
-          <div className="skeleton mb-4 h-10 w-2/3 rounded-lg" />
-          <div className="skeleton mb-2 h-4 rounded" />
-          <div className="skeleton mb-2 h-4 w-5/6 rounded" />
-          <div className="skeleton h-4 w-4/6 rounded" />
-        </div>
+        <EditorSkeleton />
       </div>
     )
   }
@@ -203,70 +193,72 @@ export function DocEditor() {
         <StatusDot status={status} />
         <div className="min-w-0 flex-1 truncate text-sm"><button onClick={() => navigate('/docs')} className="text-[var(--color-text-faint)] hover:text-[var(--color-text)]">‹ Docs</button><span className="mx-1.5 text-[var(--color-text-faint)]">/</span><span className="text-[var(--color-text-dim)]">{doc.title || 'Untitled'}</span></div>
         <Presence peers={peers} />
-        <div className="relative">
-          <button
-            onClick={() => setMenuOpen((o) => !o)}
-            className="flex h-11 w-11 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] sm:h-9 sm:w-9"
-            title="Actions"
-            aria-label="Document actions"
+        <Menu
+          open={menuOpen}
+          onClose={() => setMenuOpen(false)}
+          align="end"
+          width="w-52"
+          trigger={
+            <button
+              onClick={() => setMenuOpen((o) => !o)}
+              className="flex h-11 w-11 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] sm:h-9 sm:w-9"
+              title="Actions"
+              aria-label="Document actions"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" />
+              </svg>
+            </button>
+          }
+        >
+          <MenuItem
+            onClick={() => {
+              setMenuOpen(false)
+              setShowShare(true)
+            }}
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-              <circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" />
-            </svg>
-          </button>
-          {menuOpen && (
-            <>
-              <div className="fixed inset-0 z-20" onClick={() => setMenuOpen(false)} />
-              <div className="absolute right-0 top-full z-30 mt-1 w-52 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1 shadow-2xl">
-                <MenuItem
-                  onClick={() => {
-                    setMenuOpen(false)
-                    setShowShare(true)
-                  }}
-                >
-                  Share to channel…
-                </MenuItem>
-                {isOwner && (
-                  <MenuItem
-                    onClick={() => {
-                      setMenuOpen(false)
-                      setShowRoles(true)
-                    }}
-                  >
-                    Permissions…
-                  </MenuItem>
-                )}
-                {canEdit && (
-                  <MenuItem danger onClick={onTrash}>
-                    Move to trash
-                  </MenuItem>
-                )}
-              </div>
-            </>
+            Share to channel…
+          </MenuItem>
+          {isOwner && (
+            <MenuItem
+              onClick={() => {
+                setMenuOpen(false)
+                setShowRoles(true)
+              }}
+            >
+              Permissions…
+            </MenuItem>
           )}
-        </div>
+          {canEdit && (
+            <MenuItem danger onClick={onTrash}>
+              Move to trash
+            </MenuItem>
+          )}
+        </Menu>
       </header>
 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-8 sm:py-8">
           {/* banners */}
           {trashed && (
-            <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-[#e0913a]/40 bg-[#e0913a]/10 px-4 py-2.5 text-sm">
-              <span className="text-[#e0b06a]">This doc is in the trash.</span>
-              {canRestore ? (
-                <button
-                  onClick={onRestore}
-                  className="rounded-md bg-[var(--color-accent)] px-3 py-1 text-xs font-semibold text-white hover:bg-[var(--color-accent-hover)]"
-                >
-                  Restore
-                </button>
-              ) : null}
-            </div>
+            <Banner
+              tone="warning"
+              className="mb-4"
+              actions={
+                canRestore ? (
+                  <Button size="xs" onClick={onRestore}>
+                    Restore
+                  </Button>
+                ) : null
+              }
+            >
+              This doc is in the trash.
+            </Banner>
           )}
           {!trashed && isViewer && (
-            <div className="mb-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-4 py-2.5 text-sm text-[var(--color-text-dim)]">
+            <Banner tone="neutral" className="mb-4">
               You have read-only access to this doc.
-            </div>
+            </Banner>
           )}
 
           {/* icon + title */}
@@ -329,7 +321,11 @@ export function DocEditor() {
 
 function StatusDot({ status }: { status: DocConnStatus }) {
   const color =
-    status === 'connected' ? '#4fbf9f' : status === 'connecting' ? '#e0913a' : '#e05a7d'
+    status === 'connected'
+      ? 'var(--color-success-fg)'
+      : status === 'connecting'
+        ? 'var(--color-warning-fg)'
+        : 'var(--color-danger-fg)'
   const label =
     status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting…' : 'Offline'
   return (
@@ -339,6 +335,7 @@ function StatusDot({ status }: { status: DocConnStatus }) {
   )
 }
 
+// TODO(ds): AvatarStack — collab-presence ring uses live p.color, kept custom.
 function Presence({ peers }: { peers: Peer[] }) {
   if (peers.length === 0) return null
   const shown = peers.slice(0, 5)
@@ -348,38 +345,17 @@ function Presence({ peers }: { peers: Peer[] }) {
         <span
           key={p.clientId}
           title={p.name}
-          className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold text-white ring-2 ring-[var(--color-ink)]"
+          className="flex h-7 w-7 items-center justify-center rounded-full text-2xs font-semibold text-white ring-2 ring-[var(--color-ink)]"
           style={{ backgroundColor: p.color }}
         >
           {initials(p.name)}
         </span>
       ))}
       {peers.length > shown.length && (
-        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--color-panel-2)] text-[11px] font-semibold text-[var(--color-text-dim)] ring-2 ring-[var(--color-ink)]">
+        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--color-panel-2)] text-2xs font-semibold text-[var(--color-text-dim)] ring-2 ring-[var(--color-ink)]">
           +{peers.length - shown.length}
         </span>
       )}
     </div>
-  )
-}
-
-function MenuItem({
-  children,
-  onClick,
-  danger,
-}: {
-  children: React.ReactNode
-  onClick: () => void
-  danger?: boolean
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`block min-h-11 w-full rounded-md px-3 py-2 text-left text-sm hover:bg-[var(--color-panel-2)] ${
-        danger ? 'text-[#e05a7d]' : 'text-[var(--color-text)]'
-      }`}
-    >
-      {children}
-    </button>
   )
 }

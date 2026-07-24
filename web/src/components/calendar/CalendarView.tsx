@@ -8,6 +8,7 @@ import { AgendaList } from './AgendaList'
 import { WeekGrid } from './WeekGrid'
 import { ScheduleMeetingModal } from './ScheduleMeetingModal'
 import { MiniMonth } from './MiniMonth'
+import { Button, SectionLabel } from '../../ui'
 
 // Rolling window that mirrors the server's sync range (-30d / +90d).
 function windowRange() {
@@ -111,8 +112,8 @@ export function CalendarView() {
     <main className="flex min-w-0 flex-1 bg-[var(--color-ink)]">
       <aside className={`${sideOpen ? 'flex' : 'hidden'} w-72 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-panel)] p-3 lg:flex`}>
         <MiniMonth selectedDate={selectedDate ?? dayKey(dayjs())} eventDays={new Set(items.map((item) => dayKey(item.start_at)))} onSelect={setSelectedDate} />
-        <section className="mt-5 border-t border-[var(--color-border)] pt-4"><h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">Calendars</h2><div className="mb-2 flex items-center gap-2 text-sm text-[var(--color-text-dim)]"><span className="h-3 w-3 rounded-full bg-[var(--color-accent)]" />sharp meetings</div>{connections.flatMap((connection) => connection.calendars).map((calendar) => <label key={calendar.id} className="flex min-h-9 items-center gap-2 text-sm text-[var(--color-text-dim)]"><input type="checkbox" checked={calendar.selected} disabled={busyCalendar === calendar.id} onChange={(event) => void toggleCalendar(calendar.id, event.target.checked)} className="accent-[var(--color-accent)]" /><span className="h-3 w-3 rounded-full" style={{ background: calendar.color ?? 'var(--color-text-faint)' }} /><span className="truncate">{calendar.summary || 'Calendar'}</span></label>)}</section>
-        <section className="mt-5 border-t border-[var(--color-border)] pt-4"><h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">Accounts</h2><button onClick={() => navigate('/settings/accounts', { state: { from: `${location.pathname}${location.search}` } })} className="min-h-10 w-full rounded-lg border border-[var(--color-border)] px-3 text-sm text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)]">{connections.length ? 'Manage Google' : 'Connect Google'}</button></section>
+        <section className="mt-5 border-t border-[var(--color-border)] pt-4"><SectionLabel as="h2" size="2xs" className="mb-2">Calendars</SectionLabel><div className="mb-2 flex items-center gap-2 text-sm text-[var(--color-text-dim)]"><span className="h-3 w-3 rounded-full bg-[var(--color-accent)]" />sharp meetings</div>{connections.flatMap((connection) => connection.calendars).map((calendar) => <label key={calendar.id} className="flex min-h-9 items-center gap-2 text-sm text-[var(--color-text-dim)]"><input type="checkbox" checked={calendar.selected} disabled={busyCalendar === calendar.id} onChange={(event) => void toggleCalendar(calendar.id, event.target.checked)} className="accent-[var(--color-accent)]" /><span className="h-3 w-3 rounded-full" style={{ background: calendar.color ?? 'var(--color-text-faint)' }} /><span className="truncate">{calendar.summary || 'Calendar'}</span></label>)}</section>
+        <section className="mt-5 border-t border-[var(--color-border)] pt-4"><SectionLabel as="h2" size="2xs" className="mb-2">Accounts</SectionLabel><button onClick={() => navigate('/settings/accounts', { state: { from: `${location.pathname}${location.search}` } })} className="min-h-10 w-full rounded-lg border border-[var(--color-border)] px-3 text-sm text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)]">{connections.length ? 'Manage Google' : 'Connect Google'}</button></section>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex min-h-14 flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-3 py-2 sm:flex-nowrap sm:gap-3 sm:px-5">
@@ -176,13 +177,14 @@ export function CalendarView() {
             <RefreshIcon spinning={refreshing} />
           </button>
         </div>
-        <button
-          type="button"
+        <Button
+          size="sm"
+          iconLeft={<PlusIcon />}
           onClick={() => setScheduling(true)}
-          className="meeting-button-primary order-2 flex min-h-11 items-center gap-2 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] sm:order-none sm:min-h-9"
+          className="order-2 min-h-11 sm:order-none sm:min-h-9"
         >
-          <PlusIcon /> New meeting
-        </button>
+          New meeting
+        </Button>
       </header>
 
       {view === 'week' ? (

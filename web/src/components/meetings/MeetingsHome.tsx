@@ -5,6 +5,11 @@ import { meetingChannelLabel, meetingDisplayTitle } from '../../lib/meetingLabel
 import type { MeetingListItem } from '../../lib/types'
 import { useStore } from '../../store'
 import { NewMeetDialog } from './NewMeetDialog'
+import { Button } from '../../ui'
+
+// TODO(ds): .meeting-kicker kept as-is — its 0.14em tracking + 650 weight have
+// no parity with ui SectionLabel (tracking-wider). #ff6b5f/#ff8a80 are the
+// live-meeting brand identity, left decorative.
 
 export function MeetingsHome() {
   const [params, setParams] = useSearchParams()
@@ -41,13 +46,9 @@ export function MeetingsHome() {
       <header className="border-b border-[var(--color-border)] px-5 py-5 sm:px-8">
         <div className="flex flex-wrap items-end gap-3">
         <div className="min-w-0 flex-1"><h1 className="text-3xl font-semibold tracking-[-0.04em]">Meetings</h1><p className="mt-1 text-sm text-[var(--color-text-faint)]">Attendance, notes, transcript</p></div>
-        <button
-          type="button"
-          onClick={() => setCreatingMeet(true)}
-          className="meeting-button-primary flex h-10 items-center gap-2 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
-        >
-          <PlusIcon /> New meet
-        </button>
+        <Button size="sm" iconLeft={<PlusIcon />} onClick={() => setCreatingMeet(true)}>
+          New meet
+        </Button>
         </div>
         <div className="mt-5 flex flex-wrap gap-2"><input autoFocus value={query} onChange={(event) => updateParam('q', event.target.value || undefined)} placeholder="Search meeting records…" className="min-h-11 min-w-[min(100%,20rem)] flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]" />{['all', 'live', 'completed'].map((value) => <button key={value} onClick={() => updateParam('filter', value === 'all' ? undefined : value)} className={`min-h-11 rounded-full border px-3 text-xs capitalize ${filter === value ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]' : 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:bg-[var(--color-panel)]'}`}>{value}</button>)}</div>
       </header>
@@ -83,7 +84,7 @@ export function MeetingsHome() {
           {showCompleted && <section>
             <div className="mb-3 flex items-center justify-between">
               <h2 className="meeting-kicker">Recent records</h2>
-              <span className="text-[11px] text-[var(--color-text-faint)]">Newest first</span>
+              <span className="text-2xs text-[var(--color-text-faint)]">Newest first</span>
             </div>
             {loading ? (
               <div className="py-20 text-center text-sm text-[var(--color-text-faint)]">Loading meeting records…</div>
@@ -114,7 +115,7 @@ function Metric({ value, label }: { value: string; label: string }) {
   return (
     <div className="min-w-28 bg-[var(--color-panel)] px-5 py-4">
       <div className="font-mono text-xl font-medium tabular-nums">{value}</div>
-      <div className="mt-1 text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-faint)]">{label}</div>
+      <div className="mt-1 text-3xs uppercase tracking-[0.14em] text-[var(--color-text-faint)]">{label}</div>
     </div>
   )
 }
@@ -124,11 +125,11 @@ function MeetingCard({ meeting, onOpen, live }: { meeting: MeetingListItem; onOp
   return (
     <button onClick={onOpen} className="group rounded-2xl border border-[#ff6b5f]/25 bg-[#ff6b5f]/5 p-5 text-left hover:border-[#ff6b5f]/55">
       <div className="mb-5 flex items-center justify-between">
-        <span className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#ff8a80]">
+        <span className="flex items-center gap-2 text-3xs font-semibold uppercase tracking-[0.14em] text-[#ff8a80]">
           <span className="h-2 w-2 animate-pulse rounded-full bg-[#ff6b5f] motion-reduce:animate-none" />
           {live ? 'Recording notes' : meeting.status}
         </span>
-        <span className="font-mono text-[11px] text-[var(--color-text-faint)]">{timeOf(meeting.started_at)}</span>
+        <span className="font-mono text-2xs text-[var(--color-text-faint)]">{timeOf(meeting.started_at)}</span>
       </div>
       <div className="truncate font-semibold group-hover:text-white">{meetingDisplayTitle(meeting, channels)}</div>
       <div className="mt-2 truncate text-xs text-[var(--color-text-faint)]">{meetingChannelLabel(meeting, channels)} · {meeting.participant_count} participants</div>
@@ -142,7 +143,7 @@ function MeetingRow({ meeting, onOpen }: { meeting: MeetingListItem; onOpen: () 
     <button onClick={onOpen} className="group grid min-h-11 w-full grid-cols-[4rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2 py-4 text-left hover:bg-[var(--color-panel)] sm:grid-cols-[7rem_minmax(0,1fr)_auto] sm:gap-4 sm:px-3">
       <div>
         <div className="font-mono text-xs tabular-nums text-[var(--color-text-dim)]">{dayOf(meeting.started_at)}</div>
-        <div className="mt-1 font-mono text-[10px] tabular-nums text-[var(--color-text-faint)]">{timeOf(meeting.started_at)}</div>
+        <div className="mt-1 font-mono text-3xs tabular-nums text-[var(--color-text-faint)]">{timeOf(meeting.started_at)}</div>
       </div>
       <div className="min-w-0">
         <div className="truncate text-sm font-medium group-hover:text-white">{meetingDisplayTitle(meeting, channels)}</div>
@@ -150,7 +151,7 @@ function MeetingRow({ meeting, onOpen }: { meeting: MeetingListItem; onOpen: () 
       </div>
       <div className="col-span-2 flex items-center justify-end gap-2 text-right sm:col-span-1 sm:block">
         <div className="font-mono text-xs tabular-nums text-[var(--color-text-dim)]">{formatMinutes(durationMinutes(meeting))}</div>
-        <div className={`text-[10px] sm:mt-1 ${meeting.summary_status === 'ready' ? 'text-[#66c7aa]' : 'text-[var(--color-text-faint)]'}`}>
+        <div className={`text-3xs sm:mt-1 ${meeting.summary_status === 'ready' ? 'text-success-fg' : 'text-[var(--color-text-faint)]'}`}>
           {meeting.summary_status === 'ready' ? 'Notes ready' : meeting.summary_status}
         </div>
       </div>

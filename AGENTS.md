@@ -1,3 +1,7 @@
+## Design System
+
+**`docs/DESIGN_SYSTEM.md` is the single source of truth for UI construction.** All visual building blocks live in `web/src/ui/` (import from the barrel `../ui`) — buttons, inputs, modals, menus, badges, list rows, empty states, tokens, z-index bands, type scale. Read it before writing any styled JSX; never inline a class recipe a primitive already covers, never hard-code hex colors (theme presets break), extend the primitive + `/design` gallery + doc together when a variant is missing. Live catalog: `/design` route in dev builds.
+
 ## Learned User Preferences
 
 - Prefer web-app mobile UX only; skip native iOS/Android app work unless explicitly requested.

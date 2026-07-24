@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Modal } from './Modal'
+import { Button, SearchInput } from '../ui'
 import { useStore } from '../store'
 import { toastError } from '../lib/toast'
 
@@ -35,12 +36,12 @@ export function BrowseChannelsModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal title="Browse channels" onClose={onClose} wide>
-      <input
+      <SearchInput
         autoFocus
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder="Search channels…"
-        className="mb-3 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
+        className="mb-3"
       />
       <div className="max-h-[50vh] space-y-1 overflow-y-auto">
         {publicChannels.length === 0 && (
@@ -63,23 +64,26 @@ export function BrowseChannelsModal({ onClose }: { onClose: () => void }) {
               )}
             </div>
             {c.is_member ? (
-              <button
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs"
                 onClick={() => {
                   onClose()
                   navigate(`/c/${c.id}`)
                 }}
-                className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-dim)] hover:bg-[var(--color-panel)]"
               >
                 Open
-              </button>
+              </Button>
             ) : (
-              <button
+              <Button
+                size="sm"
+                className="text-xs"
                 onClick={() => join(c.id)}
                 disabled={joining === c.id}
-                className="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
               >
                 {joining === c.id ? 'Joining…' : 'Join'}
-              </button>
+              </Button>
             )}
           </div>
         ))}

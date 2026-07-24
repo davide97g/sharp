@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Channel, Poll } from '../lib/types'
 import { useStore } from '../store'
+import { ChevronDownIcon } from '../ui'
 import { PollView, pollToViewModel } from './PollView'
 
 export function ActivePollBanner({ channel }: { channel: Channel }) {
@@ -106,7 +107,7 @@ function PollMeta({ poll }: { poll: Poll }) {
           ? `ends in ${Math.floor(minutes / 60)}h ${minutes % 60}m`
           : `ends in ${minutes}m`
   return (
-    <span className="block text-[11px] text-[var(--color-text-faint)]">
+    <span className="block text-2xs text-[var(--color-text-faint)]">
       {poll.total_voters} voted{countdown ? ` · ${countdown}` : ''}
     </span>
   )
@@ -122,8 +123,8 @@ function PollIcon() {
 
 function Chevron({ expanded }: { expanded: boolean }) {
   return (
-    <svg className={`shrink-0 text-[var(--color-text-faint)] transition-transform motion-reduce:transition-none ${expanded ? 'rotate-180' : ''}`} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="m6 9 6 6 6-6" />
-    </svg>
+    <ChevronDownIcon
+      className={`shrink-0 text-[var(--color-text-faint)] transition-transform motion-reduce:transition-none ${expanded ? 'rotate-180' : ''}`}
+    />
   )
 }

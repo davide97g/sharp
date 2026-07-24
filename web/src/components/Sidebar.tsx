@@ -7,6 +7,7 @@ import { CreateChannelModal } from './CreateChannelModal'
 import { BrowseChannelsModal } from './BrowseChannelsModal'
 import { ChannelSettingsModal } from './ChannelSettingsModal'
 import { GearIcon, LockIcon } from './icons'
+import { CountBadge, Input, SectionLabel } from '../ui'
 import type { Channel } from '../lib/types'
 
 export function Sidebar({
@@ -72,7 +73,7 @@ export function Sidebar({
         <button
           onClick={() => setQuickSwitcher(true)}
           title="Quick switcher (⌘K)"
-          className="ml-auto rounded-md border border-[var(--color-border)] px-2 py-1 text-[10px] font-medium text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)]"
+          className="ml-auto rounded-md border border-[var(--color-border)] px-2 py-1 text-3xs font-medium text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)]"
         >
           ⌘K
         </button>
@@ -94,11 +95,11 @@ export function Sidebar({
 
       {/* search */}
       <form onSubmit={submitSearch} className="px-3 pt-3">
-        <input
+        <Input
+          uiSize="md"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search messages…"
-          className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
         />
       </form>
 
@@ -178,14 +179,16 @@ function SectionHeader({
 }) {
   return (
     <div className="flex items-center justify-between px-2 py-1">
-      <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+      <SectionLabel size="2xs" tone="faint">
         {label}
-      </span>
+      </SectionLabel>
       <div className="flex items-center gap-0.5">{children}</div>
     </div>
   )
 }
 
+// TODO(ds): ui IconButton's smallest size is h-8 w-8; these section-header
+// glyph buttons are h-5 w-5, so no parity — keeping the local 20px button.
 function IconButton({
   title,
   onClick,
@@ -255,9 +258,7 @@ function ChannelRow({
         <GearIcon />
       </button>
       {unread && !active && (
-        <span className={`rounded-full bg-[var(--color-accent)] px-1.5 py-0.5 text-[10px] font-bold text-white ${shielded ? 'stream-blur' : ''}`}>
-          {channel.unread_count}
-        </span>
+        <CountBadge count={channel.unread_count} className={shielded ? 'stream-blur' : undefined} />
       )}
     </NavLink>
   )
@@ -295,9 +296,10 @@ function DmRow({
       </span>
       <VoiceRoomIndicator room={voiceRoom} />
       {unread && !active && (
-        <span className={`ml-auto rounded-full bg-[var(--color-accent)] px-1.5 py-0.5 text-[10px] font-bold text-white ${shielded ? 'stream-blur' : ''}`}>
-          {channel.unread_count}
-        </span>
+        <CountBadge
+          count={channel.unread_count}
+          className={`ml-auto ${shielded ? 'stream-blur' : ''}`}
+        />
       )}
     </NavLink>
   )
@@ -313,7 +315,7 @@ function VoiceRoomIndicator({ room }: { room?: VoiceRoom }) {
     <span
       aria-label={`${count} ${count === 1 ? 'participant' : 'participants'} in voice`}
       title={`${count} in voice`}
-      className="voice-live-indicator flex shrink-0 items-center gap-1 text-[10px] font-medium tabular-nums text-[var(--color-accent-hover)]"
+      className="voice-live-indicator flex shrink-0 items-center gap-1 text-3xs font-medium tabular-nums text-[var(--color-accent-hover)]"
     >
       <svg className="voice-waveform" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path className="voice-wave-bar" d="M4 10v4" />

@@ -10,6 +10,7 @@ import { fmtTime } from '../lib/util'
 import { useDisplayName } from '../lib/displayName'
 import { gifPreviewText } from '../lib/gif'
 import { LockIcon } from './icons'
+import { Button } from '../ui'
 import { CreateTaskFromMessage } from './tasks/CreateTaskFromMessage'
 
 export const REACTION_PALETTE = ['👍', '✅', '👀', '❤️', '😂', '🎉']
@@ -95,7 +96,7 @@ function QuotedAuthorName({
 }) {
   const name = useDisplayName(userId, fallback)
   return (
-    <div className="text-[11px] font-semibold text-[var(--color-accent-hover)]">{name}</div>
+    <div className="text-2xs font-semibold text-[var(--color-accent-hover)]">{name}</div>
   )
 }
 
@@ -331,19 +332,13 @@ export function MessageItem({
         className="max-h-64 w-full resize-none bg-transparent text-sm text-[var(--color-text)] focus:outline-none"
       />
       <div className="mt-2 flex items-center gap-2">
-        <button
-          onClick={saveEdit}
-          className="rounded-md bg-[var(--color-accent)] px-2.5 py-1 text-xs font-semibold text-white hover:bg-[var(--color-accent-hover)]"
-        >
+        <Button size="xs" onClick={saveEdit}>
           Save
-        </button>
-        <button
-          onClick={() => setEditing(false)}
-          className="rounded-md border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)]"
-        >
+        </Button>
+        <Button variant="outline" size="xs" onClick={() => setEditing(false)}>
           Cancel
-        </button>
-        <span className="text-[11px] text-[var(--color-text-faint)]">
+        </Button>
+        <span className="text-2xs text-[var(--color-text-faint)]">
           Enter to save · Esc to cancel
         </span>
       </div>
@@ -385,7 +380,7 @@ export function MessageItem({
             >
               {message.reply_to && <QuotedReply reply={message.reply_to} />}
               <RenderedMessageContent message={message} highlight={focusQuery} />
-              <span className="ml-2 mt-0.5 inline-block align-baseline text-[10px] text-[var(--color-text-faint)]">
+              <span className="ml-2 mt-0.5 inline-block align-baseline text-3xs text-[var(--color-text-faint)]">
                 {message.edited_at && <span className="mr-1">(edited)</span>}
                 {message.encrypted && (
                   <span className="mr-1 inline-flex align-[-1px]" title="End-to-end encrypted">
@@ -473,12 +468,9 @@ export function MessageItem({
               {isMine &&
                 (confirmDelete ? (
                   <div className="flex items-center gap-0.5 pl-0.5">
-                    <button
-                      onClick={doDelete}
-                      className="rounded-md px-2 py-1 text-xs font-semibold text-red-400 transition-colors hover:bg-red-500/15"
-                    >
+                    <Button variant="danger" size="xs" onClick={doDelete}>
                       Delete
-                    </button>
+                    </Button>
                     <ToolbarBtn title="Cancel" onClick={() => setConfirmDelete(false)}>
                       <span className="text-xs leading-none">✕</span>
                     </ToolbarBtn>
@@ -516,7 +508,7 @@ export function MessageItem({
       <div className="relative w-9 shrink-0">
         {grouped ? (
           // Absolute + nowrap so the hover timestamp never reflows the row height.
-          <span className="absolute right-0 top-0.5 whitespace-nowrap text-[10px] leading-5 tabular-nums text-[var(--color-text-faint)] opacity-0 group-hover:opacity-100 max-md:hidden">
+          <span className="absolute right-0 top-0.5 whitespace-nowrap text-3xs leading-5 tabular-nums text-[var(--color-text-faint)] opacity-0 group-hover:opacity-100 max-md:hidden">
             {message.encrypted && (
               <span className="mr-1 inline-flex align-[-1px]" title="End-to-end encrypted">
                 <LockIcon size={9} />
@@ -539,7 +531,7 @@ export function MessageItem({
             >
               {authorName}
             </UserChip>
-            <span className="text-[11px] text-[var(--color-text-faint)]">
+            <span className="text-2xs text-[var(--color-text-faint)]">
               {message.encrypted && (
                 <span className="mr-1 inline-flex align-[-1px]" title="End-to-end encrypted">
                   <LockIcon size={9} />
@@ -582,19 +574,13 @@ export function MessageItem({
               className="max-h-64 w-full resize-none bg-transparent text-sm text-[var(--color-text)] focus:outline-none"
             />
             <div className="mt-2 flex items-center gap-2">
-              <button
-                onClick={saveEdit}
-                className="rounded-md bg-[var(--color-accent)] px-2.5 py-1 text-xs font-semibold text-white hover:bg-[var(--color-accent-hover)]"
-              >
+              <Button size="xs" onClick={saveEdit}>
                 Save
-              </button>
-              <button
-                onClick={() => setEditing(false)}
-                className="rounded-md border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)]"
-              >
+              </Button>
+              <Button variant="outline" size="xs" onClick={() => setEditing(false)}>
                 Cancel
-              </button>
-              <span className="text-[11px] text-[var(--color-text-faint)]">
+              </Button>
+              <span className="text-2xs text-[var(--color-text-faint)]">
                 Enter to save · Esc to cancel
               </span>
             </div>
@@ -603,7 +589,7 @@ export function MessageItem({
           <div className="pr-8">
             <RenderedMessageContent message={message} highlight={focusQuery} />
             {message.edited_at && (
-              <span className="ml-1 align-baseline text-[10px] text-[var(--color-text-faint)]">
+              <span className="ml-1 align-baseline text-3xs text-[var(--color-text-faint)]">
                 (edited)
               </span>
             )}
@@ -705,12 +691,9 @@ export function MessageItem({
           {isMine &&
             (confirmDelete ? (
               <div className="flex items-center gap-0.5 pl-0.5">
-                <button
-                  onClick={doDelete}
-                  className="rounded-md px-2 py-1 text-xs font-semibold text-red-400 transition-colors hover:bg-red-500/15"
-                >
+                <Button variant="danger" size="xs" onClick={doDelete}>
                   Delete
-                </button>
+                </Button>
                 <ToolbarBtn title="Cancel" onClick={() => setConfirmDelete(false)}>
                   <span className="text-xs leading-none">✕</span>
                 </ToolbarBtn>
@@ -767,7 +750,7 @@ function ToolbarBtn({
       title={title}
       onClick={onClick}
       className={`message-toolbar-button flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-text-faint)] transition-colors hover:bg-[var(--color-panel)] ${
-        danger ? 'hover:text-red-400' : 'hover:text-[var(--color-text)]'
+        danger ? 'hover:text-danger-fg' : 'hover:text-[var(--color-text)]'
       }`}
     >
       {children}

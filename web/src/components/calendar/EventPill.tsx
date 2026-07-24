@@ -1,10 +1,11 @@
 import { effectiveNicknames } from '../../lib/displayName'
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import type { CalendarItem } from '../../lib/types'
 import { timeRange, withinJoinWindow } from '../../lib/calendar'
 import { useStore } from '../../store'
 import { channelLabel } from '../../lib/util'
 import { EventDetail } from './EventDetail'
+import { useDismiss } from '../../ui'
 
 export function EventPill({ item }: { item: CalendarItem }) {
   const [open, setOpen] = useState(false)
@@ -26,21 +27,7 @@ export function EventPill({ item }: { item: CalendarItem }) {
     !!item.join_path &&
     withinJoinWindow(item.start_at, item.end_at)
 
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+  useDismiss({ ref: rootRef, onClose: () => setOpen(false), enabled: open })
 
   return (
     <div ref={rootRef} className="relative">
@@ -68,17 +55,17 @@ export function EventPill({ item }: { item: CalendarItem }) {
             >
               {item.title || 'Untitled'}
             </span>
-            <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[var(--color-text-faint)]">
+            <span className="mt-0.5 flex items-center gap-1.5 text-2xs text-[var(--color-text-faint)]">
               <span className="tabular-nums">
                 {timeRange(item.start_at, item.end_at, item.all_day)}
               </span>
               {channel && (
-                <span className="truncate rounded bg-[var(--color-panel-2)] px-1 text-[10px] text-[var(--color-text-dim)]">
+                <span className="truncate rounded bg-[var(--color-panel-2)] px-1 text-3xs text-[var(--color-text-dim)]">
                   {channelLabel(channel, nicknames)}
                 </span>
               )}
               {isNative && !channel && item.meeting.standalone_call_id && (
-                <span className="rounded bg-[var(--color-panel-2)] px-1 text-[10px] text-[var(--color-text-dim)]">
+                <span className="rounded bg-[var(--color-panel-2)] px-1 text-3xs text-[var(--color-text-dim)]">
                   call
                 </span>
               )}
@@ -92,7 +79,7 @@ export function EventPill({ item }: { item: CalendarItem }) {
               e.stopPropagation()
               joinScheduledMeeting(item.source === 'native' ? item.join_path : null)
             }}
-            className="m-1 min-h-11 shrink-0 rounded-md bg-[var(--color-accent)] px-3 text-[11px] font-semibold text-white hover:bg-[var(--color-accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-hover)]"
+            className="m-1 min-h-11 shrink-0 rounded-md bg-[var(--color-accent)] px-3 text-2xs font-semibold text-white hover:bg-[var(--color-accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-hover)]"
           >
             Join
           </button>

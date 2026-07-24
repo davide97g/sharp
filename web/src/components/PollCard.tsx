@@ -86,13 +86,15 @@ function ActionButton({
   onClick: () => void
   danger?: boolean
 }) {
+  // TODO(ds): no Button variant matches this ghost-danger text mini-button
+  // (min-h-9, no vertical padding, ghost-style danger) — kept custom; colors + text size normalized.
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`min-h-9 rounded-md px-2.5 text-[11px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+      className={`min-h-9 rounded-md px-2.5 text-2xs font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
         danger
-          ? 'ml-auto text-red-400 hover:bg-red-500/10'
+          ? 'ml-auto text-danger-fg hover:bg-danger-soft'
           : 'text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]'
       }`}
     >

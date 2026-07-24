@@ -5,6 +5,7 @@ import { useStore, streamShieldOn } from '../store'
 import { channelLabel, fuzzyScore } from '../lib/util'
 import { toastError } from '../lib/toast'
 import { sound } from '../lib/sound'
+import { SearchInput } from '../ui'
 import type { DocKind } from '../lib/types'
 
 // `priv` marks entries whose label must blur while the Privacy Shield is on;
@@ -194,14 +195,15 @@ export function QuickSwitcher() {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/60 p-4 pt-[max(14vh,calc(var(--safe-top)+1.5rem))] pb-[max(1rem,var(--safe-bottom))] pl-[max(1rem,var(--safe-left))] pr-[max(1rem,var(--safe-right))] backdrop-blur-sm"
+      className="fixed inset-0 z-(--z-overlay) flex items-start justify-center bg-black/60 p-4 pt-[max(14vh,calc(var(--safe-top)+1.5rem))] pb-[max(1rem,var(--safe-bottom))] pl-[max(1rem,var(--safe-left))] pr-[max(1rem,var(--safe-right))] backdrop-blur-sm"
       onMouseDown={() => setOpen(false)}
     >
       <div
         className="w-full max-w-lg animate-in overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <input
+        <SearchInput
+          variant="palette"
           ref={inputRef}
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -220,7 +222,6 @@ export function QuickSwitcher() {
             }
           }}
           placeholder="Jump to a channel or person…"
-          className="w-full border-b border-[var(--color-border)] bg-transparent px-4 py-3.5 text-sm focus:outline-none"
         />
         <div ref={listRef} className="max-h-[45vh] overflow-y-auto p-1.5">
           {filtered.length === 0 && (
@@ -228,6 +229,8 @@ export function QuickSwitcher() {
               No matches.
             </div>
           )}
+          {/* TODO(ds): rows are two-line (label + sub) with a blur wrapper, so
+              they don't map onto ListRow's single-line truncate slot; kept custom. */}
           {filtered.map((it, i) => (
             <button
               key={`${it.kind}-${it.id}`}
@@ -242,14 +245,16 @@ export function QuickSwitcher() {
               </span>
               <span className={`min-w-0 flex-1 ${itemShielded(it) ? 'stream-blur' : ''}`}>
                 <span className="block truncate text-sm font-medium">{it.label}</span>
-                <span className="block truncate text-[11px] text-[var(--color-text-faint)]">
+                <span className="block truncate text-2xs text-[var(--color-text-faint)]">
                   {it.sub}
                 </span>
               </span>
             </button>
           ))}
         </div>
-        <div className="border-t border-[var(--color-border)] px-4 py-2 text-[11px] text-[var(--color-text-faint)]">
+        {/* TODO(ds): hints are plain arrow glyphs, not chip spans — wrapping each
+            key in <Kbd> would change the look, so kept as text. */}
+        <div className="border-t border-[var(--color-border)] px-4 py-2 text-2xs text-[var(--color-text-faint)]">
           ↑↓ to navigate · ↵ to select · esc to close
         </div>
       </div>

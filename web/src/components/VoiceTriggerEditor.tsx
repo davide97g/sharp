@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { VoiceTrigger } from '../lib/types'
 import { toastError } from '../lib/toast'
+import { Button, Input, SectionLabel, Skeleton } from '../ui'
 
 export function VoiceTriggerEditor({
   triggers,
@@ -49,15 +50,13 @@ export function VoiceTriggerEditor({
   return (
     <div className="flex flex-col gap-3">
       <div>
-        <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
-          Voice triggers
-        </div>
+        <SectionLabel size="xs">Voice triggers</SectionLabel>
         <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-faint)]">{hint}</p>
       </div>
 
       {canEdit && (
         <div className="flex gap-2">
-          <input
+          <Input
             value={phrase}
             onChange={(event) => setPhrase(event.target.value)}
             onKeyDown={(event) => {
@@ -68,25 +67,24 @@ export function VoiceTriggerEditor({
             }}
             maxLength={80}
             placeholder="Add a trigger phrase"
-            className="min-w-0 flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
+            className="min-w-0 flex-1"
           />
-          <button
-            type="button"
+          <Button
             onClick={() => void add()}
             disabled={!phrase.trim() || pending !== null}
-            className="rounded-lg bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
           >
             {pending === 'add' ? 'Adding…' : 'Add'}
-          </button>
+          </Button>
         </div>
       )}
 
       {loading ? (
         <div className="space-y-2">
-          <div className="skeleton h-9 rounded-lg" />
-          <div className="skeleton h-9 rounded-lg" />
+          <Skeleton className="h-9 rounded-lg" />
+          <Skeleton className="h-9 rounded-lg" />
         </div>
       ) : triggers.length === 0 ? (
+        // TODO(ds): EmptyState variants (dashed py-14 / inline) don't match this compact inline dashed box — kept custom.
         <div className="rounded-lg border border-dashed border-[var(--color-border)] px-3 py-3 text-sm text-[var(--color-text-faint)]">
           No voice triggers yet.
         </div>
@@ -105,7 +103,7 @@ export function VoiceTriggerEditor({
                   type="button"
                   onClick={() => void remove(trigger.id)}
                   disabled={pending !== null}
-                  className="rounded-md px-2 py-1 text-xs text-[var(--color-text-faint)] hover:bg-red-500/10 hover:text-red-400 disabled:opacity-50"
+                  className="rounded-md px-2 py-1 text-xs text-[var(--color-text-faint)] hover:bg-danger-soft hover:text-danger-fg disabled:opacity-50"
                 >
                   {pending === trigger.id ? 'Deleting…' : 'Delete'}
                 </button>

@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useStore } from '../store'
 import { hasUnseenRelease } from '../lib/whatsNew'
 import { Avatar } from './Avatar'
+import { TasksGlyph } from './tasks/taskUi'
 
 type TabId = 'chat' | 'docs' | 'canvas' | 'more'
 
@@ -10,6 +11,11 @@ function tabFromPath(pathname: string): TabId {
   if (pathname.startsWith('/docs') || pathname.startsWith('/d/')) return 'docs'
   if (pathname.startsWith('/canvas') || pathname.startsWith('/x/')) return 'canvas'
   if (
+    pathname.startsWith('/board') ||
+    pathname.startsWith('/b/') ||
+    pathname.startsWith('/tasks') ||
+    pathname.startsWith('/t/') ||
+    pathname.startsWith('/sharpy') ||
     pathname.startsWith('/meetings') ||
     pathname.startsWith('/calendar') ||
     pathname.startsWith('/help')
@@ -33,6 +39,10 @@ export function MobileTabBar() {
   )
   const canvasMentions = mentions.reduce(
     (n, m) => n + (!m.read_at && m.doc.kind === 'canvas' ? 1 : 0),
+    0,
+  )
+  const boardMentions = mentions.reduce(
+    (n, m) => n + (!m.read_at && m.doc.kind === 'board' ? 1 : 0),
     0,
   )
   const me = useStore((s) => s.me)
@@ -79,7 +89,25 @@ export function MobileTabBar() {
           >
             <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-[var(--color-border)]" />
             <MoreLink
+              label="Boards"
+              icon={<BoardIcon />}
+              badge={boardMentions}
+              onClick={() => {
+                setMoreOpen(false)
+                navigate('/board')
+              }}
+            />
+            <MoreLink
+              label="Tasks"
+              icon={<TasksGlyph size={18} />}
+              onClick={() => {
+                setMoreOpen(false)
+                navigate('/tasks')
+              }}
+            />
+            <MoreLink
               label="Meetings"
+              icon={<MeetingsIcon />}
               onClick={() => {
                 setMoreOpen(false)
                 navigate('/meetings')
@@ -87,13 +115,23 @@ export function MobileTabBar() {
             />
             <MoreLink
               label="Calendar"
+              icon={<CalendarIcon />}
               onClick={() => {
                 setMoreOpen(false)
                 navigate('/calendar')
               }}
             />
             <MoreLink
+              label="Sharpy"
+              icon={<SharpyIcon />}
+              onClick={() => {
+                setMoreOpen(false)
+                navigate('/sharpy')
+              }}
+            />
+            <MoreLink
               label="Help"
+              icon={<HelpIcon />}
               badge={unseenRelease}
               onClick={() => {
                 setMoreOpen(false)
@@ -167,7 +205,7 @@ function TabButton({
       type="button"
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
-      className={`relative flex min-h-12 flex-1 cursor-pointer flex-col items-center justify-center gap-0.5 px-1 pt-1.5 text-[10px] font-medium outline-none transition-colors active:bg-[var(--color-panel)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] ${
+      className={`relative flex min-h-12 flex-1 cursor-pointer flex-col items-center justify-center gap-0.5 px-1 pt-1.5 text-3xs font-medium outline-none transition-colors active:bg-[var(--color-panel)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] ${
         active ? 'text-[var(--color-accent-hover)]' : 'text-[var(--color-text-faint)]'
       }`}
     >
@@ -188,19 +226,21 @@ function MoreLink({
   label,
   onClick,
   badge,
+  icon,
 }: {
   label: string
   onClick: () => void
-  badge?: boolean
+  badge?: boolean | number
+  icon: React.ReactNode
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex min-h-12 w-full cursor-pointer items-center justify-between rounded-xl px-3 py-3 text-left text-sm font-medium text-[var(--color-text)] hover:bg-[var(--color-panel-2)] active:bg-[var(--color-panel-2)]"
+      className="flex min-h-12 w-full cursor-pointer items-center justify-between rounded-xl px-3 py-3 text-left text-sm font-medium text-[var(--color-text)] transition-colors hover:bg-[var(--color-panel-2)] active:bg-[var(--color-panel-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
     >
-      <span>{label}</span>
-      {badge && <span className="h-2 w-2 rounded-full bg-[var(--color-accent)]" aria-hidden />}
+      <span className="flex items-center gap-3"><span className="text-[var(--color-text-dim)]">{icon}</span>{label}</span>
+      {typeof badge === 'number' && badge > 0 ? <span className="rounded-full bg-[var(--color-accent-soft)] px-2 py-0.5 text-xs font-semibold text-[var(--color-accent-hover)]">{badge > 99 ? '99+' : badge}</span> : badge ? <span className="h-2 w-2 rounded-full bg-[var(--color-accent)]" aria-hidden /> : null}
     </button>
   )
 }
@@ -235,6 +275,12 @@ function MoreIcon() {
     </svg>
   )
 }
+
+function BoardIcon() { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="4" y="4" width="4" height="16" rx="1" /><rect x="10" y="4" width="4" height="11" rx="1" /><rect x="16" y="4" width="4" height="7" rx="1" /></svg> }
+function MeetingsIcon() { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 6h16M4 12h16M4 18h10" /><circle cx="18" cy="18" r="3" /></svg> }
+function CalendarIcon() { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M3 9h18M8 2v4M16 2v4" /></svg> }
+function SharpyIcon() { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 3c.4 4.7 2.3 6.6 7 7-4.7.4-6.6 2.3-7 7-.4-4.7-2.3-6.6-7-7 4.7-.4 6.6-2.3 7-7Z" /><path d="M18.5 16.5c.1 1.5.8 2.2 2.3 2.3-1.5.1-2.2.8-2.3 2.3-.1-1.5-.8-2.2-2.3-2.3 1.5-.1 2.2-.8 2.3-2.3Z" /></svg> }
+function HelpIcon() { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="9" /><path d="M9.7 9a2.4 2.4 0 1 1 3.8 2c-1 .7-1.5 1.1-1.5 2.2" /><path d="M12 17h.01" /></svg> }
 
 function ProfileIcon() {
   return (

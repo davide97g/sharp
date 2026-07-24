@@ -321,6 +321,10 @@ function ChromeButton({
 
 function StatusDot({ status }: { status: DocConnStatus }) {
   const color =
-    status === 'connected' ? '#4fbf9f' : status === 'connecting' ? '#e0913a' : '#e05a7d'
+    status === 'connected'
+      ? 'var(--color-success-fg)'
+      : status === 'connecting'
+        ? 'var(--color-warning-fg)'
+        : 'var(--color-danger-fg)'
   return <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
 }

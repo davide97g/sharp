@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Button, IconButton, SectionLabel, useDismiss } from '../ui'
 import { useStore } from '../store'
 import { effectiveNicknames } from '../lib/displayName'
 import { api } from '../lib/api'
@@ -136,6 +137,8 @@ export function Composer({
   const isMobile = useIsMobile()
   // Mobile "+" sheet holding attach / GIF / poll so the input row stays roomy.
   const [plusOpen, setPlusOpen] = useState(false)
+  const plusRef = useRef<HTMLDivElement>(null)
+  useDismiss({ ref: plusRef, onClose: () => setPlusOpen(false), enabled: plusOpen })
 
   // --- voice message recording ---
   const [recorder, setRecorder] = useState<VoiceRecorder | null>(null)
@@ -704,14 +707,14 @@ export function Composer({
       {pickerOpen && !gifOpen && (
         <div className="composer-picker absolute bottom-full left-4 right-4 z-20 mb-1 max-h-64 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1.5 shadow-2xl">
           <div className="flex items-center justify-between px-2 py-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+            <SectionLabel as="span" size="3xs">
               {trigger?.type === '@'
                 ? 'People'
                 : trigger?.type === ':'
                   ? 'Emoji'
                   : 'Docs, canvases & boards'}
-            </span>
-            <span className="text-[10px] text-[var(--color-text-faint)]">↑↓ · ↵/⇥ · esc</span>
+            </SectionLabel>
+            <span className="text-3xs text-[var(--color-text-faint)]">↑↓ · ↵/⇥ · esc</span>
           </div>
           {results.map((r, i) => (
             <button
@@ -736,7 +739,7 @@ export function Composer({
                     📣
                   </span>
                   <span className="min-w-0 shrink-0 font-medium">all</span>
-                  <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--color-text-faint)]">
+                  <span className="min-w-0 flex-1 truncate text-2xs text-[var(--color-text-faint)]">
                     Notify everyone in this channel
                   </span>
                 </>
@@ -748,7 +751,7 @@ export function Composer({
                   <span className="min-w-0 flex-1 truncate text-[var(--color-text-dim)]">
                     :{r.shortcode}:
                   </span>
-                  <span className="shrink-0 truncate text-[11px] text-[var(--color-text-faint)]">
+                  <span className="shrink-0 truncate text-2xs text-[var(--color-text-faint)]">
                     {r.name}
                   </span>
                 </>
@@ -757,7 +760,7 @@ export function Composer({
                   <span>{r.kind === 'canvas' ? '🎨' : r.kind === 'board' ? '🗂️' : '📄'}</span>
                   <span className="min-w-0 flex-1 truncate">{r.title}</span>
                   {r.channelName && (
-                    <span className="shrink-0 text-[11px] text-[var(--color-text-faint)]">
+                    <span className="shrink-0 text-2xs text-[var(--color-text-faint)]">
                       #{r.channelName}
                     </span>
                   )}
@@ -788,7 +791,7 @@ export function Composer({
         {activeReply && (
           <div className="mb-2 flex items-stretch gap-2 rounded-lg border-l-2 border-[var(--color-accent)] bg-[var(--color-panel-2)] py-1.5 pl-2.5 pr-2">
             <div className="min-w-0 flex-1">
-              <div className="text-[11px] font-semibold text-[var(--color-accent-hover)]">
+              <div className="text-2xs font-semibold text-[var(--color-accent-hover)]">
                 Replying to {replyAuthorName}
               </div>
               <div className="truncate text-xs text-[var(--color-text-dim)]">
@@ -826,7 +829,7 @@ export function Composer({
                     </div>
                   )}
                   {p.error && (
-                    <span className="text-[10px] text-red-500">failed</span>
+                    <span className="text-3xs text-danger-fg">failed</span>
                   )}
                   <button
                     onClick={() => removePending(p.id)}
@@ -855,7 +858,7 @@ export function Composer({
                 )}
                 <div className="min-w-0 max-w-[10rem]">
                   <div className="truncate text-xs text-[var(--color-text)]">{p.name}</div>
-                  <div className="text-[10px] text-[var(--color-text-faint)]">
+                  <div className="text-3xs text-[var(--color-text-faint)]">
                     {p.error
                       ? 'failed'
                       : p.attachment
@@ -909,7 +912,7 @@ export function Composer({
             (() => {
               const canPoll = channel.kind !== 'dm' && !isGuest && canPost
               return (
-                <div className="relative">
+                <div className="relative" ref={plusRef}>
                   <button
                     type="button"
                     onClick={() => {
@@ -927,14 +930,6 @@ export function Composer({
                     <PlusIcon open={plusOpen} />
                   </button>
                   {plusOpen && (
-                    <>
-                      <button
-                        type="button"
-                        aria-hidden
-                        tabIndex={-1}
-                        onClick={() => setPlusOpen(false)}
-                        className="fixed inset-0 z-30 cursor-default"
-                      />
                       <div
                         role="menu"
                         className="absolute bottom-full left-0 z-40 mb-2 min-w-44 overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1.5 shadow-2xl"
@@ -969,21 +964,20 @@ export function Composer({
                           />
                         )}
                       </div>
-                    </>
                   )}
                 </div>
               )
             })()
           ) : (
             <>
-              <button
+              <IconButton
+                label="Attach files"
+                size="sm"
+                className="mb-0.5"
                 onClick={() => fileRef.current?.click()}
-                title="Attach files"
-                aria-label="Attach files"
-                className="mb-0.5 flex items-center justify-center rounded-md px-2 py-1.5 text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
               >
                 <PaperclipGlyph />
-              </button>
+              </IconButton>
               {gifEnabled && (
                 <button
                   type="button"
@@ -999,26 +993,24 @@ export function Composer({
                 </button>
               )}
               {channel.kind !== 'dm' && !isGuest && canPost ? (
-                <button
-                  type="button"
+                <IconButton
+                  label="Create a poll"
+                  size="sm"
+                  className="mb-0.5"
                   onClick={() => setPollOpen(true)}
-                  title="Create a poll"
-                  aria-label="Create a poll"
-                  className="mb-0.5 flex items-center justify-center rounded-md px-2 py-1.5 text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
                 >
                   <PollIcon />
-                </button>
+                </IconButton>
               ) : null}
               {recordingSupported && (
-                <button
-                  type="button"
+                <IconButton
+                  label="Record a voice message"
+                  size="sm"
+                  className="mb-0.5"
                   onClick={() => void startRecording()}
-                  title="Record a voice message"
-                  aria-label="Record a voice message"
-                  className="mb-0.5 flex items-center justify-center rounded-md px-2 py-1.5 text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
                 >
                   <MicGlyph />
-                </button>
+                </IconButton>
               )}
             </>
           )}
@@ -1040,34 +1032,40 @@ export function Composer({
               the WhatsApp affordance. Desktop keeps the labelled Send button. */}
           {isMobile ? (
             !canSend && recordingSupported && !value.trim() && readyIds.length === 0 ? (
-              <button
-                type="button"
+              <IconButton
+                label="Record a voice message"
+                variant="ghost"
+                shape="circle"
+                size="xl"
+                className="mb-0.5"
                 onClick={() => void startRecording()}
-                aria-label="Record a voice message"
-                className="mb-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--color-text-faint)] transition hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
               >
                 <MicGlyph />
-              </button>
+              </IconButton>
             ) : (
-              <button
+              <IconButton
+                label="Send message"
+                title={uploading ? 'Waiting for uploads…' : 'Send'}
+                variant="accent"
+                shape="circle"
+                size="xl"
+                className="composer-send mb-0.5"
                 onClick={doSend}
                 disabled={!canSend}
-                aria-label="Send message"
-                title={uploading ? 'Waiting for uploads…' : 'Send'}
-                className="composer-send mb-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent)] text-white transition hover:bg-[var(--color-accent-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
               >
                 <SendIcon />
-              </button>
+              </IconButton>
             )
           ) : (
-            <button
+            <Button
+              size="sm"
+              className="composer-send mb-0.5 min-h-11 md:min-h-0"
               onClick={doSend}
               disabled={!canSend}
               title={uploading ? 'Waiting for uploads…' : 'Send (Enter)'}
-              className="composer-send mb-0.5 min-h-11 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-[var(--color-accent-hover)] disabled:opacity-40 md:min-h-0"
             >
               Send
-            </button>
+            </Button>
           )}
         </div>
         )}

@@ -120,7 +120,7 @@ export function DocRolesModal({ doc, onClose }: { doc: Doc; onClose: () => void 
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{u.display_name}</div>
                   {visibleEmail(u, me?.id) && (
-                    <div className="truncate text-[11px] text-[var(--color-text-faint)]">
+                    <div className="truncate text-2xs text-[var(--color-text-faint)]">
                       {visibleEmail(u, me?.id)}
                     </div>
                   )}

@@ -7,6 +7,7 @@ import { Markdown } from './Markdown'
 import type { SharpySource } from '../lib/types'
 import { SharpyCitationChips } from './sharpy/SharpyCitationChips'
 import { StreamShield } from './stream/StreamShield'
+import { PanelHeader, IconButton, EmptyState } from '../ui'
 
 const SUGGESTED_PROMPTS = [
   'What did we decide about ',
@@ -108,46 +109,46 @@ export function SharpyPanel() {
     >
       {/* Sharpy answers are grounded in workspace content, so the whole panel shields. */}
       <StreamShield label="Sharpy hidden">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--color-border)] px-3 sm:px-4">
-        <div className="flex min-w-0 items-center gap-2">
+      <PanelHeader
+        title="Sharpy"
+        icon={
           <span className="text-[var(--color-accent-hover)]" aria-hidden>
             <SparkleIcon />
           </span>
-          <span className="text-sm font-semibold">Sharpy</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <IconButton
-            title="Open full page"
-            onClick={() => {
-              setSharpyOpen(false)
-              navigate('/sharpy')
-            }}
-          >
-            <ExpandIcon />
-          </IconButton>
-          <IconButton
-            title="Conversation history"
-            active={historyOpen}
-            onClick={() => setHistoryOpen((v) => !v)}
-          >
-            <HistoryIcon />
-          </IconButton>
-          <IconButton
-            title="New chat"
-            onClick={() => {
-              newConversation()
-              setHistoryOpen(false)
-              setInput('')
-              requestAnimationFrame(() => textareaRef.current?.focus())
-            }}
-          >
-            <PlusIcon />
-          </IconButton>
-          <IconButton title="Close (Esc)" onClick={() => setSharpyOpen(false)}>
-            <CloseIcon />
-          </IconButton>
-        </div>
-      </header>
+        }
+        actions={
+          <>
+            <IconButton
+              label="Open full page"
+              onClick={() => {
+                setSharpyOpen(false)
+                navigate('/sharpy')
+              }}
+            >
+              <ExpandIcon />
+            </IconButton>
+            <IconButton
+              label="Conversation history"
+              className={historyOpen ? 'bg-panel' : undefined}
+              onClick={() => setHistoryOpen((v) => !v)}
+            >
+              <HistoryIcon />
+            </IconButton>
+            <IconButton
+              label="New chat"
+              onClick={() => {
+                newConversation()
+                setHistoryOpen(false)
+                setInput('')
+                requestAnimationFrame(() => textareaRef.current?.focus())
+              }}
+            >
+              <PlusIcon />
+            </IconButton>
+          </>
+        }
+        onClose={() => setSharpyOpen(false)}
+      />
 
       {historyOpen ? (
         <div className="min-h-0 flex-1 overflow-y-auto py-2">
@@ -172,18 +173,18 @@ export function SharpyPanel() {
                     <span className="w-full truncate text-sm text-[var(--color-text)]">
                       {c.title}
                     </span>
-                    <span className="text-[11px] text-[var(--color-text-faint)]">
+                    <span className="text-2xs text-[var(--color-text-faint)]">
                       {fmtRelative(c.updated_at)}
                     </span>
                   </button>
-                  <button
-                    type="button"
-                    title="Delete conversation"
+                  <IconButton
+                    label="Delete conversation"
+                    size="sm"
                     onClick={() => void deleteConversation(c.id)}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--color-text-faint)] opacity-0 transition hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:opacity-100 group-hover:opacity-100"
+                    className="opacity-0 transition focus-visible:opacity-100 group-hover:opacity-100"
                   >
                     <TrashIcon />
-                  </button>
+                  </IconButton>
                 </li>
               ))}
             </ul>
@@ -202,7 +203,26 @@ export function SharpyPanel() {
                 <div className="skeleton h-16" />
               </div>
             ) : isEmpty ? (
-              <EmptyState onPick={fillPrompt} />
+              <EmptyState
+                icon={<SparkleIcon large />}
+                title="Ask Sharpy"
+                description="Grounded in your workspace messages and docs."
+                action={
+                  <div className="flex w-full flex-col gap-2">
+                    {SUGGESTED_PROMPTS.map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        onClick={() => fillPrompt(prompt)}
+                        className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 text-left text-sm text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+                      >
+                        {prompt.trim()}
+                        {prompt.endsWith(' ') ? '…' : ''}
+                      </button>
+                    ))}
+                  </div>
+                }
+              />
             ) : (
               <div className="flex flex-col gap-4">
                 {messages.map((m) =>
@@ -235,17 +255,17 @@ export function SharpyPanel() {
                 placeholder={streaming ? 'Sharpy is thinking…' : 'Ask Sharpy…'}
                 className="max-h-40 min-h-[1.5rem] flex-1 resize-none bg-transparent text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] disabled:opacity-60"
               />
-              <button
-                type="button"
+              <IconButton
+                label="Send"
+                variant="accent"
+                size="sm"
                 onClick={submit}
                 disabled={streaming || !input.trim()}
-                aria-label="Send"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-accent)] text-white transition hover:bg-[var(--color-accent-hover)] disabled:cursor-default disabled:opacity-30"
               >
                 <SendIcon />
-              </button>
+              </IconButton>
             </div>
-            <p className="mt-1.5 px-1 text-[11px] text-[var(--color-text-faint)]">
+            <p className="mt-1.5 px-1 text-2xs text-[var(--color-text-faint)]">
               Answers grounded in your workspace messages and docs.
             </p>
           </div>
@@ -253,35 +273,6 @@ export function SharpyPanel() {
       )}
       </StreamShield>
     </aside>
-  )
-}
-
-function EmptyState({ onPick }: { onPick: (prompt: string) => void }) {
-  return (
-    <div className="flex flex-col items-center gap-5 pt-8 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]">
-        <SparkleIcon large />
-      </div>
-      <div>
-        <p className="text-sm font-semibold text-[var(--color-text)]">Ask Sharpy</p>
-        <p className="mt-1 text-xs text-[var(--color-text-faint)]">
-          Grounded in your workspace messages and docs.
-        </p>
-      </div>
-      <div className="flex w-full flex-col gap-2">
-        {SUGGESTED_PROMPTS.map((prompt) => (
-          <button
-            key={prompt}
-            type="button"
-            onClick={() => onPick(prompt)}
-            className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 text-left text-sm text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
-          >
-            {prompt.trim()}
-            {prompt.endsWith(' ') ? '…' : ''}
-          </button>
-        ))}
-      </div>
-    </div>
   )
 }
 
@@ -332,34 +323,6 @@ function TypingIndicator({ inline }: { inline?: boolean }) {
   )
 }
 
-function IconButton({
-  title,
-  active,
-  onClick,
-  children,
-}: {
-  title: string
-  active?: boolean
-  onClick: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      aria-label={title}
-      onClick={onClick}
-      className={`flex h-9 w-9 items-center justify-center rounded-lg transition hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] ${
-        active
-          ? 'bg-[var(--color-panel)] text-[var(--color-accent-hover)]'
-          : 'text-[var(--color-text-dim)]'
-      }`}
-    >
-      {children}
-    </button>
-  )
-}
-
 function SparkleIcon({ large }: { large?: boolean }) {
   const s = large ? 24 : 18
   return (
@@ -402,14 +365,6 @@ function ExpandIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M15 3h6v6M21 3l-7 7M9 21H3v-6M3 21l7-7" />
-    </svg>
-  )
-}
-
-function CloseIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="m6 6 12 12M18 6 6 18" />
     </svg>
   )
 }

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CalendarItem } from '../../lib/types'
 import { dayjs, dayKey, itemKey, startOfWeek, shortTime } from '../../lib/calendar'
 import { EventDetail } from './EventDetail'
+import { useDismiss } from '../../ui'
 
 const HOUR_HEIGHT = 48 // px per hour row
 const DAY_HEIGHT = HOUR_HEIGHT * 24
@@ -113,7 +114,7 @@ export function WeekGrid({
               key={d.toISOString()}
               className="flex flex-1 flex-col items-center py-1.5"
             >
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+              <span className="text-3xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
                 {d.format('ddd')}
               </span>
               <span
@@ -134,7 +135,7 @@ export function WeekGrid({
       {hasAllDay && (
         <div className="flex border-b border-[var(--color-border)]">
           <div
-            className={`${GUTTER} shrink-0 py-1 pr-1 text-right text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]`}
+            className={`${GUTTER} shrink-0 py-1 pr-1 text-right text-3xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]`}
           >
             All day
           </div>
@@ -166,7 +167,7 @@ export function WeekGrid({
             {Array.from({ length: 24 }, (_, h) => (
               <div
                 key={h}
-                className="absolute right-1 -translate-y-1/2 text-[10px] tabular-nums text-[var(--color-text-faint)]"
+                className="absolute right-1 -translate-y-1/2 text-3xs tabular-nums text-[var(--color-text-faint)]"
                 style={{ top: h * HOUR_HEIGHT }}
               >
                 {h === 0 ? '' : dayjs().hour(h).minute(0).format('h A')}
@@ -244,7 +245,7 @@ function AllDayChip({
       type="button"
       onClick={(e) => onOpen(e.currentTarget.getBoundingClientRect())}
       style={{ background: `color-mix(in srgb, ${accent} 22%, transparent)` }}
-      className={`flex w-full items-center gap-1 truncate rounded px-1 py-0.5 text-left text-[11px] text-[var(--color-text)] hover:brightness-110 ${
+      className={`flex w-full items-center gap-1 truncate rounded px-1 py-0.5 text-left text-2xs text-[var(--color-text)] hover:brightness-110 ${
         cancelled ? 'line-through opacity-60' : ''
       }`}
     >
@@ -289,14 +290,14 @@ function WeekEvent({
       } ${active ? 'ring-2 ring-[var(--color-accent)]' : ''}`}
     >
       <div
-        className={`truncate text-[11px] font-medium leading-tight text-[var(--color-text)] ${
+        className={`truncate text-2xs font-medium leading-tight text-[var(--color-text)] ${
           cancelled ? 'line-through' : ''
         }`}
       >
         {item.title || 'Untitled'}
       </div>
       {pe.heightPct > 4 && (
-        <div className="truncate text-[10px] leading-tight text-[var(--color-text-faint)]">
+        <div className="truncate text-3xs leading-tight text-[var(--color-text-faint)]">
           {shortTime(item.start_at)}
         </div>
       )}
@@ -335,20 +336,7 @@ function WeekPopover({
     setPos({ top, left })
   }, [anchor])
 
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [onClose])
+  useDismiss({ ref, onClose })
 
   return (
     <div

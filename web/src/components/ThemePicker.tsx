@@ -1,4 +1,5 @@
 import { THEME_PRESETS, type ThemePreset } from '../lib/theme'
+import { ChoiceCard } from '../ui'
 
 function ThemeCard({
   preset,
@@ -17,15 +18,7 @@ function ThemeCard({
 }) {
   const [ink, accent, text] = swatches
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={`rounded-xl border p-2 text-left transition ${
-        selected
-          ? 'border-[var(--color-accent)] ring-2 ring-[var(--color-accent-soft)]'
-          : 'border-[var(--color-border)] hover:border-[var(--color-text-faint)]'
-      }`}
-    >
+    <ChoiceCard selected={selected} onSelect={onSelect} title={title} description={desc} selectedStyle="ring">
       <div
         className="flex flex-col gap-1.5 rounded-lg p-3"
         style={{ backgroundColor: ink }}
@@ -53,11 +46,7 @@ function ThemeCard({
           <div className="h-1.5 w-2/3 rounded" style={{ backgroundColor: text, opacity: 0.35 }} />
         </div>
       </div>
-      <div className="mt-2 px-1">
-        <div className="text-sm font-semibold text-[var(--color-text)]">{title}</div>
-        <div className="text-[11px] text-[var(--color-text-faint)]">{desc}</div>
-      </div>
-    </button>
+    </ChoiceCard>
   )
 }
 

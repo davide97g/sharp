@@ -4,6 +4,7 @@ import { timeRange } from '../../lib/calendar'
 import { useStore } from '../../store'
 import { toastError } from '../../lib/toast'
 import { ScheduleMeetingModal } from './ScheduleMeetingModal'
+import { SectionLabel } from '../../ui'
 
 const RSVP_OPTIONS: { value: string; label: string }[] = [
   { value: 'accepted', label: 'Yes' },
@@ -49,14 +50,14 @@ export function EventDetail({ item }: { item: CalendarItem }) {
           <div className="text-sm font-semibold text-[var(--color-text)]">
             {item.title || 'Untitled'}
           </div>
-          <div className="text-[11px] text-[var(--color-text-faint)]">
+          <div className="text-2xs text-[var(--color-text-faint)]">
             {timeRange(item.start_at, item.end_at, item.all_day)}
           </div>
         </div>
       </div>
 
       {cancelled && (
-        <div className="mb-2 rounded-md bg-[#ff6b5f]/10 px-2 py-1 text-[11px] font-medium text-[#ff8a80]">
+        <div className="mb-2 rounded-md bg-[#ff6b5f]/10 px-2 py-1 text-2xs font-medium text-[#ff8a80]">
           Cancelled
         </div>
       )}
@@ -76,9 +77,9 @@ export function EventDetail({ item }: { item: CalendarItem }) {
 
       {isNative && item.meeting.attendees.length > 0 && (
         <div className="mb-2">
-          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+          <SectionLabel size="3xs" className="mb-1">
             Attendees
-          </div>
+          </SectionLabel>
           <ul className="space-y-0.5">
             {item.meeting.attendees.map((a) => (
               <li
@@ -86,7 +87,7 @@ export function EventDetail({ item }: { item: CalendarItem }) {
                 className="flex items-center justify-between gap-2 text-xs text-[var(--color-text-dim)]"
               >
                 <span className="truncate">{a.display_name}</span>
-                <span className="shrink-0 text-[10px] text-[var(--color-text-faint)]">
+                <span className="shrink-0 text-3xs text-[var(--color-text-faint)]">
                   {rsvpLabel(a.response)}
                 </span>
               </li>
@@ -104,7 +105,7 @@ export function EventDetail({ item }: { item: CalendarItem }) {
                 key={opt.value}
                 type="button"
                 onClick={() => void rsvp(opt.value)}
-                className={`flex-1 rounded-md border px-2 py-1 text-[11px] font-medium transition ${
+                className={`flex-1 rounded-md border px-2 py-1 text-2xs font-medium transition ${
                   active
                     ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]'
                     : 'border-[var(--color-border)] text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)]'

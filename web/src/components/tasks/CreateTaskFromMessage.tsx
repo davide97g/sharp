@@ -7,6 +7,7 @@ import { useStore } from '../../store'
 import type { Message, Project } from '../../lib/types'
 import { Modal } from '../Modal'
 import { NewTaskModal } from './NewTaskModal'
+import { Button } from '../../ui'
 
 export function CreateTaskFromMessage({
   message,
@@ -31,15 +32,15 @@ export function CreateTaskFromMessage({
           No projects yet. Create one in the Tasks area first.
         </p>
         <div className="mt-3 flex justify-end">
-          <button
+          <Button
+            className="min-h-11"
             onClick={() => {
               onClose()
               navigate('/tasks')
             }}
-            className="rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-sm font-semibold text-white"
           >
             Open Tasks
-          </button>
+          </Button>
         </div>
       </Modal>
     )
@@ -53,11 +54,11 @@ export function CreateTaskFromMessage({
             <button
               key={p.id}
               onClick={() => setProject(p)}
-              className="flex w-full items-center gap-2.5 rounded-lg border border-[var(--color-border)] px-3 py-2 text-left hover:border-[var(--color-accent)] hover:bg-[var(--color-panel-2)]"
+              className="flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-lg border border-[var(--color-border)] px-3 py-2 text-left transition-colors hover:border-[var(--color-accent)] hover:bg-[var(--color-panel-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
             >
               <span className="text-lg">{p.icon || '🎯'}</span>
               <span className="min-w-0 flex-1 truncate text-sm font-medium">{p.name}</span>
-              <span className="font-mono text-[11px] text-[var(--color-text-faint)]">{p.key}</span>
+              <span className="font-mono text-2xs text-[var(--color-text-faint)]">{p.key}</span>
             </button>
           ))}
         </div>

@@ -88,7 +88,7 @@ export function ChannelPaneHeader({
                 <LockIcon />
               </button>
             )}
-            {verification?.changed ? <span className="text-[11px] font-normal text-amber-400">⚠ device list changed</span> : null}
+            {verification?.changed ? <span className="text-2xs font-normal text-warning-fg">⚠ device list changed</span> : null}
           </span>
         ) : (
           <span className="flex items-center gap-1 font-semibold">
@@ -109,7 +109,7 @@ export function ChannelPaneHeader({
             <p className="text-sm text-[var(--color-text-dim)]">Compare these emoji with {channel.dm_user.display_name} over another channel.</p>
             <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] p-4 text-center text-2xl leading-relaxed tracking-wider">{verification?.fingerprint ?? 'Loading…'}</div>
             <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-[var(--color-border)] p-3 text-sm"><input type="checkbox" checked={verification?.verified ?? false} disabled={!verification} onChange={() => void toggleVerified()} className="h-4 w-4 accent-[var(--color-accent)]" /><span>Mark as verified</span></label>
-            {verification?.changed ? <p className="text-xs text-amber-400">Device list changed since last verification. Compare again before marking verified.</p> : null}
+            {verification?.changed ? <p className="text-xs text-warning-fg">Device list changed since last verification. Compare again before marking verified.</p> : null}
           </div>
         </Modal>
       ) : null}

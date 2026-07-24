@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ChatLayout } from '../lib/types'
 import { useStore } from '../store'
+import { Button, ChoiceCard, ModalFooter } from '../ui'
 import { Modal } from './Modal'
 
 // A small non-interactive mockup of each DM rendering style.
@@ -34,13 +35,13 @@ export function ChatLayoutPreview({ layout }: { layout: ChatLayout }) {
       ].map((r, i) => (
         <div key={i} className="flex items-start gap-2">
           <span
-            className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[10px] font-semibold text-white"
+            className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-3xs font-semibold text-white"
             style={{ backgroundColor: r.c }}
           >
             {r.n[0]}
           </span>
           <div className="min-w-0">
-            <div className="text-[11px] font-semibold text-[var(--color-text)]">{r.n}</div>
+            <div className="text-2xs font-semibold text-[var(--color-text)]">{r.n}</div>
             <div className="text-xs text-[var(--color-text-dim)]">{r.t}</div>
           </div>
         </div>
@@ -63,20 +64,15 @@ function LayoutCard({
   onSelect: () => void
 }) {
   return (
-    <button
-      onClick={onSelect}
-      className={`flex-1 rounded-xl border p-2 text-left transition ${
-        selected
-          ? 'border-[var(--color-accent)] ring-2 ring-[var(--color-accent-soft)]'
-          : 'border-[var(--color-border)] hover:border-[var(--color-text-faint)]'
-      }`}
+    <ChoiceCard
+      selected={selected}
+      onSelect={onSelect}
+      title={title}
+      description={desc}
+      className="flex-1"
     >
       <ChatLayoutPreview layout={layout} />
-      <div className="mt-2 px-1">
-        <div className="text-sm font-semibold text-[var(--color-text)]">{title}</div>
-        <div className="text-[11px] text-[var(--color-text-faint)]">{desc}</div>
-      </div>
-    </button>
+    </ChoiceCard>
   )
 }
 
@@ -126,15 +122,11 @@ export function ChatLayoutChooser() {
         How should your direct messages look? You can change this anytime in Settings.
       </p>
       <ChatLayoutPicker value={choice} onChange={setChoice} />
-      <div className="mt-4 flex justify-end">
-        <button
-          onClick={confirm}
-          disabled={saving}
-          className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
-        >
+      <ModalFooter>
+        <Button className="px-4" onClick={confirm} disabled={saving}>
           {saving ? 'Saving…' : 'Use this style'}
-        </button>
-      </div>
+        </Button>
+      </ModalFooter>
     </Modal>
   )
 }

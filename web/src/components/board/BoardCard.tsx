@@ -1,8 +1,8 @@
 import { memo, useCallback } from 'react'
 import type { BoardCardData, BoardProperty } from '../../lib/boardDoc'
-import { colorOf } from '../../lib/boardColors'
 import type { ChannelMember } from '../../lib/types'
 import { initials, userColor } from '../../lib/util'
+import { Tag } from '../../ui'
 
 // Parse a stored 'YYYY-MM-DD' as a *local* date (never let the browser read it
 // as UTC midnight and shift the day).
@@ -105,22 +105,15 @@ function BoardCardImpl({
 
       {hasMeta && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          {chips.map((t) => {
-            const c = colorOf(t.color)
-            return (
-              <span
-                key={t.key}
-                className="max-w-full truncate rounded px-1.5 py-0.5 text-[11px] font-medium"
-                style={{ backgroundColor: c.bg, color: c.fg }}
-              >
-                {t.label}
-              </span>
-            )
-          })}
+          {chips.map((t) => (
+            <Tag key={t.key} colorKey={t.color}>
+              {t.label}
+            </Tag>
+          ))}
           {dates.map((d) => (
             <span
               key={d.key}
-              className="rounded px-1.5 py-0.5 text-[11px] font-medium"
+              className="rounded px-1.5 py-0.5 text-2xs font-medium"
               style={{
                 backgroundColor: 'var(--color-panel)',
                 color: d.overdue ? 'var(--board-red-fg)' : 'var(--color-text-dim)',
@@ -129,9 +122,11 @@ function BoardCardImpl({
               {d.label}
             </span>
           ))}
+          {/* TODO(ds): Avatar — card assignee circle; kept custom for the '?'
+              unknown-member fallback and its hard-coded #4b4b56 fill. */}
           {assigneeId && (
             <span
-              className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+              className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-3xs font-semibold text-white"
               title={assignee?.display_name ?? 'Unknown'}
               style={{ backgroundColor: assignee ? userColor(assignee.id) : '#4b4b56' }}
             >
@@ -166,7 +161,7 @@ function BoardCardImpl({
               }}
             />
           </div>
-          <span className="shrink-0 text-[10px] font-medium tabular-nums text-[var(--color-text-faint)]">
+          <span className="shrink-0 text-3xs font-medium tabular-nums text-[var(--color-text-faint)]">
             {done}/{total}
           </span>
         </div>

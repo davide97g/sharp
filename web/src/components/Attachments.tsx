@@ -116,7 +116,7 @@ function FileChip({ att }: { att: Attachment }) {
       <span className="text-lg">{busy ? '⏳' : '📄'}</span>
       <span className="min-w-0">
         <span className="block truncate text-[var(--color-text)]">{att.filename}</span>
-        <span className="block text-[11px] text-[var(--color-text-faint)]">
+        <span className="block text-2xs text-[var(--color-text-faint)]">
           {fmtBytes(att.size)}
         </span>
       </span>

@@ -37,7 +37,8 @@ export function SharpyCitationChips({ sources }: { sources: SharpySource[] }) {
             type="button"
             title={src.snippet}
             onClick={() => navigate(to)}
-            className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1 text-[11px] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+            // TODO(ds): bespoke citation chip — border-accent hover + max-w truncation has no clean Button/Badge parity.
+            className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1 text-2xs text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
           >
             <span className="text-[var(--color-text-faint)]">[{index + 1}]</span>
             <span className="truncate">{label}</span>

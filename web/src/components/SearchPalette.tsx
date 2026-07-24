@@ -8,6 +8,7 @@ import { toastError } from '../lib/toast'
 import { gifPreviewText } from '../lib/gif'
 import { localSearchResult, searchLocal } from '../lib/e2ee/search'
 import { Avatar } from './Avatar'
+import { SearchInput, SectionLabel, Skeleton } from '../ui'
 import type { DocSearchResult, SearchResult } from '../lib/types'
 
 type Scope =
@@ -277,7 +278,7 @@ export function SearchPalette() {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/60 p-4 pt-[max(14vh,calc(var(--safe-top)+1.5rem))] pb-[max(1rem,var(--safe-bottom))] pl-[max(1rem,var(--safe-left))] pr-[max(1rem,var(--safe-right))] backdrop-blur-sm"
+      className="fixed inset-0 z-(--z-overlay) flex items-start justify-center bg-black/60 p-4 pt-[max(14vh,calc(var(--safe-top)+1.5rem))] pb-[max(1rem,var(--safe-bottom))] pl-[max(1rem,var(--safe-left))] pr-[max(1rem,var(--safe-right))] backdrop-blur-sm"
       onMouseDown={() => setOpen(false)}
     >
       <div
@@ -285,7 +286,7 @@ export function SearchPalette() {
         onMouseDown={(e) => e.stopPropagation()}
       >
         {hasScoped && (
-          <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-4 pt-3 text-[11px] text-[var(--color-text-faint)]">
+          <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-4 pt-3 text-2xs text-[var(--color-text-faint)]">
             <span>Searching in</span>
             <span className="rounded bg-[var(--color-accent-soft)] px-1.5 py-0.5 font-medium text-[var(--color-text)]">
               {scope!.type === 'channel' ? 'chat' : scope!.canvas ? 'canvas' : 'doc'}:{' '}
@@ -293,7 +294,8 @@ export function SearchPalette() {
             </span>
           </div>
         )}
-        <input
+        <SearchInput
+          variant="palette"
           ref={inputRef}
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -312,13 +314,12 @@ export function SearchPalette() {
             }
           }}
           placeholder="Search messages and docs…"
-          className="w-full border-b border-[var(--color-border)] bg-transparent px-4 py-3.5 text-sm focus:outline-none"
         />
         <div ref={listRef} className="max-h-[52vh] overflow-y-auto p-1.5">
           {loading && rows.length === 0 && (
             <div className="space-y-2 p-1.5">
               {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="skeleton h-14 rounded-lg" />
+                <Skeleton key={i} className="h-14 rounded-lg" />
               ))}
             </div>
           )}
@@ -340,15 +341,17 @@ export function SearchPalette() {
             return (
               <div key={row.key}>
                 {showScopedHeader && (
-                  <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-faint)]">
+                  <SectionLabel size="3xs" className="px-3 pb-1 pt-2">
                     In this {scope!.type === 'channel' ? 'chat' : 'doc'} · {scopedCount}
-                  </div>
+                  </SectionLabel>
                 )}
                 {showGlobalHeader && (
-                  <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-faint)]">
+                  <SectionLabel size="3xs" className="px-3 pb-1 pt-2">
                     {hasScoped ? 'Elsewhere' : 'All results'}
-                  </div>
+                  </SectionLabel>
                 )}
+                {/* TODO(ds): rich multi-line rows (avatar + meta + snippet, blur
+                    wrapper) don't fit ListRow's single-line truncate slot; kept custom. */}
                 <button
                   data-idx={i}
                   onMouseEnter={() => setSel(i)}
@@ -373,7 +376,7 @@ export function SearchPalette() {
                     </span>
                   )}
                   <div className={`min-w-0 flex-1 ${rowShielded(row) ? 'stream-blur' : ''}`}>
-                    <div className="mb-0.5 flex items-center gap-2 text-[11px]">
+                    <div className="mb-0.5 flex items-center gap-2 text-2xs">
                       <span className="truncate font-medium text-[var(--color-accent-hover)]">
                         {locationLabel(row)}
                       </span>
@@ -407,7 +410,9 @@ export function SearchPalette() {
             )
           })}
         </div>
-        <div className="border-t border-[var(--color-border)] px-4 py-2 text-[11px] text-[var(--color-text-faint)]">
+        {/* TODO(ds): hints are plain arrow glyphs, not chip spans — wrapping each
+            key in <Kbd> would change the look, so kept as text. */}
+        <div className="border-t border-[var(--color-border)] px-4 py-2 text-2xs text-[var(--color-text-faint)]">
           ↑↓ to navigate · ↵ to open · esc to close
         </div>
       </div>

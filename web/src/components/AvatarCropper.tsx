@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Button } from '../ui'
 
 const VIEW = 256 // on-screen square viewport (px)
 const OUT = 512 // exported square size (px)
@@ -148,23 +149,15 @@ export function AvatarCropper({
           className="flex-1 accent-[var(--color-accent)]"
         />
       </div>
-      <p className="text-[11px] text-[var(--color-text-faint)]">Drag to reposition · scroll or slider to zoom</p>
+      <p className="text-2xs text-[var(--color-text-faint)]">Drag to reposition · scroll or slider to zoom</p>
 
       <div className="flex w-full items-center justify-end gap-2">
-        <button
-          onClick={onCancel}
-          disabled={busy}
-          className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] disabled:opacity-50"
-        >
+        <Button variant="outline" size="sm" onClick={onCancel} disabled={busy}>
           Cancel
-        </button>
-        <button
-          onClick={exportBlob}
-          disabled={!img || busy}
-          className="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
-        >
+        </Button>
+        <Button size="sm" onClick={exportBlob} disabled={!img || busy}>
           {busy ? 'Saving…' : 'Save photo'}
-        </button>
+        </Button>
       </div>
     </div>
   )

@@ -8,6 +8,7 @@ import type { ChannelMember } from '../../lib/types'
 import { BoardCard } from './BoardCard'
 import { SelectOptionEditor } from './SelectOptionEditor'
 import type { BoardColumnData, useBoardDnd } from './useBoardDnd'
+import { Popover } from '../../ui'
 
 type Dnd = ReturnType<typeof useBoardDnd>
 
@@ -98,6 +99,9 @@ export function BoardColumn({
     >
       {/* header */}
       <div className="flex items-center gap-2 px-3 pt-3 pb-2">
+        {/* TODO(ds): Tag — header pill is also the column drag handle (onPointerDown)
+            with a no-background "No status" variant; kept custom (Tag has no event
+            passthrough and is text-2xs/rounded vs this text-xs/rounded-md). */}
         <span
           onPointerDown={(e) => {
             if (!isNoStatus) dnd.startColumnDrag(e, column.optionId as string)
@@ -126,42 +130,44 @@ export function BoardColumn({
             </button>
           )}
           {canEdit && !isNoStatus && (
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setMenuOpen((o) => !o)}
-                aria-label="Column options"
-                className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                  <circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" />
-                </svg>
-              </button>
-              {menuOpen && (
-                <>
-                  <div className="fixed inset-0 z-20" onClick={() => setMenuOpen(false)} />
-                  <div className="absolute right-0 top-full z-30 mt-1 w-72 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-2 shadow-2xl">
-                    <SelectOptionEditor
-                      option={{ id: column.optionId as string, label: column.label, color: column.color }}
-                      autoFocus
-                      onLabel={(label) => {
-                        if (groupByPropertyId)
-                          updateOption(ydoc, groupByPropertyId, column.optionId as string, { label })
-                      }}
-                      onColor={(color) => {
-                        if (groupByPropertyId)
-                          updateOption(ydoc, groupByPropertyId, column.optionId as string, { color })
-                      }}
-                      onDelete={() => {
-                        if (groupByPropertyId)
-                          deleteOption(ydoc, groupByPropertyId, column.optionId as string)
-                        setMenuOpen(false)
-                      }}
-                    />
-                  </div>
-                </>
-              )}
-            </div>
+            <Popover
+              open={menuOpen}
+              onClose={() => setMenuOpen(false)}
+              align="end"
+              width="w-72"
+              trigger={
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen((o) => !o)}
+                  aria-label="Column options"
+                  className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                    <circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" />
+                  </svg>
+                </button>
+              }
+            >
+              <div className="p-1">
+                <SelectOptionEditor
+                  option={{ id: column.optionId as string, label: column.label, color: column.color }}
+                  autoFocus
+                  onLabel={(label) => {
+                    if (groupByPropertyId)
+                      updateOption(ydoc, groupByPropertyId, column.optionId as string, { label })
+                  }}
+                  onColor={(color) => {
+                    if (groupByPropertyId)
+                      updateOption(ydoc, groupByPropertyId, column.optionId as string, { color })
+                  }}
+                  onDelete={() => {
+                    if (groupByPropertyId)
+                      deleteOption(ydoc, groupByPropertyId, column.optionId as string)
+                    setMenuOpen(false)
+                  }}
+                />
+              </div>
+            </Popover>
           )}
         </div>
       </div>

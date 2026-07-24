@@ -33,6 +33,10 @@ import { PasskeySetupPrompt } from './components/PasskeySetupPrompt'
 import { UserSettingsPage } from './components/UserSettingsModal'
 import { SharpyPage } from './components/sharpy/SharpyPage'
 import { AudioAuraShowcase } from './components/voice/AudioAuraShowcase'
+// Dev-only catalog; lazy so it never lands in the production bundle.
+const DesignGallery = lazy(() =>
+  import('./ui/DesignGallery').then((m) => ({ default: m.DesignGallery })),
+)
 // tldraw is a large dependency; keep it out of the main bundle by loading the
 // canvas editor lazily (only fetched when a whiteboard is actually opened).
 const CanvasEditor = lazy(() =>
@@ -131,6 +135,16 @@ export function App() {
         {/* Public reset landing — reachable regardless of auth state. */}
         <Route path="/reset-password" element={<ResetPassword />} />
         {import.meta.env.DEV && <Route path="/aura-lab" element={<AudioAuraShowcase />} />}
+        {import.meta.env.DEV && (
+          <Route
+            path="/design"
+            element={
+              <Suspense fallback={null}>
+                <DesignGallery />
+              </Suspense>
+            }
+          />
+        )}
         {/* Public call link: authenticated visitors keep their account session;
             anonymous visitors get the scoped guest flow. */}
         <Route path="/call/:token" element={<GuestCall />} />

@@ -6,6 +6,9 @@ import { useStore } from '../../store'
 import { Markdown } from '../Markdown'
 import { SharpyCitationChips } from './SharpyCitationChips'
 import { StreamShield } from '../stream/StreamShield'
+import { Card, CloseIcon, PlusIcon } from '../../ui'
+// TODO(ds): local SparkleIcon (organic 2-path brand glyph), SendIcon (up-arrow),
+// TrashIcon + HistoryIcon (distinct/not-in-registry) kept — ui glyphs differ visually.
 
 const SUGGESTED_PROMPTS = [
   'What did we decide about ',
@@ -144,7 +147,7 @@ export function SharpyPage() {
                 className="flex h-10 w-10 items-center justify-center rounded-lg text-[var(--color-text-dim)] transition hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
                 aria-label="Close conversations"
               >
-                <CloseIcon />
+                <CloseIcon size={18} strokeWidth={1.8} />
               </button>
             )}
             <span className="text-sm font-semibold text-[var(--color-text)]">Chats</span>
@@ -156,7 +159,7 @@ export function SharpyPage() {
             aria-label="New chat"
             title="New chat"
           >
-            <PlusIcon />
+            <PlusIcon size={18} strokeWidth={1.8} />
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
@@ -178,7 +181,7 @@ export function SharpyPage() {
                     <span className="w-full truncate text-sm text-[var(--color-text)]">
                       {conversation.title}
                     </span>
-                    <span className="text-[11px] text-[var(--color-text-faint)]">
+                    <span className="text-2xs text-[var(--color-text-faint)]">
                       {fmtRelative(conversation.updated_at)}
                     </span>
                   </button>
@@ -225,7 +228,7 @@ export function SharpyPage() {
             className="flex h-10 w-10 items-center justify-center rounded-lg text-[var(--color-text-dim)] transition hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
             aria-label="New chat"
           >
-            <PlusIcon />
+            <PlusIcon size={18} strokeWidth={1.8} />
           </button>
         </header>
 
@@ -278,7 +281,7 @@ export function SharpyPage() {
                 <SendIcon />
               </button>
             </div>
-            <p className="mt-1.5 px-1 text-center text-[11px] text-[var(--color-text-faint)]">
+            <p className="mt-1.5 px-1 text-center text-2xs text-[var(--color-text-faint)]">
               Answers grounded in your workspace messages and docs.
             </p>
           </div>
@@ -305,15 +308,17 @@ function EmptyState({ onPick }: { onPick: (prompt: string) => void }) {
       </div>
       <div className="grid w-full gap-2 sm:grid-cols-3">
         {SUGGESTED_PROMPTS.map((prompt) => (
-          <button
+          <Card
             key={prompt}
+            as="button"
+            interactive
             type="button"
             onClick={() => onPick(prompt)}
-            className="rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-4 text-left text-sm text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+            className="text-sm text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
           >
             {prompt.trim()}
             {prompt.endsWith(' ') ? '…' : ''}
-          </button>
+          </Card>
         ))}
       </div>
     </div>
@@ -385,22 +390,6 @@ function HistoryIcon() {
       <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
       <path d="M3 3v5h5" />
       <path d="M12 8v4l3 2" />
-    </svg>
-  )
-}
-
-function PlusIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M12 5v14M5 12h14" />
-    </svg>
-  )
-}
-
-function CloseIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="m6 6 12 12M18 6 6 18" />
     </svg>
   )
 }

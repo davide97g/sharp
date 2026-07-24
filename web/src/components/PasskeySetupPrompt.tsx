@@ -3,6 +3,7 @@ import { api } from '../lib/api'
 import { isPasskeyCancellation, registerPasskey, supportsPasskeys } from '../lib/passkeys'
 import { toastError } from '../lib/toast'
 import { Modal } from './Modal'
+import { Button, Field, Input } from '../ui'
 
 const OFFER_KEY = 'sharp.offerPasskey'
 
@@ -53,17 +54,15 @@ export function PasskeySetupPrompt() {
         <p className="text-sm leading-relaxed text-[var(--color-text-dim)]">
           Sign in next time with Face ID, Touch ID, Windows Hello, or a security key. Your password remains available for recovery.
         </p>
-        <label className="flex flex-col gap-1.5 text-xs font-medium text-[var(--color-text-dim)]">
-          Passkey name
-          <input value={name} maxLength={80} onChange={(event) => setName(event.target.value)} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2.5 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none" />
-        </label>
-        <label className="flex flex-col gap-1.5 text-xs font-medium text-[var(--color-text-dim)]">
-          Confirm current password
-          <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2.5 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none" />
-        </label>
+        <Field label="Passkey name">
+          <Input uiSize="lg" value={name} maxLength={80} onChange={(event) => setName(event.target.value)} />
+        </Field>
+        <Field label="Confirm current password">
+          <Input uiSize="lg" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
+        </Field>
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={() => void dismiss()} className="rounded-md border border-[var(--color-border)] px-3 py-2 text-sm text-[var(--color-text-dim)]">Not now</button>
-          <button type="button" disabled={busy || !name.trim() || !password} onClick={() => void enroll()} className="rounded-md bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? 'Setting up…' : 'Create passkey'}</button>
+          <Button variant="outline" onClick={() => void dismiss()}>Not now</Button>
+          <Button disabled={busy || !name.trim() || !password} onClick={() => void enroll()}>{busy ? 'Setting up…' : 'Create passkey'}</Button>
         </div>
       </div>
     </Modal>

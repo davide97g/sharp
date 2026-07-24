@@ -57,7 +57,7 @@ export function SharpnessMeter({ password }: { password: string }) {
           <span key={i} className="auth-meter-seg" data-on={i <= grade ? 'true' : undefined} />
         ))}
       </div>
-      <p className="text-[11px] text-[var(--color-text-faint)]">
+      <p className="text-2xs text-[var(--color-text-faint)]">
         <span key={label} className="auth-meter-label font-semibold text-[var(--color-text-dim)]">
           {label}
         </span>

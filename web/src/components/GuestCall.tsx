@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { ApiRequestError, api, setSessionToken } from '../lib/api'
 import { useStore } from '../store'
 import { toastError } from '../lib/toast'
+import { Button, Field, Input } from '../ui'
 import { VideoStage } from './voice/VideoStage'
 
 const GUEST_NAME_KEY = 'sharp.guestName'
@@ -176,25 +177,21 @@ export function GuestCall() {
               You&rsquo;re joining «{channelName}»
             </p>
           </div>
-          <label className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium text-[var(--color-text-dim)]">Your name</span>
-            <input
+          <Field label="Your name">
+            <Input
+              surface="panel"
+              uiSize="lg"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Ada Lovelace"
               maxLength={80}
               autoFocus
               required
-              className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2.5 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
             />
-          </label>
-          <button
-            type="submit"
-            disabled={busy}
-            className="mt-2 rounded-lg bg-[var(--color-accent)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 focus:ring-offset-[var(--color-ink)] disabled:opacity-60"
-          >
+          </Field>
+          <Button type="submit" size="lg" disabled={busy} className="mt-2">
             {busy ? 'Please wait…' : 'Join call'}
-          </button>
+          </Button>
         </form>
       )}
 
@@ -208,13 +205,9 @@ export function GuestCall() {
             <h1 className="text-lg font-semibold">You left the call</h1>
             <p className="text-sm text-[var(--color-text-dim)]">«{channelName}»</p>
           </div>
-          <button
-            type="button"
-            onClick={rejoin}
-            className="rounded-lg bg-[var(--color-accent)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 focus:ring-offset-[var(--color-ink)]"
-          >
+          <Button type="button" size="lg" onClick={rejoin}>
             Rejoin call
-          </button>
+          </Button>
         </div>
       )}
     </Shell>

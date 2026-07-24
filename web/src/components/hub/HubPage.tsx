@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { Button } from '../../ui'
 
 export function HubPage({
   title,
@@ -61,12 +62,9 @@ export function HubPage({
                 )}
               </div>
               {primaryLabel && (
-                <button
-                  onClick={onPrimary}
-                  className="min-h-11 rounded-lg bg-[var(--color-accent)] px-4 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-ink)]"
-                >
+                <Button size="lg" onClick={onPrimary}>
                   {primaryLabel}
-                </button>
+                </Button>
               )}
             </div>
             <div className="mt-6 flex flex-wrap gap-2">

@@ -62,7 +62,7 @@ export function AudioAuraShowcase() {
       <div className="mx-auto max-w-[1380px]">
         <header className="grid gap-7 border-b border-white/10 pb-8 lg:grid-cols-[1fr_auto] lg:items-end">
           <div>
-            <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-[0.28em] text-[#9f91ae]">
+            <div className="flex items-center gap-3 text-3xs font-black uppercase tracking-[0.28em] text-[#9f91ae]">
               <span className="h-px w-8 bg-[#ff805f]" />
               Audio Aura / direction study
             </div>
@@ -76,7 +76,7 @@ export function AudioAuraShowcase() {
           </div>
 
           <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/[0.035] p-4 lg:w-[340px]">
-            <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.18em] text-[#9f91ae]">
+            <div className="flex items-center justify-between text-3xs font-bold uppercase tracking-[0.18em] text-[#9f91ae]">
               <label htmlFor="aura-energy">Simulated voice energy</label>
               <span className="font-mono text-[#ffb28f]">{Math.round(level * 100)}%</span>
             </div>
@@ -103,7 +103,7 @@ export function AudioAuraShowcase() {
               className={`aura-showcase-card aura-showcase-card-${concept.id} relative flex min-h-[390px] flex-col overflow-hidden bg-[#100b16] p-5 sm:min-h-[420px]`}
             >
               <div className="flex items-start justify-between">
-                <span className="font-mono text-[11px] text-[#655d6e]">{concept.number} / 05</span>
+                <span className="font-mono text-2xs text-[#655d6e]">{concept.number} / 05</span>
                 {concept.pick ? (
                   <span className="rounded-full border border-[#ff8b69]/40 bg-[#ff805f]/10 px-2 py-1 text-[8px] font-black uppercase tracking-[0.16em] text-[#ffae93]">
                     My pick
@@ -120,7 +120,7 @@ export function AudioAuraShowcase() {
                 <div className="text-[9px] font-black uppercase tracking-[0.2em] text-[#9b86ff]">{concept.mood}</div>
                 <h2 className="mt-1 text-[28px] font-black leading-none tracking-[-0.04em] text-white">{concept.name}</h2>
                 <p className="mt-3 text-sm font-semibold text-[#ece4f4]">{concept.line}</p>
-                <p className="mt-1.5 text-[11px] leading-[1.55] text-[#8e8499]">{concept.detail}</p>
+                <p className="mt-1.5 text-2xs leading-[1.55] text-[#8e8499]">{concept.detail}</p>
               </div>
             </article>
           ))}

@@ -23,6 +23,7 @@ import { CallPollOverlay } from '../CallPollOverlay'
 import { CreatePollModal } from '../CreatePollModal'
 import { useAudioAuraPreference, setAudioAuraPreference } from '../../lib/meetingEffects'
 import { AudioAuraAvatar, AudioAuraPreview } from './AudioAuraAvatar'
+import { useDismiss } from '../../ui'
 
 type StageParticipant = {
   userId: string
@@ -343,7 +344,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
             onClick={() => setPollCreatorOpen(true)}
             aria-label="Start a quick poll"
             title="Quick poll"
-            className="fixed bottom-24 right-[4.5rem] z-[64] flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] text-[var(--color-text-dim)] shadow-2xl hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+            className="fixed bottom-24 right-[4.5rem] z-(--z-floating) flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] text-[var(--color-text-dim)] shadow-2xl hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
           >
             <PollControlIcon />
             <span
@@ -575,7 +576,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
       <>
       <section
         aria-label={`${roomName} huddle`}
-        className="voice-stage fixed inset-0 z-[60] flex bg-black text-[var(--color-text)]"
+        className="voice-stage fixed inset-0 z-(--z-overlay) flex bg-black text-[var(--color-text)]"
       >
         <CallConnectionNotice status={voiceStatus} />
         <div className="relative flex min-w-0 flex-1 flex-col">
@@ -589,7 +590,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
             }}
           >
             <div className="min-w-0">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--color-text-faint)]">
+              <div className="text-3xs font-semibold uppercase tracking-[0.2em] text-[var(--color-text-faint)]">
                 Huddle
               </div>
               <div className="truncate text-sm font-semibold">{roomName}</div>
@@ -781,16 +782,16 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
       >
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold">{roomName}</div>
-          <div className="text-[11px] text-[var(--color-text-faint)]">
+          <div className="text-2xs text-[var(--color-text-faint)]">
             {participants.length} {participants.length === 1 ? 'participant' : 'participants'}
           </div>
         </div>
         {activeMeetingId && (
           <div
-            className="flex shrink-0 items-center gap-1.5 rounded-full border border-[#ff6b5f]/35 bg-[#ff6b5f]/10 px-2.5 py-1 text-[10px] font-semibold text-[#ff8a80]"
+            className="flex shrink-0 items-center gap-1.5 rounded-full border border-danger-fg/35 bg-danger-soft px-2.5 py-1 text-3xs font-semibold text-danger-fg"
             title="Meeting record is active. Only opted-in microphones are transcribed."
           >
-            <span className="h-1.5 w-1.5 rounded-full bg-[#ff6b5f]" />
+            <span className="h-1.5 w-1.5 rounded-full bg-danger" />
             Notes on · {sharingCount} sharing
           </div>
         )}
@@ -882,21 +883,17 @@ function AudioAuraConsentPrompt({
   onAccept: () => void
   onDismiss: () => void
 }) {
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onDismiss()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onDismiss])
+  const promptRef = useRef<HTMLElement>(null)
+  useDismiss({ ref: promptRef, onClose: onDismiss, outside: false })
 
   return (
     <aside
+      ref={promptRef}
       role="dialog"
       aria-modal="false"
       aria-labelledby="audio-aura-prompt-title"
       aria-describedby="audio-aura-prompt-description"
-      className="fixed bottom-5 left-1/2 z-[72] w-[min(34rem,calc(100vw-2rem))] -translate-x-1/2 overflow-hidden rounded-[1.4rem] border border-[#796cff]/40 bg-[var(--color-panel)] shadow-[0_28px_90px_-24px_rgba(0,0,0,0.95)]"
+      className="fixed bottom-5 left-1/2 z-(--z-floating) w-[min(34rem,calc(100vw-2rem))] -translate-x-1/2 overflow-hidden rounded-[1.4rem] border border-accent/40 bg-[var(--color-panel)] shadow-[0_28px_90px_-24px_rgba(0,0,0,0.95)]"
       style={{ bottom: 'max(1.25rem, var(--safe-bottom))' }}
     >
       <div className="h-0.5 w-full bg-[linear-gradient(90deg,#4fbf9f,#62d8ff,#796cff,#ff6fae,#ffd166)]" />
@@ -906,7 +903,7 @@ function AudioAuraConsentPrompt({
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="rounded-full bg-[#796cff]/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-[#a99fff]">
+            <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-accent-hover">
               Advanced
             </span>
             <h2 id="audio-aura-prompt-title" className="text-sm font-semibold">
@@ -932,7 +929,7 @@ function AudioAuraConsentPrompt({
               type="button"
               onClick={onAccept}
               autoFocus
-              className="min-h-11 rounded-xl bg-[#796cff] px-4 py-2 text-xs font-semibold text-white outline-none shadow-[0_10px_28px_-14px_#796cff] hover:bg-[#897dff] focus-visible:ring-2 focus-visible:ring-[#a99fff] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-panel)]"
+              className="min-h-11 rounded-xl bg-accent px-4 py-2 text-xs font-semibold text-white outline-none shadow-[0_10px_28px_-14px_#796cff] hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-panel)]"
             >
               Turn on Audio Aura
             </button>
@@ -955,16 +952,16 @@ function NotesConsentPrompt({
       role="dialog"
       aria-labelledby="meeting-notes-prompt-title"
       aria-describedby="meeting-notes-prompt-description"
-      className="fixed bottom-5 left-1/2 z-[70] w-[min(30rem,calc(100vw-2rem))] -translate-x-1/2 overflow-hidden rounded-2xl border border-[#ff6b5f]/35 bg-[var(--color-panel)] shadow-[0_24px_70px_-22px_rgba(0,0,0,0.9)]"
+      className="fixed bottom-5 left-1/2 z-(--z-floating) w-[min(30rem,calc(100vw-2rem))] -translate-x-1/2 overflow-hidden rounded-2xl border border-danger-fg/35 bg-[var(--color-panel)] shadow-[0_24px_70px_-22px_rgba(0,0,0,0.9)]"
     >
-      <div className="h-0.5 w-full bg-[#ff6b5f]" />
+      <div className="h-0.5 w-full bg-danger" />
       <div className="grid grid-cols-[auto_1fr] gap-3 p-4 sm:p-5">
-        <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-[#ff6b5f]/10 text-[#ff8a80] ring-1 ring-[#ff6b5f]/20">
+        <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-danger-soft text-danger-fg ring-1 ring-danger-fg/20">
           <CaptionsIcon />
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#ff6b5f]" />
+            <span className="h-1.5 w-1.5 rounded-full bg-danger" />
             <h2 id="meeting-notes-prompt-title" className="text-sm font-semibold">
               Meeting notes are on
             </h2>
@@ -987,7 +984,7 @@ function NotesConsentPrompt({
             <button
               type="button"
               onClick={onAccept}
-              className="rounded-lg bg-[#ff6b5f] px-3.5 py-2 text-xs font-semibold text-white outline-none hover:bg-[#ff7d72] focus-visible:ring-2 focus-visible:ring-[#ff8a80] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-panel)]"
+              className="rounded-lg bg-danger px-3.5 py-2 text-xs font-semibold text-white outline-none hover:bg-danger-hover focus-visible:ring-2 focus-visible:ring-danger-fg focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-panel)]"
             >
               Share my transcript
             </button>
@@ -1028,7 +1025,7 @@ function AudioTile({
       <div
         className={`relative ${
           speaking && !audioAuraEnabled
-            ? 'rounded-full ring-2 ring-[#4fbf9f] ring-offset-2 ring-offset-[var(--color-ink)]'
+            ? 'rounded-full ring-2 ring-success ring-offset-2 ring-offset-[var(--color-ink)]'
             : ''
         }`}
       >
@@ -1116,7 +1113,7 @@ function VideoTile({
   return (
     <article
       className={`relative flex aspect-video w-full overflow-hidden rounded-2xl border bg-[var(--color-panel)] ${
-        speaking ? 'border-[#4fbf9f] ring-2 ring-[#4fbf9f]/30' : 'border-[var(--color-border)]'
+        speaking ? 'border-success ring-2 ring-success/30' : 'border-[var(--color-border)]'
       }`}
     >
       {hasVideo ? (
@@ -1192,21 +1189,7 @@ function CopyLinkControl({
   const [busy, setBusy] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    if (!open) return
-    function onPointerDown(event: MouseEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    function onKey(event: KeyboardEvent) {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('mousedown', onPointerDown)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('mousedown', onPointerDown)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+  useDismiss({ ref: rootRef, onClose: () => setOpen(false), enabled: open })
 
   async function writeLink(token: string) {
     await navigator.clipboard.writeText(`${window.location.origin}/call/${token}`)
@@ -1292,10 +1275,12 @@ function CopyLinkControl({
 
 // Small quiet "Guest" chip shown next to a participant's name when they joined
 // via a public call link. `onDark` variant sits over the video tile gradient.
+// TODO(ds): not migrated to ui Badge — Badge has no on-dark (glass white-on-video)
+// tone, and this one chip must switch between light and on-dark variants.
 function GuestBadge({ onDark = false }: { onDark?: boolean }) {
   return (
     <span
-      className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none tracking-wide ${
+      className={`shrink-0 rounded px-1.5 py-0.5 text-3xs font-semibold uppercase leading-none tracking-wide ${
         onDark
           ? 'bg-white/20 text-white'
           : 'bg-[var(--color-panel-2)] text-[var(--color-text-dim)]'
@@ -1478,6 +1463,8 @@ function CallConnectionNotice({
     <div
       role="status"
       aria-live="polite"
+      // TODO(ds): z-[90] kept — this connecting notice sits in the gap between
+      // --z-popover (80) and --z-toast (100); no z-band maps to that stacking.
       className="pointer-events-none fixed left-1/2 z-[90] -translate-x-1/2 rounded-full border border-white/15 bg-black/85 px-3 py-1.5 text-xs font-medium text-white shadow-xl backdrop-blur-md"
       style={{ top: 'max(0.75rem, var(--safe-top))' }}
     >
@@ -1696,23 +1683,18 @@ function MobileCallMoreSheet({
   const setVoiceAudioDevice = useStore((s) => s.setVoiceAudioDevice)
   const setVoiceVideoDevice = useStore((s) => s.setVoiceVideoDevice)
 
-  useEffect(() => {
-    function onKey(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  const sheetRef = useRef<HTMLDivElement>(null)
+  useDismiss({ ref: sheetRef, onClose, outside: false })
 
   return createPortal(
-    <div className="fixed inset-0 z-[80]" role="dialog" aria-modal="true" aria-label="Call controls">
+    <div ref={sheetRef} className="fixed inset-0 z-(--z-popover)" role="dialog" aria-modal="true" aria-label="Call controls">
       <button
         type="button"
         aria-label="Close"
         className="absolute inset-0 cursor-default bg-black/55"
         onClick={onClose}
       />
-      <div className="absolute inset-x-0 bottom-[var(--mobile-tab-h)] z-[81] max-h-[min(70dvh,32rem)] overflow-y-auto rounded-t-2xl border border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl">
+      <div className="absolute inset-x-0 bottom-[var(--mobile-tab-h)] z-10 max-h-[min(70dvh,32rem)] overflow-y-auto rounded-t-2xl border border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl">
         <div className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-panel)] px-4 pb-3 pt-3">
           <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-[var(--color-border)]" />
           <div className="flex items-center justify-between">
@@ -1815,21 +1797,7 @@ function VideoBackgroundControl({ disabled }: { disabled: boolean }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const background = useStore((s) => s.voice.videoBackground)
 
-  useEffect(() => {
-    if (!open) return
-    function onPointerDown(event: MouseEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    function onKey(event: KeyboardEvent) {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('mousedown', onPointerDown)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('mousedown', onPointerDown)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+  useDismiss({ ref: rootRef, onClose: () => setOpen(false), enabled: open })
 
   return (
     <div ref={rootRef} className="relative flex">
@@ -1892,7 +1860,7 @@ function VideoBackgroundPicker({
       <div className="mb-2 flex items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-[var(--color-text)]">Camera background</h3>
-          <p className="mt-0.5 text-[11px] text-[var(--color-text-faint)]">
+          <p className="mt-0.5 text-2xs text-[var(--color-text-faint)]">
             Your choice appears behind you for everyone.
           </p>
         </div>
@@ -1915,7 +1883,7 @@ function VideoBackgroundPicker({
               }`}
             >
               <BackgroundPreview option={option} />
-              <span className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium text-[var(--color-text)]">
+              <span className="flex items-center gap-1.5 px-2 py-1.5 text-2xs font-medium text-[var(--color-text)]">
                 <span className="truncate">{option.label}</span>
                 {selected ? <span className="ml-auto text-[var(--color-accent-hover)]"><CheckIcon /></span> : null}
               </span>
@@ -1943,7 +1911,7 @@ function VideoBackgroundPicker({
               </span>
             )}
           </div>
-          <span className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium text-[var(--color-text)]">
+          <span className="flex items-center gap-1.5 px-2 py-1.5 text-2xs font-medium text-[var(--color-text)]">
             <span className="truncate">{uploading ? 'Preparing…' : 'Upload'}</span>
             {background.id === 'custom' ? <span className="ml-auto text-[var(--color-accent-hover)]"><CheckIcon /></span> : null}
           </span>
@@ -2018,7 +1986,7 @@ function SheetAction({
         {icon}
       </span>
       <span className="min-w-0 flex-1 text-sm font-medium">{label}</span>
-      {active && <span className="text-[10px] font-semibold uppercase tracking-wider opacity-70">On</span>}
+      {active && <span className="text-3xs font-semibold uppercase tracking-wider opacity-70">On</span>}
     </button>
   )
 }
@@ -2036,7 +2004,7 @@ function DevicePickerSection({
 }) {
   return (
     <div className="border-t border-[var(--color-border)] px-2 py-3">
-      <div className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+      <div className="px-3 pb-2 text-2xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
         {title}
       </div>
       <div className="space-y-0.5">
@@ -2089,7 +2057,7 @@ function CallControl({
       onClick={onClick}
       className={`flex ${dim} shrink-0 cursor-pointer items-center justify-center rounded-full outline-none transition-[transform,background-color] duration-150 ease-out active:scale-95 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:active:scale-100 ${
         danger
-          ? 'bg-red-500/25 text-red-300 hover:bg-red-500/35'
+          ? 'bg-danger-soft text-danger-fg hover:bg-danger-soft'
           : active
             ? 'bg-[var(--color-accent)] text-white'
             : 'bg-[var(--color-panel-2)] text-[var(--color-text)] hover:bg-[var(--color-border)]'
@@ -2127,21 +2095,7 @@ function DeviceControl({
   const rootRef = useRef<HTMLDivElement>(null)
   const hasDevices = devices.length > 0
 
-  useEffect(() => {
-    if (!open) return
-    function onPointerDown(event: MouseEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    function onKey(event: KeyboardEvent) {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('mousedown', onPointerDown)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('mousedown', onPointerDown)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+  useDismiss({ ref: rootRef, onClose: () => setOpen(false), enabled: open })
 
   const shellClass = active
     ? 'bg-[var(--color-accent)] text-white'

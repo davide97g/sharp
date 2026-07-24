@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { BoardOption } from '../../lib/boardDoc'
 import { colorOf } from '../../lib/boardColors'
 import type { ChannelMember } from '../../lib/types'
 import { initials, userColor } from '../../lib/util'
+import { Popover, Tag } from '../../ui'
 
 // Small popover shell shared by the select/assignee controls: a trigger that
-// toggles a panel, closing on outside-click.
+// toggles a panel, closing on outside-click (ui Popover adds Escape too).
 function Dropdown({
   trigger,
   children,
@@ -16,43 +17,26 @@ function Dropdown({
   align?: 'left' | 'right'
 }) {
   const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    function onDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    window.addEventListener('mousedown', onDown)
-    return () => window.removeEventListener('mousedown', onDown)
-  }, [open])
   return (
-    <div ref={ref} className="relative">
-      <button type="button" onClick={() => setOpen((o) => !o)} className="block w-full text-left">
-        {trigger(open)}
-      </button>
-      {open && (
-        <div
-          className={`absolute top-full z-30 mt-1 max-h-64 w-full min-w-[12rem] overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1 shadow-2xl ${
-            align === 'right' ? 'right-0' : 'left-0'
-          }`}
-        >
-          {children(() => setOpen(false))}
-        </div>
-      )}
-    </div>
+    <Popover
+      open={open}
+      onClose={() => setOpen(false)}
+      align={align === 'right' ? 'end' : 'start'}
+      width="w-full min-w-[12rem]"
+      className="max-h-64 overflow-y-auto"
+      trigger={
+        <button type="button" onClick={() => setOpen((o) => !o)} className="block w-full text-left">
+          {trigger(open)}
+        </button>
+      }
+    >
+      {children(() => setOpen(false))}
+    </Popover>
   )
 }
 
 function OptionPill({ option }: { option: BoardOption }) {
-  const c = colorOf(option.color)
-  return (
-    <span
-      className="inline-flex max-w-full items-center truncate rounded px-1.5 py-0.5 text-xs font-medium"
-      style={{ backgroundColor: c.bg, color: c.fg }}
-    >
-      {option.label || 'Untitled'}
-    </span>
-  )
+  return <Tag colorKey={option.color}>{option.label || 'Untitled'}</Tag>
 }
 
 const emptyBox =
@@ -220,10 +204,12 @@ export function AssigneeControl({
   disabled?: boolean
 }) {
   const selected = value ? members?.find((m) => m.id === value) : undefined
+  // TODO(ds): Avatar — member-picker circle; kept custom for the '?' unknown-member
+  // fallback and its hard-coded #4b4b56 fill (no Avatar equivalent).
   const display = value ? (
     <span className="flex items-center gap-2">
       <span
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-3xs font-semibold text-white"
         style={{ backgroundColor: selected ? userColor(selected.id) : '#4b4b56' }}
       >
         {selected ? initials(selected.display_name) : '?'}
@@ -250,8 +236,9 @@ export function AssigneeControl({
               }}
               className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--color-panel-2)]"
             >
+              {/* TODO(ds): Avatar — member-picker circle, id-based color already. */}
               <span
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-3xs font-semibold text-white"
                 style={{ backgroundColor: userColor(m.id) }}
               >
                 {initials(m.display_name)}

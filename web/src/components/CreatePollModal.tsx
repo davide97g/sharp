@@ -1,6 +1,7 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { toastError } from '../lib/toast'
 import { useStore } from '../store'
+import { Button } from '../ui'
 import { Modal } from './Modal'
 
 type Mode = 'channel' | 'call'
@@ -80,6 +81,8 @@ export function CreatePollModal({
   return (
     <Modal title={mode === 'call' ? 'Quick poll' : 'Create poll'} onClose={onClose} wide>
       <form onSubmit={submit} className="space-y-5">
+        {/* TODO(ds): poll fields use the bg-ink surface + text-base tap sizing,
+            which Input/Textarea can't express (surfaces are panel/panel-2 only). */}
         <div>
           <label htmlFor="poll-question" className="mb-1.5 block text-xs font-semibold text-[var(--color-text-dim)]">
             Question
@@ -94,7 +97,7 @@ export function CreatePollModal({
             placeholder="What should we decide?"
             className="w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-ink)] px-3 py-2.5 text-base text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent-soft)]"
           />
-          <div className="mt-1 text-right text-[10px] tabular-nums text-[var(--color-text-faint)]">
+          <div className="mt-1 text-right text-3xs tabular-nums text-[var(--color-text-faint)]">
             {question.length}/500
           </div>
         </div>
@@ -112,7 +115,7 @@ export function CreatePollModal({
         <fieldset>
           <div className="mb-2 flex items-center justify-between gap-3">
             <legend className="text-xs font-semibold text-[var(--color-text-dim)]">Options</legend>
-            <span className="text-[10px] tabular-nums text-[var(--color-text-faint)]">{options.length}/10</span>
+            <span className="text-3xs tabular-nums text-[var(--color-text-faint)]">{options.length}/10</span>
           </div>
           <div className="space-y-2">
             {options.map((option, index) => (
@@ -134,7 +137,7 @@ export function CreatePollModal({
                     type="button"
                     onClick={() => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))}
                     aria-label={`Remove option ${index + 1}`}
-                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-faint)] hover:bg-red-500/10 hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-faint)] hover:bg-danger-soft hover:text-danger-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
                   >
                     <RemoveIcon />
                   </button>
@@ -181,12 +184,12 @@ export function CreatePollModal({
           />
           <div className="mt-2 flex gap-2">
             {[1, 4, 24].map((hours) => (
-              <button key={hours} type="button" onClick={() => setDeadlineHours(hours)} className="min-h-9 rounded-full bg-[var(--color-panel-2)] px-3 text-[11px] font-medium text-[var(--color-text-dim)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">
+              <button key={hours} type="button" onClick={() => setDeadlineHours(hours)} className="min-h-9 rounded-full bg-[var(--color-panel-2)] px-3 text-2xs font-medium text-[var(--color-text-dim)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">
                 {hours}h
               </button>
             ))}
             {deadline ? (
-              <button type="button" onClick={() => setDeadline('')} className="min-h-9 rounded-full px-3 text-[11px] font-medium text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]">
+              <button type="button" onClick={() => setDeadline('')} className="min-h-9 rounded-full px-3 text-2xs font-medium text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]">
                 Clear
               </button>
             ) : null}
@@ -194,12 +197,12 @@ export function CreatePollModal({
         </div>
 
         <div className="flex justify-end gap-2 border-t border-[var(--color-border)] pt-4">
-          <button type="button" onClick={onClose} disabled={busy} className="min-h-11 rounded-lg px-4 text-sm font-medium text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] disabled:opacity-40">
+          <Button variant="ghost" size="lg" onClick={onClose} disabled={busy}>
             Cancel
-          </button>
-          <button type="submit" disabled={!valid || busy} className="min-h-11 rounded-lg bg-[var(--color-accent)] px-4 text-sm font-semibold text-white transition-colors hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-40">
+          </Button>
+          <Button type="submit" size="lg" disabled={!valid || busy}>
             {busy ? 'Creating…' : mode === 'call' ? 'Start poll' : 'Create poll'}
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>

@@ -8,6 +8,7 @@ import { HubCard } from './HubCard'
 import { HubFilters } from './HubFilters'
 import { HubGrid } from './HubGrid'
 import { HubPage } from './HubPage'
+import { Button, EmptyState, SectionLabel } from '../../ui'
 
 const paths: Record<DocKind, string> = { doc: '/d', canvas: '/x', board: '/b' }
 const names: Record<DocKind, string> = { doc: 'Docs', canvas: 'Canvas', board: 'Boards' }
@@ -136,17 +137,15 @@ export function DocKindHub({ kind }: { kind: DocKind }) {
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <section>
           {rows.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-[var(--color-border)] px-6 py-14 text-center">
-              <p className="text-sm text-[var(--color-text-dim)]">
-                No {names[kind].toLowerCase()} here yet.
-              </p>
-              <button
-                onClick={() => void newItem()}
-                className="mt-4 rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-white"
-              >
-                Create {kind === 'doc' ? 'first doc' : kind}
-              </button>
-            </div>
+            <EmptyState
+              variant="dashed"
+              title={`No ${names[kind].toLowerCase()} here yet.`}
+              action={
+                <Button onClick={() => void newItem()}>
+                  Create {kind === 'doc' ? 'first doc' : kind}
+                </Button>
+              }
+            />
           ) : (
             <HubGrid>
               {rows.map(({ doc, channel_name }) => (
@@ -209,9 +208,9 @@ function Mentions({ kind }: { kind: DocKind }) {
 
   return (
     <aside className="max-lg:order-first">
-      <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+      <SectionLabel as="h2" size="xs" className="mb-3">
         Mentions
-      </h2>
+      </SectionLabel>
       {mentions.length ? (
         <div className="space-y-2">
           {mentions.map((mention) => (

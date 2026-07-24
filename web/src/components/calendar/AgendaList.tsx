@@ -66,7 +66,7 @@ export function AgendaList({
               <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
                 {group.label}
               </h2>
-              <span className="text-[11px] text-[var(--color-text-faint)]">
+              <span className="text-2xs text-[var(--color-text-faint)]">
                 {dayjs(group.key).format('MMM D')}
               </span>
               <div className="h-px flex-1 bg-[var(--color-border)]" />
@@ -105,7 +105,7 @@ function NowLine() {
   return (
     <div className="flex items-center gap-2 py-0.5" aria-label="Current time">
       <span className="h-2 w-2 shrink-0 rounded-full bg-[#ff6b5f]" />
-      <span className="text-[10px] font-semibold uppercase tracking-wider text-[#ff8a80]">
+      <span className="text-3xs font-semibold uppercase tracking-wider text-[#ff8a80]">
         {dayjs().format('h:mm A')}
       </span>
       <div className="h-px flex-1 bg-[#ff6b5f]/40" />

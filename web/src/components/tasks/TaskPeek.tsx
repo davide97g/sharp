@@ -16,6 +16,7 @@ import {
 } from './PropertyPicker'
 import { TaskRow } from './TaskListView'
 import { branchNameFor, PRIORITY_LABELS } from './taskUi'
+import { Button, CloseIcon, IconButton, SectionLabel as UISectionLabel, useDismiss } from '../../ui'
 
 export function TaskPeek({
   project,
@@ -37,6 +38,7 @@ export function TaskPeek({
   const [descDraft, setDescDraft] = useState('')
   const [comment, setComment] = useState('')
   const titleRef = useRef<HTMLTextAreaElement>(null)
+  const asideRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     loadTaskDetail(taskId).catch((e) => {
@@ -46,14 +48,8 @@ export function TaskPeek({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId])
 
-  // Esc closes (unless typing in a field that handles it itself).
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  // Esc closes (the backdrop keeps its own click-to-close, so outside is off).
+  useDismiss({ ref: asideRef, onClose, outside: false })
 
   const feed = useMemo(() => {
     if (!detail) return []
@@ -70,7 +66,7 @@ export function TaskPeek({
 
   if (!detail) {
     return (
-      <Shell onClose={onClose}>
+      <Shell onClose={onClose} asideRef={asideRef}>
         <div className="flex flex-1 items-center justify-center text-sm text-[var(--color-text-faint)]">
           Loading…
         </div>
@@ -106,7 +102,7 @@ export function TaskPeek({
   }
 
   return (
-    <Shell onClose={onClose}>
+    <Shell onClose={onClose} asideRef={asideRef}>
       {/* header */}
       <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-4 py-2.5">
         <span className="font-mono text-xs text-[var(--color-text-faint)]">
@@ -115,7 +111,7 @@ export function TaskPeek({
         <button
           onClick={copyBranch}
           title="Copy git branch name"
-          className="flex items-center gap-1 rounded-md border border-[var(--color-border)] px-1.5 py-0.5 text-[11px] text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
+          className="flex h-9 cursor-pointer items-center gap-1 rounded-md border border-[var(--color-border)] px-2 text-2xs text-[var(--color-text-dim)] transition-colors hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
         >
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M6 3v12a3 3 0 1 0 3 3" />
@@ -129,19 +125,15 @@ export function TaskPeek({
           <button
             onClick={remove}
             title="Delete task"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--board-red-fg)]"
+            className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-[var(--color-text-faint)] transition-colors hover:bg-[var(--color-panel-2)] hover:text-[var(--board-red-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
             </svg>
           </button>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
-          >
-            ✕
-          </button>
+          <IconButton label="Close" onClick={onClose}>
+            <CloseIcon />
+          </IconButton>
         </div>
       </div>
 
@@ -171,7 +163,7 @@ export function TaskPeek({
           />
 
           {/* property rail */}
-          <div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-0.5">
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
             <StatePicker
               project={project}
               stateId={detail.state_id}
@@ -245,7 +237,7 @@ export function TaskPeek({
                     <span className="min-w-0 flex-1 truncate">
                       {link.title || link.ref}
                     </span>
-                    <span className="shrink-0 text-[11px] text-[var(--color-text-faint)]">
+                    <span className="shrink-0 text-2xs text-[var(--color-text-faint)]">
                       {link.repo}
                     </span>
                   </a>
@@ -292,7 +284,7 @@ export function TaskPeek({
 
       {/* comment composer */}
       <div className="border-t border-[var(--color-border)] p-3">
-        <textarea
+        <div className="flex items-end gap-2"><textarea
           value={comment}
           onChange={(e) => setComment(e.target.value)}
           onKeyDown={(e) => {
@@ -303,18 +295,30 @@ export function TaskPeek({
           }}
           rows={2}
           placeholder="Leave a comment…"
-          className="w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none"
+          className="min-h-18 min-w-0 flex-1 resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
         />
+        <Button className="min-h-9" onClick={() => void submitComment()} disabled={!comment.trim()}>Send</Button></div>
       </div>
     </Shell>
   )
 }
 
-function Shell({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+function Shell({
+  children,
+  onClose,
+  asideRef,
+}: {
+  children: React.ReactNode
+  onClose: () => void
+  asideRef?: React.Ref<HTMLElement>
+}) {
+  // TODO(ds): SlideOver — kept custom because this peek is bg-ink (not bg-panel),
+  // absolutely positioned inside the project view (not portaled); adopts
+  // useDismiss for Escape instead.
   return (
     <>
       <div className="absolute inset-0 z-20 bg-black/30" onClick={onClose} />
-      <aside className="absolute inset-y-0 right-0 z-30 flex w-full max-w-xl flex-col border-l border-[var(--color-border)] bg-[var(--color-ink)] shadow-2xl">
+      <aside ref={asideRef} className="absolute inset-y-0 right-0 z-30 flex w-full max-w-xl flex-col border-l border-[var(--color-border)] bg-[var(--color-ink)] shadow-2xl max-sm:max-w-full">
         {children}
       </aside>
     </>
@@ -323,9 +327,9 @@ function Shell({ children, onClose }: { children: React.ReactNode; onClose: () =
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-faint)]">
+    <UISectionLabel size="2xs" className="mb-1.5">
       {children}
-    </div>
+    </UISectionLabel>
   )
 }
 
@@ -340,7 +344,7 @@ function GithubLinkBadge({ state, kind }: { state: string; kind: string }) {
           : 'var(--board-green-fg)'
   return (
     <span
-      className="rounded-full px-1.5 py-px text-[10px] font-semibold"
+      className="rounded-full px-1.5 py-px text-3xs font-semibold"
       style={{ color, border: `1px solid ${color}` }}
     >
       {kind === 'branch' ? 'branch' : state || kind}
@@ -370,7 +374,7 @@ function CommentItem({
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
           <span className="text-xs font-semibold">{comment.author.display_name}</span>
-          <span className="text-[10px] text-[var(--color-text-faint)]">
+          <span className="text-3xs text-[var(--color-text-faint)]">
             {new Date(comment.created_at).toLocaleString(undefined, {
               month: 'short',
               day: 'numeric',
@@ -386,7 +390,7 @@ function CommentItem({
                   setDraft(comment.body)
                   setEditing(true)
                 }}
-                className="text-[10px] text-[var(--color-text-faint)] hover:text-[var(--color-text)]"
+                className="text-3xs text-[var(--color-text-faint)] hover:text-[var(--color-text)]"
               >
                 Edit
               </button>
@@ -399,7 +403,7 @@ function CommentItem({
                     if (e instanceof Error) toastError(e.message)
                   }
                 }}
-                className="text-[10px] text-[var(--color-text-faint)] hover:text-[var(--board-red-fg)]"
+                className="text-3xs text-[var(--color-text-faint)] hover:text-[var(--board-red-fg)]"
               >
                 Delete
               </button>
@@ -488,7 +492,7 @@ function ActivityItem({ activity, project }: { activity: TaskActivity; project: 
       <span>
         <span className="text-[var(--color-text-dim)]">{who}</span> {text}
       </span>
-      <span className="ml-auto shrink-0 text-[10px]">
+      <span className="ml-auto shrink-0 text-3xs">
         {new Date(activity.created_at).toLocaleDateString(undefined, {
           month: 'short',
           day: 'numeric',

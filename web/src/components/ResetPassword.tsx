@@ -54,6 +54,10 @@ export function ResetPassword() {
     }
   }
 
+  // TODO(ds): bespoke auth screen kept as-is — buttons carry the login-primary-action
+  // shimmer + ink-offset focus rings, inputs are AuthField/SharpnessMeter, errors use
+  // auth-error-box, and swaps use auth-* animations; none map to ui/ primitives without
+  // visibly redesigning the sign-in language.
   return (
     <div className="login-screen flex h-full min-h-0 w-full items-center justify-center overflow-y-auto bg-[var(--color-ink)] px-6 py-10">
       <div className="auth-ambient" aria-hidden>

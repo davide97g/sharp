@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import { ApiRequestError, api } from '../lib/api'
 import type { GifResult } from '../lib/types'
 import { useStore } from '../store'
+import { SearchInput, useDismiss } from '../ui'
 
 const PROVIDER_LABELS: Record<string, string> = { giphy: 'GIPHY', tenor: 'Tenor' }
 
@@ -33,20 +34,7 @@ export const GifPicker = forwardRef<GifPickerHandle, GifPickerProps>(function Gi
   const [notConfigured, setNotConfigured] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
 
-  useEffect(() => {
-    function onDown(event: MouseEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) onClose()
-    }
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKeyDown)
-    return () => {
-      window.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKeyDown)
-    }
-  }, [onClose])
+  useDismiss({ ref: rootRef, onClose })
 
   useEffect(() => {
     if (initialResults && !typed) return
@@ -129,7 +117,8 @@ export const GifPicker = forwardRef<GifPickerHandle, GifPickerProps>(function Gi
       className="w-80 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl sm:w-96"
     >
       <div className="border-b border-[var(--color-border)] p-2.5">
-        <input
+        <SearchInput
+          variant="boxed"
           autoFocus={autoFocus}
           value={query}
           onChange={(event) => {
@@ -145,7 +134,6 @@ export const GifPicker = forwardRef<GifPickerHandle, GifPickerProps>(function Gi
             }
           }}
           placeholder="Search GIFs…"
-          className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]"
         />
       </div>
 
@@ -202,7 +190,7 @@ export const GifPicker = forwardRef<GifPickerHandle, GifPickerProps>(function Gi
                     event.stopPropagation()
                     void copyGif(g)
                   }}
-                  className="absolute right-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white opacity-0 shadow transition hover:bg-black/90 group-hover:opacity-100 focus:opacity-100"
+                  className="absolute right-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-3xs font-semibold text-white opacity-0 shadow transition hover:bg-black/90 group-hover:opacity-100 focus:opacity-100"
                 >
                   {copiedId === g.id ? 'Copied' : 'Copy'}
                 </button>
@@ -212,7 +200,7 @@ export const GifPicker = forwardRef<GifPickerHandle, GifPickerProps>(function Gi
         )}
       </div>
 
-      <div className="border-t border-[var(--color-border)] px-3 py-1.5 text-right text-[10px] text-[var(--color-text-faint)]">
+      <div className="border-t border-[var(--color-border)] px-3 py-1.5 text-right text-3xs text-[var(--color-text-faint)]">
         via {PROVIDER_LABELS[provider ?? ''] ?? 'GIPHY'}
       </div>
     </div>

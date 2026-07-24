@@ -6,6 +6,8 @@ type Tab = 'chat' | 'docs' | 'canvas' | 'board'
 // the chat message view and the channel's docs / canvas galleries while staying
 // in chat mode (the channel sidebar stays put — opening an item then routes to
 // the full editor under /d/:id or /x/:id).
+// TODO(ds): ui Tabs lacks per-item icons + the responsive (max-sm:flex-1 /
+// icon-hiding) layout this strip needs, so it stays hand-rolled for now.
 export function ChannelTabs({ channelId, active }: { channelId: string; active: Tab }) {
   const navigate = useNavigate()
 
