@@ -10,7 +10,7 @@ import { TaskListView } from './TaskListView'
 import { TaskPeek } from './TaskPeek'
 import { PRIORITIES, PRIORITY_LABELS, PriorityIcon, StateDot } from './taskUi'
 import { Avatar } from '../Avatar'
-import { Button, Popover } from '../../ui'
+import { Button, CheckIcon, Menu, MenuItem } from '../../ui'
 
 const VIEW_KEY = 'sharp.taskView.' // + projectId → 'list' | 'board'
 
@@ -260,11 +260,11 @@ function FilterChip({
   const currentLabel = options.find((o) => o.id === current)?.label
   return (
     <div className="shrink-0">
-      <Popover
+      <Menu
         open={open}
         onClose={() => setOpen(false)}
-        align="end"
-        width="w-48"
+        align="start"
+        width="w-52"
         className="max-h-72 overflow-y-auto"
         trigger={
           <span className="flex items-center">
@@ -283,24 +283,23 @@ function FilterChip({
         }
       >
         {options.length === 0 && (
-          <div className="px-2 py-1.5 text-xs text-[var(--color-text-faint)]">Nothing here</div>
+          <div className="px-3 py-2 text-sm text-text-faint">Nothing here</div>
         )}
         {options.map((o) => (
-          <button
+          <MenuItem
             key={o.id}
+            icon={o.icon && <span className="flex w-4 justify-center">{o.icon}</span>}
+            trailing={o.id === current ? <CheckIcon size={14} className="text-accent" /> : undefined}
+            className={o.id === current ? 'text-accent-hover' : undefined}
             onClick={() => {
               onPick(o.id)
               setOpen(false)
             }}
-            className={`flex min-h-9 w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-[var(--color-panel-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
-              o.id === current ? 'text-[var(--color-accent-hover)]' : 'text-[var(--color-text)]'
-            }`}
           >
-            {o.icon && <span className="flex w-4 justify-center">{o.icon}</span>}
-            <span className="min-w-0 flex-1 truncate">{o.label}</span>
-          </button>
+            {o.label}
+          </MenuItem>
         ))}
-      </Popover>
+      </Menu>
     </div>
   )
 }
