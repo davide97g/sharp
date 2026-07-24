@@ -966,7 +966,7 @@ export const api = {
           method: 'PATCH',
           body: input,
         }),
-      cancel: (id: string) =>
+      delete: (id: string) =>
         request<void>(`/calendar/meetings/${id}`, { method: 'DELETE' }),
       rsvp: (id: string, response: string) =>
         request<void>(`/calendar/meetings/${id}/rsvp`, {

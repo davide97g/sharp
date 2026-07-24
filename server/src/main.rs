@@ -380,7 +380,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/calendar/meetings/:id",
             get(routes::calendar::get_meeting)
                 .patch(routes::calendar::update_meeting)
-                .delete(routes::calendar::cancel_meeting),
+                .delete(routes::calendar::delete_meeting),
         )
         .route("/calendar/meetings/:id/rsvp", post(routes::calendar::rsvp))
         .route(

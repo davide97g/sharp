@@ -619,7 +619,7 @@ type State = {
       attendee_ids?: string[]
     },
   ) => Promise<ScheduledMeeting>
-  cancelScheduledMeeting: (id: string) => Promise<void>
+  deleteScheduledMeeting: (id: string) => Promise<void>
   rsvpMeeting: (id: string, response: string) => Promise<void>
   setCalendarSelectedDate: (dayKey: string | null) => void
   joinScheduledMeeting: (joinPath: string | null) => void
@@ -2546,8 +2546,8 @@ export const useStore = create<State>((set, get) => ({
     return meeting
   },
 
-  async cancelScheduledMeeting(id) {
-    await api.calendar.meetings.cancel(id)
+  async deleteScheduledMeeting(id) {
+    await api.calendar.meetings.delete(id)
     set((s) => ({
       calendarItems: s.calendarItems.filter(
         (i) => !(i.source === 'native' && i.meeting.id === id),

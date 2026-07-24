@@ -954,22 +954,32 @@ pub async fn update_meeting(
     Ok(Json(meeting))
 }
 
-pub async fn cancel_meeting(
+/// DELETE a scheduled meeting entirely (creator only). The row and its attendee
+/// rows are removed (attendees cascade); the standalone call room provisioned to
+/// back the meeting's join link is cleaned up too. Attendees get a
+/// `calendar.meeting_cancelled` event so it drops off their calendars.
+pub async fn delete_meeting(
     State(state): State<SharedState>,
     auth: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
     require_creator(&state.pool, id, auth.id).await?;
 
-    // Capture attendees before flipping status (so we can still notify them).
+    // Capture attendees + the backing call room before the row is gone.
     let meeting = load_meeting(&state.pool, id, auth.id).await?;
 
-    sqlx::query(
-        "UPDATE scheduled_meetings SET status = 'cancelled', updated_at = now() WHERE id = $1",
-    )
-    .bind(id)
-    .execute(&state.pool)
-    .await?;
+    sqlx::query("DELETE FROM scheduled_meetings WHERE id = $1")
+        .bind(id)
+        .execute(&state.pool)
+        .await?;
+
+    // Drop the standalone call room that only existed to host this meeting.
+    if let Some(call_id) = meeting.standalone_call_id {
+        let _ = sqlx::query("DELETE FROM standalone_calls WHERE id = $1")
+            .bind(call_id)
+            .execute(&state.pool)
+            .await;
+    }
 
     let ev = envelope("calendar.meeting_cancelled", json!({ "meeting_id": id.to_string() }));
     let targets: Vec<Uuid> = meeting.attendees.iter().map(|a| a.user_id).collect();

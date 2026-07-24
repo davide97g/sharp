@@ -21,8 +21,10 @@ const RSVP_OPTIONS: { value: string; label: string }[] = [
 export function EventDetail({ item }: { item: CalendarItem }) {
   const joinScheduledMeeting = useStore((s) => s.joinScheduledMeeting)
   const rsvpMeeting = useStore((s) => s.rsvpMeeting)
+  const deleteScheduledMeeting = useStore((s) => s.deleteScheduledMeeting)
   const me = useStore((s) => s.me)
   const [editing, setEditing] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const isNative = item.source === 'native'
   const color = item.source === 'google' ? item.color : null
@@ -52,6 +54,19 @@ export function EventDetail({ item }: { item: CalendarItem }) {
       toastSuccess('Invite link copied.')
     } catch {
       toastError('Could not copy the link.')
+    }
+  }
+
+  async function remove() {
+    if (!isNative || deleting) return
+    if (!window.confirm(`Delete "${item.title || 'this meeting'}"? This can't be undone.`)) return
+    setDeleting(true)
+    try {
+      await deleteScheduledMeeting(item.meeting.id)
+      toastSuccess('Meeting deleted.')
+    } catch (e) {
+      toastError(e instanceof Error ? e.message : 'Could not delete the meeting.')
+      setDeleting(false)
     }
   }
 
@@ -161,13 +176,23 @@ export function EventDetail({ item }: { item: CalendarItem }) {
       )}
 
       {canEdit && (
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          className="mt-2 w-full rounded-md border border-[var(--color-border)] px-2 py-1.5 text-xs font-medium text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
-        >
-          Edit
-        </button>
+        <div className="mt-2 flex gap-2">
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="flex-1 rounded-md border border-[var(--color-border)] px-2 py-1.5 text-xs font-medium text-[var(--color-text-dim)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]"
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            onClick={() => void remove()}
+            disabled={deleting}
+            className="flex-1 rounded-md border border-[var(--color-border)] px-2 py-1.5 text-xs font-medium text-[var(--color-text-dim)] hover:bg-danger-soft hover:text-danger-fg disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {deleting ? 'Deleting…' : 'Delete'}
+          </button>
+        </div>
       )}
 
       {item.source === 'google' && item.html_link && (
