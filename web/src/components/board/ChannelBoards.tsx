@@ -1,2 +1,5 @@
-import { Navigate, useParams } from 'react-router-dom'
-export function ChannelBoards() { const { channelId } = useParams<{ channelId: string }>(); return <Navigate to={channelId ? `/board?channel=${channelId}` : '/board'} replace /> }
+import { ChannelDocGallery } from '../docs/ChannelDocGallery'
+
+export function ChannelBoards() {
+  return <ChannelDocGallery kind="board" />
+}

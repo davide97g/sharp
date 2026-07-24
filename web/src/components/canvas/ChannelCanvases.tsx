@@ -1,2 +1,5 @@
-import { Navigate, useParams } from 'react-router-dom'
-export function ChannelCanvases() { const { channelId } = useParams<{ channelId: string }>(); return <Navigate to={channelId ? `/canvas?channel=${channelId}` : '/canvas'} replace /> }
+import { ChannelDocGallery } from '../docs/ChannelDocGallery'
+
+export function ChannelCanvases() {
+  return <ChannelDocGallery kind="canvas" />
+}
