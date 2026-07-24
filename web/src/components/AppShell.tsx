@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar'
 import { TasksGlyph } from './tasks/taskUi'
 import { CompactSidebar } from './CompactSidebar'
 import { ThreadPanel } from './ThreadPanel'
+import { DocPeekPanel } from './docs/DocPeekPanel'
 import { SharpyPanel } from './SharpyPanel'
 import { QuickSwitcher } from './QuickSwitcher'
 import { SearchPalette } from './SearchPalette'
@@ -224,6 +225,7 @@ export function AppShell() {
         <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <Outlet />
           {!settingsMode && mode === 'chat' && <ThreadPanel />}
+          {!settingsMode && mode === 'chat' && <DocPeekPanel />}
           <SharpyPanel />
         </div>
       </div>

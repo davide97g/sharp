@@ -327,6 +327,9 @@ type State = {
   // thread panel
   thread: ThreadState
 
+  // doc/canvas/board inline "peek" panel (chat mode)
+  docPeekId: string | null
+
   // typing: channelId -> userId -> entry
   typing: Record<string, Record<string, TypingEntry>>
 
@@ -530,6 +533,9 @@ type State = {
 
   openThread: (parentId: string) => Promise<void>
   closeThread: () => void
+
+  openDocPeek: (id: string) => void
+  closeDocPeek: () => void
 
   setQuickSwitcher: (open: boolean) => void
   setSearchOpen: (open: boolean) => void
@@ -786,6 +792,7 @@ export const useStore = create<State>((set, get) => ({
   members: {},
   channelVoiceTriggers: {},
   thread: { open: false, parentId: null, parent: null, replies: [], loading: false },
+  docPeekId: null,
   typing: {},
   quickSwitcherOpen: false,
   searchOpen: false,
@@ -1009,6 +1016,7 @@ export const useStore = create<State>((set, get) => ({
       members: {},
       channelVoiceTriggers: {},
       thread: { open: false, parentId: null, parent: null, replies: [], loading: false },
+      docPeekId: null,
       typing: {},
       quickSwitcherOpen: false,
       searchOpen: false,
@@ -1646,7 +1654,8 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async openThread(parentId) {
-    set({ thread: { open: true, parentId, parent: null, replies: [], loading: true } })
+    // Right-side panels are mutually exclusive.
+    set({ thread: { open: true, parentId, parent: null, replies: [], loading: true }, docPeekId: null })
     try {
       const res = await api.thread(parentId)
       set((s) =>
@@ -1671,6 +1680,21 @@ export const useStore = create<State>((set, get) => ({
 
   closeThread() {
     set({ thread: { open: false, parentId: null, parent: null, replies: [], loading: false } })
+  },
+
+  openDocPeek(id) {
+    // Right-side panels are mutually exclusive: close thread + Sharpy.
+    set({
+      docPeekId: id,
+      thread: { open: false, parentId: null, parent: null, replies: [], loading: false },
+      sharpyOpen: false,
+    })
+    // Warm the meta cache so the panel can render its header immediately.
+    void get().fetchDoc(id).catch(() => {})
+  },
+
+  closeDocPeek() {
+    set({ docPeekId: null })
   },
 
   setQuickSwitcher(open) {
@@ -1702,7 +1726,8 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setSharpyOpen(open) {
-    set({ sharpyOpen: open })
+    // Opening Sharpy closes the doc peek (mutually exclusive right-side panels).
+    set(open ? { sharpyOpen: true, docPeekId: null } : { sharpyOpen: false })
   },
 
   async openSharpyConversation(id) {

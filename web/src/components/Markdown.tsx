@@ -53,12 +53,18 @@ function ResourceChip({
 }) {
   const prefix = kind === 'canvas' ? 'x' : kind === 'board' ? 'b' : 'd'
   const emoji = kind === 'canvas' ? '🎨' : kind === 'board' ? '🗂️' : '📄'
+  const openDocPeek = useStore((s) => s.openDocPeek)
   return (
     <button
       type="button"
       onClick={(e) => {
         e.stopPropagation()
-        navigateTo(`/${prefix}/${id}`)
+        // In chat mode, open an inline peek panel; a modified click (or being
+        // outside chat) falls back to navigating into the full editor.
+        const path = window.location.pathname
+        const inChat = path === '/' || path.startsWith('/c/')
+        if (inChat && !e.metaKey && !e.ctrlKey) openDocPeek(id)
+        else navigateTo(`/${prefix}/${id}`)
       }}
       className="mx-0.5 inline-flex items-center gap-1 rounded border border-[var(--color-border)] bg-[var(--color-panel-2)] px-1.5 py-0.5 align-baseline text-[0.85em] font-medium text-[var(--color-accent-hover)] hover:border-[var(--color-accent)]"
     >
