@@ -5,16 +5,10 @@ use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::Row;
-use std::sync::OnceLock;
 use std::time::Duration;
 use uuid::Uuid;
 
 const EXPO_PUSH_URL: &str = "https://exp.host/--/api/v2/push/send";
-
-fn client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new)
-}
 
 #[derive(Deserialize)]
 struct ExpoResponse {
@@ -100,7 +94,7 @@ async fn send_inner(
             })
         })
         .collect();
-    let mut request = client()
+    let mut request = crate::http::client()
         .post(EXPO_PUSH_URL)
         .header(CONTENT_TYPE, "application/json")
         .header(ACCEPT, "application/json")

@@ -1,23 +1,47 @@
+//! The OpenAI-compatible provider client: chat (streaming and one-shot), embeddings,
+//! and audio transcription.
+//!
+//! Contract: docs/arch/10-sharpy.md (embeddings + ask flow) and the transcription section
+//! of docs/arch/04-voice.md.
+//!
+//! This module owns the **wire types** for `/chat/completions` — `ChatMessage`,
+//! `ChatRequest`, `ChatResponse`. `deepseek.rs` speaks the same protocol against a
+//! different endpoint and reuses them; it used to declare a parallel set that could drift.
+//! Anything new that talks to an OpenAI-compatible provider belongs here too.
+//!
+//! Providers vary: some reject unknown or null parameters, so optional request fields are
+//! omitted rather than sent as null. Chat-only providers (no embeddings endpoint) are
+//! expected — a query-embed failure degrades Sharpy to a context-free answer instead of
+//! erroring, see `routes/sharpy.rs`.
+
 use crate::config::{AiConfig, TranscribeConfig};
 use anyhow::{anyhow, bail};
 use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use std::sync::OnceLock;
 use std::time::Duration;
-
-/// OpenAI-compatible chat/embeddings client. Shared connection pool, like
-/// `deepseek.rs`.
-fn client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new)
-}
 
 /// A single chat turn sent upstream (`role` is "system", "user", or "assistant").
 #[derive(Serialize)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+}
+
+impl ChatMessage {
+    pub fn system(content: impl Into<String>) -> Self {
+        Self {
+            role: "system".to_string(),
+            content: content.into(),
+        }
+    }
+
+    pub fn user(content: impl Into<String>) -> Self {
+        Self {
+            role: "user".to_string(),
+            content: content.into(),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -62,7 +86,7 @@ pub async fn transcribe(
         "{}/audio/transcriptions",
         cfg.base_url.trim_end_matches('/')
     );
-    let response = client()
+    let response = crate::http::client()
         .post(url)
         .bearer_auth(&cfg.api_key)
         .multipart(form)
@@ -85,7 +109,7 @@ pub async fn embed(cfg: &AiConfig, inputs: &[String]) -> anyhow::Result<Vec<Vec<
         model: &cfg.embed_model,
         input: inputs,
     };
-    let mut resp = client()
+    let mut resp = crate::http::client()
         .post(url)
         .bearer_auth(&cfg.api_key)
         .json(&body)
@@ -107,11 +131,72 @@ pub async fn embed(cfg: &AiConfig, inputs: &[String]) -> anyhow::Result<Vec<Vec<
     Ok(resp.data.into_iter().map(|d| d.embedding).collect())
 }
 
+/// `POST /chat/completions` body, shared by the streaming Sharpy path and the one-shot
+/// DeepSeek calls in `deepseek.rs`.
+///
+/// `stream`, `max_tokens` and `temperature` are omitted from the JSON when unset so each
+/// caller sends exactly the parameters it sent before this was shared — some providers
+/// reject parameters they do not implement.
 #[derive(Serialize)]
-struct ChatRequest {
-    model: String,
-    messages: Vec<ChatMessage>,
-    stream: bool,
+pub struct ChatRequest {
+    pub model: String,
+    pub messages: Vec<ChatMessage>,
+    #[serde(skip_serializing_if = "is_false")]
+    pub stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+impl ChatRequest {
+    /// Streaming completion — the Sharpy ask flow, consumed as SSE by [`chat_stream`].
+    pub fn streaming(model: impl Into<String>, messages: Vec<ChatMessage>) -> Self {
+        Self {
+            model: model.into(),
+            messages,
+            stream: true,
+            max_tokens: None,
+            temperature: None,
+        }
+    }
+
+    /// One-shot completion with a bounded reply, for the short structured answers
+    /// (GIF query, GIF pick, meeting notes) that `deepseek.rs` asks for.
+    pub fn once(
+        model: impl Into<String>,
+        messages: Vec<ChatMessage>,
+        max_tokens: u16,
+        temperature: f32,
+    ) -> Self {
+        Self {
+            model: model.into(),
+            messages,
+            stream: false,
+            max_tokens: Some(max_tokens),
+            temperature: Some(temperature),
+        }
+    }
+}
+
+/// Non-streaming `/chat/completions` response. The streaming shape is `StreamChunk`.
+#[derive(Deserialize)]
+pub struct ChatResponse {
+    pub choices: Vec<ChatChoice>,
+}
+
+#[derive(Deserialize)]
+pub struct ChatChoice {
+    pub message: ChatResponseMessage,
+}
+
+#[derive(Deserialize)]
+pub struct ChatResponseMessage {
+    pub content: String,
 }
 
 #[derive(Deserialize)]
@@ -186,12 +271,8 @@ pub async fn chat_stream(
     messages: Vec<ChatMessage>,
 ) -> anyhow::Result<impl Stream<Item = anyhow::Result<String>>> {
     let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
-    let body = ChatRequest {
-        model: cfg.chat_model.clone(),
-        messages,
-        stream: true,
-    };
-    let resp = client()
+    let body = ChatRequest::streaming(cfg.chat_model.clone(), messages);
+    let resp = crate::http::client()
         .post(url)
         .bearer_auth(&cfg.api_key)
         .json(&body)

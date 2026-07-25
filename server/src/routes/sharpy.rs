@@ -577,10 +577,7 @@ async fn run_stream(
     }
 
     // Build the prompt: system (+context) then the last turns of history.
-    let mut messages = vec![ChatMessage {
-        role: "system".to_string(),
-        content: system_prompt(&retrieved.context),
-    }];
+    let mut messages = vec![ChatMessage::system(system_prompt(&retrieved.context))];
     match load_history(&state, conversation_id).await {
         Ok(history) => messages.extend(history),
         Err(e) => {

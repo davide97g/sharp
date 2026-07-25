@@ -10,6 +10,7 @@ mod error;
 mod expo_push;
 mod gif;
 mod google_oauth;
+mod http;
 mod livekit;
 mod mailer;
 mod models;

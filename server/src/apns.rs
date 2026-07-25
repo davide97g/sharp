@@ -14,12 +14,6 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
-fn client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    // reqwest negotiates HTTP/2 with APNs via ALPN; a plain client is enough.
-    CLIENT.get_or_init(reqwest::Client::new)
-}
-
 #[derive(Serialize)]
 struct Claims {
     iss: String,
@@ -135,7 +129,7 @@ async fn send_inner(
     .to_string();
 
     for token in &tokens {
-        let response = client()
+        let response = crate::http::client()
             .post(format!("{host}/3/device/{token}"))
             .header("authorization", format!("bearer {jwt}"))
             .header("apns-topic", &config.bundle_id)

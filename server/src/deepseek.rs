@@ -1,8 +1,19 @@
+//! DeepSeek-backed helpers: the "duck" GIF roast (query + pick) and meeting notes.
+//!
+//! Contract: docs/arch/06-gifs.md (duck flow, durable meeting notes).
+//!
+//! This is an OpenAI-compatible provider, so the `/chat/completions` wire types come from
+//! `ai.rs` — only the prompts, temperatures, timeout and parsing live here. Configured
+//! independently of Sharpy (`DEEPSEEK_*` vs `AI_*`) and inert without `DEEPSEEK_API_KEY`.
+//!
+//! Guardrail: transcript and chat text reaching these prompts is untrusted user content.
+//! The system prompts say so explicitly; keep that framing in any new prompt here.
+
+use crate::ai::{ChatMessage, ChatRequest, ChatResponse};
 use crate::config::DeepSeekConfig;
 use crate::gif::GifResult;
 use anyhow::{anyhow, bail};
-use serde::{Deserialize, Serialize};
-use std::sync::OnceLock;
+use serde::Deserialize;
 use std::time::Duration;
 
 const MEETING_SYSTEM_PROMPT: &str = "\
@@ -48,40 +59,6 @@ Output ONLY the GIF id — nothing else.";
 
 const QUERY_TEMPERATURE: f32 = 0.7;
 const PICK_TEMPERATURE: f32 = 0.3;
-
-fn client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new)
-}
-
-#[derive(Serialize)]
-struct ChatRequest {
-    model: String,
-    messages: Vec<ChatMessage>,
-    max_tokens: u16,
-    temperature: f32,
-}
-
-#[derive(Serialize)]
-struct ChatMessage {
-    role: &'static str,
-    content: String,
-}
-
-#[derive(Deserialize)]
-struct ChatResponse {
-    choices: Vec<ChatChoice>,
-}
-
-#[derive(Deserialize)]
-struct ChatChoice {
-    message: ResponseMessage,
-}
-
-#[derive(Deserialize)]
-struct ResponseMessage {
-    content: String,
-}
 
 /// Package recent messages so the model focuses on who/what to roast.
 pub fn format_roast_context(transcript: &[(String, String)]) -> String {
@@ -275,24 +252,15 @@ async fn chat_completion(
     max_tokens: u16,
     temperature: f32,
 ) -> anyhow::Result<String> {
-    let body = ChatRequest {
-        model: config.model.clone(),
-        messages: vec![
-            ChatMessage {
-                role: "system",
-                content: system.to_string(),
-            },
-            ChatMessage {
-                role: "user",
-                content: user.to_string(),
-            },
-        ],
+    let body = ChatRequest::once(
+        config.model.clone(),
+        vec![ChatMessage::system(system), ChatMessage::user(user)],
         max_tokens,
         temperature,
-    };
+    );
     let url = format!("{}/chat/completions", config.base_url.trim_end_matches('/'));
     let response = tokio::time::timeout(Duration::from_secs(10), async {
-        client()
+        crate::http::client()
             .post(url)
             .bearer_auth(&config.api_key)
             .json(&body)

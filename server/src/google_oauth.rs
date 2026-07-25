@@ -11,7 +11,6 @@ use crate::config::GoogleConfig;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
-use std::sync::OnceLock;
 use uuid::Uuid;
 
 const AUTH_ENDPOINT: &str = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -23,11 +22,6 @@ pub const CALENDAR_SCOPE: &str =
 const STATE_PURPOSE: &str = "cal_oauth";
 /// The OAuth flow must complete within this window.
 const STATE_TTL_MINUTES: i64 = 10;
-
-fn client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new)
-}
 
 /// Errors from a token exchange/refresh. `InvalidGrant` is called out because the
 /// caller must flip the connection to `status='invalid'` (expired/revoked refresh
@@ -131,7 +125,7 @@ struct TokenErrorResponse {
 }
 
 async fn post_token(params: &[(&str, &str)]) -> Result<TokenResponse, OAuthError> {
-    let resp = client()
+    let resp = crate::http::client()
         .post(TOKEN_ENDPOINT)
         .form(params)
         .send()
@@ -197,7 +191,7 @@ struct UserInfo {
 
 /// Fetch the connected account's email via the OpenID userinfo endpoint.
 pub async fn fetch_email(access_token: &str) -> Result<String, OAuthError> {
-    let resp = client()
+    let resp = crate::http::client()
         .get(USERINFO_ENDPOINT)
         .bearer_auth(access_token)
         .send()

@@ -14,15 +14,9 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::Row;
-use std::sync::OnceLock;
 use uuid::Uuid;
 
 const CALENDAR_API: &str = "https://www.googleapis.com/calendar/v3";
-
-fn client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new)
-}
 
 /// Percent-encode a path segment (calendar ids are emails / contain `@`, `#`).
 fn pct(s: &str) -> String {
@@ -198,7 +192,7 @@ pub async fn sync_account(state: &SharedState, account_id: Uuid) -> Result<(), S
     .await?;
 
     // 1) Calendar list.
-    let list_resp = client()
+    let list_resp = crate::http::client()
         .get(format!("{CALENDAR_API}/users/me/calendarList"))
         .bearer_auth(&access_token)
         .send()
@@ -253,7 +247,7 @@ pub async fn sync_account(state: &SharedState, account_id: Uuid) -> Result<(), S
         let url = format!("{CALENDAR_API}/calendars/{}/events", pct(&external_id));
 
         loop {
-            let mut req = client()
+            let mut req = crate::http::client()
                 .get(&url)
                 .bearer_auth(&access_token)
                 .query(&[

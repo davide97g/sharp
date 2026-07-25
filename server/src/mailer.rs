@@ -16,7 +16,6 @@ use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 #[derive(Clone)]
 pub enum Mailer {
     Resend {
-        client: reqwest::Client,
         api_key: String,
         from: String,
         base_url: String,
@@ -53,7 +52,6 @@ impl Mailer {
             .map_err(|e| format!("invalid EMAIL_FROM address: {e}"))?;
 
         Ok(Mailer::Resend {
-            client: reqwest::Client::new(),
             api_key: cfg.api_key.clone(),
             from: cfg.from.clone(),
             base_url: cfg.base_url.trim_end_matches('/').to_string(),
@@ -89,7 +87,6 @@ impl Mailer {
     pub async fn send(&self, to: &str, subject: &str, text: &str, html: &str) -> Result<(), String> {
         match self {
             Mailer::Resend {
-                client,
                 api_key,
                 from,
                 base_url,
@@ -102,7 +99,7 @@ impl Mailer {
                     "html": html,
                 });
 
-                let response = client
+                let response = crate::http::client()
                     .post(format!("{base_url}/emails"))
                     .bearer_auth(api_key)
                     .json(&body)

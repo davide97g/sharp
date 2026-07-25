@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
@@ -218,11 +218,6 @@ pub fn empty_streak_snapshot() -> DuckStreakSnapshot {
     }
 }
 
-fn client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new)
-}
-
 #[derive(Serialize, Clone)]
 pub struct GifResult {
     pub id: String,
@@ -415,7 +410,7 @@ impl GifProvider for Tenor {
             ("contentfilter", "medium".to_string()),
         ];
         let response = tokio::time::timeout(Duration::from_secs(10), async {
-            client()
+            crate::http::client()
                 .get(TENOR_SEARCH_URL)
                 .query(&params)
                 .send()
@@ -494,7 +489,7 @@ impl GifProvider for Giphy {
             ("lang", "en".to_string()),
         ];
         let response = tokio::time::timeout(Duration::from_secs(10), async {
-            client()
+            crate::http::client()
                 .get(GIPHY_SEARCH_URL)
                 .query(&params)
                 .send()
