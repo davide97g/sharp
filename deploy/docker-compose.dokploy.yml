@@ -18,6 +18,14 @@
 # so cross-origin works with no extra config.
 #
 # Dokploy setup: see deploy/DOKPLOY.md
+#
+# Environment: `deploy/.env.example` is the canonical list of every variable the server
+# reads and what goes inert when each is unset — read it, not this file, to understand the
+# configuration surface. This file keeps its variables listed explicitly (unlike
+# docker-compose.yml, which defers to `.env` via `env_file`) because Dokploy injects the
+# environment from its own UI rather than from a `.env` in the build context, so an
+# `env_file` here would resolve to nothing. The cost is that adding a variable means
+# editing this file too.
 
 services:
   livekit:

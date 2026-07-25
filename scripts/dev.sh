@@ -1,40 +1,18 @@
 #!/usr/bin/env bash
 # sharp — one-command local dev environment.
 # Boots dependencies (Docker), the Rust server (:3000), and the web app (:5173).
+#
+# Ctrl-C stops the two host processes; the containers stay up for the next run
+# (scripts/stop.sh --docker takes them down).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+cd "$SHARP_ROOT"
 
-for bin in docker cargo bun; do
-  command -v "$bin" >/dev/null || { echo "error: '$bin' is required (install it first)"; exit 1; }
-done
+require_bins docker cargo bun
 
-echo "==> starting postgres + redis + minio + livekit (docker)"
-docker compose -f deploy/docker-compose.dev.yml up -d
-
-echo "==> waiting for postgres"
-until docker compose -f deploy/docker-compose.dev.yml exec -T postgres pg_isready -U sharp -d sharp >/dev/null 2>&1; do
-  sleep 1
-done
-
-export DATABASE_URL="postgres://sharp:sharp@localhost:5432/sharp"
-export REDIS_URL="redis://localhost:6379"
-export JWT_SECRET="dev-only-secret-do-not-use-in-prod"
-export RUST_LOG="${RUST_LOG:-info}"
-export LIVEKIT_URL="ws://localhost:7880"
-export LIVEKIT_INTERNAL_URL="http://localhost:7880"
-export LIVEKIT_API_KEY="devkey"
-export LIVEKIT_API_SECRET="secret"
-
-# File uploads -> local MinIO (from docker-compose.dev.yml).
-export S3_ENDPOINT="http://localhost:9000"
-export S3_BUCKET="sharp"
-export S3_ACCESS_KEY="sharp"
-export S3_SECRET_KEY="sharp-secret"
-export S3_REGION="us-east-1"
-export S3_ALLOW_HTTP="true"
-# Web push: VAPID keys auto-generate + persist on first start (no config needed).
+dev_deps_up
+dev_env
 
 cleanup() {
   echo; echo "==> shutting down"
@@ -54,11 +32,11 @@ WEB_PID=$!
 
 echo
 echo "  sharp is coming up:"
-echo "    api    -> http://localhost:3000/api/v1/healthz"
-echo "    app    -> http://localhost:5173"
+echo "    api    -> http://localhost:${PORT_SERVER}/api/v1/healthz"
+echo "    app    -> http://localhost:${PORT_WEB}"
 echo
-echo "  Ctrl-C stops everything (db containers keep running; stop with"
-echo "  'docker compose -f deploy/docker-compose.dev.yml down')"
+echo "  Ctrl-C stops everything (db containers keep running; stop them with"
+echo "  'scripts/stop.sh --docker')"
 echo
 
 wait

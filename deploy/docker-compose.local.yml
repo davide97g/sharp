@@ -63,6 +63,13 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
     restart: unless-stopped
+    # Optional integrations come from .env if you have one — see .env.example. Absent
+    # is fine: everything optional is inert, so the stack boots with none of it.
+    env_file:
+      - path: .env
+        required: false
+    # Only what this topology fixes. `environment` wins over `env_file`, so these cannot
+    # be overridden from .env by accident.
     environment:
       DATABASE_URL: postgres://sharp:sharp@postgres:5432/sharp
       REDIS_URL: redis://redis:6379
@@ -82,47 +89,7 @@ services:
       S3_SECRET_KEY: sharp-secret
       S3_REGION: us-east-1
       S3_ALLOW_HTTP: "true"
-      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
       APP_URL: ${APP_URL:-http://localhost:5173}
-      # Sharpy AI assistant (OpenAI-compatible) — optional; disabled when unset.
-      AI_API_KEY: ${AI_API_KEY:-}
-      AI_BASE_URL: ${AI_BASE_URL:-https://api.openai.com/v1}
-      AI_CHAT_MODEL: ${AI_CHAT_MODEL:-gpt-4o-mini}
-      AI_EMBED_MODEL: ${AI_EMBED_MODEL:-text-embedding-3-small}
-      # Optional separate live-transcription provider. Leave empty to fall back to
-      # the AI_* key/base URL above.
-      TRANSCRIBE_API_KEY: ${TRANSCRIBE_API_KEY:-}
-      TRANSCRIBE_BASE_URL: ${TRANSCRIBE_BASE_URL:-}
-      TRANSCRIBE_MODEL: ${TRANSCRIBE_MODEL:-gpt-4o-mini-transcribe}
-      # Password-reset email — optional; the reset flow is inert without a backend.
-      EMAIL_FROM: ${EMAIL_FROM:-}
-      RESEND_API_KEY: ${RESEND_API_KEY:-}
-      RESEND_BASE_URL: ${RESEND_BASE_URL:-}
-      SMTP_HOST: ${SMTP_HOST:-}
-      SMTP_PORT: ${SMTP_PORT:-465}
-      SMTP_USERNAME: ${SMTP_USERNAME:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SMTP_FROM: ${SMTP_FROM:-}
-      SMTP_TLS: ${SMTP_TLS:-}
-      # GIF search + duck suggestions — optional.
-      GIPHY_API_KEY: ${GIPHY_API_KEY:-}
-      TENOR_API_KEY: ${TENOR_API_KEY:-}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
-      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
-      # Web push: VAPID keys auto-generate + persist on first startup when unset.
-      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@sharp.app}
-      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
-      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
-      # GitHub task sync — inert without the webhook secret. Needs a public tunnel
-      # to reach localhost:3000/api/v1/integrations/github/webhook.
-      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
-      GITHUB_REPOS: ${GITHUB_REPOS:-}
-      # Google Calendar (Phase 5) — optional. Set to a Google OAuth client with
-      # redirect http://localhost:3000/api/v1/calendar/google/callback to test sync.
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
     ports:
       - "3000:3000"
     depends_on:

@@ -1,3 +1,23 @@
+//! Environment-derived configuration, resolved once at startup.
+//!
+//! **`deploy/.env.example` is the canonical reference for every variable read here.**
+//! Adding one means adding it there in the same commit — the compose files defer to that
+//! file rather than restating the list, so it is the only place that must stay in step.
+//!
+//! Two rules the whole file follows:
+//!
+//! 1. **Optional integrations resolve to `Option<T>` and go inert when unset.** An
+//!    unconfigured feature must never be a startup failure; it disappears from the UI and
+//!    the server runs normally. Self-hosters should be able to run sharp with a database
+//!    and a JWT secret and nothing else.
+//! 2. **A partially-configured group *is* an error.** Where a feature needs several
+//!    variables to be coherent (LiveKit, WebAuthn, Google's redirect URI), setting some
+//!    but not all returns `Err` here rather than failing later at the first request,
+//!    which is much harder to diagnose.
+//!
+//! `env_opt` treats whitespace-only as unset, so a variable left empty in a compose file
+//! or an `.env` behaves the same as an absent one.
+
 use std::env;
 
 #[derive(Clone)]
