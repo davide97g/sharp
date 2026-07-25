@@ -21,6 +21,8 @@ pub mod meetings;
 pub mod messages;
 pub mod notifications;
 pub mod polls;
+pub mod prefs;
+pub mod push;
 pub mod search;
 pub mod sharpy;
 pub mod tasks;

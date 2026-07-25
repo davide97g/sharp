@@ -276,7 +276,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    // The whole API surface, one flat table, grouped by feature with the contract file for
+    // each group. It stays flat on purpose: a single grep here answers "what endpoints exist
+    // and where do they go", which per-module Router::merge() would scatter.
+    //
+    // Adding an endpoint: put it in its feature's group, then update that group's
+    // docs/arch/*.md table in the same commit — those tables are the contract the web and
+    // desktop clients are built against, not a description of this file.
     let api = Router::new()
+        // ── Auth, sessions, password reset, passkeys — contract: docs/arch/01-core.md ────────
         .route("/auth/register", post(auth::register))
         .route("/auth/login", post(auth::login))
         .route("/auth/password/config", get(auth::password_reset_config))
@@ -318,6 +326,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .layer(DefaultBodyLimit::max(upload_limit))
                 .delete(routes::users::delete_avatar),
         )
+        // ── Users, profile, personal nicknames — contract: docs/arch/01-core.md ──────────────
         .route("/users", get(routes::users::list_users))
         .route("/users/:id/avatar", get(routes::users::get_avatar))
         .route("/me/nicknames", get(routes::users::list_nicknames))
@@ -325,6 +334,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/users/:id/nickname",
             put(routes::users::set_nickname).delete(routes::users::delete_nickname),
         )
+        // ── E2EE DM device keys (key transport only — the server can never read a DM) — contract: docs/arch/09-e2ee.md 
         .route(
             "/e2ee/devices",
             get(routes::e2ee::list_devices).post(routes::e2ee::put_device),
@@ -334,12 +344,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/e2ee/backup",
             get(routes::e2ee::get_backup).put(routes::e2ee::put_backup),
         )
+        // ── GIFs and duck roasts — contract: docs/arch/06-gifs.md ────────────────────────────
         .route("/gifs/config", get(routes::gifs::get_config))
         .route("/gifs/search", get(routes::gifs::search))
         .route(
             "/gifs/settings",
             get(routes::gifs::get_settings).put(routes::gifs::put_settings),
         )
+        // ── Voice/video rooms, standalone calls, meeting records — contract: docs/arch/04-voice.md 
         .route("/voice/config", get(routes::voice::voice_config))
         .route(
             "/voice/transcriptions",
@@ -367,7 +379,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/meetings/:id/regenerate",
             post(routes::meetings::regenerate_meeting),
         )
-        // --- Phase 5: calendar ---
         .route(
             "/calendar/connections",
             get(routes::calendar::list_connections),
@@ -388,6 +399,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/calendar/calendars/:id",
             patch(routes::calendar::set_calendar_selected),
         )
+        // ── Calendar and scheduled meetings — contract: docs/arch/07-calendar.md ─────────────
         .route("/calendar/sync", post(routes::calendar::sync_now))
         .route("/calendar/events", get(routes::calendar::list_events))
         .route("/calendar/meetings", post(routes::calendar::create_meeting))
@@ -402,6 +414,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/channels",
             get(routes::channels::list_channels).post(routes::channels::create_channel),
         )
+        // ── Channels, membership, roles, read state — contract: docs/arch/01-core.md ─────────
         .route("/channels/dm", post(routes::channels::create_dm))
         .route(
             "/channels/:id",
@@ -439,15 +452,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/channels/:id/voice-link",
             get(routes::call_links::get_voice_link).post(routes::call_links::create_voice_link),
         )
+        // ── Public guest call links — contract: docs/arch/04-voice.md ────────────────────────
         .route("/call-links/:token", get(routes::call_links::get_call_link))
         .route(
             "/call-links/:token/join",
             post(routes::call_links::join_call_link),
         )
+        // ── Messages, threads, reactions — contract: docs/arch/01-core.md ────────────────────
         .route(
             "/channels/:id/messages",
             get(routes::messages::list_messages).post(routes::messages::create_message),
         )
+        // ── Polls — contract: docs/arch/08-polls.md ──────────────────────────────────────────
         .route(
             "/channels/:id/polls",
             get(routes::polls::list_polls).post(routes::polls::create_poll),
@@ -472,12 +488,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             put(routes::messages::add_reaction).delete(routes::messages::remove_reaction),
         )
         // files
+        // ── File uploads (S3-compatible; inert without S3 config) — contract: docs/arch/05-files-notifications.md 
         .route(
             "/channels/:id/uploads",
             post(routes::files::upload).layer(DefaultBodyLimit::max(upload_limit)),
         )
         .route("/files/:id", get(routes::files::download))
         // notifications + preferences
+        // ── Notification inbox — contract: docs/arch/05-files-notifications.md ───────────────
         .route(
             "/notifications",
             get(routes::notifications::list_notifications),
@@ -488,43 +506,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route(
             "/prefs",
-            get(routes::notifications::get_prefs).put(routes::notifications::set_prefs),
+            get(routes::prefs::get_prefs).put(routes::prefs::set_prefs),
         )
-        .route("/prefs/dnd", put(routes::notifications::set_dnd))
-        .route("/prefs/ui", patch(routes::notifications::patch_ui_prefs))
+        // ── Preferences: notifications, DND, appearance — contract: docs/arch/05-files-notifications.md 
+        .route("/prefs/dnd", put(routes::prefs::set_dnd))
+        .route("/prefs/ui", patch(routes::prefs::patch_ui_prefs))
         .route(
             "/prefs/chat-layout",
-            put(routes::notifications::set_chat_layout),
+            put(routes::prefs::set_chat_layout),
         )
         .route(
             "/channels/:id/prefs",
-            put(routes::notifications::set_channel_pref),
+            put(routes::prefs::set_channel_pref),
         )
         // web push
-        .route("/push/vapid", get(routes::notifications::vapid_public))
-        .route("/push/subscribe", post(routes::notifications::subscribe))
+        // ── Push subscription registration (web, APNs, Expo) — contract: docs/arch/05-files-notifications.md 
+        .route("/push/vapid", get(routes::push::vapid_public))
+        .route("/push/subscribe", post(routes::push::subscribe))
         .route(
             "/push/unsubscribe",
-            post(routes::notifications::unsubscribe),
+            post(routes::push::unsubscribe),
         )
         .route(
             "/push/expo/register",
-            post(routes::notifications::expo_register),
+            post(routes::push::expo_register),
         )
         .route(
             "/push/expo/unregister",
-            post(routes::notifications::expo_unregister),
+            post(routes::push::expo_unregister),
         )
         .route(
             "/push/apns/register",
-            post(routes::notifications::apns_register),
+            post(routes::push::apns_register),
         )
         .route(
             "/push/apns/unregister",
-            post(routes::notifications::apns_unregister),
+            post(routes::push::apns_unregister),
         )
+        // ── Full-text search — contract: docs/arch/01-core.md ────────────────────────────────
         .route("/search", get(routes::search::search))
-        // --- Tasks (Linear-lite planner) ---
+        // ── Tasks, projects, GitHub sync — contract: docs/arch/11-tasks.md ───────────────────
         .route(
             "/projects",
             get(routes::tasks::list_projects).post(routes::tasks::create_project),
@@ -566,7 +587,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/integrations/github/webhook",
             post(routes::github::webhook),
         )
-        // --- Sharpy AI assistant ---
+        // ── Sharpy AI assistant (inert without AI_API_KEY) — contract: docs/arch/10-sharpy.md 
         .route("/sharpy/status", get(routes::sharpy::status))
         .route(
             "/sharpy/conversations",
@@ -580,7 +601,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/sharpy/conversations/:id/messages",
             post(routes::sharpy::send_message),
         )
-        // --- Phase 2: docs ---
+        // ── Docs, canvas and boards (all `docs` rows, differing `kind`) — contract: docs/arch/02-docs.md 
         .route(
             "/channels/:id/docs",
             get(routes::docs::list_channel_docs).post(routes::docs::create_doc),
@@ -614,8 +635,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             post(routes::files::upload_doc_image).layer(DefaultBodyLimit::max(upload_limit)),
         )
         .route("/docs/:id/sync", get(docs_sync::doc_sync_handler))
+        // ── Doc mention inbox — contract: docs/arch/02-docs.md ───────────────────────────────
         .route("/mentions", get(routes::docs::list_mentions))
         .route("/mentions/read", post(routes::docs::read_mentions))
+        // ── Infrastructure ──────────────────────────────────────────────────────────────────
+        // `/healthz` is the only unauthenticated route in this table. `/ws` is the single
+        // realtime socket for everything except doc sync (`/docs/:id/sync`, above).
         .route("/healthz", get(healthz))
         .route("/ws", get(ws::ws_handler));
 
