@@ -9,7 +9,8 @@ use std::time::Instant;
 use uuid::Uuid;
 
 /// Short-lived, single-use codes for desktop browser-login.
-/// Maps code -> (user id, expiry). In-process, per-replica (see ARCHITECTURE).
+/// Maps code -> (user id, expiry). In-process, per-replica by design — see
+/// docs/arch/01-core.md; a retry simply re-mints, so no shared store is needed.
 pub type DesktopCodes = Arc<Mutex<HashMap<String, (Uuid, Instant)>>>;
 
 /// Resolved VAPID keypair for web push (from env or auto-generated + persisted).
@@ -27,7 +28,7 @@ pub struct AppState {
     pub hub: Arc<Hub>,
     /// Ephemeral voice rooms, keyed by channel id. Per-replica.
     pub voice_rooms: crate::ws::voice::VoiceRooms,
-    /// Live doc-sync rooms, keyed by doc id. Per-replica (see ARCHITECTURE Phase 2).
+    /// Live doc-sync rooms, keyed by doc id. Per-replica (see docs/arch/02-docs.md).
     pub doc_rooms: DocRooms,
     /// Object storage for uploads; `None` when S3 is not configured.
     pub storage: Option<Storage>,

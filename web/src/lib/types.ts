@@ -1,4 +1,9 @@
-// Wire types — copied verbatim from docs/ARCHITECTURE.md ("Wire types (JSON)").
+// Wire types — mirror of server/src/models.rs. The contract is docs/arch/*.md
+// ("Wire types" section in each); docs/ARCHITECTURE.md is the index.
+//
+// Guardrail: message ids are Postgres bigint serialized as STRINGS. Never widen one
+// to `number` — past 2^53 the value corrupts silently. Use cmpId/maxId in lib/util.ts
+// to compare them.
 // All ids (including message bigints) are serialized as strings. Timestamps are RFC3339 UTC.
 
 export type User = {

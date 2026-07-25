@@ -159,3 +159,14 @@ Render a chord with `formatChord(chordFor(id))` inside `<Kbd>`, never a hard-cod
 3. Update the table in this file.
 
 All three steps in the same change — the gallery and this doc must never lag the code.
+
+## `TODO(ds)` comments are decisions, not debt
+
+A `// TODO(ds):` or `{/* TODO(ds): */}` comment in `web/src/components/` marks a spot where a
+primitive was deliberately **not** used, with the reason stated inline — a bespoke tone that has
+no token, a pill that doubles as a drag handle, a panel on `bg-ink` instead of `bg-panel`, an
+avatar that must render a `?` placeholder. They were audited when the design system landed.
+
+Leave them alone unless you are adding the missing variant properly (all three steps above), in
+which case delete the comment in the same change. Do not "clean them up" by forcing the
+primitive in — that is how the exceptions became exceptions.
