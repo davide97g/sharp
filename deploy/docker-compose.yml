@@ -127,6 +127,7 @@ services:
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_ALLOW_HTTP: "true"
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
       # VAPID keys auto-generate + persist on first startup (leave unset). Set
       # both to pin your own keypair; empty => auto-generate.
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@sharp.app}
@@ -139,8 +140,13 @@ services:
       APNS_TEAM_ID: ${APNS_TEAM_ID:-}
       APNS_KEY_ID: ${APNS_KEY_ID:-}
       APNS_PRIVATE_KEY: ${APNS_PRIVATE_KEY:-}
+      # Alternative to APNS_PRIVATE_KEY: a path to the .p8 *inside the container*,
+      # so it needs a bind mount of your own to resolve.
+      APNS_PRIVATE_KEY_PATH: ${APNS_PRIVATE_KEY_PATH:-}
       APNS_BUNDLE_ID: ${APNS_BUNDLE_ID:-dev.sharp.app}
       APNS_ENV: ${APNS_ENV:-production}
+      # Expo push (mobile). Optional: pushes work unauthenticated without it.
+      EXPO_ACCESS_TOKEN: ${EXPO_ACCESS_TOKEN:-}
       # Password-reset email — self-service reset is inert (the "Forgot password?"
       # link is hidden) unless EMAIL_FROM plus one backend are set. Resend's HTTP
       # API is preferred (no outbound SMTP ports needed) and wins when both are
@@ -148,13 +154,17 @@ services:
       # APP_URL is the public web URL used in email links (else request origin).
       EMAIL_FROM: ${EMAIL_FROM:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
+      # Only for pointing Resend at a mock in tests; defaults to api.resend.com.
+      RESEND_BASE_URL: ${RESEND_BASE_URL:-}
       APP_URL: ${APP_URL:-}
       # SMTP fallback, used only when RESEND_API_KEY is empty. SMTP_PORT defaults
-      # to 465 (implicit TLS); set SMTP_TLS=starttls for 587.
+      # to 465 (implicit TLS); set SMTP_TLS=starttls for 587. SMTP_FROM is a legacy
+      # alias for EMAIL_FROM, still read when EMAIL_FROM is unset.
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-465}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
       SMTP_TLS: ${SMTP_TLS:-}
       # Sharpy AI assistant (OpenAI-compatible LLM + embeddings) — disabled when
       # AI_API_KEY is unset. Base URL works with OpenAI, DeepSeek, Ollama, etc.
@@ -162,10 +172,24 @@ services:
       AI_BASE_URL: ${AI_BASE_URL:-https://api.openai.com/v1}
       AI_CHAT_MODEL: ${AI_CHAT_MODEL:-gpt-4o-mini}
       AI_EMBED_MODEL: ${AI_EMBED_MODEL:-text-embedding-3-small}
-      # Optional separate live-transcription provider; each setting falls back to AI_*.
-      # TRANSCRIBE_API_KEY: ${TRANSCRIBE_API_KEY:-}
-      # TRANSCRIBE_BASE_URL: ${TRANSCRIBE_BASE_URL:-https://api.openai.com/v1}
-      # TRANSCRIBE_MODEL: ${TRANSCRIBE_MODEL:-gpt-4o-mini-transcribe}
+      # Optional separate live-transcription provider. Leave empty to fall back to
+      # the AI_* key/base URL above; set these to send audio elsewhere (e.g. OpenAI
+      # for transcription while chat runs on a provider without audio support).
+      TRANSCRIBE_API_KEY: ${TRANSCRIBE_API_KEY:-}
+      TRANSCRIBE_BASE_URL: ${TRANSCRIBE_BASE_URL:-}
+      TRANSCRIBE_MODEL: ${TRANSCRIBE_MODEL:-gpt-4o-mini-transcribe}
+      # GIF search (server-side proxy). A key saved in Settings → Workspace takes
+      # precedence; these are the env fallbacks. GIPHY is default, Tenor legacy.
+      GIPHY_API_KEY: ${GIPHY_API_KEY:-}
+      TENOR_API_KEY: ${TENOR_API_KEY:-}
+      # Duck GIF suggestions (DeepSeek LLM) — duck is disabled when unset.
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      # GitHub task sync (Phase 7) — inert without the webhook secret. GITHUB_REPOS
+      # is an optional comma-separated owner/repo allowlist (all repos when unset).
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      GITHUB_REPOS: ${GITHUB_REPOS:-}
       # Google Calendar (Phase 5) — optional. Leave unset to disable calendar sync.
       # GOOGLE_REDIRECT_URI must exactly match a redirect registered on the OAuth
       # client, pointing at this API origin: https://<domain>/api/v1/calendar/google/callback

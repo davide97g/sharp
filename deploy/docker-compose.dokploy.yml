@@ -113,6 +113,7 @@ services:
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:?set S3_ACCESS_KEY in the Environment tab}
       S3_SECRET_KEY: ${S3_SECRET_KEY:?set S3_SECRET_KEY in the Environment tab}
       S3_REGION: ${S3_REGION:-auto}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
       # Web push: VAPID keys auto-generate + persist on first startup, so these
       # can be left unset. To pin your own keypair, set both VAPID_PUBLIC_KEY and
       # VAPID_PRIVATE_KEY in the Environment tab (empty => auto-generate).
@@ -124,8 +125,13 @@ services:
       APNS_TEAM_ID: ${APNS_TEAM_ID:-}
       APNS_KEY_ID: ${APNS_KEY_ID:-}
       APNS_PRIVATE_KEY: ${APNS_PRIVATE_KEY:-}
+      # Alternative to APNS_PRIVATE_KEY: a path to the .p8 *inside the container*,
+      # so it needs a bind mount of your own to resolve. Prefer the inline key here.
+      APNS_PRIVATE_KEY_PATH: ${APNS_PRIVATE_KEY_PATH:-}
       APNS_BUNDLE_ID: ${APNS_BUNDLE_ID:-dev.sharp.app}
       APNS_ENV: ${APNS_ENV:-production}
+      # Expo push (mobile). Optional: pushes work unauthenticated without it.
+      EXPO_ACCESS_TOKEN: ${EXPO_ACCESS_TOKEN:-}
       # Password-reset email — inert (the "Forgot password?" link is hidden)
       # unless EMAIL_FROM plus one backend are set. Resend's HTTP API is the
       # default here: no outbound SMTP ports, which hosts often block. Set
@@ -134,13 +140,17 @@ services:
       # the app host, not this API host, or reset links break.
       EMAIL_FROM: ${EMAIL_FROM:-Sharp <no-reply@sharp.davideghiotto.it>}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
+      # Only for pointing Resend at a mock in tests; defaults to api.resend.com.
+      RESEND_BASE_URL: ${RESEND_BASE_URL:-}
       APP_URL: ${APP_URL:-https://app.sharp.davideghiotto.it}
       # SMTP fallback, used only when RESEND_API_KEY is empty. SMTP_PORT defaults
-      # to 465 (implicit TLS); set SMTP_TLS=starttls for 587.
+      # to 465 (implicit TLS); set SMTP_TLS=starttls for 587. SMTP_FROM is a legacy
+      # alias for EMAIL_FROM, still read when EMAIL_FROM is unset.
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-465}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
       SMTP_TLS: ${SMTP_TLS:-}
       # GIF search (server-side proxy). Key can also be saved from the in-app
       # Settings → Workspace tab (persisted in Postgres); these are the env
@@ -157,10 +167,17 @@ services:
       AI_BASE_URL: ${AI_BASE_URL:-https://api.openai.com/v1}
       AI_CHAT_MODEL: ${AI_CHAT_MODEL:-gpt-4o-mini}
       AI_EMBED_MODEL: ${AI_EMBED_MODEL:-text-embedding-3-small}
-      # Optional separate live-transcription provider; each setting falls back to AI_*.
-      # TRANSCRIBE_API_KEY: ${TRANSCRIBE_API_KEY:-}
-      # TRANSCRIBE_BASE_URL: ${TRANSCRIBE_BASE_URL:-https://api.openai.com/v1}
-      # TRANSCRIBE_MODEL: ${TRANSCRIBE_MODEL:-gpt-4o-mini-transcribe}
+      # Optional separate live-transcription provider. Leave empty to fall back to
+      # the AI_* key/base URL above; set these to send audio elsewhere (e.g. OpenAI
+      # for transcription while chat runs on a provider without audio support).
+      TRANSCRIBE_API_KEY: ${TRANSCRIBE_API_KEY:-}
+      TRANSCRIBE_BASE_URL: ${TRANSCRIBE_BASE_URL:-}
+      TRANSCRIBE_MODEL: ${TRANSCRIBE_MODEL:-gpt-4o-mini-transcribe}
+      # GitHub task sync (Phase 7) — inert without the webhook secret. GITHUB_REPOS
+      # is an optional comma-separated owner/repo allowlist (all repos when unset).
+      # Webhook endpoint: https://<api-domain>/api/v1/integrations/github/webhook
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      GITHUB_REPOS: ${GITHUB_REPOS:-}
       # Google Calendar (Phase 5) — optional. Leave unset to disable calendar sync.
       # GOOGLE_REDIRECT_URI must exactly match a redirect registered on the OAuth
       # client and point at the API subdomain (split deploy):

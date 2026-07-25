@@ -338,26 +338,6 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
         <VoiceMiniWidget />
         <CallConnectionNotice status={voiceStatus} />
         <CallPollOverlay mode="mini" />
-        {!isGuest ? (
-          <button
-            type="button"
-            onClick={() => setPollCreatorOpen(true)}
-            aria-label="Start a quick poll"
-            title="Quick poll"
-            className="fixed bottom-24 right-[4.5rem] z-(--z-floating) flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] text-[var(--color-text-dim)] shadow-2xl hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
-          >
-            <PollControlIcon />
-            <span
-              aria-hidden
-              className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full border-2 border-[var(--color-panel)] bg-[var(--color-accent)] text-white"
-            >
-              <svg width="8" height="8" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
-                <path d="M6 1.5v9M1.5 6h9" />
-              </svg>
-            </span>
-          </button>
-        ) : null}
-        {pollCreatorOpen ? <CreatePollModal mode="call" onClose={() => setPollCreatorOpen(false)} /> : null}
         {audioAuraPrompt}
         {notesConsentPrompt}
       </>
