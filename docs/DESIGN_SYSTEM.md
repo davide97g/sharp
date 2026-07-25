@@ -100,7 +100,7 @@ Composites:
 ## Layout & wireframe rules
 
 - **Shell**: mode rail + collapsible `sidebar-shell` (16rem / 4.5rem) + main column. Mobile (`max-width: 800px`): rail/sidebar omitted, `MobileTabBar` bottom bar, `.mobile-sheet` for sheets. Respect `--safe-*` / `--titlebar-h` vars on any fixed-position chrome (`.safe-pad*` helpers).
-- **Panels**: right-hand contextual panels are 420px inline columns on desktop (`SlideOver` inline mode), overlay sheets on mobile. The doc peek panel (`DocPeekPanel`, inline doc/canvas/board opened from chat) is a wider, user-resizable variant — 480px default, drag-clamped 380–780px (and never past ~60vw), persisted to `localStorage['sharp.docPeekWidth']`.
+- **Panels**: right-hand contextual panels are 420px inline columns on desktop (`SlideOver` inline mode), overlay sheets on mobile. The doc peek (`DocPeekPanel`, doc/canvas/board opened from a chat chip or the in-channel gallery) is *not* a side panel — it covers the main content column (`absolute inset-0` inside the outlet region, rail + channel sidebar stay visible) with a Back / "Open in …" header bar, and closes on Back or any route change (no Escape — embedded editors own that key).
 - **Tap targets**: interactive rows/buttons on touch surfaces get `min-h-11`.
 - **Spacing rhythm**: 4px grid; content padding `p-4` (panels) / `px-3 py-2` (rows); section gaps `gap-5` in forms, `gap-2` between related controls.
 - **Text hierarchy per surface**: title (`Heading`) → metadata (`text-2xs text-text-faint`) → body (`text-sm`). One accent element per region.

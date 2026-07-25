@@ -1,12 +1,11 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useStore } from '../../store'
-import { useIsMobile } from '../../lib/useMediaQuery'
 import { ApiRequestError } from '../../lib/api'
 import { navigateTo } from '../../lib/nav'
 import { userColor } from '../../lib/util'
 import type { DocConnStatus } from '../../lib/docSync'
 import type { Doc } from '../../lib/types'
-import { Banner, Button, EditorSkeleton, EmptyState, PanelHeader } from '../../ui'
+import { Banner, Button, EditorSkeleton, EmptyState } from '../../ui'
 import { DocEditorInner } from './DocEditorInner'
 import { BoardEditorInner } from '../board/BoardEditorInner'
 
@@ -15,16 +14,6 @@ import { BoardEditorInner } from '../board/BoardEditorInner'
 const CanvasEditorInner = lazy(() =>
   import('../canvas/CanvasEditorInner').then((m) => ({ default: m.CanvasEditorInner })),
 )
-
-const WIDTH_KEY = 'sharp.docPeekWidth'
-const DEFAULT_WIDTH = 480
-const MIN_WIDTH = 380
-const MAX_WIDTH = 780
-
-function clampWidth(px: number): number {
-  const max = Math.min(MAX_WIDTH, Math.round(window.innerWidth * 0.6))
-  return Math.max(MIN_WIDTH, Math.min(px, Math.max(MIN_WIDTH, max)))
-}
 
 const noop = () => {}
 
@@ -36,21 +25,21 @@ const KIND_OPEN: Record<Doc['kind'], { label: string; prefix: string }> = {
   board: { label: 'Open in Board', prefix: 'b' },
 }
 
+/**
+ * Inline doc/canvas/board peek. Renders over the chat mode's main content
+ * column (rail + channel sidebar stay put), so opening a resource from a
+ * message chip or the in-channel gallery never leaves the chat app. Two CTAs:
+ * Back returns to whatever was underneath, "Open in …" jumps to the full editor.
+ */
 export function DocPeekPanel() {
   const docPeekId = useStore((s) => s.docPeekId)
   const doc = useStore((s) => (s.docPeekId ? s.docMeta[s.docPeekId] : undefined))
   const me = useStore((s) => s.me)
   const fetchDoc = useStore((s) => s.fetchDoc)
   const closeDocPeek = useStore((s) => s.closeDocPeek)
-  const isMobile = useIsMobile()
 
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<DocConnStatus>('connecting')
-  const [width, setWidth] = useState(() => {
-    const stored = Number(window.localStorage.getItem(WIDTH_KEY))
-    return stored >= MIN_WIDTH && stored <= MAX_WIDTH ? stored : DEFAULT_WIDTH
-  })
-  const dragging = useRef(false)
 
   // Load meta whenever the peeked doc changes; surface access/not-found errors.
   useEffect(() => {
@@ -71,10 +60,8 @@ export function DocPeekPanel() {
     }
   }, [docPeekId, fetchDoc])
 
-  // Persist the chosen width.
-  useEffect(() => {
-    window.localStorage.setItem(WIDTH_KEY, String(width))
-  }, [width])
+  // No Escape-to-close: the embedded editors (tldraw menus, BlockNote slash
+  // menu) own that key. Back button / navigating away are the exits.
 
   const user = useMemo(
     () => ({ name: me?.display_name ?? 'Someone', color: userColor(me?.id ?? '') }),
@@ -83,54 +70,38 @@ export function DocPeekPanel() {
 
   if (!docPeekId) return null
 
-  function onHandleDown(e: React.PointerEvent) {
-    e.preventDefault()
-    dragging.current = true
-    const onMove = (ev: PointerEvent) => {
-      if (!dragging.current) return
-      // Panel is docked right, so width grows as the pointer moves left.
-      setWidth(clampWidth(window.innerWidth - ev.clientX))
-    }
-    const onUp = () => {
-      dragging.current = false
-      document.body.style.cursor = ''
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-    }
-    document.body.style.cursor = 'col-resize'
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-  }
-
   const kind = doc?.kind
   const openMeta = kind ? KIND_OPEN[kind] : null
 
   const header = (
-    <PanelHeader
-      title={doc ? doc.title || 'Untitled' : 'Loading…'}
-      subtitle={kind ? KIND_LABEL[kind] : undefined}
-      icon={
-        <span className="text-base" aria-hidden>
-          {doc?.icon || (kind ? KIND_GLYPH[kind] : '📄')}
-        </span>
-      }
-      actions={
-        doc && openMeta ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            iconLeft={<ExpandIcon />}
-            onClick={() => {
-              closeDocPeek()
-              navigateTo(`/${openMeta.prefix}/${doc.id}`)
-            }}
-          >
-            {openMeta.label}
-          </Button>
-        ) : undefined
-      }
-      onClose={closeDocPeek}
-    />
+    <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-[var(--color-border)] px-3 py-2 sm:px-4">
+      <Button variant="ghost" size="sm" iconLeft={<BackIcon />} onClick={closeDocPeek}>
+        Back
+      </Button>
+      <span className="hidden h-5 w-px shrink-0 bg-[var(--color-border)] sm:block" />
+      <span className="shrink-0 text-base" aria-hidden>
+        {doc?.icon || (kind ? KIND_GLYPH[kind] : '📄')}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-semibold text-[var(--color-text)]">
+          {doc ? doc.title || 'Untitled' : 'Loading…'}
+        </div>
+        {kind && <div className="truncate text-2xs text-[var(--color-text-faint)]">{KIND_LABEL[kind]}</div>}
+      </div>
+      {doc && openMeta && (
+        <Button
+          variant="outline"
+          size="sm"
+          iconLeft={<ExpandIcon />}
+          onClick={() => {
+            closeDocPeek()
+            navigateTo(`/${openMeta.prefix}/${doc.id}`)
+          }}
+        >
+          {openMeta.label}
+        </Button>
+      )}
+    </header>
   )
 
   let body: React.ReactNode
@@ -142,7 +113,7 @@ export function DocPeekPanel() {
         description={error}
         action={
           <Button variant="outline" size="sm" onClick={closeDocPeek}>
-            Close
+            Back
           </Button>
         }
       />
@@ -157,7 +128,7 @@ export function DocPeekPanel() {
         description="Ask the owner to share this with you."
         action={
           <Button variant="outline" size="sm" onClick={closeDocPeek}>
-            Close
+            Back
           </Button>
         }
       />
@@ -172,16 +143,18 @@ export function DocPeekPanel() {
           </Banner>
         )}
         {doc.kind === 'doc' ? (
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-            <DocEditorInner
-              key={doc.id}
-              docId={doc.id}
-              channelId={doc.channel_id}
-              user={user}
-              editable={editable}
-              onStatus={setStatus}
-              onPeers={noop}
-            />
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-8">
+              <DocEditorInner
+                key={doc.id}
+                docId={doc.id}
+                channelId={doc.channel_id}
+                user={user}
+                editable={editable}
+                onStatus={setStatus}
+                onPeers={noop}
+              />
+            </div>
           </div>
         ) : doc.kind === 'board' ? (
           <BoardEditorInner
@@ -211,37 +184,22 @@ export function DocPeekPanel() {
     )
   }
 
-  if (isMobile) {
-    return (
-      <aside
-        className="mobile-sheet"
-        role="dialog"
-        aria-modal
-        aria-label={doc ? doc.title || 'Untitled' : 'Document'}
-      >
-        {header}
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{body}</div>
-      </aside>
-    )
-  }
-
   return (
-    <aside
-      className="relative flex shrink-0 flex-col border-l border-[var(--color-border)] bg-[var(--color-ink)]"
-      style={{ width }}
+    <section
+      className="absolute inset-0 z-20 flex min-w-0 flex-col bg-[var(--color-ink)]"
       aria-label={doc ? doc.title || 'Untitled' : 'Document'}
     >
-      {/* Drag handle to resize the panel from its left edge. */}
-      <div
-        onPointerDown={onHandleDown}
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize panel"
-        className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize"
-      />
       {header}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{body}</div>
-    </aside>
+    </section>
+  )
+}
+
+function BackIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="m15 18-6-6 6-6" />
+    </svg>
   )
 }
 

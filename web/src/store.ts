@@ -1683,7 +1683,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   openDocPeek(id) {
-    // Right-side panels are mutually exclusive: close thread + Sharpy.
+    // The peek covers the main column, so open side panels go with it.
     set({
       docPeekId: id,
       thread: { open: false, parentId: null, parent: null, replies: [], loading: false },

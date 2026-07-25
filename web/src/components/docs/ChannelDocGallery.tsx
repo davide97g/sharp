@@ -20,8 +20,8 @@ const config: Record<
 }
 
 // Shared in-channel gallery for docs / canvases / boards. Lives in chat mode
-// (`/c/:id/docs|canvas|board`) so the DocPeekPanel can float alongside it; row
-// clicks open that inline peek. When reached from a non-chat route
+// (`/c/:id/docs|canvas|board`) where a row click opens the DocPeekPanel over
+// this same main content column (Back returns here). When reached from a non-chat route
 // (`/docs/c/:id` etc., where AppShell doesn't mount the peek panel) clicks fall
 // back to navigating into the full editor — mirrors Markdown.tsx's convention.
 export function ChannelDocGallery({ kind }: { kind: DocKind }) {

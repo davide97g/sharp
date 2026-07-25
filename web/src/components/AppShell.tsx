@@ -147,6 +147,14 @@ export function AppShell() {
     else if (prev.path !== location.pathname) sound.tabSwitch()
   }, [mode, location.pathname])
 
+  // The doc peek covers the main content column, so any navigation (another
+  // channel, another mode) backs out of it instead of leaving it stranded on
+  // top of a different destination. Opening a peek never changes the URL.
+  const closeDocPeek = useStore((s) => s.closeDocPeek)
+  useEffect(() => {
+    closeDocPeek()
+  }, [location.pathname, closeDocPeek])
+
   // total unread -> document title (hidden while the streaming shield is on —
   // the tab title is visible in a shared screen's window chrome)
   const shielded = useStore(streamShieldOn)
