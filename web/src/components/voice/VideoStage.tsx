@@ -568,6 +568,8 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
       cameras={cameras}
       someoneElseSharing={someoneElseSharing}
       otherSharerName={otherSharerName}
+      canPoll={!isGuest}
+      onOpenPoll={() => setPollCreatorOpen(true)}
     />
   )
 
@@ -620,17 +622,6 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
                   className={headerBtnClass}
                 >
                   <ChatIcon />
-                </button>
-              )}
-              {!isGuest && (
-                <button
-                  type="button"
-                  aria-label="Start a quick poll"
-                  title="Quick poll"
-                  onClick={() => setPollCreatorOpen(true)}
-                  className={headerBtnClass}
-                >
-                  <PollControlIcon />
                 </button>
               )}
               <button
@@ -809,17 +800,6 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
             <PipIcon />
           </button>
         )}
-        {!isGuest ? (
-          <button
-            type="button"
-            aria-label="Start a quick poll"
-            title="Quick poll"
-            onClick={() => setPollCreatorOpen(true)}
-            className={headerBtnClass}
-          >
-            <PollControlIcon />
-          </button>
-        ) : null}
         <button
           type="button"
           aria-label={stageMode === 'expanded' ? 'Reduce call window' : 'Expand call window'}
@@ -1478,11 +1458,15 @@ function StageControlsBar({
   cameras,
   someoneElseSharing,
   otherSharerName,
+  canPoll,
+  onOpenPoll,
 }: {
   mics: MediaDeviceOption[]
   cameras: MediaDeviceOption[]
   someoneElseSharing: boolean
   otherSharerName: string
+  canPoll: boolean
+  onOpenPoll: () => void
 }) {
   const isMobile = useIsMobile()
   const [moreOpen, setMoreOpen] = useState(false)
@@ -1491,21 +1475,14 @@ function StageControlsBar({
   const noiseSuppressionAvailable = useStore((s) => s.voice.noiseSuppressionAvailable)
   const handRaised = useStore((s) => s.voice.handRaised)
   const transcribing = useStore((s) => s.voice.transcribing)
-  const transcriptionAvailable = useStore((s) => s.voice.transcriptionAvailable)
   const voiceStatus = useStore((s) => s.voice.status)
   const cameraStatus = useStore((s) => s.voice.cameraStatus)
   const videoBackground = useStore((s) => s.voice.videoBackground)
   const screenStatus = useStore((s) => s.voice.screenStatus)
   const audioDeviceId = useStore((s) => s.voice.audioDeviceId)
   const videoDeviceId = useStore((s) => s.voice.videoDeviceId)
-  const channelId = useStore((s) => s.voice.channelId)
-  const activeMeetingId = useStore((s) =>
-    channelId ? s.activeMeetings[channelId] ?? null : null,
-  )
   const toggleVoiceMute = useStore((s) => s.toggleVoiceMute)
-  const toggleNoiseSuppression = useStore((s) => s.toggleNoiseSuppression)
   const toggleVoiceHand = useStore((s) => s.toggleVoiceHand)
-  const toggleTranscription = useStore((s) => s.toggleTranscription)
   const toggleVoiceCamera = useStore((s) => s.toggleVoiceCamera)
   const toggleVoiceScreen = useStore((s) => s.toggleVoiceScreen)
   const setVoiceAudioDevice = useStore((s) => s.setVoiceAudioDevice)
@@ -1556,6 +1533,8 @@ function StageControlsBar({
             cameras={cameras}
             someoneElseSharing={someoneElseSharing}
             otherSharerName={otherSharerName}
+            canPoll={canPoll}
+            onOpenPoll={onOpenPoll}
             onClose={() => setMoreOpen(false)}
           />
         )}
@@ -1577,44 +1556,6 @@ function StageControlsBar({
       >
         <MicActivityIcon muted={muted} />
       </DeviceControl>
-      <CallControl
-        label={
-          !noiseSuppressionAvailable
-            ? 'Noise suppression unavailable'
-            : noiseSuppression
-              ? 'Turn off noise suppression'
-              : 'Turn on noise suppression'
-        }
-        active={noiseSuppression && noiseSuppressionAvailable}
-        disabled={voiceStatus !== 'connected' || !noiseSuppressionAvailable}
-        onClick={() => void toggleNoiseSuppression()}
-      >
-        <NoiseSuppressionIcon off={!noiseSuppression || !noiseSuppressionAvailable} />
-      </CallControl>
-      {transcriptionAvailable && isTranscriptionSupported() && (
-        <CallControl
-          label={
-            transcribing
-              ? 'Stop sharing my transcript'
-              : activeMeetingId
-                ? 'Share my transcript'
-                : 'Start meeting notes'
-          }
-          active={transcribing}
-          disabled={voiceStatus !== 'connected'}
-          onClick={toggleTranscription}
-        >
-          <CaptionsIcon />
-        </CallControl>
-      )}
-      <CallControl
-        label={handRaised ? 'Lower hand' : 'Raise hand'}
-        active={handRaised}
-        disabled={voiceStatus !== 'connected'}
-        onClick={toggleVoiceHand}
-      >
-        <HandIcon />
-      </CallControl>
       <DeviceControl
         label={cameraStatus === 'on' ? 'Turn camera off' : 'Turn camera on'}
         menuLabel="Choose camera"
@@ -1628,7 +1569,6 @@ function StageControlsBar({
       >
         <CameraIcon off={cameraStatus === 'off'} />
       </DeviceControl>
-      <VideoBackgroundControl disabled={voiceStatus !== 'connected'} />
       <CallControl
         label={
           someoneElseSharing
@@ -1643,10 +1583,224 @@ function StageControlsBar({
       >
         <ScreenShareIcon />
       </CallControl>
+      <CallControl
+        label={handRaised ? 'Lower hand' : 'Raise hand'}
+        active={handRaised}
+        disabled={voiceStatus !== 'connected'}
+        onClick={toggleVoiceHand}
+      >
+        <HandIcon />
+      </CallControl>
+      <CallMoreMenu canPoll={canPoll} onOpenPoll={onOpenPoll} />
       <CallControl label="Leave call" danger onClick={leaveVoice}>
         <LeaveIcon />
       </CallControl>
     </>
+  )
+}
+
+// Everything that is a setting rather than a live action lives here: one button
+// in the bar, a two-step popover behind it (Meet's "More options"). Camera
+// effects open as a second step inside the same panel so the bar never grows.
+function CallMoreMenu({
+  canPoll,
+  onOpenPoll,
+}: {
+  canPoll: boolean
+  onOpenPoll: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [view, setView] = useState<'root' | 'effects'>('root')
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  const noiseSuppression = useStore((s) => s.voice.noiseSuppression)
+  const noiseSuppressionAvailable = useStore((s) => s.voice.noiseSuppressionAvailable)
+  const transcribing = useStore((s) => s.voice.transcribing)
+  const transcriptionAvailable = useStore((s) => s.voice.transcriptionAvailable)
+  const voiceStatus = useStore((s) => s.voice.status)
+  const background = useStore((s) => s.voice.videoBackground)
+  const channelId = useStore((s) => s.voice.channelId)
+  const activeMeetingId = useStore((s) =>
+    channelId ? s.activeMeetings[channelId] ?? null : null,
+  )
+  const toggleNoiseSuppression = useStore((s) => s.toggleNoiseSuppression)
+  const toggleTranscription = useStore((s) => s.toggleTranscription)
+
+  const connected = voiceStatus === 'connected'
+  const noiseOn = noiseSuppression && noiseSuppressionAvailable
+  const notesAvailable = transcriptionAvailable && isTranscriptionSupported()
+  const hasSetting = noiseOn || transcribing || background.id !== 'none'
+
+  function close() {
+    setOpen(false)
+    setView('root')
+  }
+
+  useDismiss({ ref: rootRef, onClose: close, enabled: open })
+
+  return (
+    <div ref={rootRef} className="relative flex">
+      <CallControl
+        label="More options"
+        active={open}
+        onClick={() => (open ? close() : setOpen(true))}
+      >
+        <MoreCallIcon />
+      </CallControl>
+      {hasSetting && !open && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute right-0.5 top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--color-accent)] ring-2 ring-[var(--color-ink)]"
+        />
+      )}
+      {open && (
+        <div
+          role="dialog"
+          aria-label="More call options"
+          className={`absolute bottom-full right-0 z-50 mb-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1.5 shadow-2xl ${
+            view === 'effects' ? 'w-[23rem]' : 'w-[17.5rem]'
+          }`}
+        >
+          {view === 'effects' ? (
+            <div className="p-1.5">
+              <button
+                type="button"
+                onClick={() => setView('root')}
+                className="mb-2.5 -ml-1 flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-2xs font-semibold uppercase tracking-wider text-[var(--color-text-faint)] outline-none hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+              >
+                <BackIcon />
+                More options
+              </button>
+              <VideoBackgroundPicker disabled={!connected} />
+            </div>
+          ) : (
+            <>
+              <MenuSectionLabel>Audio</MenuSectionLabel>
+              <MoreMenuRow
+                icon={<NoiseSuppressionIcon off={!noiseOn} />}
+                label="Noise suppression"
+                hint={noiseSuppressionAvailable ? undefined : 'Not supported on this device'}
+                state={noiseOn ? 'on' : 'off'}
+                disabled={!connected || !noiseSuppressionAvailable}
+                onClick={() => void toggleNoiseSuppression()}
+              />
+              <MenuSectionLabel>Video</MenuSectionLabel>
+              <MoreMenuRow
+                icon={<BackgroundIcon />}
+                label="Camera background"
+                hint={backgroundLabel(background)}
+                trailing={<ForwardIcon />}
+                onClick={() => setView('effects')}
+              />
+              {(notesAvailable || canPoll) && (
+                <>
+                  <MenuSectionLabel>Meeting</MenuSectionLabel>
+                  {notesAvailable && (
+                    <MoreMenuRow
+                      icon={<CaptionsIcon />}
+                      label={activeMeetingId ? 'Share my transcript' : 'Meeting notes'}
+                      hint={
+                        transcribing
+                          ? 'Your speech is attributed to you'
+                          : 'Transcribes the room. No audio is recorded.'
+                      }
+                      state={transcribing ? 'on' : 'off'}
+                      disabled={!connected}
+                      onClick={toggleTranscription}
+                    />
+                  )}
+                  {canPoll && (
+                    <MoreMenuRow
+                      icon={<PollControlIcon />}
+                      label="Start a poll"
+                      hint="Ask the room a quick question"
+                      onClick={() => {
+                        close()
+                        onOpenPoll()
+                      }}
+                    />
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function backgroundLabel(background: VideoBackground): string {
+  if (background.id === 'custom') return 'Custom image'
+  return VIDEO_BACKGROUND_OPTIONS.find((option) => option.id === background.id)?.label ?? 'Off'
+}
+
+function MenuSectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="px-2.5 pb-1 pt-2 text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--color-text-faint)]">
+      {children}
+    </div>
+  )
+}
+
+function MoreMenuRow({
+  icon,
+  label,
+  hint,
+  state,
+  disabled = false,
+  trailing,
+  onClick,
+}: {
+  icon: React.ReactNode
+  label: string
+  hint?: string
+  state?: 'on' | 'off'
+  disabled?: boolean
+  trailing?: React.ReactNode
+  onClick: () => void
+}) {
+  const on = state === 'on'
+  return (
+    <button
+      type="button"
+      role={state ? 'menuitemcheckbox' : 'menuitem'}
+      aria-checked={state ? on : undefined}
+      disabled={disabled}
+      onClick={onClick}
+      className="flex w-full cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-2 text-left outline-none transition-colors hover:bg-[var(--color-panel-2)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+    >
+      <span
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+          on
+            ? 'bg-[var(--color-accent)] text-white'
+            : 'bg-[var(--color-panel-2)] text-[var(--color-text-dim)]'
+        }`}
+      >
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-[var(--color-text)]">{label}</span>
+        {hint && (
+          <span className="mt-0.5 block truncate text-2xs text-[var(--color-text-faint)]">
+            {hint}
+          </span>
+        )}
+      </span>
+      {state ? (
+        <span
+          className={`shrink-0 rounded-full px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wider ${
+            on
+              ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]'
+              : 'text-[var(--color-text-faint)]'
+          }`}
+        >
+          {on ? 'On' : 'Off'}
+        </span>
+      ) : (
+        <span className="shrink-0 text-[var(--color-text-faint)]">{trailing}</span>
+      )}
+    </button>
   )
 }
 
@@ -1655,12 +1809,16 @@ function MobileCallMoreSheet({
   cameras,
   someoneElseSharing,
   otherSharerName,
+  canPoll,
+  onOpenPoll,
   onClose,
 }: {
   mics: MediaDeviceOption[]
   cameras: MediaDeviceOption[]
   someoneElseSharing: boolean
   otherSharerName: string
+  canPoll: boolean
+  onOpenPoll: () => void
   onClose: () => void
 }) {
   const noiseSuppression = useStore((s) => s.voice.noiseSuppression)
@@ -1759,6 +1917,16 @@ function MobileCallMoreSheet({
             icon={<ScreenShareIcon />}
             onClick={() => void toggleVoiceScreen()}
           />
+          {canPoll && (
+            <SheetAction
+              label="Start a poll"
+              icon={<PollControlIcon />}
+              onClick={() => {
+                onClose()
+                onOpenPoll()
+              }}
+            />
+          )}
         </div>
 
         <div className="border-t border-[var(--color-border)] px-3 py-3">
@@ -1789,36 +1957,6 @@ function MobileCallMoreSheet({
       </div>
     </div>,
     document.body,
-  )
-}
-
-function VideoBackgroundControl({ disabled }: { disabled: boolean }) {
-  const [open, setOpen] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
-  const background = useStore((s) => s.voice.videoBackground)
-
-  useDismiss({ ref: rootRef, onClose: () => setOpen(false), enabled: open })
-
-  return (
-    <div ref={rootRef} className="relative flex">
-      <CallControl
-        label="Choose camera background"
-        active={background.id !== 'none' || open}
-        disabled={disabled}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <BackgroundIcon />
-      </CallControl>
-      {open ? (
-        <div
-          role="dialog"
-          aria-label="Camera background"
-          className="absolute bottom-full right-0 z-50 mb-2 w-[23rem] rounded-2xl border border-[var(--color-border)] bg-[var(--color-panel)] p-3 shadow-2xl"
-        >
-          <VideoBackgroundPicker disabled={disabled} onPick={() => setOpen(false)} />
-        </div>
-      ) : null}
-    </div>
   )
 }
 
@@ -2171,6 +2309,22 @@ function MoreCallIcon() {
       <circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none" />
       <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
       <circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+function BackIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="m15 18-6-6 6-6" />
+    </svg>
+  )
+}
+
+function ForwardIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="m9 18 6-6-6-6" />
     </svg>
   )
 }
