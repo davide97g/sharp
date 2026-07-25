@@ -7,7 +7,8 @@ import { SharpDocProvider, type DocConnStatus, type DocRoleByte } from '../../li
 import { useYjsTldrawStore } from '../../lib/tldrawYjs'
 import { useStore } from '../../store'
 
-export type Peer = { clientId: number; name: string; color: string }
+import type { DocPeer as Peer } from '../../lib/types'
+export type { DocPeer as Peer } from '../../lib/types'
 
 // Self-hosted tldraw assets (this app must never hit the tldraw CDN). Resolved
 // once at module scope.

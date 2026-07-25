@@ -557,6 +557,12 @@ export type MeetingEndedPayload = {
 export type DocRole = 'owner' | 'editor' | 'viewer' | 'none'
 export type DocKind = 'doc' | 'canvas' | 'board'
 
+/**
+ * A remote collaborator on a doc/canvas/board sync socket, as reported by Yjs awareness.
+ * `clientId` is the Yjs client id, not a user id — one user with two tabs is two peers.
+ */
+export type DocPeer = { clientId: number; name: string; color: string }
+
 export type Doc = {
   id: string
   channel_id: string

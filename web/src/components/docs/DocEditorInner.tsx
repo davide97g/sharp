@@ -16,7 +16,8 @@ import { useStore } from '../../store'
 import { api, fetchAttachmentBlob } from '../../lib/api'
 import { toastError } from '../../lib/toast'
 
-export type Peer = { clientId: number; name: string; color: string }
+import type { DocPeer as Peer } from '../../lib/types'
+export type { DocPeer as Peer } from '../../lib/types'
 
 const DOC_IMAGE_TYPES = new Set([
   'image/png',

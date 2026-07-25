@@ -10,7 +10,8 @@ import { CardPanel } from './CardPanel'
 import { CustomizePanel } from './CustomizePanel'
 import { NO_STATUS, useBoardDnd, type BoardColumnData } from './useBoardDnd'
 
-export type Peer = { clientId: number; name: string; color: string }
+import type { DocPeer as Peer } from '../../lib/types'
+export type { DocPeer as Peer } from '../../lib/types'
 
 const noop = () => {}
 const noopReg = () => {}
