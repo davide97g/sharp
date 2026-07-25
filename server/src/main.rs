@@ -157,20 +157,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Transactional email (password reset) over SMTP.
-    let mailer = match &config.smtp {
-        Some(smtp) => match mailer::Mailer::from_config(smtp) {
+    // Transactional email (password reset) via Resend or SMTP.
+    let mailer = match &config.mail {
+        Some(mail) => match mailer::Mailer::from_config(mail) {
             Ok(m) => {
-                tracing::info!("smtp email enabled (host '{}')", smtp.host);
+                tracing::info!("email enabled (backend '{}')", m.backend());
                 Some(m)
             }
             Err(e) => {
-                tracing::warn!("smtp email disabled: {}", e);
+                tracing::warn!("email disabled: {}", e);
                 None
             }
         },
         None => {
-            tracing::info!("smtp email disabled (SMTP not configured)");
+            tracing::info!(
+                "email disabled (set RESEND_API_KEY or SMTP_HOST, plus EMAIL_FROM)"
+            );
             None
         }
     };

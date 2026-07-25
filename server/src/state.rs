@@ -43,8 +43,8 @@ pub struct AppState {
     pub giphy_usage: crate::gif::GiphyUsageTracker,
     /// WebAuthn verifier; absent when passkeys are not configured.
     pub webauthn: Option<Arc<webauthn_rs::Webauthn>>,
-    /// SMTP mailer for transactional email (password reset); `None` when SMTP
-    /// is not configured.
+    /// Mailer for transactional email (password reset), backed by Resend or SMTP;
+    /// `None` when no email backend is configured.
     pub mailer: Option<crate::mailer::Mailer>,
 }
 
