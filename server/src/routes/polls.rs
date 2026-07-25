@@ -2,7 +2,7 @@ use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
 use crate::models::ser_opt_i64_string;
 use crate::notify;
-use crate::routes::{channel_kind, is_member, member_role};
+use crate::routes::{channel_kind, member_role, require_can_post, require_member};
 use crate::state::SharedState;
 use crate::ws::{channel_member_ids, envelope};
 use axum::extract::{Path, Query, State};
@@ -226,19 +226,16 @@ pub(crate) fn validate_create(body: &CreatePollRequest) -> AppResult<(String, Ve
     Ok((question, options))
 }
 
-async fn require_member(state: &SharedState, channel_id: Uuid, user_id: Uuid) -> AppResult<()> {
-    if channel_kind(&state.pool, channel_id).await?.is_none() {
-        return Err(AppError::NotFound("channel not found".to_string()));
-    }
-    if !is_member(&state.pool, channel_id, user_id).await? {
-        return Err(AppError::Forbidden(
-            "not a member of this channel".to_string(),
-        ));
-    }
-    Ok(())
-}
-
-async fn require_can_post(state: &SharedState, channel_id: Uuid, user_id: Uuid) -> AppResult<()> {
+/// Write gate for poll creation.
+///
+/// Functional decision: polls are a channel/group affordance and are rejected in DMs by
+/// design (a two-person vote is a message), so this wraps the shared guard rather than
+/// calling it directly. See docs/arch/08-polls.md.
+async fn require_can_create_poll(
+    state: &SharedState,
+    channel_id: Uuid,
+    user_id: Uuid,
+) -> AppResult<()> {
     let kind = channel_kind(&state.pool, channel_id)
         .await?
         .ok_or_else(|| AppError::NotFound("channel not found".to_string()))?;
@@ -247,15 +244,13 @@ async fn require_can_post(state: &SharedState, channel_id: Uuid, user_id: Uuid) 
             "polls are not allowed in DMs".to_string(),
         ));
     }
-    if !member_role(&state.pool, channel_id, user_id)
-        .await?
-        .is_some_and(|role| role.can_post())
-    {
-        return Err(AppError::Forbidden(
-            "posting requires owner or editor role".to_string(),
-        ));
-    }
-    Ok(())
+    require_can_post(
+        &state.pool,
+        channel_id,
+        user_id,
+        "posting requires owner or editor role",
+    )
+    .await
 }
 
 fn token_field(value: &str) -> String {
@@ -268,7 +263,7 @@ pub async fn create_poll_shared(
     creator_id: Uuid,
     body: &CreatePollRequest,
 ) -> AppResult<Poll> {
-    require_can_post(state, channel_id, creator_id).await?;
+    require_can_create_poll(state, channel_id, creator_id).await?;
     let (question, options) = validate_create(body)?;
     let mut tx = state.pool.begin().await?;
     let poll_id: Uuid = sqlx::query_scalar(
@@ -572,7 +567,7 @@ pub async fn get_poll(
     auth: AuthUser,
 ) -> AppResult<Json<Poll>> {
     let meta = poll_meta(&state.pool, poll_id).await?;
-    require_member(&state, meta.channel_id, auth.id).await?;
+    require_member(&state.pool, meta.channel_id, auth.id).await?;
     Ok(Json(load_poll(&state.pool, poll_id, Some(auth.id)).await?))
 }
 
@@ -582,7 +577,7 @@ pub async fn list_polls(
     auth: AuthUser,
     Query(query): Query<ListPollsQuery>,
 ) -> AppResult<Json<serde_json::Value>> {
-    require_member(&state, channel_id, auth.id).await?;
+    require_member(&state.pool, channel_id, auth.id).await?;
     let active = query.active.as_deref() == Some("1");
     let ids = if active {
         sqlx::query_scalar::<_, Uuid>(

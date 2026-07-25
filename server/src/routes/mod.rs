@@ -1,3 +1,14 @@
+//! Route modules, plus the channel-authorization primitives every one of them shares.
+//!
+//! Contract: docs/arch/01-core.md — "Channel management" and the viewer gates.
+//!
+//! Guardrail: `channel_members.role` is the *only* source of channel authorization.
+//! `channels.created_by` is historical and must never be consulted for authz. Reach for
+//! the guards below (`require_member`, `require_member_role`, `require_can_post`,
+//! `require_owner`) instead of re-deriving membership inside a route module — five
+//! modules used to carry byte-identical copies of them, which is how error bodies drift
+//! apart between surfaces.
+
 pub mod calendar;
 pub mod call_links;
 pub mod channels;
@@ -17,7 +28,7 @@ pub mod users;
 pub mod voice;
 pub mod voice_triggers;
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -122,4 +133,78 @@ pub async fn count_owners(pool: &PgPool, channel_id: Uuid) -> AppResult<i64> {
     .fetch_one(pool)
     .await?;
     Ok(row.try_get("count")?)
+}
+
+// ── Authorization guards ─────────────────────────────────────────────────────────────
+//
+// Each returns `Err` with the exact status + message the API already promised, so these
+// are drop-in for the per-module copies they replaced. Existence is always checked before
+// membership: a missing channel is 404, never 403.
+
+/// Read gate: the channel exists and `user_id` is a member. A `viewer` passes — this is
+/// the gate for reading, not for writing.
+pub async fn require_member(pool: &PgPool, channel_id: Uuid, user_id: Uuid) -> AppResult<()> {
+    if channel_kind(pool, channel_id).await?.is_none() {
+        return Err(AppError::NotFound("channel not found".to_string()));
+    }
+    if !is_member(pool, channel_id, user_id).await? {
+        return Err(AppError::Forbidden(
+            "not a member of this channel".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Read gate that also hands back the caller's role, for routes that branch on it.
+/// Note the non-member response here is "not a member of this channel", whereas
+/// [`require_can_post`] reports its own denial message for non-members too.
+pub async fn require_member_role(
+    pool: &PgPool,
+    channel_id: Uuid,
+    user_id: Uuid,
+) -> AppResult<ChannelRole> {
+    if channel_kind(pool, channel_id).await?.is_none() {
+        return Err(AppError::NotFound("channel not found".to_string()));
+    }
+    member_role(pool, channel_id, user_id)
+        .await?
+        .ok_or_else(|| AppError::Forbidden("not a member of this channel".to_string()))
+}
+
+/// Write gate: the channel exists and `user_id` may post to it (owner or editor).
+///
+/// `denied` is the 403 body, passed in because each surface words it differently
+/// ("posting requires owner or editor role", "uploading requires…") and those strings are
+/// part of the response contract — see docs/arch/01-core.md. Non-members land on `denied`
+/// as well, not on "not a member of this channel"; that is the long-standing behavior of
+/// every posting route and is preserved on purpose.
+pub async fn require_can_post(
+    pool: &PgPool,
+    channel_id: Uuid,
+    user_id: Uuid,
+    denied: &str,
+) -> AppResult<()> {
+    if channel_kind(pool, channel_id).await?.is_none() {
+        return Err(AppError::NotFound("channel not found".to_string()));
+    }
+    if !member_role(pool, channel_id, user_id)
+        .await?
+        .is_some_and(ChannelRole::can_post)
+    {
+        return Err(AppError::Forbidden(denied.to_string()));
+    }
+    Ok(())
+}
+
+/// Owner gate for channel management: rename, topic, visibility, membership, roles,
+/// deletion. Every non-DM channel must retain at least one owner; DMs cannot be managed
+/// at all (both members are editors).
+pub async fn require_owner(pool: &PgPool, channel_id: Uuid, user_id: Uuid) -> AppResult<()> {
+    if !member_role(pool, channel_id, user_id)
+        .await?
+        .is_some_and(ChannelRole::is_owner)
+    {
+        return Err(AppError::Forbidden("channel owner required".to_string()));
+    }
+    Ok(())
 }

@@ -2,7 +2,7 @@ use crate::auth::AuthUser;
 use crate::deepseek;
 use crate::error::{AppError, AppResult};
 use crate::gif::{self, GifResult, GifSettings};
-use crate::routes::{channel_kind, is_member};
+use crate::routes::require_member;
 use crate::state::SharedState;
 use crate::ws::{channel_member_ids, envelope, voice};
 use axum::extract::{Path, Query, State};
@@ -206,7 +206,7 @@ pub async fn suggest(
     Path(channel_id): Path<Uuid>,
     auth: AuthUser,
 ) -> AppResult<Json<serde_json::Value>> {
-    require_member(&state, channel_id, auth.id).await?;
+    require_member(&state.pool, channel_id, auth.id).await?;
 
     let settings = gif::load_settings(&state.pool, &state.config).await;
     let enabled = gif::resolve_provider(&settings).is_some();
@@ -255,7 +255,7 @@ pub async fn suggest_voice(
     Path(channel_id): Path<Uuid>,
     auth: AuthUser,
 ) -> AppResult<Json<serde_json::Value>> {
-    require_member(&state, channel_id, auth.id).await?;
+    require_member(&state.pool, channel_id, auth.id).await?;
 
     let settings = gif::load_settings(&state.pool, &state.config).await;
     let enabled = gif::resolve_provider(&settings).is_some();
@@ -454,16 +454,4 @@ fn empty_suggestion() -> Json<serde_json::Value> {
         "query": Option::<String>::None,
         "results": Vec::<GifResult>::new(),
     }))
-}
-
-async fn require_member(state: &SharedState, channel_id: Uuid, user_id: Uuid) -> AppResult<()> {
-    if channel_kind(&state.pool, channel_id).await?.is_none() {
-        return Err(AppError::NotFound("channel not found".to_string()));
-    }
-    if !is_member(&state.pool, channel_id, user_id).await? {
-        return Err(AppError::Forbidden(
-            "not a member of this channel".to_string(),
-        ));
-    }
-    Ok(())
 }

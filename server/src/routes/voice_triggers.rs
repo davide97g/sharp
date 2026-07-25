@@ -1,7 +1,7 @@
 use crate::auth::VoiceConfigAuth;
 use crate::error::{AppError, AppResult};
 use crate::models::VoiceTrigger;
-use crate::routes::{channel_kind, member_role, ChannelRole};
+use crate::routes::require_member_role;
 use crate::state::SharedState;
 use crate::ws::{channel_member_ids, envelope};
 use axum::extract::{Path, State};
@@ -69,25 +69,18 @@ fn duplicate_error(error: sqlx::Error) -> AppError {
     }
 }
 
-async fn require_channel_member(
-    state: &SharedState,
-    channel_id: Uuid,
-    user_id: Uuid,
-) -> AppResult<ChannelRole> {
-    if channel_kind(&state.pool, channel_id).await?.is_none() {
-        return Err(AppError::NotFound("channel not found".to_string()));
-    }
-    member_role(&state.pool, channel_id, user_id)
-        .await?
-        .ok_or_else(|| AppError::Forbidden("not a member of this channel".to_string()))
-}
-
+/// Write gate for shared channel triggers.
+///
+/// Deliberately *not* the shared `require_can_post`: this surface distinguishes a
+/// non-member (403 "not a member of this channel") from a viewer (403 "editing voice
+/// triggers requires owner or editor role"), where every posting route collapses both onto
+/// its own denial message. Both response bodies are long-standing; keep them.
 async fn require_channel_editor(
     state: &SharedState,
     channel_id: Uuid,
     user_id: Uuid,
 ) -> AppResult<()> {
-    if !require_channel_member(state, channel_id, user_id)
+    if !require_member_role(&state.pool, channel_id, user_id)
         .await?
         .can_post()
     {
@@ -165,7 +158,7 @@ pub async fn list_channel(
     Path(channel_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     let user_id = registered_user(auth)?;
-    require_channel_member(&state, channel_id, user_id).await?;
+    require_member_role(&state.pool, channel_id, user_id).await?;
     let rows = sqlx::query(
         "SELECT id, channel_id, user_id, phrase, action, created_at
          FROM voice_triggers

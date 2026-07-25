@@ -1,7 +1,9 @@
 use crate::auth::{user_from_row, AuthUser};
 use crate::error::{AppError, AppResult};
 use crate::models::{Channel, User};
-use crate::routes::{channel_member_roles, count_owners, is_member, member_role, ChannelRole};
+use crate::routes::{
+    channel_member_roles, count_owners, is_member, member_role, require_owner, ChannelRole,
+};
 use crate::state::SharedState;
 use crate::ws::{channel_member_ids, envelope};
 use axum::extract::{Path, State};
@@ -45,16 +47,6 @@ fn map_channel_row(row: &PgRow) -> AppResult<Channel> {
         ai_excluded: row.try_get("ai_excluded").unwrap_or(false),
         message_ttl_minutes: row.try_get("message_ttl_minutes").unwrap_or(None),
     })
-}
-
-async fn require_owner(pool: &PgPool, channel_id: Uuid, user_id: Uuid) -> AppResult<()> {
-    if !member_role(pool, channel_id, user_id)
-        .await?
-        .is_some_and(ChannelRole::is_owner)
-    {
-        return Err(AppError::Forbidden("channel owner required".to_string()));
-    }
-    Ok(())
 }
 
 async fn broadcast_channel_to_members(

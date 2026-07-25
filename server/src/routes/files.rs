@@ -2,7 +2,7 @@ use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
 use crate::models::Attachment;
 use crate::routes::docs::{editable_doc_channel, require_doc_visible};
-use crate::routes::{channel_kind, is_member, member_role};
+use crate::routes::{require_can_post, require_member};
 use crate::state::SharedState;
 use axum::body::Body;
 use axum::extract::{Multipart, Path, Query, State};
@@ -51,32 +51,8 @@ fn is_safe_inline(content_type: &str) -> bool {
         || ct == "text/plain"
 }
 
-async fn require_member(state: &SharedState, channel_id: Uuid, user_id: Uuid) -> AppResult<()> {
-    if channel_kind(&state.pool, channel_id).await?.is_none() {
-        return Err(AppError::NotFound("channel not found".to_string()));
-    }
-    if !is_member(&state.pool, channel_id, user_id).await? {
-        return Err(AppError::Forbidden(
-            "not a member of this channel".to_string(),
-        ));
-    }
-    Ok(())
-}
-
-async fn require_can_post(state: &SharedState, channel_id: Uuid, user_id: Uuid) -> AppResult<()> {
-    if channel_kind(&state.pool, channel_id).await?.is_none() {
-        return Err(AppError::NotFound("channel not found".to_string()));
-    }
-    if !member_role(&state.pool, channel_id, user_id)
-        .await?
-        .is_some_and(|role| role.can_post())
-    {
-        return Err(AppError::Forbidden(
-            "uploading requires owner or editor role".to_string(),
-        ));
-    }
-    Ok(())
-}
+/// 403 body for a viewer (or non-member) trying to upload into a channel.
+const UPLOAD_DENIED: &str = "uploading requires owner or editor role";
 
 fn normalized_content_type(content_type: &str) -> String {
     content_type
@@ -113,7 +89,7 @@ pub async fn upload(
     auth: AuthUser,
     mut multipart: Multipart,
 ) -> AppResult<(StatusCode, Json<Attachment>)> {
-    require_can_post(&state, channel_id, auth.id).await?;
+    require_can_post(&state.pool, channel_id, auth.id, UPLOAD_DENIED).await?;
     upload_inner(&state, channel_id, auth.id, None, &mut multipart).await
 }
 
@@ -280,7 +256,7 @@ pub async fn download(
     let doc_id: Option<Uuid> = row.try_get("doc_id")?;
     match doc_id {
         Some(doc_id) => require_doc_visible(&state.pool, doc_id, auth.id).await?,
-        None => require_member(&state, channel_id, auth.id).await?,
+        None => require_member(&state.pool, channel_id, auth.id).await?,
     }
 
     let key: String = row.try_get("key")?;

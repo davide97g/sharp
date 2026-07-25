@@ -3,7 +3,7 @@ use crate::error::{AppError, AppResult};
 use crate::gif;
 use crate::models::{Attachment, Message, MessageUser, Reaction, ReplyPreview};
 use crate::notify;
-use crate::routes::{channel_kind, is_member, member_role};
+use crate::routes::{channel_kind, require_can_post, require_member};
 use crate::state::SharedState;
 use crate::ws::{channel_member_ids, envelope};
 use axum::extract::{Path, Query, State};
@@ -222,32 +222,8 @@ async fn message_meta(pool: &PgPool, id: i64) -> AppResult<MessageMeta> {
     })
 }
 
-async fn require_member(state: &SharedState, channel_id: Uuid, user_id: Uuid) -> AppResult<()> {
-    if channel_kind(&state.pool, channel_id).await?.is_none() {
-        return Err(AppError::NotFound("channel not found".to_string()));
-    }
-    if !is_member(&state.pool, channel_id, user_id).await? {
-        return Err(AppError::Forbidden(
-            "not a member of this channel".to_string(),
-        ));
-    }
-    Ok(())
-}
-
-async fn require_can_post(state: &SharedState, channel_id: Uuid, user_id: Uuid) -> AppResult<()> {
-    if channel_kind(&state.pool, channel_id).await?.is_none() {
-        return Err(AppError::NotFound("channel not found".to_string()));
-    }
-    if !member_role(&state.pool, channel_id, user_id)
-        .await?
-        .is_some_and(|role| role.can_post())
-    {
-        return Err(AppError::Forbidden(
-            "posting requires owner or editor role".to_string(),
-        ));
-    }
-    Ok(())
-}
+/// 403 body for a viewer (or non-member) trying to write in a channel.
+const POST_DENIED: &str = "posting requires owner or editor role";
 
 fn validate_content(content: &str, encrypted: bool) -> AppResult<()> {
     let len = content.chars().count();
@@ -432,7 +408,7 @@ pub async fn list_messages(
     auth: AuthUser,
     Query(q): Query<ListQuery>,
 ) -> AppResult<Json<serde_json::Value>> {
-    require_member(&state, channel_id, auth.id).await?;
+    require_member(&state.pool, channel_id, auth.id).await?;
 
     let before: Option<i64> = match q.before {
         Some(ref s) if !s.is_empty() => Some(
@@ -479,7 +455,7 @@ pub async fn create_message(
     auth: AuthUser,
     Json(body): Json<CreateMessageRequest>,
 ) -> AppResult<(StatusCode, Json<Message>)> {
-    require_can_post(&state, channel_id, auth.id).await?;
+    require_can_post(&state.pool, channel_id, auth.id, POST_DENIED).await?;
     let encrypted = body.encrypted.unwrap_or(false);
     if encrypted && channel_kind(&state.pool, channel_id).await?.as_deref() != Some("dm") {
         return Err(AppError::BadRequest(
@@ -597,7 +573,7 @@ pub async fn get_thread(
     auth: AuthUser,
 ) -> AppResult<Json<serde_json::Value>> {
     let meta = message_meta(&state.pool, id).await?;
-    require_member(&state, meta.channel_id, auth.id).await?;
+    require_member(&state.pool, meta.channel_id, auth.id).await?;
 
     // Resolve to the top-level parent id.
     let parent_id = meta.parent_id.unwrap_or(id);
@@ -632,7 +608,7 @@ pub async fn edit_message(
     if meta.user_id != auth.id {
         return Err(AppError::Forbidden("not the author".to_string()));
     }
-    require_can_post(&state, meta.channel_id, auth.id).await?;
+    require_can_post(&state.pool, meta.channel_id, auth.id, POST_DENIED).await?;
     if meta.deleted {
         return Err(AppError::BadRequest(
             "cannot edit a deleted message".to_string(),
@@ -681,7 +657,7 @@ pub async fn delete_message(
     if meta.user_id != auth.id {
         return Err(AppError::Forbidden("not the author".to_string()));
     }
-    require_member(&state, meta.channel_id, auth.id).await?;
+    require_member(&state.pool, meta.channel_id, auth.id).await?;
 
     if !meta.deleted {
         sqlx::query("UPDATE messages SET deleted_at = now(), content = '' WHERE id = $1")
@@ -741,7 +717,7 @@ pub async fn add_reaction(
     auth: AuthUser,
 ) -> AppResult<StatusCode> {
     let meta = message_meta(&state.pool, id).await?;
-    require_can_post(&state, meta.channel_id, auth.id).await?;
+    require_can_post(&state.pool, meta.channel_id, auth.id, POST_DENIED).await?;
     if emoji.trim().is_empty() || emoji.chars().count() > 64 {
         return Err(AppError::Validation("invalid emoji".to_string()));
     }
@@ -777,7 +753,7 @@ pub async fn remove_reaction(
     auth: AuthUser,
 ) -> AppResult<StatusCode> {
     let meta = message_meta(&state.pool, id).await?;
-    require_member(&state, meta.channel_id, auth.id).await?;
+    require_member(&state.pool, meta.channel_id, auth.id).await?;
 
     sqlx::query("DELETE FROM reactions WHERE message_id = $1 AND user_id = $2 AND emoji = $3")
         .bind(id)
