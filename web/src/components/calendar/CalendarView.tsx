@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useStore } from '../../store'
 import { api } from '../../lib/api'
 import { toastError, toastInfo } from '../../lib/toast'
+import { KEYS, readLocal, writeLocal } from '../../lib/localPrefs'
 import { dayjs, dayKey, dayHeading, startOfWeek, weekHeading } from '../../lib/calendar'
 import { AgendaList } from './AgendaList'
 import { WeekGrid } from './WeekGrid'
@@ -19,11 +20,10 @@ function windowRange() {
 }
 
 type ViewMode = 'day' | 'week'
-const VIEW_KEY = 'sharp.calendarView'
 
 function initialView(): ViewMode {
   if (window.matchMedia('(max-width: 800px)').matches) return 'day'
-  return localStorage.getItem(VIEW_KEY) === 'week' ? 'week' : 'day'
+  return readLocal(KEYS.calendarView) === 'week' ? 'week' : 'day'
 }
 
 export function CalendarView() {
@@ -47,7 +47,7 @@ export function CalendarView() {
 
   function changeView(next: ViewMode) {
     setView(next)
-    localStorage.setItem(VIEW_KEY, next)
+    writeLocal(KEYS.calendarView, next)
   }
 
   function step(direction: 1 | -1) {

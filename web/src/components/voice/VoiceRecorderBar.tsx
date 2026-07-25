@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { fmtClockMs } from '../../lib/util'
 import type { VoiceRecorder } from '../../lib/audioRecording'
 import { TrashIcon } from '../../ui'
 
@@ -19,11 +20,6 @@ function prefersReducedMotion(): boolean {
   return typeof window !== 'undefined'
     ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
     : false
-}
-
-function fmtElapsed(ms: number): string {
-  const s = Math.floor(ms / 1000)
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
 function Waveform({ recorder }: { recorder: VoiceRecorder }) {
@@ -97,7 +93,7 @@ export function VoiceRecorderBar({
         Recording
       </span>
       <Waveform recorder={recorder} />
-      <span className="tabular-nums text-sm text-[var(--color-text-dim)]">{fmtElapsed(elapsedMs)}</span>
+      <span className="tabular-nums text-sm text-[var(--color-text-dim)]">{fmtClockMs(elapsedMs)}</span>
       <div className="ml-auto flex items-center gap-1.5">
         <button
           type="button"

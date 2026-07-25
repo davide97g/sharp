@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { fmtHoursMinutes } from '../../lib/util'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { meetingChannelLabel, meetingDisplayTitle } from '../../lib/meetingLabels'
@@ -66,7 +67,7 @@ export function MeetingsHome() {
             </div>
             <div className="grid grid-cols-2 gap-px self-end overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-border)]">
               <Metric value={String(completed.length)} label="records" />
-              <Metric value={formatMinutes(totalMinutes)} label="captured" />
+              <Metric value={fmtHoursMinutes(totalMinutes)} label="captured" />
             </div>
           </section>
 
@@ -150,7 +151,7 @@ function MeetingRow({ meeting, onOpen }: { meeting: MeetingListItem; onOpen: () 
         <div className="mt-1 truncate text-xs text-[var(--color-text-faint)]">{meetingChannelLabel(meeting, channels)} · {meeting.participant_count} participants · {meeting.transcript_count} phrases</div>
       </div>
       <div className="col-span-2 flex items-center justify-end gap-2 text-right sm:col-span-1 sm:block">
-        <div className="font-mono text-xs tabular-nums text-[var(--color-text-dim)]">{formatMinutes(durationMinutes(meeting))}</div>
+        <div className="font-mono text-xs tabular-nums text-[var(--color-text-dim)]">{fmtHoursMinutes(durationMinutes(meeting))}</div>
         <div className={`text-3xs sm:mt-1 ${meeting.summary_status === 'ready' ? 'text-success-fg' : 'text-[var(--color-text-faint)]'}`}>
           {meeting.summary_status === 'ready' ? 'Notes ready' : meeting.summary_status}
         </div>
@@ -162,11 +163,6 @@ function MeetingRow({ meeting, onOpen }: { meeting: MeetingListItem; onOpen: () 
 function durationMinutes(meeting: MeetingListItem) {
   const end = meeting.ended_at ? new Date(meeting.ended_at).getTime() : Date.now()
   return Math.max(0, Math.round((end - new Date(meeting.started_at).getTime()) / 60_000))
-}
-
-function formatMinutes(value: number) {
-  if (value < 60) return `${value}m`
-  return `${Math.floor(value / 60)}h ${value % 60}m`
 }
 
 const dayOf = (value: string) => new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(value))

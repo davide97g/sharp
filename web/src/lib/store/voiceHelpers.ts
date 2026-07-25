@@ -7,6 +7,7 @@
 // participant who is not there.
 
 import type { Poll, VoiceRoomSnapshot } from '../types'
+import { KEYS, readLocalBool, writeLocalBool } from '../localPrefs'
 import { loadVideoBackground } from '../videoBackgrounds'
 import type { VoiceRoom, VoiceState } from '../../store'
 
@@ -91,22 +92,14 @@ export function voiceErrorMessage(code: string): string {
 }
 
 // Device-local, not synced: denoising depends on the mic you are actually using.
-const NOISE_SUPPRESSION_KEY = 'sharp.noiseSuppression'
-
 export function saveNoiseSuppression(enabled: boolean) {
-  try {
-    window.localStorage.setItem(NOISE_SUPPRESSION_KEY, enabled ? '1' : '0')
-  } catch {
-    // ignore persistence failures (private mode etc.)
-  }
+  writeLocalBool(KEYS.noiseSuppression, enabled)
 }
 
+// Defaults to on: denoising is what most people want, and an unreadable store should
+// not silently turn it off.
 export function storedNoiseSuppression(): boolean {
-  try {
-    return window.localStorage.getItem(NOISE_SUPPRESSION_KEY) !== '0'
-  } catch {
-    return true
-  }
+  return readLocalBool(KEYS.noiseSuppression, true)
 }
 
 /** The idle voice slice — also the reset applied on every leave/kick/error path. */

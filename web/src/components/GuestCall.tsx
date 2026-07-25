@@ -3,10 +3,9 @@ import { useParams } from 'react-router-dom'
 import { ApiRequestError, api, setSessionToken } from '../lib/api'
 import { useStore } from '../store'
 import { toastError } from '../lib/toast'
+import { KEYS, readLocal, writeLocal } from '../lib/localPrefs'
 import { Button, Field, Input } from '../ui'
 import { VideoStage } from './voice/VideoStage'
-
-const GUEST_NAME_KEY = 'sharp.guestName'
 
 type Phase = 'loading' | 'invalid' | 'form' | 'connecting' | 'incall' | 'left'
 
@@ -25,7 +24,7 @@ export function GuestCall() {
 
   const [phase, setPhase] = useState<Phase>('loading')
   const [channelName, setChannelName] = useState('')
-  const [name, setName] = useState(() => localStorage.getItem(GUEST_NAME_KEY) ?? '')
+  const [name, setName] = useState(() => readLocal(KEYS.guestName) ?? '')
   const [busy, setBusy] = useState(false)
 
   const boundChannelRef = useRef<string | null>(null)
@@ -120,7 +119,7 @@ export function GuestCall() {
     setBusy(true)
     try {
       const res = await api.callLink.join(linkToken, trimmed)
-      localStorage.setItem(GUEST_NAME_KEY, trimmed)
+      writeLocal(KEYS.guestName, trimmed)
       boundChannelRef.current = res.channel_id
       wasInCallRef.current = false
       setPhase('connecting')

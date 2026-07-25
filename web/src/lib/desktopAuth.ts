@@ -3,6 +3,7 @@
 // exchange it for a JWT. Native (Tauri) only — no-ops / not wired on the web.
 
 import { api, resolveBaseUrl } from './api'
+import { KEYS, readLocal, removeLocal, writeLocal } from './localPrefs'
 import type { AuthResponse } from './types'
 
 export const isTauri =
@@ -10,8 +11,6 @@ export const isTauri =
 
 /** Custom URL scheme registered by the Tauri shell (tauri.conf.json). */
 export const DEEP_LINK_SCHEME = 'sharp'
-
-const STATE_KEY = 'sharp.desktopAuthState'
 
 function randomState(): string {
   const bytes = new Uint8Array(16)
@@ -26,7 +25,7 @@ function randomState(): string {
  */
 export async function startBrowserLogin(): Promise<void> {
   const state = randomState()
-  localStorage.setItem(STATE_KEY, state)
+  writeLocal(KEYS.desktopAuthState, state)
   const base = resolveBaseUrl()
   const url = `${base}/desktop-auth?state=${encodeURIComponent(state)}&scheme=${DEEP_LINK_SCHEME}`
   const { open } = await import('@tauri-apps/plugin-shell')
@@ -58,9 +57,9 @@ export async function handleAuthDeepLink(rawUrl: string): Promise<AuthResponse |
 
   const code = url.searchParams.get('code')
   const state = url.searchParams.get('state')
-  const expected = localStorage.getItem(STATE_KEY)
+  const expected = readLocal(KEYS.desktopAuthState)
   if (!code || !state || !expected || state !== expected) return null
-  localStorage.removeItem(STATE_KEY)
+  removeLocal(KEYS.desktopAuthState)
 
   return api.desktopExchange(code)
 }

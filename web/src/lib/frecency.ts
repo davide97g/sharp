@@ -9,7 +9,7 @@
 // (every single navigation writes), it is worthless on another device, and the
 // blob has an 8 KB server-side ceiling.
 
-const KEY = 'sharp.frecency'
+import { KEYS, readLocalJson, writeLocalJson } from './localPrefs'
 const MAX_ENTRIES = 300
 
 type Entry = { n: number; last: number }
@@ -18,21 +18,13 @@ let table: Record<string, Entry> | null = null
 
 function load(): Record<string, Entry> {
   if (table) return table
-  try {
-    table = JSON.parse(window.localStorage.getItem(KEY) || '{}') as Record<string, Entry>
-  } catch {
-    table = {}
-  }
+  table = readLocalJson<Record<string, Entry>>(KEYS.frecency, {})
   return table
 }
 
 function save() {
-  if (!table) return
-  try {
-    window.localStorage.setItem(KEY, JSON.stringify(table))
-  } catch {
-    /* storage unavailable — ranking degrades to insertion order */
-  }
+  // Storage failure just degrades ranking to insertion order.
+  if (table) writeLocalJson(KEYS.frecency, table)
 }
 
 /** Record that the user opened something. `key` is `<kind>:<id>`. */

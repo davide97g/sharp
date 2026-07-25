@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { fmtDurationMs } from '../../lib/util'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { toastError, toastSuccess } from '../../lib/toast'
@@ -153,7 +154,7 @@ function MeetingHeader({ meeting, displayTitle, onSave }: { meeting: MeetingDeta
         className="mt-3 w-full bg-transparent text-3xl font-semibold tracking-[-0.04em] outline-none placeholder:text-[var(--color-text-faint)] sm:text-4xl"
       />
       <div className="mt-5 flex flex-wrap gap-x-6 gap-y-2 font-mono text-2xs tabular-nums text-[var(--color-text-faint)]">
-        <span>{formatDuration(duration)}</span>
+        <span>{fmtDurationMs(duration)}</span>
         <span>{meeting.participant_count} participants</span>
         <span>{meeting.transcript_count} transcript phrases</span>
         <span>{meeting.status === 'active' ? 'In progress' : `Ended ${meeting.ended_at ? timeOf(meeting.ended_at) : 'unexpectedly'}`}</span>
@@ -284,6 +285,5 @@ function uniqueMemberAttendees(attendance: MeetingAttendance[]) { const seen = n
 function uniqueAttendees(attendance: MeetingAttendance[]) { const map = new Map<string, MeetingAttendance & { key: string }>(); for (const item of attendance) { const key = item.user_id ?? `${item.display_name}-${item.guest}`; const existing = map.get(key); if (!existing) map.set(key, { ...item, key }); else { if (new Date(item.joined_at) < new Date(existing.joined_at)) existing.joined_at = item.joined_at; if (!existing.left_at || !item.left_at) existing.left_at = null; else if (new Date(item.left_at) > new Date(existing.left_at)) existing.left_at = item.left_at } } return [...map.values()] }
 function speakerColor(key: string) { let hash = 0; for (const char of key) hash = (hash * 31 + char.charCodeAt(0)) | 0; return SPEAKER_COLORS[Math.abs(hash) % SPEAKER_COLORS.length] }
 function offsetTime(start: string, at: string) { const seconds = Math.max(0, Math.floor((new Date(at).getTime() - new Date(start).getTime()) / 1000)); return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}` }
-function formatDuration(ms: number) { const minutes = Math.floor(ms / 60_000); return `${Math.floor(minutes / 60) ? `${Math.floor(minutes / 60)}h ` : ''}${minutes % 60}m` }
 const fullDate = (value: string) => new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(new Date(value))
 const timeOf = (value: string) => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(value))

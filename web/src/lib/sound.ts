@@ -13,26 +13,23 @@
 //     if the AudioContext can't start (autoplay policy) the sound is dropped, not
 //     queued — no backlog of stale blips.
 
+import { KEYS, readLocalJson, writeLocalJson } from './localPrefs'
+
 export type SoundSettings = { enabled: boolean; volume: number }
 
-const STORAGE_KEY = 'sharp.sounds'
 const DEFAULTS: SoundSettings = { enabled: true, volume: 0.7 }
 
 function loadSettings(): SoundSettings {
   if (typeof window === 'undefined') return { ...DEFAULTS }
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { ...DEFAULTS }
-    const parsed = JSON.parse(raw) as Partial<SoundSettings>
-    return {
-      enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : DEFAULTS.enabled,
-      volume:
-        typeof parsed.volume === 'number' && Number.isFinite(parsed.volume)
-          ? Math.min(1, Math.max(0, parsed.volume))
-          : DEFAULTS.volume,
-    }
-  } catch {
-    return { ...DEFAULTS }
+  const parsed = readLocalJson<Partial<SoundSettings>>(KEYS.sounds, {})
+  // Re-validate rather than trusting the blob: volume feeds a GainNode, and NaN or a
+  // value outside 0–1 there is either silence or clipping.
+  return {
+    enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : DEFAULTS.enabled,
+    volume:
+      typeof parsed.volume === 'number' && Number.isFinite(parsed.volume)
+        ? Math.min(1, Math.max(0, parsed.volume))
+        : DEFAULTS.volume,
   }
 }
 
@@ -56,11 +53,8 @@ export function setSoundSink(fn: (settings: SoundSettings) => void) {
 
 function commit(next: SoundSettings) {
   settings = next
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
-  } catch {
-    /* storage unavailable — keep the in-memory value */
-  }
+  // Storage failure keeps the in-memory value, so the session still behaves.
+  writeLocalJson(KEYS.sounds, settings)
   if (master && ctx) {
     // Smoothly track the new volume so dragging the slider doesn't zipper.
     master.gain.setTargetAtTime(settings.volume, ctx.currentTime, 0.02)

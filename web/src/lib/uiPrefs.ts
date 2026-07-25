@@ -14,6 +14,13 @@
 // top level only, so a nested value (`sounds`) must always be sent complete.
 
 import { normalizeIntensity, type SeasonalIntensity } from './seasonal'
+import {
+  KEYS,
+  LEGACY_UI_KEYS,
+  readLocal,
+  readLocalJson,
+  writeLocalJson,
+} from './localPrefs'
 
 export type ColorScheme = 'dark' | 'light' | 'system'
 export type Density = 'cozy' | 'compact' | 'ultra'
@@ -81,7 +88,7 @@ export type UiPrefs = {
   focusMode: boolean
 }
 
-export const UI_PREFS_KEY = 'sharp.ui'
+export const UI_PREFS_KEY = KEYS.ui
 
 export const DEFAULT_UI_PREFS: UiPrefs = {
   theme: 'default',
@@ -237,24 +244,15 @@ function normalizeOverrides(
 /** Read the local mirror. Also folds in the pre-0029 single-purpose keys, once. */
 export function readLocalUiPrefs(): UiPrefs {
   if (typeof window === 'undefined') return { ...DEFAULT_UI_PREFS }
-  let stored: unknown = null
-  try {
-    const raw = window.localStorage.getItem(UI_PREFS_KEY)
-    if (raw) stored = JSON.parse(raw)
-  } catch {
-    /* corrupt or unavailable — fall through to legacy/defaults */
-  }
+  // A corrupt or unavailable blob falls through to the legacy keys, then to defaults.
+  const stored = readLocalJson<unknown>(UI_PREFS_KEY, null)
   if (stored) return normalizeUiPrefs(stored)
   return normalizeUiPrefs(readLegacyKeys())
 }
 
 /** Persist the mirror. Failure is non-fatal — the session keeps its in-memory value. */
 export function writeLocalUiPrefs(prefs: UiPrefs) {
-  try {
-    window.localStorage.setItem(UI_PREFS_KEY, JSON.stringify(prefs))
-  } catch {
-    /* storage unavailable (private mode, quota) */
-  }
+  writeLocalJson(UI_PREFS_KEY, prefs)
 }
 
 /**
@@ -265,22 +263,16 @@ export function writeLocalUiPrefs(prefs: UiPrefs) {
  */
 function readLegacyKeys(): Partial<UiPrefs> {
   const out: Partial<UiPrefs> = {}
-  const get = (key: string) => {
-    try {
-      return window.localStorage.getItem(key)
-    } catch {
-      return null
-    }
-  }
+  const get = readLocal
   // Pre-v2 values were 'dark' | 'light' | a preset id; the schemes collapse to
   // the default preset, matching the migration the old theme.ts did.
-  const theme = get('sharp.theme')
+  const theme = get(LEGACY_UI_KEYS.theme)
   if (theme && theme !== 'dark' && theme !== 'light') out.theme = theme
-  const rail = get('sharp.railPosition')
+  const rail = get(LEGACY_UI_KEYS.railPosition)
   if (rail === 'left' || rail === 'top' || rail === 'bottom') out.railPosition = rail
-  const dock = get('sharp.dockAutoHide')
+  const dock = get(LEGACY_UI_KEYS.dockAutoHide)
   if (dock !== null) out.dockAutoHide = dock === '1'
-  const sounds = get('sharp.sounds')
+  const sounds = get(KEYS.sounds)
   if (sounds) {
     try {
       const parsed = JSON.parse(sounds) as Partial<UiPrefs['sounds']>

@@ -1,10 +1,5 @@
 import { useCallback, useRef } from 'react'
-
-function initialsOf(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean)
-  if (words.length === 0) return ''
-  return (words[0][0] + (words[1]?.[0] ?? '')).toUpperCase()
-}
+import { initials } from '../../lib/util'
 
 const canTilt = () =>
   typeof window !== 'undefined' &&
@@ -52,13 +47,15 @@ export function BadgeCard({
 
   const displayName = name.trim()
   const displayEmail = email?.trim()
-  const initials = initialsOf(name)
+  // Empty stays empty so the '#' placeholder shows while the field is untouched — the
+  // shared initials() returns '?' for a blank name, which would leak into the badge.
+  const badgeInitials = name.trim() ? initials(name) : ''
 
   if (compact) {
     return (
       <div className="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] px-3.5 py-3">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[linear-gradient(135deg,var(--color-accent),var(--color-accent-hover))] text-sm font-extrabold text-white">
-          {initials || '#'}
+          {badgeInitials || '#'}
         </span>
         <div className="min-w-0 flex-1">
           <div
@@ -117,7 +114,7 @@ export function BadgeCard({
         </div>
         <div className="mt-4 flex items-center gap-3.5">
           <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[linear-gradient(135deg,var(--color-accent),var(--color-accent-hover))] text-xl font-extrabold text-white shadow-[0_0_24px_-6px_var(--color-accent)]">
-            {initials || <span className="opacity-70">#</span>}
+            {badgeInitials || <span className="opacity-70">#</span>}
           </span>
           <div className="min-w-0">
             <div

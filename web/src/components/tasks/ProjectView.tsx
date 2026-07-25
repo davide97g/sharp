@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useStore } from '../../store'
 import { registerShortcut } from '../../lib/shortcuts'
+import { KEY_PREFIXES, readLocal, scopedKey, writeLocal } from '../../lib/localPrefs'
 import type { Task, TaskPriority } from '../../lib/types'
 import { NewTaskModal } from './NewTaskModal'
 import { TaskBoardView } from './TaskBoardView'
@@ -13,7 +14,6 @@ import { PRIORITIES, PRIORITY_LABELS, PriorityIcon, StateDot } from './taskUi'
 import { Avatar } from '../Avatar'
 import { Button, CheckIcon, ChevronLeftIcon, IconButton, Menu, MenuItem, PlusIcon } from '../../ui'
 
-const VIEW_KEY = 'sharp.taskView.' // + projectId → 'list' | 'board'
 
 export function ProjectView() {
   const { key, num } = useParams()
@@ -37,7 +37,7 @@ export function ProjectView() {
     setActiveProject(project.id)
     void loadProjectTasks(project.id)
     setView(
-      (window.localStorage.getItem(VIEW_KEY + project.id) as 'list' | 'board') ?? 'list',
+      (readLocal(scopedKey(KEY_PREFIXES.taskView, project.id)) as 'list' | 'board') ?? 'list',
     )
     return () => setActiveProject(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -45,7 +45,7 @@ export function ProjectView() {
 
   function switchView(v: 'list' | 'board') {
     setView(v)
-    if (project) window.localStorage.setItem(VIEW_KEY + project.id, v)
+    if (project) writeLocal(scopedKey(KEY_PREFIXES.taskView, project.id), v)
   }
 
   // `c` creates a task from anywhere in the project view.

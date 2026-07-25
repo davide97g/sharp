@@ -68,10 +68,15 @@ import type {
   SharpyStreamEvent,
 } from './types'
 import type { UiPrefs } from './uiPrefs'
+import { KEYS } from './localPrefs'
 import type { Wallpaper } from './wallpaper'
 
-const TOKEN_KEY = 'sharp.token'
-const SERVER_URL_KEY = 'sharp.serverUrl'
+// Auth storage deliberately does NOT go through lib/localPrefs' swallowing accessors: a
+// preference that fails to persist is a shrug, but a token that fails to persist would
+// look like a successful login that evaporates on reload. Let it throw so the caller
+// surfaces it.
+const TOKEN_KEY = KEYS.token
+const SERVER_URL_KEY = KEYS.serverUrl
 
 // In-memory auth override for guest call sessions. When set, it wins over the
 // persisted login token so a guest can authenticate the WS + voice/config
@@ -180,6 +185,24 @@ async function request<T>(path: string, opts: ReqOpts = {}): Promise<T> {
   return data as T
 }
 
+/**
+ * Build a query suffix from a params object, skipping `undefined`, `null` and `''`.
+ *
+ * Returns `''` for an empty result rather than a bare `?`, so callers can always append it
+ * unconditionally: `` `/meetings${qs({ q })}` ``. Skipping empty strings matters — sending
+ * `?q=` is not the same request as omitting `q`, and several list endpoints treat a present
+ * but empty filter as "match nothing".
+ */
+function qs(params: Record<string, string | number | boolean | null | undefined>): string {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') continue
+    search.set(key, String(value))
+  }
+  const query = search.toString()
+  return query ? `?${query}` : ''
+}
+
 function uploadAttachment(
   path: string,
   file: File,
@@ -284,14 +307,7 @@ export const api = {
         q?: string
       } = {},
     ) => {
-      const params = new URLSearchParams()
-      for (const [k, v] of Object.entries(filters)) {
-        if (v !== undefined && v !== '') params.set(k, String(v))
-      }
-      const query = params.toString()
-      return request<{ tasks: Task[] }>(
-        `/projects/${projectId}/tasks${query ? `?${query}` : ''}`,
-      )
+      return request<{ tasks: Task[] }>(`/projects/${projectId}/tasks${qs(filters)}`)
     },
     create: (projectId: string, input: TaskCreateInput) =>
       request<Task>(`/projects/${projectId}/tasks`, { method: 'POST', body: input }),
@@ -358,13 +374,14 @@ export const api = {
   },
   meetings: {
     list: (input: { channelId?: string; q?: string; before?: string; limit?: number } = {}) => {
-      const params = new URLSearchParams()
-      if (input.channelId) params.set('channel_id', input.channelId)
-      if (input.q) params.set('q', input.q)
-      if (input.before) params.set('before', input.before)
-      if (input.limit) params.set('limit', String(input.limit))
-      const query = params.toString()
-      return request<MeetingsResponse>(`/meetings${query ? `?${query}` : ''}`)
+      return request<MeetingsResponse>(
+        `/meetings${qs({
+          channel_id: input.channelId,
+          q: input.q,
+          before: input.before,
+          limit: input.limit,
+        })}`,
+      )
     },
     get: (id: string) => request<MeetingDetail>(`/meetings/${id}`),
     update: (id: string, input: { title?: string; summary?: string; decisions?: string }) =>
@@ -649,12 +666,7 @@ export const api = {
 
   // --- messages ---
   messages(channelId: string, before?: string, limit = 50) {
-    const params = new URLSearchParams()
-    if (before) params.set('before', before)
-    params.set('limit', String(limit))
-    return request<MessagesResponse>(
-      `/channels/${channelId}/messages?${params.toString()}`,
-    )
+    return request<MessagesResponse>(`/channels/${channelId}/messages${qs({ before, limit })}`)
   },
   sendMessage(
     channelId: string,
@@ -701,8 +713,7 @@ export const api = {
 
   // --- end-to-end encryption ---
   e2eeDevices(userId: string) {
-    const params = new URLSearchParams({ user_id: userId })
-    return request<E2eeDevicesResponse>(`/e2ee/devices?${params.toString()}`)
+    return request<E2eeDevicesResponse>(`/e2ee/devices${qs({ user_id: userId })}`)
   },
   registerDevice(device: Pick<E2eeDevice, 'id' | 'name' | 'x25519_pub' | 'ed25519_pub'>) {
     return request<void>('/e2ee/devices', { method: 'POST', body: device })
@@ -732,10 +743,7 @@ export const api = {
 
   // --- notifications ---
   notifications(before?: string, limit = 30) {
-    const params = new URLSearchParams()
-    if (before) params.set('before', before)
-    params.set('limit', String(limit))
-    return request<NotificationsResponse>(`/notifications?${params.toString()}`)
+    return request<NotificationsResponse>(`/notifications${qs({ before, limit })}`)
   },
   markNotificationsRead(opts: { ids?: string[]; all?: boolean }) {
     return request<void>('/notifications/read', { method: 'POST', body: opts })
@@ -803,9 +811,7 @@ export const api = {
 
   // --- search ---
   search(q: string, limit = 20, channelId?: string) {
-    const params = new URLSearchParams({ q, limit: String(limit) })
-    if (channelId) params.set('channel_id', channelId)
-    return request<SearchResponse>(`/search?${params.toString()}`)
+    return request<SearchResponse>(`/search${qs({ q, limit, channel_id: channelId })}`)
   },
 
   // --- GIFs ---
@@ -813,8 +819,7 @@ export const api = {
     return request<GifConfig>('/gifs/config')
   },
   searchGifs(q: string, limit = 24) {
-    const params = new URLSearchParams({ q, limit: String(limit) })
-    return request<{ results: GifResult[] }>(`/gifs/search?${params.toString()}`)
+    return request<{ results: GifResult[] }>(`/gifs/search${qs({ q, limit })}`)
   },
   getGifSettings() {
     return request<GifSettings>('/gifs/settings')
@@ -903,14 +908,10 @@ export const api = {
     return request<void>('/mentions/read', { method: 'POST', body: { ids } })
   },
   docSearch(q: string, limit = 20, docId?: string) {
-    const params = new URLSearchParams({ q, limit: String(limit) })
-    if (docId) params.set('doc_id', docId)
-    return request<DocSearchResponse>(`/docs/search?${params.toString()}`)
+    return request<DocSearchResponse>(`/docs/search${qs({ q, limit, doc_id: docId })}`)
   },
   recentDocs(kind?: 'doc' | 'canvas' | 'board', limit = 30) {
-    const params = new URLSearchParams({ limit: String(limit) })
-    if (kind) params.set('kind', kind)
-    return request<RecentDocsResponse>(`/docs/recent?${params.toString()}`)
+    return request<RecentDocsResponse>(`/docs/recent${qs({ limit, kind })}`)
   },
 
   // --- Sharpy: AI workspace assistant ---
@@ -954,10 +955,8 @@ export const api = {
         body: { selected },
       }),
     sync: () => request<void>('/calendar/sync', { method: 'POST' }),
-    events: (from: string, to: string) => {
-      const params = new URLSearchParams({ from, to })
-      return request<CalendarEventsResponse>(`/calendar/events?${params.toString()}`)
-    },
+    events: (from: string, to: string) =>
+      request<CalendarEventsResponse>(`/calendar/events${qs({ from, to })}`),
     meetings: {
       create: (input: {
         title: string

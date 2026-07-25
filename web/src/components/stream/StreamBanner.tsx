@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { fmtCountdown } from '../../lib/util'
 import { useStore, streamingActive } from '../../store'
 
 /**
@@ -63,9 +64,9 @@ export function StreamBanner() {
       <span className="text-3xs font-bold uppercase tracking-[0.18em]">Privacy Shield</span>
       <span className="min-w-0 flex-1 truncate font-medium opacity-90">
         {fullyPaused
-          ? `paused — everything visible (${formatCountdown(countdown)})`
+          ? `paused — everything visible (${fmtCountdown(countdown)})`
           : partiallyPaused
-            ? `on — ${channelRemaining.length} ${channelRemaining.length === 1 ? 'conversation' : 'conversations'} revealed (${formatCountdown(countdown)})`
+            ? `on — ${channelRemaining.length} ${channelRemaining.length === 1 ? 'conversation' : 'conversations'} revealed (${fmtCountdown(countdown)})`
             : 'on — private chats, previews & email hidden'}
       </span>
       {(fullyPaused || partiallyPaused) && (
@@ -90,9 +91,3 @@ export function StreamBanner() {
   )
 }
 
-function formatCountdown(ms: number): string {
-  const total = Math.max(0, Math.ceil(ms / 1000))
-  const m = Math.floor(total / 60)
-  const s = total % 60
-  return `${m}:${String(s).padStart(2, '0')}`
-}

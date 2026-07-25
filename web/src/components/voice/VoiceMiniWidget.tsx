@@ -8,12 +8,12 @@ import {
 } from 'react'
 import { displayNameFor, effectiveNicknames } from '../../lib/displayName'
 import { channelLabel } from '../../lib/util'
+import { KEYS, readLocal, writeLocal } from '../../lib/localPrefs'
 import { useStore } from '../../store'
 import { useAudioAuraPreference } from '../../lib/meetingEffects'
 import { AudioAuraAvatar } from './AudioAuraAvatar'
 import { MicActivityIcon } from './MicActivityIcon'
 
-const CORNER_KEY = 'sharp.voiceWidgetCorner'
 const EDGE_MARGIN = 16
 const DRAG_THRESHOLD = 5
 
@@ -31,7 +31,7 @@ type DragState = {
 }
 
 function storedCorner(): Corner {
-  const value = window.localStorage.getItem(CORNER_KEY)
+  const value = readLocal(KEYS.voiceWidgetCorner)
   return value === 'top-left' ||
     value === 'top-right' ||
     value === 'bottom-left' ||
@@ -188,7 +188,7 @@ export function VoiceMiniWidget() {
     const nextCorner = `${vertical}-${horizontal}` as Corner
     setCorner(nextCorner)
     setPosition(cornerPosition(nextCorner, rect.width, rect.height))
-    window.localStorage.setItem(CORNER_KEY, nextCorner)
+    writeLocal(KEYS.voiceWidgetCorner, nextCorner)
   }
 
   const visibleParticipants = participants.length > 3 ? participants.slice(0, 2) : participants

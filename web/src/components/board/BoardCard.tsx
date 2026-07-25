@@ -1,7 +1,7 @@
 import { memo, useCallback } from 'react'
 import type { BoardCardData, BoardProperty } from '../../lib/boardDoc'
 import type { ChannelMember } from '../../lib/types'
-import { initials, userColor } from '../../lib/util'
+import { fmtShortDate, initials, userColor } from '../../lib/util'
 import { Tag } from '../../ui'
 
 // Parse a stored 'YYYY-MM-DD' as a *local* date (never let the browser read it
@@ -10,10 +10,6 @@ function parseDate(v: string): Date | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v)
   if (!m) return null
   return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
-}
-
-function shortDate(d: Date): string {
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
 function isOverdue(d: Date): boolean {
@@ -72,7 +68,7 @@ function BoardCardImpl({
       }
     } else if (p.type === 'date' && typeof v === 'string' && v) {
       const d = parseDate(v)
-      if (d) dates.push({ key: p.id, label: shortDate(d), overdue: isOverdue(d) })
+      if (d) dates.push({ key: p.id, label: fmtShortDate(d), overdue: isOverdue(d) })
     } else if (p.type === 'assignee' && typeof v === 'string' && v) {
       assigneeId = v
     }

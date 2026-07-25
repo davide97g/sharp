@@ -5,6 +5,7 @@ import { ApiRequestError } from '../lib/api'
 import { startBrowserLogin } from '../lib/desktopAuth'
 import { useStore } from '../store'
 import { toastError } from '../lib/toast'
+import { SESSION_KEYS, writeSession } from '../lib/localPrefs'
 import { sound } from '../lib/sound'
 import { Button } from '../ui'
 import { BrandLockup, LOGIN_BRAND_ID } from './BrandLockup'
@@ -139,7 +140,7 @@ export function Login() {
     try {
       const res = await api.login(loginEmail.trim().toLowerCase(), loginPassword)
       await init(res.token, res.user)
-      sessionStorage.setItem('sharp.offerPasskey', '1')
+      writeSession(SESSION_KEYS.offerPasskey, '1')
       sound.loginSuccess()
       navigate('/', { replace: true })
     } catch (err) {
@@ -250,7 +251,7 @@ export function Login() {
         // plays before the app shell takes over.
         await new Promise((r) => setTimeout(r, 1600))
         await init(res.token, res.user)
-        sessionStorage.setItem('sharp.offerPasskey', '1')
+        writeSession(SESSION_KEYS.offerPasskey, '1')
         navigate('/', { replace: true })
       } catch (bootErr) {
         setIssued(false)

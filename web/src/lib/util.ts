@@ -212,3 +212,68 @@ export function avatarColor(id: string): string {
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0
   return palette[h % palette.length]
 }
+
+// ── Duration and clock formatting ────────────────────────────────────────────────────
+//
+// These lived as nine near-identical local helpers across the components that needed
+// them, differing only in whether they took seconds or milliseconds and whether they
+// rounded up or down. The distinction matters, so both directions are here explicitly
+// rather than collapsed into one function that guesses.
+
+/** `m:ss` from seconds. Negative or non-finite input clamps to `0:00`. */
+export function fmtClock(seconds: number): string {
+  const s = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+
+/**
+ * `m:ss` from milliseconds, rounded **down** — for elapsed time. A recorder should show
+ * 0:00 for the first second, not 0:01.
+ */
+export function fmtClockMs(ms: number): string {
+  return fmtClock(ms / 1000)
+}
+
+/**
+ * `m:ss` from milliseconds, rounded **up** — for a countdown. A remaining time of 500ms
+ * must read 0:01, not 0:00, or the label hits zero before the thing it counts does.
+ */
+export function fmtCountdown(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000))
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+}
+
+/** `45m` / `2h 5m` from whole minutes. Used for meeting lengths. */
+export function fmtHoursMinutes(minutes: number): string {
+  const safe = Math.max(0, Math.round(minutes))
+  if (safe < 60) return `${safe}m`
+  return `${Math.floor(safe / 60)}h ${safe % 60}m`
+}
+
+/** `45m` / `2h 5m` from milliseconds. */
+export function fmtDurationMs(ms: number): string {
+  return fmtHoursMinutes(ms / 60_000)
+}
+
+/** Locale-aware `Mar 4`. Takes a Date so callers that already parsed one don't re-parse. */
+export function fmtShortDate(d: Date): string {
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+// ── Minutes-of-day ↔ "HH:MM" ─────────────────────────────────────────────────────────
+//
+// Quiet-hours preferences are stored as minutes past local midnight (see
+// server/src/routes/prefs.rs), while `<input type="time">` speaks "HH:MM".
+
+/** Minutes past midnight → zero-padded `HH:MM`. */
+export function minutesToHhmm(minutes: number): string {
+  const m = Math.max(0, Math.min(24 * 60 - 1, Math.round(minutes)))
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+}
+
+/** `HH:MM` → minutes past midnight. Unparseable input is 0 (midnight), never NaN. */
+export function hhmmToMinutes(value: string): number {
+  const [h, m] = value.split(':').map(Number)
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return 0
+  return h * 60 + m
+}

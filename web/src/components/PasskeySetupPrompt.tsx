@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { isPasskeyCancellation, registerPasskey, supportsPasskeys } from '../lib/passkeys'
 import { toastError } from '../lib/toast'
+import { SESSION_KEYS, readSession, removeSession } from '../lib/localPrefs'
 import { Modal } from './Modal'
 import { Button, Field, Input } from '../ui'
 
-const OFFER_KEY = 'sharp.offerPasskey'
 
 export function PasskeySetupPrompt() {
   const [open, setOpen] = useState(false)
@@ -14,8 +14,10 @@ export function PasskeySetupPrompt() {
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    if (!supportsPasskeys() || sessionStorage.getItem(OFFER_KEY) !== '1') return
-    sessionStorage.removeItem(OFFER_KEY)
+    // Session-scoped and consumed once: the prompt follows a login, it is not offered
+    // on every visit.
+    if (!supportsPasskeys() || readSession(SESSION_KEYS.offerPasskey) !== '1') return
+    removeSession(SESSION_KEYS.offerPasskey)
     api.passkeys()
       .then((result) => {
         if (result.enabled && !result.prompt_dismissed && result.passkeys.length === 0) setOpen(true)

@@ -3,20 +3,13 @@
 // mirroring the localStorage convention used for other purely-client prefs.
 // Theme presets live in lib/theme.ts.
 
-const DONE_KEY = 'sharp.onboarding.v1'
+import { KEYS, readLocal, writeLocal } from './localPrefs'
 
 export function isOnboardingDone(): boolean {
-  try {
-    return window.localStorage.getItem(DONE_KEY) === 'done'
-  } catch {
-    return true // if storage is unavailable, don't nag
-  }
+  // Unreadable storage counts as done — better to skip the tour than to loop it.
+  return readLocal(KEYS.onboarding) === 'done'
 }
 
 export function markOnboardingDone() {
-  try {
-    window.localStorage.setItem(DONE_KEY, 'done')
-  } catch {
-    /* ignore */
-  }
+  writeLocal(KEYS.onboarding, 'done')
 }

@@ -17,6 +17,16 @@ export type VideoBackgroundOption = {
   imageUrl?: string
 }
 
+import {
+  KEYS,
+  KEY_PREFIXES,
+  readLocalBool,
+  readLocalJson,
+  scopedKey,
+  writeLocalBool,
+  writeLocalJson,
+} from './localPrefs'
+
 export const VIDEO_BACKGROUND_OPTIONS: VideoBackgroundOption[] = [
   { id: 'none', label: 'None' },
   { id: 'blur', label: 'Blur' },
@@ -25,8 +35,6 @@ export const VIDEO_BACKGROUND_OPTIONS: VideoBackgroundOption[] = [
   { id: 'horizon', label: 'Horizon', imageUrl: '/wallpapers/horizon.svg' },
 ]
 
-const LEGACY_BLUR_KEY = 'sharp.videoBlur'
-const STORAGE_PREFIX = 'sharp.videoBackground.v1.'
 const BUILT_IN_IDS = new Set<VideoBackgroundId>([
   'none',
   'blur',
@@ -36,37 +44,35 @@ const BUILT_IN_IDS = new Set<VideoBackgroundId>([
 ])
 
 function storageKey(userId: string): string {
-  return `${STORAGE_PREFIX}${encodeURIComponent(userId)}`
+  return scopedKey(KEY_PREFIXES.videoBackground, encodeURIComponent(userId))
 }
 
 export function loadVideoBackground(userId?: string | null): VideoBackground {
-  try {
-    if (userId) {
-      const raw = window.localStorage.getItem(storageKey(userId))
-      if (raw) {
-        const parsed = JSON.parse(raw) as Partial<VideoBackground>
-        if (parsed.id === 'custom' && parsed.customUrl?.startsWith('data:image/')) {
-          return { id: 'custom', customUrl: parsed.customUrl }
-        }
-        if (parsed.id && BUILT_IN_IDS.has(parsed.id)) return { id: parsed.id }
-      }
+  if (userId) {
+    const parsed = readLocalJson<Partial<VideoBackground>>(storageKey(userId), {})
+    // A custom background is an inline data: URL. Re-check the prefix on read: this
+    // value ends up in a CSS background, so anything else must be discarded.
+    if (parsed.id === 'custom' && parsed.customUrl?.startsWith('data:image/')) {
+      return { id: 'custom', customUrl: parsed.customUrl }
     }
-    // Keep the old blur preference as a one-way migration fallback.
-    if (window.localStorage.getItem(LEGACY_BLUR_KEY) === '1') return { id: 'blur' }
-  } catch {
-    // Storage may be blocked in private/restricted contexts.
+    if (parsed.id && BUILT_IN_IDS.has(parsed.id)) return { id: parsed.id }
   }
+  // Keep the old blur-only preference as a one-way migration fallback.
+  if (readLocalBool(KEYS.videoBlurLegacy, false)) return { id: 'blur' }
   return { id: 'none' }
 }
 
+/**
+ * Returns false when the browser refused to persist — a custom background is an inline
+ * data: URL and can exceed the quota, and the caller tells the user so the choice does
+ * not silently vanish on reload.
+ */
 export function saveVideoBackground(userId: string, background: VideoBackground): boolean {
-  try {
-    window.localStorage.setItem(storageKey(userId), JSON.stringify(background))
-    window.localStorage.setItem(LEGACY_BLUR_KEY, background.id === 'blur' ? '1' : '0')
-    return true
-  } catch {
-    return false
-  }
+  const saved = writeLocalJson(storageKey(userId), background)
+  // Keep the legacy flag in step so an older build (or the pre-migration read path)
+  // still sees blur.
+  writeLocalBool(KEYS.videoBlurLegacy, background.id === 'blur')
+  return saved
 }
 
 export function videoBackgroundImageUrl(background: VideoBackground): string | null {

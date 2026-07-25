@@ -38,6 +38,7 @@ import {
   setVoiceRecognizer,
   stopVoiceRecognizer,
 } from './lib/store/recognizer'
+import { KEYS, readLocalBool, writeLocalBool } from './lib/localPrefs'
 import { applyWsEventTo } from './lib/wsEvents'
 import { sortTasks } from './lib/store/taskHelpers'
 import { applyUi } from './lib/store/uiHelpers'
@@ -641,8 +642,6 @@ function emptyChannelMessages(): ChannelMessages {
   return { list: [], loaded: false, loading: false, hasMore: true }
 }
 
-const STREAM_MANUAL_KEY = 'sharp.streamManual'
-const STREAM_REVERT_NICKS_KEY = 'sharp.streamRevertNicknames'
 
 
 /** Local mirror of the appearance blob, replaced by the server copy on login. */
@@ -664,7 +663,7 @@ configureCelebrations({
 
 function storedStreamManual(): boolean {
   try {
-    return window.localStorage.getItem(STREAM_MANUAL_KEY) === '1'
+    return readLocalBool(KEYS.streamManual, false)
   } catch {
     return false
   }
@@ -672,7 +671,7 @@ function storedStreamManual(): boolean {
 
 function storedStreamRevertNicknames(): boolean {
   try {
-    return window.localStorage.getItem(STREAM_REVERT_NICKS_KEY) === '1'
+    return readLocalBool(KEYS.streamRevertNicknames, false)
   } catch {
     return false
   }
@@ -2712,7 +2711,7 @@ export const useStore = create<State>((set, get) => ({
       ...(on ? {} : { streamRevealAllUntil: null, streamRevealChannels: {} }),
     })
     try {
-      window.localStorage.setItem(STREAM_MANUAL_KEY, on ? '1' : '0')
+      writeLocalBool(KEYS.streamManual, on)
     } catch {
       // The preference is still usable for this session if storage is unavailable.
     }
@@ -2721,7 +2720,7 @@ export const useStore = create<State>((set, get) => ({
   setStreamRevertNicknames(on) {
     set({ streamRevertNicknames: on })
     try {
-      window.localStorage.setItem(STREAM_REVERT_NICKS_KEY, on ? '1' : '0')
+      writeLocalBool(KEYS.streamRevertNicknames, on)
     } catch {
       // The preference is still usable for this session if storage is unavailable.
     }

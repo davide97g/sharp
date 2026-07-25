@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchAttachmentBlob } from '../lib/api'
 import { decryptAttachmentBlob } from '../lib/e2ee/attachments'
 import { toastError } from '../lib/toast'
+import { fmtClock } from '../lib/util'
 import type { Attachment } from '../lib/types'
 
 export function isAudio(contentType: string): boolean {
@@ -16,15 +17,12 @@ function isVoiceMessage(filename: string): boolean {
 
 // The composer stamps the clip length into the filename (`voice-message-33s.webm`)
 // so we can show the duration before the audio bytes are ever fetched.
+// Voice notes are uploaded as `voice-message-<seconds>s.<ext>`, so the duration is
+// recoverable before the audio element has loaded any metadata. Specific to that naming
+// convention, hence local rather than in lib/util.
 function durationFromFilename(filename: string): number {
   const m = filename.match(/voice-message-(\d+)s/)
   return m ? Number(m[1]) : 0
-}
-
-function fmtTime(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) seconds = 0
-  const s = Math.floor(seconds)
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
 const BAR_COUNT = 40
@@ -206,7 +204,7 @@ function AudioPlayerControls({
             />
           </div>
           <span className="shrink-0 text-2xs tabular-nums text-[var(--color-text-dim)]">
-            {total ? fmtTime(shownTime) : '--:--'}
+            {total ? fmtClock(shownTime) : '--:--'}
           </span>
         </div>
       </div>

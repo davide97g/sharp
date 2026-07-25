@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar'
 import { TasksGlyph } from './tasks/taskUi'
 import { CompactSidebar } from './CompactSidebar'
 import { ThreadPanel } from './ThreadPanel'
+import { KEYS, readLocal, writeLocal } from '../lib/localPrefs'
 import { DocPeekPanel } from './docs/DocPeekPanel'
 import { SharpyPanel } from './SharpyPanel'
 import { QuickSwitcher } from './QuickSwitcher'
@@ -38,7 +39,6 @@ function RouteFallback() {
   )
 }
 
-const SIDEBAR_OPEN_KEY = 'sharp.sidebarOpen'
 
 // Module jump targets (chord+1…9), in the rail's visual order.
 const MODE_ROUTES = ['/', '/docs', '/canvas', '/board', '/tasks', '/meetings', '/calendar', '/help', '/sharpy']
@@ -73,7 +73,7 @@ export function AppShell() {
   const navigate = useNavigate()
   const isMobile = useIsMobile()
   const [sidebarOpen, setSidebarOpen] = useState(
-    () => window.localStorage.getItem(SIDEBAR_OPEN_KEY) !== 'false',
+    () => readLocal(KEYS.sidebarOpen) !== 'false',
   )
   const [onboarding, setOnboarding] = useState(() => !isOnboardingDone())
 
@@ -179,7 +179,7 @@ export function AppShell() {
   // Persist desktop sidebar preference only; mobile always uses list→detail.
   useEffect(() => {
     if (isMobile) return
-    window.localStorage.setItem(SIDEBAR_OPEN_KEY, String(sidebarOpen))
+    writeLocal(KEYS.sidebarOpen, String(sidebarOpen))
   }, [sidebarOpen, isMobile])
 
   // Global shortcuts, declared through the central registry (lib/shortcuts.ts)

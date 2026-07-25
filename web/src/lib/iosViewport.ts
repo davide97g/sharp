@@ -10,6 +10,8 @@
  *    composer) sits partly offscreen. Scrolling back to the origin restores
  *    alignment.
  */
+
+import { KEY_PREFIXES, readLocal, scopedKey, writeLocal } from './localPrefs'
 export function installIosViewportFix() {
   const ua = navigator.userAgent
   const isIos =
@@ -29,21 +31,11 @@ export function installIosViewportFix() {
   // chrome at the bottom) and legit heights vary per device/status-bar
   // style, so we compare against what this device actually achieved on
   // healthy launches instead of guessing an absolute number.
-  const maxHeightKey = () => `sharp.maxViewportH.${portrait() ? 'p' : 'l'}`
-  const recordedMaxHeight = () => {
-    try {
-      return Number(window.localStorage.getItem(maxHeightKey())) || 0
-    } catch {
-      return 0
-    }
-  }
+  const maxHeightKey = () => scopedKey(KEY_PREFIXES.maxViewportHeight, portrait() ? 'p' : 'l')
+  const recordedMaxHeight = () => Number(readLocal(maxHeightKey())) || 0
   const recordHealthyHeight = () => {
-    try {
-      if (window.innerHeight > recordedMaxHeight()) {
-        window.localStorage.setItem(maxHeightKey(), String(window.innerHeight))
-      }
-    } catch {
-      /* ignore */
+    if (window.innerHeight > recordedMaxHeight()) {
+      writeLocal(maxHeightKey(), String(window.innerHeight))
     }
   }
 

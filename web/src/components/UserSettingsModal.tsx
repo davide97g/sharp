@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { hhmmToMinutes, minutesToHhmm } from '../lib/util'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useStore, streamShieldOn } from '../store'
 import { api } from '../lib/api'
@@ -2097,17 +2098,9 @@ function SoundSettingsSection() {
 const DEFAULT_QUIET_START = 22 * 60 // 22:00
 const DEFAULT_QUIET_END = 7 * 60 // 07:00
 
+/** Quiet-hours inputs fall back to the defaults above when the pref is unset. */
 function minutesToHHMM(min: number | null, fallback: number): string {
-  const m = min ?? fallback
-  const h = Math.floor(m / 60)
-  const mm = m % 60
-  return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
-}
-
-function hhmmToMinutes(value: string): number {
-  const [h, m] = value.split(':').map((n) => Number(n))
-  if (Number.isNaN(h) || Number.isNaN(m)) return 0
-  return h * 60 + m
+  return minutesToHhmm(min ?? fallback)
 }
 
 type DndModeChoice = 'off' | 'on' | 'scheduled'
