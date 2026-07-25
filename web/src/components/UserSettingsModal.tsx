@@ -4,7 +4,9 @@ import { useStore, streamShieldOn } from '../store'
 import { api } from '../lib/api'
 import type {
   ChannelNotifyMode,
+  ChatLayout,
   DuckContext,
+  PushPreview,
   DuckCooldownSecs,
   GifSettings,
   GiphyUsage,
@@ -14,6 +16,8 @@ import type {
   E2eeDevice,
 } from '../lib/types'
 import { toastError, toastSuccess } from '../lib/toast'
+import { chordFor, formatChord } from '../lib/shortcuts'
+import { activePack } from '../lib/seasonal'
 import { ApiRequestError } from '../lib/api'
 import {
   deleteLocalDevice,
@@ -27,7 +31,13 @@ import {
 import { createBackup, restoreBackup } from '../lib/e2ee/backup'
 import { isTauri, openPasskeyManagement } from '../lib/desktopAuth'
 import { isPasskeyCancellation, registerPasskey, supportsPasskeys } from '../lib/passkeys'
-import { getSoundSettings, setSoundSettings, sound, subscribeSoundSettings } from '../lib/sound'
+import {
+  getSoundSettings,
+  setSoundPack,
+  setSoundSettings,
+  sound,
+  subscribeSoundSettings,
+} from '../lib/sound'
 import { Button, ChoiceCard, Input, Select, SectionLabel, Spinner } from '../ui'
 import { Modal } from './Modal'
 import { Avatar } from './Avatar'
@@ -46,7 +56,15 @@ import {
 } from '../lib/meetingEffects'
 import { AudioAuraPreview } from './voice/AudioAuraAvatar'
 import { DARK_THEMES, LIGHT_THEMES, resolveScheme } from '../lib/theme'
-import type { ColorScheme, Density } from '../lib/uiPrefs'
+import type {
+  AvatarShape,
+  ColorScheme,
+  Density,
+  MessageLayout,
+  SoundPack,
+  TimestampStyle,
+  UiPrefs,
+} from '../lib/uiPrefs'
 
 type Tab =
   | 'profile'
@@ -55,6 +73,7 @@ type Tab =
   | 'appearance'
   | 'meetings'
   | 'streaming'
+  | 'privacy'
   | 'security'
   | 'encryption'
   | 'workspace'
@@ -68,6 +87,7 @@ const SETTINGS_TABS: Tab[] = [
   'appearance',
   'meetings',
   'streaming',
+  'privacy',
   'accounts',
   'security',
   'encryption',
@@ -357,19 +377,18 @@ export function UserSettingsModal({
           </div>
         </div>
       ) : tab === 'chat' ? (
-        <div className="flex flex-col gap-3">
-          <SectionLabel size="xs">Direct message layout</SectionLabel>
-          <ChatLayoutPicker value={chatLayout} onChange={(l) => void setChatLayout(l)} />
-          <p className="text-2xs text-[var(--color-text-faint)]">
-            Applies to 1:1 conversations. Channels always use the classic layout.
-          </p>
-        </div>
+        <ChatSettings
+          chatLayout={chatLayout}
+          onChatLayout={(l) => void setChatLayout(l)}
+        />
       ) : tab === 'notifications' ? (
         <NotificationsSettings />
       ) : tab === 'appearance' ? (
         <AppearanceSettings />
       ) : tab === 'meetings' ? (
         <MeetingEffectsSettings userId={me.id} />
+      ) : tab === 'privacy' ? (
+        <PrivacySettings onOpen={(next) => (page ? navigate(`/settings/${next}`) : setModalTab(next))} />
       ) : tab === 'streaming' ? (
         <StreamingSettings />
       ) : tab === 'accounts' ? (
@@ -577,6 +596,7 @@ const SETTINGS_META: Record<Tab, { label: string; description: string; group: st
   appearance: { label: 'Appearance', description: 'Tune Sharp to your space and style.', group: 'Personal' },
   meetings: { label: 'Meetings', description: 'Control voice and meeting effects.', group: 'Personal' },
   streaming: { label: 'Streaming', description: 'Hide private content while sharing your screen.', group: 'Personal' },
+  privacy: { label: 'Privacy', description: 'Control what Sharp reveals about you.', group: 'Account' },
   accounts: { label: 'Connected accounts', description: 'Manage calendar connections and external accounts.', group: 'Account' },
   security: { label: 'Security', description: 'Protect your account with passkeys.', group: 'Account' },
   encryption: { label: 'Encryption', description: 'Manage trusted devices and encrypted backups.', group: 'Account' },
@@ -748,6 +768,7 @@ function SettingsIcon({ tab }: { tab: Tab }) {
     appearance: <><circle cx="12" cy="12" r="3" /><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4" /></>,
     meetings: <><rect x="3" y="6" width="13" height="12" rx="2" /><path d="m16 10 5-3v10l-5-3" /></>,
     streaming: <><circle cx="12" cy="12" r="2" /><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2" /></>,
+    privacy: <><path d="M12 3 4 6v6c0 4.4 3.4 8.3 8 9 4.6-.7 8-4.6 8-9V6l-8-3Z" /><circle cx="12" cy="11" r="2" /><path d="M12 13v3" /></>,
     accounts: <><circle cx="8" cy="8" r="3" /><path d="M2 20a6 6 0 0 1 12 0M16 8h6M19 5v6" /></>,
     security: <><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></>,
     encryption: <><path d="M12 3 5 6v5c0 4.5 2.8 8.2 7 10 4.2-1.8 7-5.5 7-10V6l-7-3Z" /><path d="m9 12 2 2 4-4" /></>,
@@ -1402,6 +1423,292 @@ function GiphyUsageBar({ usage }: { usage: GiphyUsage }) {
   )
 }
 
+const EFFECT_CHOICES: { key: keyof UiPrefs['effects']; label: string; desc: string }[] = [
+  { key: 'glass', label: 'Glass', desc: 'Translucent, blurred panels.' },
+  { key: 'grain', label: 'Film grain', desc: 'A fine noise texture over everything.' },
+  { key: 'glow', label: 'Accent glow', desc: 'Halo around accent-coloured elements.' },
+  { key: 'scanlines', label: 'Scanlines', desc: 'CRT-style horizontal lines.' },
+]
+
+const SOUND_PACK_CHOICES: { value: SoundPack; label: string; desc: string }[] = [
+  { value: 'default', label: 'Default', desc: 'Sharp’s house voice.' },
+  { value: 'minimal', label: 'Minimal', desc: 'Shorter, softer, barely there.' },
+  { value: 'retro', label: 'Retro', desc: 'Square-wave 8-bit blips.' },
+  { value: 'nature', label: 'Nature', desc: 'Airy, long-tailed, chorused.' },
+  { value: 'mechanical', label: 'Mechanical', desc: 'Short and clicky.' },
+]
+
+// ---- Privacy tab ----
+
+const PUSH_PREVIEW_CHOICES: { value: PushPreview; label: string }[] = [
+  { value: 'full', label: 'Show sender and message' },
+  { value: 'generic', label: 'Just “new activity”' },
+]
+
+const IDLE_LOCK_CHOICES = [0, 1, 5, 15, 30]
+
+function PrivacySettings({ onOpen }: { onOpen: (tab: Tab) => void }) {
+  const invisible = useStore((s) => s.invisible)
+  const shareTyping = useStore((s) => s.shareTyping)
+  const pushPreview = useStore((s) => s.pushPreview)
+  const updateNotifyPrefs = useStore((s) => s.updateNotifyPrefs)
+  const ui = useStore((s) => s.ui)
+  const patchUi = useStore((s) => s.patchUi)
+
+  return (
+    <div className="flex flex-col gap-3">
+      <SectionLabel size="xs">What others can see</SectionLabel>
+      <div className="flex flex-col gap-4">
+        <ToggleRow
+          title="Appear offline"
+          description="You stay connected and keep receiving everything; nobody sees you online."
+          checked={invisible}
+          onChange={(value) => void updateNotifyPrefs({ invisible: value })}
+        />
+        <ToggleRow
+          title="Share typing indicators"
+          description="Off means nobody sees “you are typing”. You still see theirs."
+          checked={shareTyping}
+          onChange={(value) => void updateNotifyPrefs({ share_typing: value })}
+        />
+      </div>
+      <p className="mt-1 text-2xs text-text-faint">
+        Both are enforced by the server, not just hidden in this app.
+      </p>
+
+      <div className="mt-3 border-t border-border pt-5">
+        <SectionLabel size="xs" className="mb-3">
+          Notification previews
+        </SectionLabel>
+        <Segmented
+          value={pushPreview}
+          options={PUSH_PREVIEW_CHOICES}
+          onChange={(value) => void updateNotifyPrefs({ push_preview: value })}
+        />
+        <p className="mt-2 text-2xs text-text-faint">
+          Applies to push notifications shown by your OS or browser — the ones
+          that appear when Sharp is closed. Encrypted DMs are always generic.
+        </p>
+      </div>
+
+      <div className="mt-3 border-t border-border pt-5">
+        <SectionLabel size="xs" className="mb-3">
+          Lock the screen
+        </SectionLabel>
+        <Segmented
+          value={ui.idleLockMin}
+          options={IDLE_LOCK_CHOICES.map((m) => ({
+            value: m,
+            label: m === 0 ? 'Never' : `${m} min`,
+          }))}
+          onChange={(value) => patchUi({ idleLockMin: value })}
+        />
+        <p className="mt-2 text-2xs text-text-faint">
+          Covers the screen after inactivity, or instantly with{' '}
+          {formatChord(chordFor('privacy.lock'))}. This hides the screen from the
+          room — it does not sign you out, so sign out if you are leaving the
+          device.
+        </p>
+      </div>
+
+      <div className="mt-3 border-t border-border pt-5">
+        <SectionLabel size="xs" className="mb-3">
+          Elsewhere
+        </SectionLabel>
+        <div className="flex flex-col gap-2">
+          <PrivacyLink
+            label="Streaming shield"
+            description="Blur private conversations while sharing a screen."
+            onClick={() => onOpen('streaming')}
+          />
+          <PrivacyLink
+            label="Encryption"
+            description="Trusted devices, safety numbers, and encrypted backups."
+            onClick={() => onOpen('encryption')}
+          />
+          <PrivacyLink
+            label="Security"
+            description="Passkeys and sign-in."
+            onClick={() => onOpen('security')}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PrivacyLink({
+  label,
+  description,
+  onClick,
+}: {
+  label: string
+  description: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-left outline-none hover:bg-panel-2 focus-visible:ring-2 focus-visible:ring-accent"
+    >
+      <span className="min-w-0">
+        <span className="block text-sm font-medium text-text">{label}</span>
+        <span className="block text-2xs text-text-faint">{description}</span>
+      </span>
+      <span aria-hidden className="shrink-0 text-text-faint">
+        →
+      </span>
+    </button>
+  )
+}
+
+// ---- Chat tab ----
+
+const CHANNEL_LAYOUTS: { value: MessageLayout; label: string; desc: string }[] = [
+  { value: 'classic', label: 'Classic', desc: 'Avatar rows with author headers.' },
+  { value: 'bubble', label: 'Bubbles', desc: 'Yours right, theirs left.' },
+  { value: 'irc', label: 'IRC', desc: 'One line each: time, name, message.' },
+]
+
+const TIMESTAMP_CHOICES: { value: TimestampStyle; label: string }[] = [
+  { value: 'hover', label: 'On hover' },
+  { value: 'clock24', label: '24-hour' },
+  { value: 'clock12', label: '12-hour' },
+  { value: 'relative', label: 'Relative' },
+]
+
+const AVATAR_CHOICES: { value: AvatarShape; label: string }[] = [
+  { value: 'circle', label: 'Circle' },
+  { value: 'squircle', label: 'Rounded' },
+  { value: 'square', label: 'Square' },
+]
+
+const GROUP_WINDOWS = [0, 1, 5, 15, 60]
+
+function ChatSettings({
+  chatLayout,
+  onChatLayout,
+}: {
+  chatLayout: ChatLayout | null
+  onChatLayout: (layout: ChatLayout) => void
+}) {
+  const ui = useStore((s) => s.ui)
+  const patchUi = useStore((s) => s.patchUi)
+  const overrideCount = Object.keys(ui.channelLayoutOverrides).length
+
+  return (
+    <div className="flex flex-col gap-3">
+      <SectionLabel size="xs">Direct message layout</SectionLabel>
+      <ChatLayoutPicker value={chatLayout} onChange={onChatLayout} />
+
+      <div className="mt-3 border-t border-border pt-5">
+        <SectionLabel size="xs" className="mb-3">
+          Channel layout
+        </SectionLabel>
+        <div className="grid grid-cols-3 gap-3">
+          {CHANNEL_LAYOUTS.map((l) => (
+            <ChoiceCard
+              key={l.value}
+              selected={ui.channelLayout === l.value}
+              onSelect={() => patchUi({ channelLayout: l.value })}
+              title={l.label}
+              description={l.desc}
+              selectedStyle="ring"
+            />
+          ))}
+        </div>
+        {overrideCount > 0 && (
+          <div className="mt-3 flex items-center gap-2">
+            <p className="text-2xs text-text-faint">
+              {overrideCount} channel{overrideCount === 1 ? '' : 's'} override this.
+            </p>
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() => patchUi({ channelLayoutOverrides: {} })}
+            >
+              Clear overrides
+            </Button>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3 border-t border-border pt-5">
+        <SectionLabel size="xs" className="mb-3">
+          Timestamps
+        </SectionLabel>
+        <Segmented
+          value={ui.timestampStyle}
+          options={TIMESTAMP_CHOICES}
+          onChange={(value) => patchUi({ timestampStyle: value })}
+        />
+      </div>
+
+      <div className="mt-3 border-t border-border pt-5">
+        <SectionLabel size="xs" className="mb-3">
+          Avatars
+        </SectionLabel>
+        <Segmented
+          value={ui.avatarShape}
+          options={AVATAR_CHOICES}
+          onChange={(value) => patchUi({ avatarShape: value })}
+        />
+      </div>
+
+      <div className="mt-3 border-t border-border pt-5">
+        <SectionLabel size="xs" className="mb-3">
+          Group messages
+        </SectionLabel>
+        <Segmented
+          value={ui.groupWindowMin}
+          options={GROUP_WINDOWS.map((m) => ({
+            value: m,
+            label: m === 0 ? 'Never' : `${m} min`,
+          }))}
+          onChange={(value) => patchUi({ groupWindowMin: value })}
+        />
+        <p className="mt-2 text-2xs text-text-faint">
+          Consecutive messages from one person collapse into a block within this
+          window.
+        </p>
+      </div>
+
+      <div className="mt-3 border-t border-border pt-5">
+        <ToggleRow
+          title="Colour author names"
+          description="Give everyone a consistent colour, IRC-style."
+          checked={ui.nameColors}
+          onChange={(nameColors) => patchUi({ nameColors })}
+        />
+      </div>
+    </div>
+  )
+}
+
+/** Label + description + switch, the shape used across these settings panes. */
+function ToggleRow({
+  title,
+  description,
+  checked,
+  onChange,
+}: {
+  title: string
+  description?: string
+  checked: boolean
+  onChange: (next: boolean) => void
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <div className="text-sm font-medium text-text">{title}</div>
+        {description && <div className="text-2xs text-text-faint">{description}</div>}
+      </div>
+      <DockAutoHideSwitch checked={checked} onChange={onChange} />
+    </div>
+  )
+}
+
 // ---- Appearance tab ----
 
 const SCHEME_CHOICES: { value: ColorScheme; label: string }[] = [
@@ -1459,6 +1766,7 @@ function AppearanceSettings() {
   // What is actually on screen right now — with scheme 'system' this follows
   // the OS, so the picker must offer that scheme's presets, not the stored one.
   const scheme = resolveScheme(ui.scheme)
+  const seasonalPack = activePack()
   const themes = scheme === 'light' ? LIGHT_THEMES : DARK_THEMES
   const activeTheme = scheme === 'light' ? ui.themeLight : ui.theme
   const hue = ui.accentHue
@@ -1600,6 +1908,95 @@ function AppearanceSettings() {
         <p className="mt-2 text-2xs text-text-faint">
           Animation duration multiplier. If your system asks for reduced motion,
           sharp already honors that regardless of this setting.
+        </p>
+      </div>
+
+      <div className="mt-3 border-t border-border pt-5">
+        <SectionLabel size="xs" className="mb-3">
+          Focus mode
+        </SectionLabel>
+        <ToggleRow
+          title="Strip everything decorative"
+          description="No effects, wallpapers, or celebrations. Turns itself on while you share a screen."
+          checked={ui.focusMode}
+          onChange={(focusMode) => patchUi({ focusMode })}
+        />
+      </div>
+
+      <div className="mt-3 border-t border-border pt-5">
+        <SectionLabel size="xs" className="mb-3">
+          Effects
+        </SectionLabel>
+        <div className="flex flex-col gap-3">
+          {EFFECT_CHOICES.map((e) => (
+            <ToggleRow
+              key={e.key}
+              title={e.label}
+              description={e.desc}
+              checked={ui.effects[e.key]}
+              onChange={(on) => patchUi({ effects: { ...ui.effects, [e.key]: on } })}
+            />
+          ))}
+          <ToggleRow
+            title="Celebrations"
+            description="Confetti when a task is completed or a poll closes."
+            checked={ui.celebrations}
+            onChange={(celebrations) => patchUi({ celebrations })}
+          />
+        </div>
+        {ui.focusMode && (
+          <p className="mt-3 text-2xs text-warning-fg">
+            Focus mode is on, so none of these are showing right now.
+          </p>
+        )}
+      </div>
+
+      <div className="mt-3 border-t border-border pt-5">
+        <SectionLabel size="xs" className="mb-3">
+          Seasonal
+        </SectionLabel>
+        <Segmented
+          value={ui.seasonal}
+          options={[
+            { value: 'off' as const, label: 'Off' },
+            { value: 'subtle' as const, label: 'Subtle' },
+            { value: 'full' as const, label: 'Full' },
+          ]}
+          onChange={(value) => patchUi({ seasonal: value })}
+        />
+        <p className="mt-2 text-2xs text-text-faint">
+          {seasonalPack
+            ? `${seasonalPack.name} is running now. `
+            : 'Nothing running today. '}
+          Subtle recolours the accent and swaps a few words; Full adds falling
+          particles.
+        </p>
+      </div>
+
+      <div className="mt-3 border-t border-border pt-5">
+        <SectionLabel size="xs" className="mb-3">
+          Sound pack
+        </SectionLabel>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {SOUND_PACK_CHOICES.map((p) => (
+            <ChoiceCard
+              key={p.value}
+              selected={ui.soundPack === p.value}
+              onSelect={() => {
+                patchUi({ soundPack: p.value })
+                // Apply before previewing so the tick is in the new voice.
+                setSoundPack(p.value)
+                sound.messageReceived()
+              }}
+              title={p.label}
+              description={p.desc}
+              selectedStyle="ring"
+            />
+          ))}
+        </div>
+        <p className="mt-2 text-2xs text-text-faint">
+          Every sound is synthesized live — a pack retunes them, it does not swap
+          in audio files. Volume and the on/off switch live under Notifications.
         </p>
       </div>
 

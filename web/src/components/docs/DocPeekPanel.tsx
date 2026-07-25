@@ -6,7 +6,13 @@ import { userColor } from '../../lib/util'
 import type { DocConnStatus } from '../../lib/docSync'
 import type { Doc } from '../../lib/types'
 import { Banner, Button, EditorSkeleton, EmptyState } from '../../ui'
-import { DocEditorInner } from './DocEditorInner'
+// BlockNote is the single largest dependency in the app. Loading the editor
+// lazily is what keeps it out of the main bundle — DocPeekPanel is mounted on
+// every chat route, so a static import here put BlockNote in everyone's cold
+// start whether or not they ever opened a doc.
+const DocEditorInner = lazy(() =>
+  import('./DocEditorInner').then((m) => ({ default: m.DocEditorInner })),
+)
 import { BoardEditorInner } from '../board/BoardEditorInner'
 
 // tldraw is heavy — lazy-load the inner canvas so its chunk stays out of the
@@ -145,15 +151,17 @@ export function DocPeekPanel() {
         {doc.kind === 'doc' ? (
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-8">
-              <DocEditorInner
-                key={doc.id}
-                docId={doc.id}
-                channelId={doc.channel_id}
-                user={user}
-                editable={editable}
-                onStatus={setStatus}
-                onPeers={noop}
-              />
+              <Suspense fallback={<EditorSkeleton />}>
+                <DocEditorInner
+                  key={doc.id}
+                  docId={doc.id}
+                  channelId={doc.channel_id}
+                  user={user}
+                  editable={editable}
+                  onStatus={setStatus}
+                  onPeers={noop}
+                />
+              </Suspense>
             </div>
           </div>
         ) : doc.kind === 'board' ? (

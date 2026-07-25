@@ -3,15 +3,16 @@ import ReactMarkdown from 'react-markdown'
 import { useNavigate, useParams } from 'react-router-dom'
 import remarkGfm from 'remark-gfm'
 import { releases } from '../../lib/changelog'
-import { faq, howTos } from '../../lib/help'
+import { faq, howTos, transparency } from '../../lib/help'
 import { setLastSeenVersion } from '../../lib/whatsNew'
 
-type HelpTab = 'whats-new' | 'faq' | 'how-to'
+type HelpTab = 'whats-new' | 'faq' | 'how-to' | 'privacy'
 
 const tabs: { id: HelpTab; label: string }[] = [
   { id: 'whats-new', label: "What's new" },
   { id: 'faq', label: 'FAQ' },
   { id: 'how-to', label: 'How-to' },
+  { id: 'privacy', label: 'Privacy' },
 ]
 
 export function HelpArea() {
@@ -76,6 +77,19 @@ export function HelpArea() {
             </section>
           )}
           {tab === 'how-to' && <HowTo />}
+          {tab === 'privacy' && (
+            <section>
+              <p className="mb-6 max-w-2xl text-sm text-[var(--color-text-dim)]">
+                An inventory of every network destination this app can reach —
+                verifiable against the source, not a promise.
+              </p>
+              <div className="md rounded-2xl border border-[var(--color-border)] bg-[var(--color-panel)] p-5 sm:p-7">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml>
+                  {transparency}
+                </ReactMarkdown>
+              </div>
+            </section>
+          )}
         </div>
       </div>
 

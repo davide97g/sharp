@@ -17,22 +17,44 @@ import { Home } from './components/Home'
 import { Toasts } from './components/Toasts'
 import { DocsHome } from './components/docs/DocsHome'
 import { ChannelDocs } from './components/docs/ChannelDocs'
-import { DocEditor } from './components/docs/DocEditor'
 import { CanvasHome } from './components/canvas/CanvasHome'
 import { ChannelCanvases } from './components/canvas/ChannelCanvases'
 import { BoardHome } from './components/board/BoardHome'
 import { ChannelBoards } from './components/board/ChannelBoards'
-import { BoardEditor } from './components/board/BoardEditor'
 import { TasksHome } from './components/tasks/TasksHome'
 import { ProjectView } from './components/tasks/ProjectView'
-import { MeetingsHome } from './components/meetings/MeetingsHome'
-import { MeetingDetailView } from './components/meetings/MeetingDetailView'
-import { CalendarView } from './components/calendar/CalendarView'
-import { HelpArea } from './components/help/HelpArea'
 import { PasskeySetupPrompt } from './components/PasskeySetupPrompt'
-import { UserSettingsPage } from './components/UserSettingsModal'
-import { SharpyPage } from './components/sharpy/SharpyPage'
-import { AudioAuraShowcase } from './components/voice/AudioAuraShowcase'
+// Route-level code splitting. Chat is the app's front door, so it stays in the
+// main chunk; these are the heavy or occasional modules — BlockNote, the board
+// editor, calendar, meetings — that used to be loaded on every cold start
+// whether or not you ever opened them.
+const DocEditor = lazy(() =>
+  import('./components/docs/DocEditor').then((m) => ({ default: m.DocEditor })),
+)
+const BoardEditor = lazy(() =>
+  import('./components/board/BoardEditor').then((m) => ({ default: m.BoardEditor })),
+)
+const CalendarView = lazy(() =>
+  import('./components/calendar/CalendarView').then((m) => ({ default: m.CalendarView })),
+)
+const MeetingsHome = lazy(() =>
+  import('./components/meetings/MeetingsHome').then((m) => ({ default: m.MeetingsHome })),
+)
+const MeetingDetailView = lazy(() =>
+  import('./components/meetings/MeetingDetailView').then((m) => ({ default: m.MeetingDetailView })),
+)
+const HelpArea = lazy(() =>
+  import('./components/help/HelpArea').then((m) => ({ default: m.HelpArea })),
+)
+const SharpyPage = lazy(() =>
+  import('./components/sharpy/SharpyPage').then((m) => ({ default: m.SharpyPage })),
+)
+const AudioAuraShowcase = lazy(() =>
+  import('./components/voice/AudioAuraShowcase').then((m) => ({ default: m.AudioAuraShowcase })),
+)
+const UserSettingsPage = lazy(() =>
+  import('./components/UserSettingsModal').then((m) => ({ default: m.UserSettingsPage })),
+)
 // Dev-only catalog; lazy so it never lands in the production bundle.
 const DesignGallery = lazy(() =>
   import('./ui/DesignGallery').then((m) => ({ default: m.DesignGallery })),
@@ -134,7 +156,16 @@ export function App() {
         />
         {/* Public reset landing — reachable regardless of auth state. */}
         <Route path="/reset-password" element={<ResetPassword />} />
-        {import.meta.env.DEV && <Route path="/aura-lab" element={<AudioAuraShowcase />} />}
+        {import.meta.env.DEV && (
+          <Route
+            path="/aura-lab"
+            element={
+              <Suspense fallback={null}>
+                <AudioAuraShowcase />
+              </Suspense>
+            }
+          />
+        )}
         {import.meta.env.DEV && (
           <Route
             path="/design"

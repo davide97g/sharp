@@ -223,9 +223,13 @@ function ChannelRow({
   const unread = channel.unread_count > 0
   const shielded =
     useStore((s) => streamChannelShielded(s, channel.id)) && channel.kind === 'private'
+  const prefetchChannel = useStore((s) => s.prefetchChannel)
   return (
     <NavLink
       to={`/c/${channel.id}`}
+      // Warm the cache on intent, so the click itself renders instantly.
+      onPointerEnter={() => prefetchChannel(channel.id)}
+      onFocus={() => prefetchChannel(channel.id)}
       className={`group flex min-h-11 items-center gap-1.5 rounded-md px-2 py-2 text-sm ${
         active
           ? 'bg-[var(--color-accent-soft)] text-white'
@@ -278,9 +282,12 @@ function DmRow({
   const active = channelId === channel.id
   const unread = channel.unread_count > 0
   const shielded = useStore((s) => streamChannelShielded(s, channel.id))
+  const prefetchChannel = useStore((s) => s.prefetchChannel)
   return (
     <NavLink
       to={`/c/${channel.id}`}
+      onPointerEnter={() => prefetchChannel(channel.id)}
+      onFocus={() => prefetchChannel(channel.id)}
       className={`flex min-h-11 items-center gap-2 rounded-md px-2 py-2 text-sm ${
         active
           ? 'bg-[var(--color-accent-soft)] text-white'

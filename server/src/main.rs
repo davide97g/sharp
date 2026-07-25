@@ -15,6 +15,7 @@ mod mailer;
 mod models;
 mod notify;
 mod passkeys;
+mod privacy;
 mod routes;
 mod state;
 mod storage;
@@ -222,6 +223,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             if let Err(error) = calendar_sync::reminder_tick(&reminder_state).await {
                 tracing::warn!("calendar reminder tick failed: {}", error);
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        }
+    });
+
+    // Disappearing messages: soft-delete anything past its TTL.
+    let message_expiry_state = app_state.clone();
+    tokio::spawn(async move {
+        loop {
+            if let Err(error) = routes::messages::expire_tick(&message_expiry_state).await {
+                tracing::warn!("message expiry tick failed: {}", error);
             }
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
         }

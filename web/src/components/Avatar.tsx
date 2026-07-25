@@ -36,6 +36,7 @@ export function Avatar({
   // Resolve the freshest name/avatar from the directory (and personal nickname)
   // so profile edits reflect live everywhere; fall back to the props for users
   // not in the directory.
+  const avatarShape = useStore((s) => s.ui.avatarShape)
   const stored = useStore((s) => s.users[id])
   const currentUser = useStore((s) => (s.me?.id === id ? s.me : null))
   const nickname = useStore((s) => effectiveNicknames(s)[id])
@@ -56,8 +57,14 @@ export function Avatar({
     }
   }, [avatarUrl])
 
-  // Soft rounded-square, scaling with size (never a hard square, never a full circle).
-  const radius = Math.max(6, Math.round(size * 0.28))
+  // Shape is a user preference, applied here so every avatar in the app follows
+  // it. Squircle (the original look) scales its radius with the box.
+  const radius =
+    avatarShape === 'circle'
+      ? 999
+      : avatarShape === 'square'
+        ? 2
+        : Math.max(6, Math.round(size * 0.28))
 
   const face = (
     <div

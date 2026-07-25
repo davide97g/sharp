@@ -6,11 +6,19 @@ import { UserChip } from './UserCard'
 import { ToggleVisual } from './Toggle'
 import { Button, ChoiceCard, Field, Input, Select, Tabs } from '../ui'
 import { useStore } from '../store'
+import { ChannelWallpaperPicker } from './ChannelWallpaperPicker'
 import { toastError } from '../lib/toast'
 import { channelLabel, visibleEmail } from '../lib/util'
 import { VoiceTriggerEditor } from './VoiceTriggerEditor'
 
 const NAME_RE = /^[a-z0-9-]{1,50}$/
+
+const TTL_CHOICES: { label: string; value: number | null }[] = [
+  { label: 'Off', value: null },
+  { label: '1 hour', value: 60 },
+  { label: '24 hours', value: 60 * 24 },
+  { label: '7 days', value: 60 * 24 * 7 },
+]
 
 export function ChannelSettingsModal({
   channelId,
@@ -21,7 +29,9 @@ export function ChannelSettingsModal({
 }) {
   const channel = useStore((s) => s.channels.find((c) => c.id === channelId))
   const nicknames = useStore(effectiveNicknames)
-  const [tab, setTab] = useState<'about' | 'members' | 'triggers'>('about')
+  const [tab, setTab] = useState<'about' | 'members' | 'triggers' | 'wallpaper'>(
+    'about',
+  )
 
   // The channel can vanish under us (deleted, or we were removed from a
   // private one). Close rather than render a broken shell.
@@ -33,7 +43,12 @@ export function ChannelSettingsModal({
   if (channel.kind === 'dm') {
     return (
       <Modal title={channelLabel(channel, nicknames)} onClose={onClose} wide>
-        <VoiceTriggersTab channelId={channelId} />
+        <div className="flex flex-col gap-6">
+          <ChannelWallpaperPicker channelId={channelId} />
+          <div className="border-t border-border pt-6">
+            <VoiceTriggersTab channelId={channelId} />
+          </div>
+        </div>
       </Modal>
     )
   }
@@ -43,10 +58,13 @@ export function ChannelSettingsModal({
       <Tabs
         className="mb-4"
         active={tab}
-        onChange={(key) => setTab(key as 'about' | 'members' | 'triggers')}
+        onChange={(key) =>
+          setTab(key as 'about' | 'members' | 'triggers' | 'wallpaper')
+        }
         items={[
           { key: 'about', label: 'About' },
           { key: 'members', label: 'Members' },
+          { key: 'wallpaper', label: 'Wallpaper' },
           { key: 'triggers', label: 'Voice triggers' },
         ]}
       />
@@ -54,6 +72,8 @@ export function ChannelSettingsModal({
         <AboutTab channelId={channelId} onClose={onClose} />
       ) : tab === 'members' ? (
         <MembersTab channelId={channelId} />
+      ) : tab === 'wallpaper' ? (
+        <ChannelWallpaperPicker channelId={channelId} />
       ) : (
         <VoiceTriggersTab channelId={channelId} />
       )}
@@ -147,6 +167,24 @@ function AboutTab({ channelId, onClose }: { channelId: string; onClose: () => vo
     }
   }
 
+  async function setTtl(minutes: number | null) {
+    if (!channel) return
+    try {
+      await updateChannel(channel.id, { message_ttl_minutes: minutes })
+    } catch (e) {
+      if (e instanceof Error) toastError(e.message)
+    }
+  }
+
+  async function toggleAiExcluded() {
+    if (!channel) return
+    try {
+      await updateChannel(channel.id, { ai_excluded: !channel.ai_excluded })
+    } catch (e) {
+      if (e instanceof Error) toastError(e.message)
+    }
+  }
+
   async function doDelete() {
     if (!channel) return
     setDeleting(true)
@@ -231,6 +269,59 @@ function AboutTab({ channelId, onClose }: { channelId: string; onClose: () => vo
           <Button type="submit" className="px-4" disabled={!canSave}>
             {busy ? 'Saving…' : 'Save changes'}
           </Button>
+        </div>
+      )}
+
+      {isOwner && (
+        <div className="rounded-lg border border-border p-3">
+          <div className="mb-2 text-sm font-medium text-text">
+            Disappearing messages
+          </div>
+          <div className="mb-2 text-2xs text-text-faint">
+            New messages delete themselves after this long. Existing messages
+            keep whatever rule they were posted under — changing this never
+            reaches back into history.
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {TTL_CHOICES.map((choice) => (
+              <Button
+                key={choice.label}
+                type="button"
+                size="xs"
+                variant={
+                  (channel.message_ttl_minutes ?? null) === choice.value
+                    ? 'primary'
+                    : 'outline'
+                }
+                onClick={() => void setTtl(choice.value)}
+              >
+                {choice.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {isOwner && (
+        <div className="rounded-lg border border-border p-3">
+          <button
+            type="button"
+            onClick={() => void toggleAiExcluded()}
+            className="flex w-full items-center justify-between gap-3 text-left"
+          >
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-text">
+                Hide from Sharpy
+              </span>
+              <span className="block text-2xs text-text-faint">
+                Keep this channel out of the AI assistant's index. Turning it on
+                also deletes what has already been indexed.
+              </span>
+            </span>
+            <span role="switch" aria-checked={channel.ai_excluded}>
+              <ToggleVisual checked={channel.ai_excluded} />
+            </span>
+          </button>
         </div>
       )}
 

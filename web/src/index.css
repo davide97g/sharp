@@ -111,6 +111,82 @@
   --safe-left: env(safe-area-inset-left, 0px);
 }
 
+/* --- ambient effects -------------------------------------------------------
+ * Opt-in surface treatments, toggled by `data-fx` on <html> (a space-separated
+ * token list, so `[data-fx~='grain']` matches one flag). Focus mode clears the
+ * attribute entirely — see lib/theme.ts.
+ *
+ * Glass and glow deliberately target the generated Tailwind utility classes
+ * (`.bg-panel`, `.bg-accent`): those are the app's real surface vocabulary, and
+ * matching them is what makes the effect reach every panel without editing a
+ * hundred components. */
+:root[data-fx~='glass'] .bg-panel,
+:root[data-fx~='glass'] .bg-panel-2 {
+  background-color: color-mix(in oklab, var(--color-panel) 72%, transparent);
+  backdrop-filter: blur(14px) saturate(1.15);
+}
+
+:root[data-fx~='glow'] .bg-accent {
+  box-shadow: 0 0 16px color-mix(in oklab, var(--color-accent) 45%, transparent);
+}
+:root[data-fx~='glow'] .text-accent,
+:root[data-fx~='glow'] .text-accent-hover {
+  text-shadow: 0 0 10px color-mix(in oklab, var(--color-accent) 55%, transparent);
+}
+
+/* Grain and scanlines are single full-viewport overlays that never take input. */
+:root[data-fx~='grain']::after,
+:root[data-fx~='scanlines']::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: var(--z-lightbox);
+}
+:root[data-fx~='grain']::after {
+  opacity: 0.035;
+  /* Inline SVG feTurbulence — no asset, no network, resolution independent. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+:root[data-fx~='scanlines']::before {
+  opacity: 0.16;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0 2px,
+    color-mix(in oklab, var(--color-ink) 85%, black) 2px 3px
+  );
+}
+
+/* Long scrollbacks: let the browser skip layout and paint for rows that are far
+ * off screen. This is windowing without the DOM surgery — no scroll maths, so
+ * scroll anchoring, jump-to-message, and find-in-page all keep working, and
+ * `contain-intrinsic-size: auto` memorises each row's real height once it has
+ * been rendered so the scrollbar stops drifting. */
+.message-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 52px;
+}
+
+/* --- celebrations ---------------------------------------------------------- */
+.celebrate-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: var(--z-lightbox);
+  overflow: hidden;
+}
+.celebrate-layer i {
+  position: absolute;
+  border-radius: 1px;
+  will-change: transform, opacity;
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Belt and braces — lib/celebrate.ts already refuses to fire. */
+  .celebrate-layer {
+    display: none;
+  }
+}
+
 :root[data-tauri-mac] {
   --titlebar-h: 28px;
 }

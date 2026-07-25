@@ -118,7 +118,7 @@ export function CallChatRail({ channelId }: { channelId: string }) {
                   <MessageItem
                     message={m}
                     grouped={grouped}
-                    dm={bubbles}
+                    layout={bubbles ? 'bubble' : 'classic'}
                     showThread={!bubbles}
                     online={isDm ? undefined : online.has(m.user.id) || undefined}
                   />

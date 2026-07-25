@@ -46,6 +46,26 @@ export function fmtTime(iso: string): string {
   })
 }
 
+/**
+ * Message timestamp in the user's chosen style. `hover` shares the clock format
+ * with the default — the difference is only *when* the caller reveals it.
+ */
+export function fmtMessageTime(
+  iso: string,
+  style: 'hover' | 'clock24' | 'clock12' | 'relative',
+): string {
+  if (style === 'relative') return fmtRelative(iso)
+  const d = new Date(iso)
+  if (style === 'clock24' || style === 'clock12') {
+    return d.toLocaleTimeString(undefined, {
+      hour: style === 'clock12' ? 'numeric' : '2-digit',
+      minute: '2-digit',
+      hour12: style === 'clock12',
+    })
+  }
+  return fmtTime(iso)
+}
+
 export function fmtDayDivider(iso: string): string {
   const d = new Date(iso)
   const now = new Date()

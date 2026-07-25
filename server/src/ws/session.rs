@@ -65,7 +65,7 @@ pub async fn handle_socket(
 
     // Announce presence if this is the user's first connection. Guests are
     // voice-only and invisible to the presence system.
-    if first && guest.is_none() {
+    if first && guest.is_none() && !crate::privacy::is_invisible(&state.pool, user_id).await {
         let targets = state.hub.online_user_ids();
         let ev = envelope(
             "presence",
@@ -105,7 +105,9 @@ pub async fn handle_socket(
         state.hub.remove_visibility(user_id, conn_id).await;
     }
     let last = state.hub.remove(user_id, conn_id);
-    if last && guest.is_none() {
+    // No "online" was announced for an invisible user, so no "offline" either —
+    // an unpaired offline event would out them as having been connected.
+    if last && guest.is_none() && !crate::privacy::is_invisible(&state.pool, user_id).await {
         let targets = state.hub.online_user_ids();
         let ev = envelope(
             "presence",
@@ -166,6 +168,10 @@ async fn handle_client_event(
             }
         }
         "typing" => {
+            // One-way opt-out: you stop broadcasting, you keep receiving.
+            if !crate::privacy::shares_typing(&state.pool, user_id).await {
+                return;
+            }
             let channel_id = payload
                 .get("channel_id")
                 .and_then(|c| c.as_str())

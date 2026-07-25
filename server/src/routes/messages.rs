@@ -274,9 +274,16 @@ async fn insert_message(
     reply_to_id: Option<i64>,
     encrypted: bool,
 ) -> AppResult<i64> {
+    // Stamp the expiry from the channel's TTL at write time. Doing it here
+    // rather than deriving it on read means later TTL changes never reach back
+    // and delete history posted under the previous rule.
     let row = sqlx::query(
-        "INSERT INTO messages (channel_id, user_id, parent_id, content, reply_to_id, encrypted)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+        "INSERT INTO messages (channel_id, user_id, parent_id, content, reply_to_id, encrypted,
+                               expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6,
+             (SELECT now() + make_interval(mins => message_ttl_minutes)
+              FROM channels WHERE id = $1 AND message_ttl_minutes IS NOT NULL))
+         RETURNING id",
     )
     .bind(channel_id)
     .bind(user_id)
@@ -287,6 +294,45 @@ async fn insert_message(
     .fetch_one(&state.pool)
     .await?;
     Ok(row.try_get("id")?)
+}
+
+/// Soft-delete messages whose TTL has elapsed and tell every member.
+///
+/// Same shape as a manual delete — `deleted_at` set, content blanked, embedding
+/// dropped, `message.deleted` broadcast — so every client already knows how to
+/// render the result and no new wire event is needed. Batched so one long-idle
+/// period cannot produce an unbounded burst of broadcasts.
+pub async fn expire_tick(state: &SharedState) -> AppResult<()> {
+    let rows = sqlx::query(
+        "UPDATE messages SET deleted_at = now(), content = ''
+         WHERE id IN (
+             SELECT id FROM messages
+             WHERE expires_at IS NOT NULL AND expires_at <= now() AND deleted_at IS NULL
+             ORDER BY expires_at
+             LIMIT 200
+         )
+         RETURNING id, channel_id, parent_id",
+    )
+    .fetch_all(&state.pool)
+    .await?;
+
+    for row in &rows {
+        let id: i64 = row.try_get("id")?;
+        let channel_id: Uuid = row.try_get("channel_id")?;
+        let parent_id: Option<i64> = row.try_get("parent_id")?;
+        crate::routes::sharpy::drop_message_embedding(state, id).await;
+        let targets = channel_member_ids(&state.pool, channel_id).await?;
+        let ev = envelope(
+            "message.deleted",
+            json!({
+                "message_id": id.to_string(),
+                "channel_id": channel_id.to_string(),
+                "parent_id": parent_id.map(|p| p.to_string()),
+            }),
+        );
+        state.hub.broadcast(ev, targets).await;
+    }
+    Ok(())
 }
 
 async fn publish_message(

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { TasksGlyph } from './tasks/taskUi'
@@ -18,9 +18,25 @@ import { hasUnseenRelease } from '../lib/whatsNew'
 import { useIsMobile } from '../lib/useMediaQuery'
 import { useStore, streamShieldOn } from '../store'
 import { StreamBanner } from './stream/StreamBanner'
+import { ScreenLock } from './stream/ScreenLock'
+import { SeasonalLayer } from './SeasonalLayer'
 import { RestoreEncryptionModal } from './RestoreEncryptionModal'
 import { Avatar } from './Avatar'
-import { CountBadge } from '../ui'
+import { CountBadge, Skeleton } from '../ui'
+
+import { registerShortcut } from '../lib/shortcuts'
+import { byFrecency } from '../lib/frecency'
+import { ShortcutsModal } from './ShortcutsModal'
+
+function RouteFallback() {
+  return (
+    <div className="flex flex-1 flex-col gap-3 p-6">
+      <Skeleton className="h-6 w-48" />
+      <Skeleton className="h-4 w-full max-w-xl" />
+      <Skeleton className="h-4 w-2/3 max-w-lg" />
+    </div>
+  )
+}
 
 const SIDEBAR_OPEN_KEY = 'sharp.sidebarOpen'
 
@@ -45,15 +61,8 @@ function modeChordPressed(e: KeyboardEvent): boolean {
   return e.altKey && !e.metaKey && !e.ctrlKey
 }
 
-function isEditableTarget(target: EventTarget | null) {
-  return (
-    target instanceof HTMLElement &&
-    (target.isContentEditable ||
-      target.closest('input, textarea, select, [contenteditable="true"]') !== null)
-  )
-}
-
 export function AppShell() {
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const setQuickSwitcher = useStore((s) => s.setQuickSwitcher)
   const setSearchOpen = useStore((s) => s.setSearchOpen)
   const channels = useStore((s) => s.channels)
@@ -173,45 +182,74 @@ export function AppShell() {
     window.localStorage.setItem(SIDEBAR_OPEN_KEY, String(sidebarOpen))
   }, [sidebarOpen, isMobile])
 
-  // Global shortcuts: ⌘K / Ctrl+K for quick switcher, \ for the sidebar.
+  // Global shortcuts, declared through the central registry (lib/shortcuts.ts)
+  // so they appear in the cheat sheet and can be remapped.
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    const off = [
+      registerShortcut('palette.open', (e) => {
         e.preventDefault()
         setQuickSwitcher(true)
-        return
-      }
-
-      // ⌘/Ctrl+F: text search palette (intentionally overrides browser find).
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+      }),
+      // Intentionally overrides browser find.
+      registerShortcut('search.open', (e) => {
         e.preventDefault()
         setSearchOpen(true)
-        return
-      }
-
-      // Chord+1…9: jump between modules in rail order. e.code keeps digits
-      // stable when Option+digit types a symbol on macOS layouts.
-      if (!isMobile && modeChordPressed(e) && e.code.startsWith('Digit')) {
-        const digit = Number(e.code.slice(5))
-        if (digit >= 1 && digit <= MODE_ROUTES.length) {
-          e.preventDefault()
-          navigate(MODE_ROUTES[digit - 1])
-          return
-        }
-      }
-
-      if (e.key === '\\' && !e.repeat && !isEditableTarget(e.target) && !isMobile && mode === 'chat') {
+      }),
+      registerShortcut('shortcuts.help', (e) => {
+        e.preventDefault()
+        setShortcutsOpen(true)
+      }),
+      registerShortcut('sidebar.toggle', (e) => {
+        if (e.repeat || isMobile || mode !== 'chat') return
         e.preventDefault()
         toggleSidebar()
+      }),
+    ]
+    return () => off.forEach((fn) => fn())
+  }, [setQuickSwitcher, setSearchOpen, toggleSidebar, isMobile, mode])
+
+  // Idle prefetch: once the app is quiet, warm the few conversations this user
+  // actually opens. Bounded to three so a large workspace does not turn a cold
+  // start into a burst of requests.
+  useEffect(() => {
+    const idle =
+      window.requestIdleCallback?.bind(window) ??
+      ((cb: () => void) => window.setTimeout(cb, 1200))
+    const handle = idle(() => {
+      const st = useStore.getState()
+      byFrecency(
+        st.channels.filter((c) => c.is_member || c.kind === 'dm'),
+        (c) => `channel:${c.id}`,
+      )
+        .slice(0, 3)
+        .forEach((c) => st.prefetchChannel(c.id))
+    })
+    return () => window.cancelIdleCallback?.(handle as number)
+  }, [])
+
+  // The module chord is a *family* over digits 1–9, which a single chord in the
+  // registry cannot express, so it keeps its own listener. `e.code` keeps the
+  // digits stable when Option+digit types a symbol on macOS layouts.
+  useEffect(() => {
+    if (isMobile) return
+    function onKey(e: KeyboardEvent) {
+      if (!modeChordPressed(e) || !e.code.startsWith('Digit')) return
+      const digit = Number(e.code.slice(5))
+      if (digit >= 1 && digit <= MODE_ROUTES.length) {
+        e.preventDefault()
+        navigate(MODE_ROUTES[digit - 1])
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [setQuickSwitcher, setSearchOpen, toggleSidebar, isMobile, mode, navigate])
+  }, [isMobile, navigate])
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
       <StreamBanner />
+      <SeasonalLayer />
+      <ScreenLock />
+      {shortcutsOpen && <ShortcutsModal onClose={() => setShortcutsOpen(false)} />}
       <div className={`relative flex min-h-0 w-full flex-1 overflow-hidden ${isMobile ? 'flex-col' : ''}`}>
       {!settingsMode && !isMobile && !dockRail && (
         <ModeRail mode={mode} orientation="vertical" />
@@ -231,7 +269,12 @@ export function AppShell() {
           </div>
         )}
         <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
-          <Outlet />
+          {/* One boundary for every lazily-loaded route (App.tsx). The fallback
+              is a skeleton rather than a spinner so a fast chunk load does not
+              flash a loading state. */}
+          <Suspense fallback={<RouteFallback />}>
+            <Outlet />
+          </Suspense>
           {!settingsMode && mode === 'chat' && <ThreadPanel />}
           {!settingsMode && mode === 'chat' && <DocPeekPanel />}
           <SharpyPanel />

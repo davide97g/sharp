@@ -52,10 +52,15 @@ pub async fn list_users(
         users.push(user_from_row(row)?.redact_email_for(auth.id));
     }
 
+    // Invisible users are connected but not disclosed. Filtering the derived
+    // list (rather than refusing the connection) keeps their own realtime
+    // working while everyone else sees them as offline.
+    let hidden = crate::privacy::invisible_user_ids(&state.pool).await;
     let online: Vec<String> = state
         .hub
         .online_user_ids()
         .into_iter()
+        .filter(|u| !hidden.contains(u))
         .map(|u| u.to_string())
         .collect();
 

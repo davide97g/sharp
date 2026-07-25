@@ -3,6 +3,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
   type RefObject,
 } from 'react'
@@ -23,11 +24,14 @@ export function UserChip({
   fallbackName,
   children,
   className,
+  style,
 }: {
   userId: string
   fallbackName: string
   children: ReactNode
   className?: string
+  /** Inline overrides — used by the per-user name-colour chat option. */
+  style?: CSSProperties
 }) {
   const meId = useStore((s) => s.me?.id)
   const [open, setOpen] = useState(false)
@@ -35,7 +39,11 @@ export function UserChip({
   const triggerRef = useRef<HTMLSpanElement>(null)
 
   if (!userId || userId === meId) {
-    return <span className={className}>{children}</span>
+    return (
+      <span className={className} style={style}>
+        {children}
+      </span>
+    )
   }
 
   function measure(): Anchor | null {
@@ -57,6 +65,7 @@ export function UserChip({
       <span
         ref={triggerRef}
         className={className ?? 'inline-flex cursor-pointer'}
+        style={style}
         onClick={(e) => {
           e.stopPropagation()
           e.preventDefault()

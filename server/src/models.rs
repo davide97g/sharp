@@ -70,6 +70,10 @@ pub struct Channel {
     pub unread_count: i64,
     pub last_message_at: Option<DateTime<Utc>>,
     pub dm_user: Option<User>,
+    /// Channel opted out of the Sharpy index (migration 0032).
+    pub ai_excluded: bool,
+    /// Disappearing-message TTL in minutes; null = keep forever (migration 0033).
+    pub message_ttl_minutes: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize)]

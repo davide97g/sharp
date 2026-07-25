@@ -1,20 +1,36 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import type { Message, ReplyPreview } from '../lib/types'
 import { useStore } from '../store'
 import { AVATAR_PX } from '../lib/theme'
+import type { MessageLayout } from '../lib/uiPrefs'
+import { activePack, type SeasonalIntensity } from '../lib/seasonal'
 import { useCoarsePointer } from '../lib/useMediaQuery'
 import { Avatar } from './Avatar'
 import { UserChip } from './UserCard'
 import { Markdown } from './Markdown'
 import { AttachmentList } from './Attachments'
-import { fmtTime } from '../lib/util'
+import { fmtMessageTime, fmtTime, userColor } from '../lib/util'
 import { useDisplayName } from '../lib/displayName'
 import { gifPreviewText } from '../lib/gif'
 import { LockIcon } from './icons'
 import { Button } from '../ui'
 import { CreateTaskFromMessage } from './tasks/CreateTaskFromMessage'
 
-export const REACTION_PALETTE = ['👍', '✅', '👀', '❤️', '😂', '🎉']
+const BASE_REACTIONS = ['👍', '✅', '👀', '❤️', '😂', '🎉']
+
+/**
+ * The quick-reaction row. A seasonal pack pushes its own emoji to the front
+ * (deduped, same length) so the palette stays one row — Halloween week offers
+ * 🎃 without permanently costing you 🎉.
+ */
+export function reactionPalette(seasonal: SeasonalIntensity): string[] {
+  if (seasonal === 'off') return BASE_REACTIONS
+  const pack = activePack()
+  if (!pack) return BASE_REACTIONS
+  const merged = [...pack.reactions, ...BASE_REACTIONS.filter((e) => !pack.reactions.includes(e))]
+  return merged.slice(0, BASE_REACTIONS.length)
+}
+
 
 // Scroll to a quoted message (if it's currently loaded) and flash it.
 function scrollToMessage(id: string) {
@@ -134,21 +150,34 @@ function QuotedReply({ reply }: { reply: ReplyPreview }) {
   )
 }
 
-export function MessageItem({
+/**
+ * One message row.
+ *
+ * Memoized: `MessagePane` re-renders on any store slice it watches (unread
+ * counts, prefs, typing), and without this every row in a long scrollback
+ * re-rendered with it. Props are all primitives plus the message object, whose
+ * identity only changes when the message actually changes, so the default
+ * shallow comparison is exactly right.
+ */
+export const MessageItem = memo(function MessageItem({
   message,
   grouped,
   showThread = true,
   online,
-  dm = false,
+  layout = 'classic',
 }: {
   message: Message
   grouped: boolean
   showThread?: boolean
   online?: boolean
-  dm?: boolean
+  /** Row shape. `bubble` is the WhatsApp-style DM form; `irc` is one line. */
+  layout?: MessageLayout
 }) {
   const me = useStore((s) => s.me)
   const density = useStore((s) => s.ui.density)
+  const timestampStyle = useStore((s) => s.ui.timestampStyle)
+  const nameColors = useStore((s) => s.ui.nameColors)
+  const palette = reactionPalette(useStore((s) => s.ui.seasonal))
   const toggleReaction = useStore((s) => s.toggleReaction)
   const editMessage = useStore((s) => s.editMessage)
   const deleteMessage = useStore((s) => s.deleteMessage)
@@ -348,11 +377,11 @@ export function MessageItem({
   )
 
   // WhatsApp-style DM layout: my messages right, partner's left, chat bubbles.
-  if (dm) {
+  if (layout === 'bubble') {
     return (
       <div
         id={`msg-${message.id}`}
-        className={`group relative flex px-4 ${freshOnMount ? 'message-arrival' : ''} ${grouped ? 'py-(--density-row-y)' : 'pt-(--density-msg-y) mt-1'} ${
+        className={`message-row group relative flex px-4 ${freshOnMount ? 'message-arrival' : ''} ${grouped ? 'py-(--density-row-y)' : 'pt-(--density-msg-y) mt-1'} ${
           isMine ? 'justify-end' : 'justify-start'
         }`}
         data-message-mine={isMine || undefined}
@@ -439,7 +468,7 @@ export function MessageItem({
                       isMine ? 'right-0' : 'left-0'
                     }`}
                   >
-                    {REACTION_PALETTE.map((e) => (
+                    {palette.map((e) => (
                       <button
                         key={e}
                         onClick={() => {
@@ -490,10 +519,15 @@ export function MessageItem({
     )
   }
 
+  // Shared by both the classic and IRC rows below.
+  const irc = layout === 'irc'
+  const stamp = fmtMessageTime(message.created_at, timestampStyle)
+  const authorStyle = nameColors ? { color: userColor(message.user.id) } : undefined
+
   return (
     <div
       id={`msg-${message.id}`}
-      className={`group relative flex gap-3 px-4 transition-colors duration-200 ease-in-out ${freshOnMount ? 'message-arrival' : ''} ${
+      className={`message-row group relative flex gap-3 px-4 transition-colors duration-200 ease-in-out ${freshOnMount ? 'message-arrival' : ''} ${
         isFocused
           ? 'bg-[var(--color-accent-soft)]/40 ring-2 ring-inset ring-[var(--color-accent)]'
           : actioned
@@ -506,35 +540,59 @@ export function MessageItem({
       onClick={onMessageTap}
     >
       {burst}
-      {/* gutter: avatar or hover timestamp */}
-      <div className="relative w-(--density-avatar) shrink-0">
-        {grouped ? (
-          // Absolute + nowrap so the hover timestamp never reflows the row height.
-          <span className="absolute right-0 top-0.5 whitespace-nowrap text-3xs leading-5 tabular-nums text-[var(--color-text-faint)] opacity-0 group-hover:opacity-100 max-md:hidden">
-            {message.encrypted && (
-              <span className="mr-1 inline-flex align-[-1px]" title="End-to-end encrypted">
-                <LockIcon size={9} />
-              </span>
-            )}
-            {fmtTime(message.created_at)}
+      {irc ? (
+        // IRC: fixed time and author columns, so every line starts at the same
+        // x — that alignment is the whole point of the mode. The body column
+        // below is shared with the classic layout.
+        <>
+          <span className="w-11 shrink-0 pt-px text-right text-2xs leading-5 tabular-nums text-[var(--color-text-faint)]">
+            {stamp}
           </span>
-        ) : (
-          <Avatar
-            id={message.user.id}
-            name={message.user.display_name}
-            size={AVATAR_PX[density]}
-            online={online}
-          />
-        )}
-      </div>
+          <UserChip
+            userId={message.user.id}
+            fallbackName={message.user.display_name}
+            className="w-28 shrink-0 truncate text-right text-xs font-semibold leading-5 hover:underline"
+            style={authorStyle}
+          >
+            {authorName}
+          </UserChip>
+        </>
+      ) : (
+        /* gutter: avatar, or the timestamp when the row is grouped */
+        <div className="relative w-(--density-avatar) shrink-0">
+          {grouped ? (
+            // Absolute + nowrap so the timestamp never reflows the row height.
+            <span
+              className={`absolute right-0 top-0.5 whitespace-nowrap text-3xs leading-5 tabular-nums text-[var(--color-text-faint)] max-md:hidden ${
+                timestampStyle === 'hover' ? 'opacity-0 group-hover:opacity-100' : ''
+              }`}
+            >
+              {message.encrypted && (
+                <span className="mr-1 inline-flex align-[-1px]" title="End-to-end encrypted">
+                  <LockIcon size={9} />
+                </span>
+              )}
+              {stamp}
+            </span>
+          ) : (
+            <Avatar
+              id={message.user.id}
+              name={message.user.display_name}
+              size={AVATAR_PX[density]}
+              online={online}
+            />
+          )}
+        </div>
+      )}
 
       <div className="min-w-0 flex-1">
-        {!grouped && (
+        {!grouped && !irc && (
           <div className="flex items-baseline gap-2">
             <UserChip
               userId={message.user.id}
               fallbackName={message.user.display_name}
               className="text-sm font-semibold text-[var(--color-text)] hover:underline"
+              style={authorStyle}
             >
               {authorName}
             </UserChip>
@@ -544,7 +602,7 @@ export function MessageItem({
                   <LockIcon size={9} />
                 </span>
               )}
-              {fmtTime(message.created_at)}
+              {stamp}
             </span>
           </div>
         )}
@@ -662,7 +720,7 @@ export function MessageItem({
             </ToolbarBtn>
             {showPalette && (
               <div className="absolute right-0 top-10 z-20 flex gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel-2)] p-1.5 shadow-lg">
-                {REACTION_PALETTE.map((e) => (
+                {palette.map((e) => (
                   <button
                     key={e}
                     onClick={() => {
@@ -715,7 +773,7 @@ export function MessageItem({
       {taskModalEl}
     </div>
   )
-}
+})
 
 function RenderedMessageContent({ message, highlight }: { message: Message; highlight?: string }) {
   if (!message.encrypted) {

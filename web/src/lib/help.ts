@@ -1,4 +1,5 @@
 import faqRaw from '../content/faq.md?raw'
+import transparencyRaw from '../content/transparency.md?raw'
 import { parseMarkdown } from './changelog'
 
 export type HowTo = {
@@ -14,6 +15,7 @@ const modules = import.meta.glob<string>('../content/howto/*.md', {
 })
 
 export const faq = faqRaw.trim()
+export const transparency = transparencyRaw.trim()
 
 export const howTos: HowTo[] = Object.values(modules)
   .map((raw) => {

@@ -190,6 +190,54 @@ function play(
   }
 }
 
+// --- sound packs ---
+//
+// Rather than re-scoring 28 sounds five times, a pack is a transform applied at
+// the two choke points every voice passes through: `envGain` (loudness and
+// tail) and `tone` (waveform, pitch, chorus). Every existing sound keeps its
+// melody and timing; only its timbre changes.
+
+export type SoundPackId = 'default' | 'minimal' | 'retro' | 'nature' | 'mechanical'
+
+type Pack = {
+  /** Substitute waveform; identity keeps whatever the sound asked for. */
+  wave: (requested: OscillatorType) => OscillatorType
+  pitch: number
+  decay: number
+  gain: number
+  /** Multiplier on the chorus detune; 0 collapses to a single oscillator. */
+  detune: number
+}
+
+const identity = (w: OscillatorType) => w
+/** A pack that ignores what the sound asked for and imposes one waveform. */
+const always = (w: OscillatorType) => () => w
+
+const PACKS: Record<SoundPackId, Pack> = {
+  default: { wave: identity, pitch: 1, decay: 1, gain: 1, detune: 1 },
+  // Shorter and quieter: present, never attention-seeking.
+  minimal: { wave: always('sine'), pitch: 1, decay: 0.5, gain: 0.55, detune: 0 },
+  // Square waves at reduced gain — square carries far more energy than sine.
+  retro: { wave: always('square'), pitch: 1, decay: 0.7, gain: 0.42, detune: 0 },
+  // Longer tails and heavy chorus read as airy/organic.
+  nature: { wave: always('sine'), pitch: 0.92, decay: 1.5, gain: 0.85, detune: 2.5 },
+  // Very short, bright, clicky.
+  mechanical: {
+    wave: always('sawtooth'),
+    pitch: 1.06,
+    decay: 0.28,
+    gain: 0.7,
+    detune: 0,
+  },
+}
+
+let pack: Pack = PACKS.default
+
+/** Switch the active pack. Unknown ids fall back to `default`. */
+export function setSoundPack(id: string) {
+  pack = PACKS[id as SoundPackId] ?? PACKS.default
+}
+
 // --- voice primitives ---
 
 type EnvOpts = { attack?: number; hold?: number; decay: number; peak: number }
@@ -199,8 +247,10 @@ function envGain(
   context: AudioContext,
   out: AudioNode,
   t0: number,
-  { attack = 0.008, hold = 0, decay, peak }: EnvOpts,
+  { attack = 0.008, hold = 0, decay: rawDecay, peak: rawPeak }: EnvOpts,
 ): { node: GainNode; endsAt: number } {
+  const decay = rawDecay * pack.decay
+  const peak = rawPeak * pack.gain
   const g = context.createGain()
   g.gain.setValueAtTime(0.0001, t0)
   g.gain.exponentialRampToValueAtTime(peak, t0 + attack)
@@ -221,21 +271,24 @@ type ToneOpts = EnvOpts & {
 /** A single (optionally detuned, optionally pitch-bending) oscillator voice. */
 function tone(context: AudioContext, out: AudioNode, t0: number, opts: ToneOpts): number {
   const { node: g, endsAt } = envGain(context, out, t0, opts)
-  const type = opts.type ?? 'sine'
+  const type = pack.wave(opts.type ?? 'sine')
+  const freq = opts.freq * pack.pitch
+  const freqEnd = opts.freqEnd === undefined ? undefined : opts.freqEnd * pack.pitch
   const mk = (detune: number) => {
     const osc = context.createOscillator()
     osc.type = type
     osc.detune.value = detune
-    osc.frequency.setValueAtTime(opts.freq, t0)
-    if (opts.freqEnd !== undefined) {
-      osc.frequency.exponentialRampToValueAtTime(opts.freqEnd, endsAt)
+    osc.frequency.setValueAtTime(freq, t0)
+    if (freqEnd !== undefined) {
+      osc.frequency.exponentialRampToValueAtTime(freqEnd, endsAt)
     }
     osc.connect(g)
     osc.start(t0)
     osc.stop(endsAt + 0.03)
   }
   mk(0)
-  if (opts.detune) mk(opts.detune)
+  const detune = (opts.detune ?? 0) * pack.detune
+  if (detune) mk(detune)
   return endsAt
 }
 

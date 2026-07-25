@@ -68,6 +68,7 @@ import type {
   SharpyStreamEvent,
 } from './types'
 import type { UiPrefs } from './uiPrefs'
+import type { Wallpaper } from './wallpaper'
 
 const TOKEN_KEY = 'sharp.token'
 const SERVER_URL_KEY = 'sharp.serverUrl'
@@ -602,7 +603,13 @@ export const api = {
   },
   updateChannel(
     id: string,
-    input: { name?: string; topic?: string; kind?: 'public' | 'private' },
+    input: {
+      name?: string
+      topic?: string
+      kind?: 'public' | 'private'
+      ai_excluded?: boolean
+      message_ttl_minutes?: number | null
+    },
   ) {
     return request<Channel>(`/channels/${id}`, { method: 'PATCH', body: input })
   },
@@ -760,6 +767,13 @@ export const api = {
     return request<void>(`/channels/${channelId}/prefs`, {
       method: 'PUT',
       body: { muted },
+    })
+  },
+  /** `null` clears the wallpaper. Leaves the channel's notification mode alone. */
+  setChannelWallpaper(channelId: string, wallpaper: Wallpaper | null) {
+    return request<void>(`/channels/${channelId}/prefs`, {
+      method: 'PUT',
+      body: { wallpaper },
     })
   },
   setChannelMode(channelId: string, mode: ChannelNotifyMode) {

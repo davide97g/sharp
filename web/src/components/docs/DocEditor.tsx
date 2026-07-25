@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useStore } from '../../store'
 import { ApiRequestError, api } from '../../lib/api'
@@ -7,7 +7,14 @@ import { initials, userColor } from '../../lib/util'
 import type { DocConnStatus } from '../../lib/docSync'
 import type { Doc } from '../../lib/types'
 import { Banner, Button, EditorSkeleton, Menu, MenuItem } from '../../ui'
-import { DocEditorInner, type Peer } from './DocEditorInner'
+// BlockNote is the single largest dependency in the app. Loading the editor
+// lazily is what keeps it out of the main bundle — DocPeekPanel is mounted on
+// every chat route, so a static import here put BlockNote in everyone's cold
+// start whether or not they ever opened a doc.
+const DocEditorInner = lazy(() =>
+  import('./DocEditorInner').then((m) => ({ default: m.DocEditorInner })),
+)
+import type { Peer } from './DocEditorInner'
 import { EmojiPicker } from './EmojiPicker'
 import { ShareToChannelModal } from './ShareToChannelModal'
 import { DocRolesModal } from './DocRolesModal'
@@ -280,15 +287,17 @@ export function DocEditor() {
           </div>
 
           {/* editor */}
-          <DocEditorInner
-            key={docId}
-            docId={docId}
-            channelId={doc.channel_id}
-            user={user}
-            editable={canEdit}
-            onStatus={setStatus}
-            onPeers={setPeers}
-          />
+          <Suspense fallback={<EditorSkeleton />}>
+            <DocEditorInner
+              key={docId}
+              docId={docId}
+              channelId={doc.channel_id}
+              user={user}
+              editable={canEdit}
+              onStatus={setStatus}
+              onPeers={setPeers}
+            />
+          </Suspense>
 
           {/* backlinks */}
           {backlinks.length > 0 && (

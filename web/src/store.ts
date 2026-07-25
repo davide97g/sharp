@@ -8,6 +8,9 @@ import {
   setToken,
 } from './lib/api'
 import { applyUiPrefs } from './lib/theme'
+import { confettiAt, configureCelebrations } from './lib/celebrate'
+import { normalizeWallpaper, type Wallpaper } from './lib/wallpaper'
+import { setShortcutOverrides } from './lib/shortcuts'
 import {
   normalizeUiPrefs,
   readLocalUiPrefs,
@@ -61,6 +64,7 @@ import {
 } from './lib/notify'
 import {
   adoptSoundSettings,
+  setSoundPack,
   setSoundSink,
   playHuddleRingSound,
   playNotifySound,
@@ -72,6 +76,7 @@ import type {
   Channel,
   ChannelMember,
   ChannelNotifyMode,
+  PushPreview,
   PrefsUpdate,
   ChannelCreatedPayload,
   ChannelUpdatedPayload,
@@ -149,6 +154,8 @@ import type {
 } from './lib/types'
 
 const PAGE = 50
+/** Messages retained per channel once you navigate away. Four pages. */
+const MAX_CACHED_MESSAGES = 200
 
 let voiceRecognizer: PhraseRecognizer | null = null
 
@@ -406,6 +413,10 @@ type State = {
   notifyReply: boolean
   notifyTask: boolean
   notifyPoll: boolean
+  // Server-enforced privacy switches (migration 0031).
+  invisible: boolean
+  shareTyping: boolean
+  pushPreview: PushPreview
   dndScheduled: boolean
   dndStart: number | null
   dndEnd: number | null
@@ -420,6 +431,8 @@ type State = {
   // The synced appearance blob (theme, scheme, accent, density, scale, motion,
   // rail, sounds). Server-backed via PATCH /prefs/ui; see lib/uiPrefs.ts.
   ui: UiPrefs
+  /** Per-channel chat wallpapers, from `channel_prefs.wallpaper`. */
+  channelWallpapers: Record<string, Wallpaper>
   // Desktop navigation preference. Mirrors `ui.railPosition` so the many
   // existing readers do not have to reach into the blob.
   railPosition: RailPosition
@@ -486,6 +499,8 @@ type State = {
   setCurrentChannel: (id: string | null) => void
   loadMessages: (channelId: string) => Promise<void>
   loadOlder: (channelId: string) => Promise<void>
+  /** Warm a channel's message cache before the user commits to opening it. */
+  prefetchChannel: (channelId: string) => void
   sendMessage: (
     channelId: string,
     content: string,
@@ -506,7 +521,13 @@ type State = {
   leaveChannel: (id: string) => Promise<void>
   updateChannel: (
     id: string,
-    input: { name?: string; topic?: string; kind?: 'public' | 'private' },
+    input: {
+      name?: string
+      topic?: string
+      kind?: 'public' | 'private'
+      ai_excluded?: boolean
+      message_ttl_minutes?: number | null
+    },
   ) => Promise<Channel>
   deleteChannel: (id: string) => Promise<void>
   addChannelMembers: (id: string, userIds: string[]) => Promise<void>
@@ -685,6 +706,7 @@ type State = {
   setChatLayout: (layout: ChatLayout) => Promise<void>
   /** Merge an appearance patch: apply locally, mirror, sync, roll back on failure. */
   patchUi: (patch: Partial<UiPrefs>) => void
+  setChannelWallpaper: (channelId: string, wallpaper: Wallpaper) => Promise<void>
   setRailPosition: (position: RailPosition) => void
   setDockAutoHide: (autoHide: boolean) => void
   setStreamManual: (on: boolean) => void
@@ -732,6 +754,14 @@ function storedNoiseSuppression(): boolean {
 
 /** Local mirror of the appearance blob, replaced by the server copy on login. */
 const initialUi = readLocalUiPrefs()
+// Sounds can fire before the first `applyUi` (splash, login), so seed the pack
+// from the mirror at module load rather than waiting for hydration.
+setSoundPack(initialUi.soundPack)
+setShortcutOverrides(initialUi.shortcuts)
+configureCelebrations({
+  enabled: initialUi.celebrations && !initialUi.focusMode,
+  motion: initialUi.motion,
+})
 
 /**
  * Push a resolved appearance blob everywhere it is consumed: store state, the
@@ -742,6 +772,12 @@ function applyUi(set: (partial: Partial<State>) => void, next: UiPrefs) {
   set({ ui: next, railPosition: next.railPosition, dockAutoHide: next.dockAutoHide })
   applyUiPrefs(next)
   adoptSoundSettings(next.sounds)
+  setSoundPack(next.soundPack)
+  setShortcutOverrides(next.shortcuts)
+  configureCelebrations({
+    enabled: next.celebrations && !next.focusMode,
+    motion: next.motion,
+  })
 }
 
 function storedStreamManual(): boolean {
@@ -855,11 +891,15 @@ export const useStore = create<State>((set, get) => ({
   dndStart: null,
   dndEnd: null,
   tzOffset: 0,
+  invisible: false,
+  shareTyping: true,
+  pushPreview: 'full',
   notifyEnabled: false,
   notificationState: initialNotificationState(),
   notifHasMore: false,
   chatLayout: null,
   ui: initialUi,
+  channelWallpapers: {},
   railPosition: initialUi.railPosition,
   dockAutoHide: initialUi.dockAutoHide,
   streamManual: storedStreamManual(),
@@ -1224,7 +1264,30 @@ export const useStore = create<State>((set, get) => ({
     // hover/palette state resets when leaving a channel.
     set((s) => {
       if (id === s.currentChannelId) return { currentChannelId: id }
-      return { currentChannelId: id, paletteForMessageId: null, activeMessageId: null }
+      // Bound the cache: a channel you scrolled a long way back through keeps
+      // every page in memory forever otherwise. Trim on the way *out*, never
+      // while it is on screen — dropping rows under a live scroll position
+      // would jump the viewport. `hasMore` goes back to true so scrolling up
+      // re-fetches what was dropped.
+      const leaving = s.currentChannelId
+      const cached = leaving ? s.byChannel[leaving] : undefined
+      const byChannel =
+        cached && cached.list.length > MAX_CACHED_MESSAGES
+          ? {
+              ...s.byChannel,
+              [leaving as string]: {
+                ...cached,
+                list: cached.list.slice(-MAX_CACHED_MESSAGES),
+                hasMore: true,
+              },
+            }
+          : s.byChannel
+      return {
+        currentChannelId: id,
+        paletteForMessageId: null,
+        activeMessageId: null,
+        byChannel,
+      }
     })
   },
 
@@ -1263,6 +1326,15 @@ export const useStore = create<State>((set, get) => ({
       }))
       if (e instanceof Error) toastError(e.message)
     }
+  },
+
+  prefetchChannel(channelId) {
+    // The store already caches per channel and never refetches once loaded, so
+    // a prefetch is just an early `loadMessages` — the click that follows finds
+    // the cache warm and renders with no spinner.
+    const cm = get().byChannel[channelId]
+    if (cm?.loaded || cm?.loading) return
+    void get().loadMessages(channelId)
   },
 
   async loadOlder(channelId) {
@@ -2663,8 +2735,17 @@ export const useStore = create<State>((set, get) => ({
         dndStart: prefs.dnd_start,
         dndEnd: prefs.dnd_end,
         tzOffset: prefs.tz_offset,
+        invisible: prefs.invisible ?? false,
+        shareTyping: prefs.share_typing ?? true,
+        pushPreview: prefs.push_preview ?? 'full',
         chatLayout: prefs.chat_layout,
         nicknames: nickRes.nicknames ?? {},
+        channelWallpapers: Object.fromEntries(
+          Object.entries(prefs.channel_wallpapers ?? {}).map(([id, raw]) => [
+            id,
+            normalizeWallpaper(raw),
+          ]),
+        ),
       })
       // The server blob wins over the local mirror outright — no merge, no
       // clock comparison. Missing fields fall back to what this device had, so
@@ -2747,6 +2828,23 @@ export const useStore = create<State>((set, get) => ({
       writeLocalUiPrefs(prev)
       if (e instanceof Error) toastError(e.message)
     })
+  },
+
+  async setChannelWallpaper(channelId, wallpaper) {
+    const prev = get().channelWallpapers
+    const next = { ...prev }
+    if (wallpaper.kind === 'none') delete next[channelId]
+    else next[channelId] = wallpaper
+    set({ channelWallpapers: next })
+    try {
+      await api.setChannelWallpaper(
+        channelId,
+        wallpaper.kind === 'none' ? null : wallpaper,
+      )
+    } catch (e) {
+      set({ channelWallpapers: prev })
+      if (e instanceof Error) toastError(e.message)
+    }
   },
 
   setRailPosition(position) {
@@ -2925,6 +3023,9 @@ export const useStore = create<State>((set, get) => ({
     if (patch.dnd_start !== undefined) next.dndStart = patch.dnd_start
     if (patch.dnd_end !== undefined) next.dndEnd = patch.dnd_end
     if (patch.tz_offset !== undefined) next.tzOffset = patch.tz_offset
+    if (patch.invisible !== undefined) next.invisible = patch.invisible
+    if (patch.share_typing !== undefined) next.shareTyping = patch.share_typing
+    if (patch.push_preview !== undefined) next.pushPreview = patch.push_preview
     set(next)
     try {
       await api.setPrefs(patch)
@@ -2939,6 +3040,9 @@ export const useStore = create<State>((set, get) => ({
         dndStart: prev.dndStart,
         dndEnd: prev.dndEnd,
         tzOffset: prev.tzOffset,
+        invisible: prev.invisible,
+        shareTyping: prev.shareTyping,
+        pushPreview: prev.pushPreview,
       })
       if (e instanceof Error) toastError(e.message)
     }
@@ -3697,6 +3801,23 @@ export const useStore = create<State>((set, get) => ({
       case 'task.created':
       case 'task.updated': {
         const { task } = env.payload as TaskCreatedPayload | TaskUpdatedPayload
+        // Celebrate a task crossing into a completed-type state. Keyed on the
+        // state *type*, never its name — projects rename their states freely.
+        const before = get().tasksByProject[task.project_id]?.find(
+          (t) => t.id === task.id,
+        )
+        const typeOfState = (stateId: string | null | undefined) =>
+          get()
+            .projects.find((p) => p.id === task.project_id)
+            ?.states.find((st) => st.id === stateId)?.type
+        if (
+          env.type === 'task.updated' &&
+          before &&
+          before.state_id !== task.state_id &&
+          typeOfState(task.state_id) === 'completed'
+        ) {
+          confettiAt()
+        }
         set((s) => {
           const list = s.tasksByProject[task.project_id]
           const tasksByProject = list
@@ -3769,6 +3890,9 @@ export const useStore = create<State>((set, get) => ({
       case 'poll.created':
       case 'poll.updated': {
         const { poll } = env.payload as PollCreatedPayload | PollUpdatedPayload
+        // A poll closing is the moment worth marking, not every incoming vote.
+        const wasOpen = get().pollsById[poll.id]?.closed_at == null
+        if (env.type === 'poll.updated' && wasOpen && poll.closed_at) confettiAt()
         set((s) => ({ pollsById: { ...s.pollsById, [poll.id]: poll } }))
         break
       }
@@ -4373,6 +4497,21 @@ function applyMessageDeleted(
 // audio graph), but they are part of the synced appearance blob — route every
 // change back through the store so it reaches the server and other devices.
 setSoundSink((s) => useStore.getState().patchUi({ sounds: s }))
+
+// Streaming implies Focus: while you are on camera or sharing a screen, the
+// decorative layer is off. This borrows focus mode without writing the stored
+// preference, so the user's own setting comes back when the stream ends.
+let lastStreaming = streamingActive(useStore.getState())
+useStore.subscribe((s) => {
+  const streaming = streamingActive(s)
+  if (streaming === lastStreaming) return
+  lastStreaming = streaming
+  applyUiPrefs(s.ui, streaming)
+  configureCelebrations({
+    enabled: s.ui.celebrations && !s.ui.focusMode && !streaming,
+    motion: s.ui.motion,
+  })
+})
 
 // Global typing pruner.
 if (typeof window !== 'undefined') {

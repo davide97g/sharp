@@ -9,6 +9,7 @@
 // inline boot script in index.html mirrors `applyUiPrefs` closely enough to
 // avoid a flash of the wrong theme — keep the two in sync.
 
+import { activePack } from './seasonal'
 import {
   DEFAULT_UI_PREFS,
   readLocalUiPrefs,
@@ -253,21 +254,39 @@ const RUNTIME_VARS = [
  * injects the app stylesheet at runtime in dev — so a style tag appended at
  * boot silently loses to `index.css`. Inline properties always win.
  */
-export function applyUiPrefs(prefs: UiPrefs = readLocalUiPrefs()) {
+export function applyUiPrefs(prefs: UiPrefs = readLocalUiPrefs(), focusOverride = false) {
   const root = document.documentElement
   const theme = resolveTheme(prefs)
+  // Focus mode is the master kill switch for anything decorative. `focusOverride`
+  // is how the streaming privacy shield borrows it without touching the stored
+  // preference.
+  const focus = prefs.focusMode || focusOverride
+  const fx = focus
+    ? []
+    : (Object.keys(prefs.effects) as (keyof typeof prefs.effects)[]).filter(
+        (k) => prefs.effects[k],
+      )
+  if (fx.length) root.setAttribute('data-fx', fx.join(' '))
+  else root.removeAttribute('data-fx')
+  root.toggleAttribute('data-focus', focus)
   // `default` is the bare @theme palette, so it carries no attribute.
   if (theme.id === 'default') root.removeAttribute('data-theme')
   else root.setAttribute('data-theme', theme.id)
   root.setAttribute('data-scheme', theme.scheme)
   root.style.colorScheme = theme.scheme
 
+  // Seasonal packs retint the accent while they are in window — but never over
+  // an accent the user chose explicitly, and never in Focus mode.
+  const pack = focus || prefs.seasonal === 'off' ? null : activePack()
+  const hue = prefs.accentHue ?? pack?.accentHue ?? null
   const vars: Record<string, string> = {
     ...DENSITY_VARS[prefs.density],
     '--font-scale': String(prefs.fontScale),
     '--motion-scale': String(prefs.motion),
-    ...(prefs.accentHue === null ? {} : accentVars(prefs.accentHue, theme.scheme)),
+    ...(hue === null ? {} : accentVars(hue, theme.scheme)),
   }
+  if (pack) root.setAttribute('data-season', pack.id)
+  else root.removeAttribute('data-season')
   for (const name of RUNTIME_VARS) {
     const value = vars[name]
     if (value === undefined) root.style.removeProperty(name)

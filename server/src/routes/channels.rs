@@ -14,7 +14,8 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 const CHANNEL_SELECT: &str = "
-    SELECT c.id, c.name, c.kind, c.topic, c.created_by, c.created_at,
+    SELECT c.id, c.name, c.kind, c.topic, c.created_by, c.created_at, c.ai_excluded,
+        c.message_ttl_minutes,
         (cm.user_id IS NOT NULL) AS is_member,
         cm.role AS my_role,
         (SELECT max(created_at) FROM messages m WHERE m.channel_id = c.id AND m.deleted_at IS NULL) AS last_message_at,
@@ -41,6 +42,8 @@ fn map_channel_row(row: &PgRow) -> AppResult<Channel> {
         unread_count: row.try_get("unread_count")?,
         last_message_at: row.try_get("last_message_at")?,
         dm_user: None,
+        ai_excluded: row.try_get("ai_excluded").unwrap_or(false),
+        message_ttl_minutes: row.try_get("message_ttl_minutes").unwrap_or(None),
     })
 }
 
@@ -464,6 +467,12 @@ pub struct UpdateChannelRequest {
     pub name: Option<String>,
     pub topic: Option<String>,
     pub kind: Option<String>,
+    /// Keep this channel out of the Sharpy index (migration 0032).
+    pub ai_excluded: Option<bool>,
+    /// Disappearing messages: minutes until a new message expires.
+    /// `Some(None)` clears the TTL, `None` leaves it untouched (migration 0033).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_ttl_minutes: Option<Option<i32>>,
 }
 
 /// Update a channel's name, topic, and/or visibility. Owner only; DMs cannot be edited.
@@ -528,6 +537,36 @@ pub async fn update_channel(
             .bind(channel_id)
             .execute(&state.pool)
             .await?;
+    }
+
+    if let Some(ttl) = body.message_ttl_minutes {
+        if let Some(minutes) = ttl {
+            if minutes <= 0 || minutes > 60 * 24 * 365 {
+                return Err(AppError::Validation(
+                    "message_ttl_minutes must be between 1 and 525600".to_string(),
+                ));
+            }
+        }
+        // Only new messages carry the new rule; existing ones keep the
+        // `expires_at` they were written with.
+        sqlx::query("UPDATE channels SET message_ttl_minutes = $1 WHERE id = $2")
+            .bind(ttl)
+            .bind(channel_id)
+            .execute(&state.pool)
+            .await?;
+    }
+
+    if let Some(excluded) = body.ai_excluded {
+        sqlx::query("UPDATE channels SET ai_excluded = $1 WHERE id = $2")
+            .bind(excluded)
+            .bind(channel_id)
+            .execute(&state.pool)
+            .await?;
+        // Retroactive: opting out purges what was already indexed, otherwise
+        // the switch would only cover messages sent from now on.
+        if excluded {
+            crate::routes::sharpy::purge_channel_embeddings(&state, channel_id).await;
+        }
     }
 
     let channel = load_channel(&state.pool, channel_id, auth.id).await?;

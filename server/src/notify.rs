@@ -520,6 +520,15 @@ pub async fn push_event(
     }
     let web_allowed = !state.hub.has_visible_session(user_id).await;
     let expo_allowed = !state.hub.is_online(user_id);
+    let generic_pair;
+    let (title, body) = if crate::privacy::load(&state.pool, user_id).await.push_preview
+        == crate::privacy::PushPreview::Generic
+    {
+        generic_pair = crate::privacy::generic_push_text();
+        (generic_pair.0.as_str(), generic_pair.1.as_str())
+    } else {
+        (title, body)
+    };
     let payload = serde_json::json!({
         "title": title,
         "body": body,
@@ -664,10 +673,22 @@ async fn dispatch_inner(
         if !is_dnd(pool, uid).await {
             let web_allowed = !state.hub.has_visible_session(uid).await;
             let expo_allowed = !state.hub.is_online(uid);
-            let (title, body) = push::title_and_body(&notif);
+            // A generic preview must strip the content on *every* transport, so
+            // it is resolved once here rather than inside each sender.
+            let generic = crate::privacy::load(pool, uid).await.push_preview
+                == crate::privacy::PushPreview::Generic;
+            let (title, body) = if generic {
+                crate::privacy::generic_push_text()
+            } else {
+                push::title_and_body(&notif)
+            };
             let web = async {
                 if web_allowed {
-                    push::send_to_user(state, uid, &notif).await;
+                    if generic {
+                        push::send_generic(state, uid, &notif).await;
+                    } else {
+                        push::send_to_user(state, uid, &notif).await;
+                    }
                 }
             };
             let expo = async {
@@ -959,6 +980,25 @@ mod push {
             "notification_id": notif.id.to_string(),
             "kind": notif.kind,
             "tag": tag,
+            "path": crate::notify::notification_path(notif),
+            "timestamp": notif.created_at.timestamp_millis(),
+        })
+        .to_string();
+        send_payload(state, user_id, &payload).await;
+    }
+
+    /// Content-free variant of `send_to_user`. Routing ids are kept so tapping
+    /// the notification still lands in the right place; the human-readable
+    /// fields carry nothing.
+    pub async fn send_generic(state: &SharedState, user_id: Uuid, notif: &Notification) {
+        let (title, body) = crate::privacy::generic_push_text();
+        let payload = json!({
+            "title": title,
+            "body": body,
+            "channel_id": notif.channel_id.map(|id| id.to_string()),
+            "notification_id": notif.id.to_string(),
+            "kind": notif.kind,
+            "tag": tag_for(notif),
             "path": crate::notify::notification_path(notif),
             "timestamp": notif.created_at.timestamp_millis(),
         })

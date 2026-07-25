@@ -5,10 +5,13 @@ import { App } from './App'
 import { registerServiceWorker } from './lib/notify'
 import { installIosViewportFix } from './lib/iosViewport'
 import { applyUiPrefs, watchSystemScheme } from './lib/theme'
+import { installShortcuts } from './lib/shortcuts'
 import { useStore } from './store'
 import './index.css'
 
 installIosViewportFix()
+// One global keydown listener for every declared shortcut (lib/shortcuts.ts).
+installShortcuts()
 // The inline boot script in index.html already painted the saved theme; this
 // re-applies the full set (density included) from the same mirror, and keeps
 // following the OS while the scheme preference is "System".

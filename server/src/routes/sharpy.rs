@@ -254,6 +254,7 @@ async fn retrieve(state: &SharedState, user_id: Uuid, query_vec: &Vector) -> App
          JOIN channels c ON c.id = e.channel_id
          JOIN users u ON u.id = m.user_id
          JOIN channel_members cm ON cm.channel_id = e.channel_id AND cm.user_id = $2
+         WHERE NOT c.ai_excluded
          ORDER BY e.embedding <=> $1
          LIMIT $3",
     )
@@ -328,6 +329,7 @@ async fn retrieve(state: &SharedState, user_id: Uuid, query_vec: &Vector) -> App
          FROM doc_embeddings de
          JOIN docs d ON d.id = de.doc_id AND d.deleted_at IS NULL
          JOIN channel_members cm ON cm.channel_id = d.channel_id AND cm.user_id = $2
+         JOIN channels dc ON dc.id = d.channel_id AND NOT dc.ai_excluded
          ORDER BY de.embedding <=> $1
          LIMIT $3",
     )
@@ -695,9 +697,10 @@ pub async fn embed_tick(state: &SharedState) -> anyhow::Result<()> {
     let rows = sqlx::query(
         "SELECT m.id, m.channel_id, m.content
          FROM messages m
+         JOIN channels c ON c.id = m.channel_id
          LEFT JOIN message_embeddings e ON e.message_id = m.id
          WHERE e.message_id IS NULL AND m.deleted_at IS NULL AND NOT m.encrypted
-           AND btrim(m.content) <> ''
+           AND btrim(m.content) <> '' AND NOT c.ai_excluded
          ORDER BY m.id DESC LIMIT 64",
     )
     .fetch_all(&state.pool)
@@ -893,6 +896,11 @@ pub async fn embed_message(state: &SharedState, message_id: i64, channel_id: Uui
     if content.trim().is_empty() {
         return;
     }
+    // Cheap guard on the hot publish path: one boolean read beats embedding a
+    // message that retrieval would then have to filter back out.
+    if channel_ai_excluded(&state.pool, channel_id).await {
+        return;
+    }
     match ai::embed(&cfg, std::slice::from_ref(&content)).await {
         Ok(mut vecs) if !vecs.is_empty() => {
             let embedding = Vector::from(vecs.remove(0));
@@ -911,6 +919,42 @@ pub async fn embed_message(state: &SharedState, message_id: i64, channel_id: Uui
         }
         Ok(_) => {}
         Err(e) => tracing::warn!("sharpy: immediate message embed failed: {}", e),
+    }
+}
+
+/// Whether a channel has opted out of the assistant index (migration 0032).
+pub async fn channel_ai_excluded(pool: &sqlx::PgPool, channel_id: Uuid) -> bool {
+    sqlx::query("SELECT ai_excluded FROM channels WHERE id = $1")
+        .bind(channel_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|r| r.try_get::<bool, _>("ai_excluded").ok())
+        .unwrap_or(false)
+}
+
+/// Purge everything already indexed for a channel. Called when the opt-out is
+/// switched on, so enabling it is retroactive rather than only forward-looking.
+pub async fn purge_channel_embeddings(state: &SharedState, channel_id: Uuid) {
+    if state.config.ai.is_none() {
+        return;
+    }
+    let messages = sqlx::query("DELETE FROM message_embeddings WHERE channel_id = $1")
+        .bind(channel_id)
+        .execute(&state.pool)
+        .await;
+    let docs = sqlx::query(
+        "DELETE FROM doc_embeddings WHERE doc_id IN (SELECT id FROM docs WHERE channel_id = $1)",
+    )
+    .bind(channel_id)
+    .execute(&state.pool)
+    .await;
+    if let Err(e) = messages {
+        tracing::warn!("sharpy: purge message embeddings failed: {}", e);
+    }
+    if let Err(e) = docs {
+        tracing::warn!("sharpy: purge doc embeddings failed: {}", e);
     }
 }
 

@@ -132,6 +132,12 @@ Composites:
 - **Spacing rhythm**: 4px grid; content padding `p-4` (panels) / `px-3 py-2` (rows); section gaps `gap-5` in forms, `gap-2` between related controls.
 - **Text hierarchy per surface**: title (`Heading`) → metadata (`text-2xs text-text-faint`) → body (`text-sm`). One accent element per region.
 
+## Keyboard
+
+**Never attach `window.addEventListener('keydown')` for a feature shortcut.** Declare it in `SHORTCUTS` (`web/src/lib/shortcuts.ts`) and bind with `registerShortcut(id, handler)` — that is what makes it appear in the `?` cheat sheet, remappable, and subject to scope resolution (`overlay` > `pane` > `global`) and the editable-target guard. A raw listener is correct only for a key *family* one chord cannot express (the module chord over digits 1–9) or a purely contextual key (Escape unwinding whatever is open); both are commented as such where they exist.
+
+Render a chord with `formatChord(chordFor(id))` inside `<Kbd>`, never a hard-coded "⌘K" — the user may have rebound it.
+
 ## Anti-patterns (reject in review)
 
 - Inline `className` button/input recipes → use `Button`/`Input`.
@@ -142,6 +148,9 @@ Composites:
 - `z-[NN]` arbitrary values → `z-(--z-*)` bands.
 - Local `function XIcon()` for a glyph that exists in `web/src/ui/icons.tsx` — check the registry first, add there if missing (defaults: 24 viewBox, `stroke-width 2`, `currentColor`, `aria-hidden`).
 - Animations without a reduced-motion fallback.
+- A new `window.addEventListener('keydown')` for a shortcut → `registerShortcut`.
+- Hard-coded row padding or avatar size on a chat surface → the `--density-*` tokens.
+- Literal durations in transitions → `--motion-snap` / `--motion-smooth`, so the motion slider reaches them.
 
 ## Extending
 

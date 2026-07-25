@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore, streamShieldOn } from '../store'
 import { channelLabel, fuzzyScore } from '../lib/util'
+import { byFrecency, recordVisit } from '../lib/frecency'
+import { buildCommands } from '../lib/commands'
 import { toastError } from '../lib/toast'
 import { sound } from '../lib/sound'
 import { SearchInput } from '../ui'
@@ -15,6 +17,19 @@ type Item =
   | { kind: 'user'; id: string; label: string; sub: string; icon: string; priv?: boolean; chanId?: string }
   | { kind: 'doc'; id: string; label: string; sub: string; icon: string; docKind: DocKind; priv?: boolean; chanId?: string }
   | { kind: 'task'; id: string; label: string; sub: string; icon: string; path: string; priv?: boolean; chanId?: string }
+  | { kind: 'command'; id: string; label: string; sub: string; icon: string; run: () => void; priv?: boolean; chanId?: string }
+
+/**
+ * Leading character narrows the palette to one kind. `>` is the command mode;
+ * the rest mirror the sigils those objects already use elsewhere in the app.
+ */
+const PREFIXES: Record<string, Item['kind']> = {
+  '>': 'command',
+  '@': 'user',
+  '#': 'channel',
+  '/': 'doc',
+  '!': 'task',
+}
 
 export function QuickSwitcher() {
   const open = useStore((s) => s.quickSwitcherOpen)
@@ -129,10 +144,39 @@ export function QuickSwitcher() {
     return out
   }, [myTasks, tasksByProject])
 
+  // Rebuilt on open (and whenever the query changes to command mode) so labels
+  // like "Turn off Focus mode" reflect current state.
+  const commandItems = useMemo<Item[]>(
+    () =>
+      buildCommands(navigate).map((c) => ({
+        kind: 'command',
+        id: c.id,
+        label: c.label,
+        sub: c.hint ? `Command · ${c.hint}` : 'Command',
+        icon: c.icon,
+        run: c.run,
+      })),
+    // `open` is the dependency that matters: a fresh snapshot per invocation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [navigate, open, q.startsWith('>')],
+  )
+
   const filtered = useMemo(() => {
-    const query = q.trim()
-    const all = [...items, ...taskItems]
-    if (!query) return items.slice(0, 20)
+    const raw = q.trim()
+    const prefix = PREFIXES[raw[0] ?? '']
+    const query = prefix ? raw.slice(1).trim() : raw
+    const pool = prefix
+      ? [...items, ...taskItems, ...commandItems].filter((it) => it.kind === prefix)
+      : [...items, ...taskItems]
+    const all = pool
+
+    if (!query) {
+      // Empty query: what you reach for most, not whatever order the store
+      // happens to hold. Commands are excluded unless explicitly asked for —
+      // they would crowd out the conversations you actually want.
+      const base = prefix ? pool : items
+      return byFrecency(base, (it) => `${it.kind}:${it.id}`).slice(0, 20)
+    }
     // Exact identifier prefix (e.g. "SHARP-12") jumps straight to tasks even if
     // that task list isn't loaded yet: synthesize a jump item from the keys.
     const identifierMatch = /^([A-Za-z][A-Za-z0-9]{1,5})-(\d+)$/.exec(query)
@@ -162,7 +206,7 @@ export function QuickSwitcher() {
         .slice(0, 20 - synthesized.length)
         .map((x) => x.it),
     ]
-  }, [items, taskItems, projects, q])
+  }, [items, taskItems, commandItems, projects, q])
 
   useEffect(() => {
     setSel(0)
@@ -175,6 +219,11 @@ export function QuickSwitcher() {
 
   async function choose(it: Item) {
     setOpen(false)
+    recordVisit(`${it.kind}:${it.id}`)
+    if (it.kind === 'command') {
+      it.run()
+      return
+    }
     if (it.kind === 'channel') {
       navigate(`/c/${it.id}`)
     } else if (it.kind === 'task') {
@@ -255,7 +304,14 @@ export function QuickSwitcher() {
         {/* TODO(ds): hints are plain arrow glyphs, not chip spans — wrapping each
             key in <Kbd> would change the look, so kept as text. */}
         <div className="border-t border-[var(--color-border)] px-4 py-2 text-2xs text-[var(--color-text-faint)]">
-          ↑↓ to navigate · ↵ to select · esc to close
+          ↑↓ navigate · ↵ select · esc close
+          <span className="ml-2 opacity-70">
+            · <b className="font-semibold">&gt;</b> commands ·{' '}
+            <b className="font-semibold">@</b> people ·{' '}
+            <b className="font-semibold">#</b> channels ·{' '}
+            <b className="font-semibold">/</b> docs · <b className="font-semibold">!</b>{' '}
+            tasks
+          </span>
         </div>
       </div>
     </div>

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useStore } from '../../store'
+import { registerShortcut } from '../../lib/shortcuts'
 import type { Task, TaskPriority } from '../../lib/types'
 import { NewTaskModal } from './NewTaskModal'
 import { TaskBoardView } from './TaskBoardView'
@@ -13,14 +14,6 @@ import { Avatar } from '../Avatar'
 import { Button, CheckIcon, ChevronLeftIcon, IconButton, Menu, MenuItem, PlusIcon } from '../../ui'
 
 const VIEW_KEY = 'sharp.taskView.' // + projectId → 'list' | 'board'
-
-function isEditableTarget(target: EventTarget | null) {
-  return (
-    target instanceof HTMLElement &&
-    (target.isContentEditable ||
-      target.closest('input, textarea, select, [contenteditable="true"]') !== null)
-  )
-}
 
 export function ProjectView() {
   const { key, num } = useParams()
@@ -57,22 +50,12 @@ export function ProjectView() {
 
   // `c` creates a task from anywhere in the project view.
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (
-        e.key === 'c' &&
-        !e.metaKey &&
-        !e.ctrlKey &&
-        !e.altKey &&
-        !isEditableTarget(e.target) &&
-        !newTask &&
-        !num
-      ) {
-        e.preventDefault()
-        setNewTask({})
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    // Not while a task is already being created or a peek is open.
+    return registerShortcut('task.create', (e) => {
+      if (newTask || num) return
+      e.preventDefault()
+      setNewTask({})
+    })
   }, [newTask, num])
 
   const allTasks = project ? (tasksByProject[project.id] ?? []) : []

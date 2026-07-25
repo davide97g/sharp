@@ -1,7 +1,10 @@
 import { effectiveNicknames } from '../lib/displayName'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useStore } from '../store'
+import { streamShieldOn, useStore } from '../store'
+import { isEditableTarget, registerShortcut } from '../lib/shortcuts'
+import type { MessageLayout } from '../lib/uiPrefs'
+import { wallpaperStyle } from '../lib/wallpaper'
 import { MessageItem } from './MessageItem'
 import { DayDivider } from './DayDivider'
 import { Composer } from './Composer'
@@ -19,6 +22,19 @@ import { ActivePollBanner } from './ActivePollBanner'
 import { StreamShield } from './stream/StreamShield'
 import { useIsMobile } from '../lib/useMediaQuery'
 import { channelLabel, sameDay, withinMinutes } from '../lib/util'
+
+/** "1 hour", "24 hours", "7 days" — the units the picker offers. */
+function formatTtl(minutes: number): string {
+  if (minutes % (60 * 24) === 0) {
+    const days = minutes / (60 * 24)
+    return `${days} day${days === 1 ? '' : 's'}`
+  }
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60
+    return `${hours} hour${hours === 1 ? '' : 's'}`
+  }
+  return `${minutes} minute${minutes === 1 ? '' : 's'}`
+}
 
 export function MessagePane() {
   const { channelId } = useParams<{ channelId: string }>()
@@ -41,6 +57,12 @@ export function MessagePane() {
   const joinVoice = useStore((s) => s.joinVoice)
   const leaveVoice = useStore((s) => s.leaveVoice)
   const chatLayout = useStore((s) => s.chatLayout)
+  const channelLayout = useStore((s) => s.ui.channelLayout)
+  const channelLayoutOverrides = useStore((s) => s.ui.channelLayoutOverrides)
+  const groupWindowMin = useStore((s) => s.ui.groupWindowMin)
+  const wallpaper = useStore((s) => s.channelWallpapers[channelId ?? ''])
+  const focusMode = useStore((s) => s.ui.focusMode)
+  const shieldOn = useStore(streamShieldOn)
   const dmEncryption = useStore((s) => (channelId ? s.dmEncryption[channelId] : undefined))
   const dmPartnerReady = useStore((s) => (channelId ? s.dmPartnerReady[channelId] : undefined))
   const focus = useStore((s) => s.focus)
@@ -93,43 +115,83 @@ export function MessagePane() {
     if (channelId) markChannelNotifsRead(channelId)
   }, [channelId, markChannelNotifsRead])
 
-  // Keyboard shortcuts acting on the hovered message (e: react, r: reply,
-  // t: thread; Esc: cancel). Disabled while typing in an input/textarea.
+  // Message shortcuts, declared through the registry. They act on the *active*
+  // message — the one hovered with a mouse or tapped on touch.
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.metaKey || e.ctrlKey || e.altKey) return
-      const t = e.target as HTMLElement | null
-      const tag = t?.tagName
-      if (t?.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-
+    /** The active message, if it still exists and is not deleted. */
+    function activeMessage() {
       const st = useStore.getState()
       const cid = st.currentChannelId
-      if (e.key === 'Escape') {
-        if (st.paletteForMessageId) {
-          st.setPaletteFor(null)
-          e.preventDefault()
-        } else if (cid && st.replyTargets[cid]) {
-          st.setReplyTarget(cid, null)
-          e.preventDefault()
-        }
-        return
-      }
-
-      const key = e.key.toLowerCase()
-      if (key !== 'e' && key !== 'r' && key !== 't') return
       const id = st.activeMessageId
       const msg = id && cid ? st.byChannel[cid]?.list.find((m) => m.id === id) : undefined
-      if (!msg || msg.deleted_at) return
-      e.preventDefault()
-      if (key === 'e') {
-        st.setPaletteFor(msg.id)
-      } else if (key === 'r') {
+      return msg && !msg.deleted_at ? msg : undefined
+    }
+    /** Move the active message by `delta` positions for j/k navigation. */
+    function step(delta: number) {
+      const st = useStore.getState()
+      const cid = st.currentChannelId
+      const list = cid ? (st.byChannel[cid]?.list ?? []) : []
+      if (!list.length) return
+      const at = list.findIndex((m) => m.id === st.activeMessageId)
+      // No active message yet: j starts at the newest, k at the oldest.
+      const next = at < 0 ? (delta > 0 ? list.length - 1 : 0) : at + delta
+      const target = list[Math.min(list.length - 1, Math.max(0, next))]
+      if (!target) return
+      st.setActiveMessage(target.id)
+      document
+        .getElementById(`msg-${target.id}`)
+        ?.scrollIntoView({ block: 'nearest' })
+    }
+
+    const off = [
+      registerShortcut('message.react', (e) => {
+        const msg = activeMessage()
+        if (!msg) return
+        e.preventDefault()
+        useStore.getState().setPaletteFor(msg.id)
+      }),
+      registerShortcut('message.reply', (e) => {
+        const msg = activeMessage()
+        if (!msg) return
+        e.preventDefault()
+        const st = useStore.getState()
         st.setReplyTarget(msg.channel_id, msg)
         st.requestComposerFocus(`c:${msg.channel_id}`)
-      } else if (key === 't') {
+      }),
+      registerShortcut('message.thread', (e) => {
+        const msg = activeMessage()
+        if (!msg) return
+        e.preventDefault()
+        const st = useStore.getState()
         const parent = msg.parent_id ?? msg.id
         st.openThread(parent)
         st.requestComposerFocus(`t:${parent}`)
+      }),
+      registerShortcut('message.next', (e) => {
+        e.preventDefault()
+        step(1)
+      }),
+      registerShortcut('message.prev', (e) => {
+        e.preventDefault()
+        step(-1)
+      }),
+    ]
+    return () => off.forEach((fn) => fn())
+  }, [])
+
+  // Escape is contextual rather than a named action: it unwinds whatever is
+  // open, innermost first, and does nothing when there is nothing to cancel.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape' || isEditableTarget(e.target)) return
+      const st = useStore.getState()
+      const cid = st.currentChannelId
+      if (st.paletteForMessageId) {
+        st.setPaletteFor(null)
+        e.preventDefault()
+      } else if (cid && st.replyTargets[cid]) {
+        st.setReplyTarget(cid, null)
+        e.preventDefault()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -346,7 +408,18 @@ export function MessagePane() {
 
   const isDm = channel.kind === 'dm'
   const dmOnline = isDm && channel.dm_user ? online.has(channel.dm_user.id) : undefined
-  const bubbles = isDm && chatLayout === 'bubble'
+  // DMs keep their layout in the server-side `chat_layout` column (the
+  // first-run chooser gates on it being null); channels read the appearance
+  // blob, with an optional per-channel override.
+  const layout: MessageLayout = isDm
+    ? chatLayout === 'bubble'
+      ? 'bubble'
+      : 'classic'
+    : (channelLayoutOverrides[channel.id] ?? channelLayout)
+  const bubbles = layout === 'bubble'
+  // Focus mode (and the streaming shield, which implies it) hides decoration.
+  const wallpaperCss =
+    focusMode || shieldOn ? null : wallpaper ? wallpaperStyle(wallpaper) : null
   const needsLayoutChoice = isDm && chatLayout === null
   const inThisVoiceRoom = activeVoiceChannelId === channel.id
   const voiceOccupancy = new Set(
@@ -484,6 +557,14 @@ export function MessagePane() {
 
       {!isDm ? <ActivePollBanner channel={channel} /> : null}
 
+      {channel.message_ttl_minutes != null && (
+        // Disappearing messages change what happens when you press send, so the
+        // rule belongs above the composer, not buried in channel settings.
+        <div className="border-b border-border bg-panel/60 px-4 py-1.5 text-center text-2xs text-text-dim">
+          Messages here disappear after {formatTtl(channel.message_ttl_minutes)}.
+        </div>
+      )}
+
       {showSettings && (
         <ChannelSettingsModal channelId={channel.id} onClose={() => setShowSettings(false)} />
       )}
@@ -494,7 +575,16 @@ export function MessagePane() {
 
       {/* messages */}
       <div className="relative min-h-0 flex-1">
-        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto overflow-x-hidden">
+        {wallpaperCss && (
+          // Behind the scroller and inert: the wallpaper must never intercept a
+          // scroll, a click, or a text selection.
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0"
+            style={wallpaperCss}
+          />
+        )}
+        <div ref={scrollRef} onScroll={onScroll} className="relative h-full overflow-y-auto overflow-x-hidden">
           {cm?.loading && messages.length === 0 ? (
             <LoadingSkeleton />
           ) : messages.length === 0 && cm?.loaded ? (
@@ -510,10 +600,11 @@ export function MessagePane() {
                 const prev = messages[i - 1]
                 const newDay = !prev || !sameDay(prev.created_at, m.created_at)
                 const grouped =
+                  groupWindowMin > 0 &&
                   !newDay &&
                   !!prev &&
                   prev.user.id === m.user.id &&
-                  withinMinutes(prev.created_at, m.created_at, 5) &&
+                  withinMinutes(prev.created_at, m.created_at, groupWindowMin) &&
                   !prev.deleted_at
                 return (
                   <div key={m.id}>
@@ -521,7 +612,7 @@ export function MessagePane() {
                     <MessageItem
                       message={m}
                       grouped={grouped}
-                      dm={bubbles}
+                      layout={layout}
                       showThread={!bubbles}
                       online={isDm ? undefined : online.has(m.user.id) || undefined}
                     />

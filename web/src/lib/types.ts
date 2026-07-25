@@ -33,6 +33,10 @@ export type Channel = {
   unread_count: number
   last_message_at: string | null
   dm_user: User | null
+  /** Channel opted out of the Sharpy index (migration 0032). */
+  ai_excluded: boolean
+  /** Disappearing messages: minutes until a new message expires; null = off. */
+  message_ttl_minutes: number | null
 }
 
 export type Reaction = {
@@ -120,11 +124,15 @@ export function notificationPath(n: Notification): string {
 }
 
 export type ChannelNotifyMode = 'all' | 'mentions' | 'muted'
+/** How much of a message may appear in an OS push notification. */
+export type PushPreview = 'full' | 'generic'
 
 export type Prefs = {
   dnd: boolean
   muted_channel_ids: string[]
   channel_modes: Record<string, ChannelNotifyMode>
+  /** Per-channel chat wallpapers; shape owned by lib/wallpaper.ts. */
+  channel_wallpapers: Record<string, unknown>
   chat_layout: ChatLayout | null
   notify_dm: boolean
   notify_mention: boolean
@@ -135,6 +143,10 @@ export type Prefs = {
   dnd_start: number | null // minutes-of-day, local time
   dnd_end: number | null
   tz_offset: number // minutes east of UTC
+  // Server-enforced privacy switches (migration 0031).
+  invisible: boolean
+  share_typing: boolean
+  push_preview: PushPreview
   /** Opaque appearance blob; shape owned by lib/uiPrefs.ts, not the server. */
   ui: Record<string, unknown>
 }
@@ -152,6 +164,9 @@ export type PrefsUpdate = Partial<
     | 'dnd_start'
     | 'dnd_end'
     | 'tz_offset'
+    | 'invisible'
+    | 'share_typing'
+    | 'push_preview'
   >
 >
 
