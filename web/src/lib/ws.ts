@@ -1,4 +1,5 @@
 import { getToken, resolveBaseUrl } from './api'
+export type { WsEnvelope } from './types'
 import type { WsEnvelope } from './types'
 
 type Handler = (env: WsEnvelope) => void

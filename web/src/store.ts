@@ -8,7 +8,7 @@ import {
   setToken,
 } from './lib/api'
 import { applyUiPrefs } from './lib/theme'
-import { confettiAt, configureCelebrations } from './lib/celebrate'
+import { configureCelebrations } from './lib/celebrate'
 import { normalizeWallpaper, type Wallpaper } from './lib/wallpaper'
 import { setShortcutOverrides } from './lib/shortcuts'
 import {
@@ -33,10 +33,52 @@ import {
 import { isTranscriptionSupported, PhraseRecognizer } from './lib/speech'
 import { getAudioAuraStyle, setAudioAuraStyle, type AudioAuraStyle } from './lib/meetingEffects'
 import { WsClient } from './lib/ws'
-import { cmpId } from './lib/util'
-import { gifPreviewText } from './lib/gif'
 import {
-  decryptDmMessage,
+  currentVoiceRecognizer,
+  setVoiceRecognizer,
+  stopVoiceRecognizer,
+} from './lib/store/recognizer'
+import { applyWsEventTo } from './lib/wsEvents'
+import { sortTasks } from './lib/store/taskHelpers'
+import { applyUi } from './lib/store/uiHelpers'
+import {
+  emptyVoiceState,
+  saveNoiseSuppression,
+  storedNoiseSuppression,
+} from './lib/store/voiceHelpers'
+
+// The pure state predicates live in lib/store/predicates.ts; every caller imports them
+// from here, so they stay re-exported.
+export {
+  dndActive,
+  streamChannelShielded,
+  streamShieldOn,
+  streamingActive,
+  streamShieldsChannel,
+} from './lib/store/predicates'
+import {
+  streamingActive,
+} from './lib/store/predicates'
+import {
+  applyMyRsvp,
+  upsertMeetingItem,
+} from './lib/store/calendarHelpers'
+import { dropChannel } from './lib/store/channelHelpers'
+import {
+  countUnread,
+  placeDoc,
+  removeDoc,
+  sortDocs,
+} from './lib/store/docHelpers'
+import {
+  findMessage,
+  queueDecryptions,
+  updateReactions,
+} from './lib/store/messageHelpers'
+import {
+  withPollVotes,
+} from './lib/store/voiceHelpers'
+import {
   encryptDmMessage,
   ensureDevice,
   getDevices,
@@ -44,30 +86,21 @@ import {
   invalidateDevices,
   isChannelEncrypted,
 } from './lib/e2ee'
-import { resolveEncryptedAttachments } from './lib/e2ee/attachments'
 import { idbClear } from './lib/e2ee/idb'
-import { indexDecryptedMessage, removeIndexedMessage } from './lib/e2ee/search'
-import { markAllDeviceSetsChanged, markDeviceSetChanged } from './lib/e2ee/trust'
 import { restoreBackup } from './lib/e2ee/backup'
-import { toastError, toastInfo, toastNotify } from './lib/toast'
+import { toastError } from './lib/toast'
 import { navigateTo } from './lib/nav'
-import { notificationPath } from './lib/types'
 import {
   disablePush,
   enableNotifications,
   getNotificationState,
   initPush,
   initialNotificationState,
-  navigateToChannel,
-  showOsNotification,
   type NotificationSetupState,
 } from './lib/notify'
 import {
-  adoptSoundSettings,
   setSoundPack,
   setSoundSink,
-  playHuddleRingSound,
-  playNotifySound,
   playVoiceJoinSound,
   playVoiceLeaveSound,
   sound,
@@ -78,75 +111,27 @@ import type {
   ChannelNotifyMode,
   PushPreview,
   PrefsUpdate,
-  ChannelCreatedPayload,
-  ChannelUpdatedPayload,
-  ChannelDeletedPayload,
-  ChannelMemberPayload,
-  ChannelMemberUpdatedPayload,
   ChannelRole,
   ChatLayout,
   Doc,
-  DocCreatedPayload,
-  DocDeletedPayload,
   DocMention,
-  DocMentionPayload,
-  DocUpdatedPayload,
   GifConfig,
-  HelloPayload,
   Message,
-  MessageCreatedPayload,
-  MessageDeletedPayload,
-  MessageUpdatedPayload,
-  DuckStreakPayload,
-  E2eeDevicesChangedPayload,
   EncryptedAttachment,
   Notification,
-  NotificationCreatedPayload,
-  PresencePayload,
-  ReactionPayload,
-  TypingPayload,
   User,
-  UserUpdatedPayload,
-  VoiceErrorPayload,
-  VoiceAnnotatePayload,
-  VoiceAnnotateClearPayload,
-  VoiceAnnotateStatePayload,
-  VoiceParticipantJoinedPayload,
-  VoiceParticipantLeftPayload,
-  VoiceParticipantUpdatedPayload,
-  VoiceRoomSnapshot,
   VoiceStatePayload,
   VoiceTrigger,
-  VoiceTriggerCreatedPayload,
-  VoiceTriggerDeletedPayload,
-  VoiceTriggerFiredPayload,
-  MeetingStartedPayload,
-  MeetingEndedPayload,
   CalendarConnection,
   CalendarItem,
   ScheduledMeeting,
-  CalendarMeetingCreatedPayload,
-  CalendarMeetingUpdatedPayload,
-  CalendarMeetingCancelledPayload,
-  CalendarSyncedPayload,
-  CalendarReminderPayload,
   Poll,
   CallPoll,
-  PollCreatedPayload,
-  PollUpdatedPayload,
-  PollDeletedPayload,
-  VoicePollStatePayload,
   Project,
-  ProjectCreatedPayload,
-  ProjectUpdatedPayload,
   Task,
-  TaskCommentPayload,
-  TaskCreatedPayload,
-  TaskDeletedPayload,
   TaskDetail,
   TaskLabel,
   TaskUpdateInput,
-  TaskUpdatedPayload,
   SharpyConversation,
   SharpyMessage,
   SharpySource,
@@ -157,12 +142,6 @@ const PAGE = 50
 /** Messages retained per channel once you navigate away. Four pages. */
 const MAX_CACHED_MESSAGES = 200
 
-let voiceRecognizer: PhraseRecognizer | null = null
-
-function stopVoiceRecognizer() {
-  voiceRecognizer?.stop()
-  voiceRecognizer = null
-}
 
 type TypingEntry = { display_name: string; expiresAt: number }
 
@@ -199,7 +178,7 @@ export type VoiceStageMode = 'expanded' | 'compact' | 'mini' | 'full'
 // call sites keep working.
 export type { RailPosition } from './lib/uiPrefs'
 
-type VoiceState = {
+export type VoiceState = {
   channelId: string | null
   status: 'idle' | 'connecting' | 'connected' | 'reconnecting'
   muted: boolean
@@ -239,74 +218,7 @@ export type ChannelMessages = {
  * active scheduled quiet-hours window (evaluated against the local clock, so it
  * matches what the user configured regardless of the stored tz offset).
  */
-export function dndActive(s: {
-  dnd: boolean
-  dndScheduled: boolean
-  dndStart: number | null
-  dndEnd: number | null
-}): boolean {
-  if (s.dnd) return true
-  if (!s.dndScheduled || s.dndStart == null || s.dndEnd == null) return false
-  const now = new Date()
-  const cur = now.getHours() * 60 + now.getMinutes()
-  const { dndStart: a, dndEnd: b } = s
-  if (a === b) return false
-  return a < b ? cur >= a && cur < b : cur >= a || cur < b
-}
-
-/** Streaming mode is on: manual toggle, or actively sharing the screen in a call. */
-export function streamingActive(s: {
-  streamManual: boolean
-  voice: { screenStatus: 'off' | 'starting' | 'on' }
-}): boolean {
-  return s.streamManual || s.voice.screenStatus === 'on'
-}
-
-type StreamShieldState = {
-  streamManual: boolean
-  streamRevealAllUntil: number | null
-  streamRevealChannels: Record<string, number>
-  voice: { screenStatus: 'off' | 'starting' | 'on' }
-}
-
-/** The privacy shield is enforcing right now (streaming and not inside an "everything" reveal window). */
-export function streamShieldOn(s: StreamShieldState): boolean {
-  if (!streamingActive(s)) return false
-  return !(s.streamRevealAllUntil && Date.now() < s.streamRevealAllUntil)
-}
-
-/**
- * Whether this channel's content must stay hidden right now. A per-channel
- * reveal window lifts the shield for that conversation only; no channel id
- * (e.g. local encrypted-DM search hits) stays hidden while the shield is on.
- */
-export function streamChannelShielded(
-  s: StreamShieldState,
-  channelId: string | null | undefined,
-): boolean {
-  if (!streamShieldOn(s)) return false
-  if (!channelId) return true
-  const until = s.streamRevealChannels[channelId]
-  return !(until && Date.now() < until)
-}
-
-/**
- * Alerts from this channel must stay off-screen while shielded (private/DM only,
- * honoring per-channel reveal windows). Server web-push fires outside the app
- * and can't be gated here — this covers in-app toasts, sounds, and
- * client-routed OS notifications only.
- */
-function streamShieldsChannel(
-  st: StreamShieldState & { channels: Channel[] },
-  channelId: string | null | undefined,
-): boolean {
-  if (!channelId) return false
-  const kind = st.channels.find((c) => c.id === channelId)?.kind
-  if (kind !== 'private' && kind !== 'dm') return false
-  return streamChannelShielded(st, channelId)
-}
-
-type State = {
+export type State = {
   // auth
   token: string | null
   me: User | null
@@ -724,33 +636,14 @@ type State = {
 }
 
 // sort_order is a fractional-index string; id tie-break keeps order stable.
-function sortTasks(list: Task[]): Task[] {
-  return [...list].sort((a, b) =>
-    a.sort_order < b.sort_order
-      ? -1
-      : a.sort_order > b.sort_order
-        ? 1
-        : a.id < b.id
-          ? -1
-          : 1,
-  )
-}
 
 function emptyChannelMessages(): ChannelMessages {
   return { list: [], loaded: false, loading: false, hasMore: true }
 }
 
-const NOISE_SUPPRESSION_KEY = 'sharp.noiseSuppression'
 const STREAM_MANUAL_KEY = 'sharp.streamManual'
 const STREAM_REVERT_NICKS_KEY = 'sharp.streamRevertNicknames'
 
-function storedNoiseSuppression(): boolean {
-  try {
-    return window.localStorage.getItem(NOISE_SUPPRESSION_KEY) !== '0'
-  } catch {
-    return true
-  }
-}
 
 /** Local mirror of the appearance blob, replaced by the server copy on login. */
 const initialUi = readLocalUiPrefs()
@@ -768,17 +661,6 @@ configureCelebrations({
  * two mirrored fields, the DOM (theme attribute + runtime vars), and the sound
  * engine. Persistence is the caller's job — hydration must not write back.
  */
-function applyUi(set: (partial: Partial<State>) => void, next: UiPrefs) {
-  set({ ui: next, railPosition: next.railPosition, dockAutoHide: next.dockAutoHide })
-  applyUiPrefs(next)
-  adoptSoundSettings(next.sounds)
-  setSoundPack(next.soundPack)
-  setShortcutOverrides(next.shortcuts)
-  configureCelebrations({
-    enabled: next.celebrations && !next.focusMode,
-    motion: next.motion,
-  })
-}
 
 function storedStreamManual(): boolean {
   try {
@@ -796,34 +678,6 @@ function storedStreamRevertNicknames(): boolean {
   }
 }
 
-function emptyVoiceState(): VoiceState {
-  const videoBackground = loadVideoBackground()
-  return {
-    channelId: null,
-    status: 'idle',
-    muted: false,
-    noiseSuppression: storedNoiseSuppression(),
-    noiseSuppressionAvailable: true,
-    videoBackground,
-    handRaised: false,
-    transcribing: false,
-    transcriptionAvailable: false,
-    roastArmed: false,
-    speaking: {},
-    cameraStatus: 'off',
-    screenStatus: 'off',
-    stageMode: 'expanded',
-    audioDeviceId: null,
-    videoDeviceId: null,
-    localStream: null,
-    remoteStreams: {},
-    localScreenStream: null,
-    remoteScreenStreams: {},
-    client: null,
-    annotationsAllowed: false,
-    annotating: false,
-  }
-}
 
 export const useStore = create<State>((set, get) => ({
   token: null,
@@ -2255,8 +2109,8 @@ export const useStore = create<State>((set, get) => ({
       voice: { ...s.voice, muted: nextMuted, handRaised: lowerHand ? false : s.voice.handRaised },
     }))
     if (get().voice.transcribing) {
-      if (nextMuted) voiceRecognizer?.pause()
-      else voiceRecognizer?.resume()
+      if (nextMuted) currentVoiceRecognizer()?.pause()
+      else currentVoiceRecognizer()?.resume()
     }
     get().ws?.send('voice.mute', { channel_id: channelId, muted: nextMuted })
   },
@@ -2264,11 +2118,7 @@ export const useStore = create<State>((set, get) => ({
   // Purely local mic denoising — no WS event; peers only hear the cleaned track.
   async toggleNoiseSuppression() {
     const next = !get().voice.noiseSuppression
-    try {
-      window.localStorage.setItem(NOISE_SUPPRESSION_KEY, next ? '1' : '0')
-    } catch {
-      // ignore persistence failures (private mode etc.)
-    }
+    saveNoiseSuppression(next)
     set((s) => ({ voice: { ...s.voice, noiseSuppression: next } }))
     const { client } = get().voice
     if (!client) return
@@ -2344,8 +2194,8 @@ export const useStore = create<State>((set, get) => ({
         current.ws?.send('voice.phrase', { channel_id: channelId, text })
       },
       onError: (error) => {
-        if (voiceRecognizer !== recognizer) return
-        voiceRecognizer = null
+        if (currentVoiceRecognizer() !== recognizer) return
+        setVoiceRecognizer(null)
         const current = get()
         if (!current.voice.transcribing || current.voice.channelId !== channelId) return
         set((s) => ({ voice: { ...s.voice, transcribing: false } }))
@@ -2357,7 +2207,7 @@ export const useStore = create<State>((set, get) => ({
         )
       },
     })
-    voiceRecognizer = recognizer
+    setVoiceRecognizer(recognizer)
     set((s) => ({ voice: { ...s.voice, transcribing: true } }))
     recognizer.start()
     if (voice.muted) recognizer.pause()
@@ -3086,1412 +2936,12 @@ export const useStore = create<State>((set, get) => ({
     set({ notificationState, notifyEnabled: false })
   },
 
+  // The WS event reducer lives in lib/wsEvents.ts — see the guardrail there about
+  // keeping the event list in lockstep with the server.
   applyWsEvent(env) {
-    const me = get().me
-    switch (env.type) {
-      case 'hello': {
-        const p = env.payload as HelloPayload
-        const previous = get()
-        const voiceReconnected =
-          previous.myConnId !== null &&
-          previous.myConnId !== p.conn_id &&
-          previous.voice.channelId !== null
-        if (voiceReconnected) {
-          stopVoiceRecognizer()
-          previous.voice.client?.stop()
-          annotations.reset()
-          annotations.setSend(null, null)
-        }
-        set({
-          online: new Set(p.online_user_ids),
-          myConnId: p.conn_id,
-          voiceRooms: voiceRoomsFromSnapshots(p.voice_rooms),
-          activeMeetings: activeMeetingsFromSnapshots(p.voice_rooms),
-          callPoll:
-            p.voice_rooms.find(
-              (room) => room.channel_id === (previous.voice.channelId ?? previous.guestChannelId),
-            )?.poll ?? null,
-          ...(voiceReconnected ? { voice: emptyVoiceState() } : {}),
-        })
-        // Guest bootstrap: once we have a conn id, auto-join the bound channel's
-        // voice room exactly once (joinVoice fetches /voice/config with the guest
-        // token). Reconnects don't re-fire this; the guest page offers Rejoin.
-        const st = get()
-        if (st.isGuest && st.guestPendingJoin && st.guestChannelId) {
-          set({ guestPendingJoin: false })
-          void get().joinVoice(st.guestChannelId)
-        }
-        break
-      }
-      case 'presence': {
-        const p = env.payload as PresencePayload
-        set((s) => {
-          const online = new Set(s.online)
-          if (p.status === 'online') online.add(p.user_id)
-          else online.delete(p.user_id)
-          return { online }
-        })
-        break
-      }
-      case 'e2ee.devices_changed': {
-        const p = env.payload as E2eeDevicesChangedPayload
-        invalidateDevices(p.user_id)
-        if (p.user_id === me?.id) void markAllDeviceSetsChanged()
-        else void markDeviceSetChanged(p.user_id)
-        void get().refreshDmEncryption(p.user_id)
-        break
-      }
-      case 'typing': {
-        const p = env.payload as TypingPayload
-        if (me && p.user_id === me.id) break
-        set((s) => ({
-          typing: {
-            ...s.typing,
-            [p.channel_id]: {
-              ...(s.typing[p.channel_id] ?? {}),
-              [p.user_id]: { display_name: p.display_name, expiresAt: Date.now() + 3000 },
-            },
-          },
-        }))
-        break
-      }
-      case 'voice.state': {
-        const p = env.payload as VoiceStatePayload
-        const joiningThisRoom =
-          get().voice.channelId === p.channel_id && get().voice.status === 'connecting'
-        set((s) => ({
-          voiceRooms: {
-            ...s.voiceRooms,
-            [p.channel_id]: voiceRoomFromParticipants(p.participants),
-          },
-          activeMeetings: p.active_meeting_id
-            ? { ...s.activeMeetings, [p.channel_id]: p.active_meeting_id }
-            : s.activeMeetings,
-          callPoll: p.poll,
-          ...(s.voice.channelId === p.channel_id
-            ? {
-                voice: {
-                  ...s.voice,
-                  speaking: {},
-                  annotationsAllowed: p.annotations_allowed,
-                },
-              }
-            : {}),
-        }))
-        const active = get().voice
-        if (active.channelId === p.channel_id) {
-          active.client?.syncPeers(p.participants)
-          for (const participant of p.participants) {
-            if (participant.conn_id === get().myConnId) continue
-            active.client?.updateRemoteScreen(
-              participant.conn_id,
-              participant.screen_on ? participant.screen_stream_id : null,
-            )
-          }
-        }
-        if (joiningThisRoom) void get().connectVoiceMedia(p)
-        break
-      }
-      case 'voice.participant_joined': {
-        const p = env.payload as VoiceParticipantJoinedPayload
-        const previousRoom = get().voiceRooms[p.channel_id]
-        const huddleStarted = !previousRoom || Object.keys(previousRoom).length === 0
-        set((s) => ({
-          voiceRooms: {
-            ...s.voiceRooms,
-            [p.channel_id]: {
-              ...(s.voiceRooms[p.channel_id] ?? {}),
-              [p.participant.conn_id]: {
-                user_id: p.participant.user_id,
-                display_name: p.participant.display_name,
-                annotation_color: p.participant.annotation_color,
-                guest: p.participant.guest,
-                muted: p.participant.muted,
-                transcribing: p.participant.transcribing,
-                camera_on: p.participant.camera_on,
-                screen_on: p.participant.screen_on,
-                  screen_stream_id: p.participant.screen_stream_id,
-                  hand_raised: p.participant.hand_raised,
-                  hand_raised_at: p.participant.hand_raised_at,
-                  aura_style: p.participant.aura_style,
-                  joined_at: p.participant.joined_at,
-              },
-            },
-          },
-        }))
-        const active = get().voice
-        if (active.channelId === p.channel_id) {
-          active.client?.ensurePeer(p.participant.conn_id, p.participant.user_id)
-          if (p.participant.conn_id !== get().myConnId && p.participant.screen_on) {
-            active.client?.updateRemoteScreen(
-              p.participant.conn_id,
-              p.participant.screen_stream_id,
-            )
-          }
-          if (p.participant.conn_id !== get().myConnId && p.participant.user_id !== me?.id) {
-            playVoiceJoinSound()
-          }
-        } else {
-          const channel = get().channels.find((candidate) => candidate.id === p.channel_id)
-          if (
-            huddleStarted &&
-            channel?.kind === 'dm' &&
-            me &&
-            p.participant.user_id !== me.id &&
-            !streamShieldOn(get())
-          ) {
-            const who = channel.dm_user?.display_name ?? 'Someone'
-            toastNotify('started a huddle', {
-              title: who,
-              initial: who.trim().charAt(0).toUpperCase() || '?',
-              onClick: () => {
-                navigateToChannel(channel.id)
-                // Mic only — no camera; mini widget keeps it audio-first.
-                void get().joinVoice(channel.id, { stageMode: 'mini' })
-              },
-            })
-            playHuddleRingSound()
-          }
-        }
-        break
-      }
-      case 'voice.participant_left': {
-        const p = env.payload as VoiceParticipantLeftPayload
-        const activeBeforeLeave = get().voice
-        set((s) => {
-          const room = { ...(s.voiceRooms[p.channel_id] ?? {}) }
-          delete room[p.conn_id]
-          const voiceRooms = { ...s.voiceRooms }
-          if (Object.keys(room).length === 0) delete voiceRooms[p.channel_id]
-          else voiceRooms[p.channel_id] = room
-          return { voiceRooms }
-        })
-        if (activeBeforeLeave.channelId === p.channel_id) {
-          playVoiceLeaveSound()
-          if (p.conn_id === get().myConnId) {
-            stopVoiceRecognizer()
-            activeBeforeLeave.client?.stop()
-            annotations.reset()
-            annotations.setSend(null, null)
-            set({ voice: emptyVoiceState(), callPoll: null })
-          } else {
-            annotations.clearConn(p.conn_id)
-            activeBeforeLeave.client?.removePeer(p.conn_id)
-            set((s) => {
-              if (s.voice.client !== activeBeforeLeave.client) return {}
-              const remoteScreenStreams = { ...s.voice.remoteScreenStreams }
-              delete remoteScreenStreams[p.conn_id]
-              return { voice: { ...s.voice, remoteScreenStreams } }
-            })
-          }
-        }
-        break
-      }
-      case 'voice.participant_updated': {
-        const p = env.payload as VoiceParticipantUpdatedPayload
-        // Detect a false→true hand-raise transition for another participant (never
-        // our own). Comparing the stored flag against the incoming one dedupes:
-        // repeated updates while already raised won't re-fire.
-        const prevEntry = get().voiceRooms[p.channel_id]?.[p.participant.conn_id]
-        const handJustRaised =
-          p.participant.hand_raised &&
-          !prevEntry?.hand_raised &&
-          p.participant.conn_id !== get().myConnId
-        set((s) => {
-          const room = s.voiceRooms[p.channel_id]
-          if (!room || !room[p.participant.conn_id]) return {}
-          return {
-            voiceRooms: {
-              ...s.voiceRooms,
-              [p.channel_id]: {
-                ...room,
-                [p.participant.conn_id]: {
-                  user_id: p.participant.user_id,
-                  display_name: p.participant.display_name,
-                  annotation_color: p.participant.annotation_color,
-                  guest: p.participant.guest,
-                  muted: p.participant.muted,
-                  transcribing: p.participant.transcribing,
-                  camera_on: p.participant.camera_on,
-                  screen_on: p.participant.screen_on,
-                screen_stream_id: p.participant.screen_stream_id,
-                hand_raised: p.participant.hand_raised,
-                hand_raised_at: p.participant.hand_raised_at,
-                aura_style: p.participant.aura_style,
-                joined_at: p.participant.joined_at,
-                },
-              },
-            },
-          }
-        })
-
-        const active = get().voice
-        if (active.channelId !== p.channel_id) break
-        if (handJustRaised) {
-          sound.handRaise()
-          const name =
-            get().users[p.participant.user_id]?.display_name ??
-            p.participant.display_name ??
-            'Someone'
-          toastInfo(`${name} raised their hand`)
-        }
-        if (p.participant.conn_id === get().myConnId) {
-          // camera
-          if (p.participant.camera_on && active.cameraStatus === 'starting' && active.client) {
-            const client = active.client
-            void client.startCamera().catch((error) => {
-              if (get().voice.client !== client) return
-              client.stopCamera()
-              get().ws?.send('voice.camera', { channel_id: p.channel_id, enabled: false })
-              set((s) => ({ voice: { ...s.voice, cameraStatus: 'off', localStream: null } }))
-              toastError(error instanceof Error ? error.message : 'Could not start the camera.')
-            })
-          } else if (!p.participant.camera_on) {
-            active.client?.stopCamera()
-            set((s) => ({
-              voice: { ...s.voice, cameraStatus: 'off', localStream: null },
-            }))
-          }
-          // screen — publish only once the server echoes our own enable.
-          if (p.participant.screen_on && active.screenStatus === 'starting' && active.client) {
-            active.client.publishScreen()
-          } else if (!p.participant.screen_on && active.screenStatus !== 'off') {
-            active.client?.stopScreenShare()
-            set((s) => ({
-              voice: { ...s.voice, screenStatus: 'off', localScreenStream: null },
-            }))
-          }
-        } else {
-          if (!p.participant.camera_on) {
-            set((s) => {
-              const remoteStreams = { ...s.voice.remoteStreams }
-              delete remoteStreams[p.participant.conn_id]
-              return { voice: { ...s.voice, remoteStreams } }
-            })
-          }
-          active.client?.updateRemoteScreen(
-            p.participant.conn_id,
-            p.participant.screen_on ? p.participant.screen_stream_id : null,
-          )
-        }
-        break
-      }
-      case 'meeting.started': {
-        const p = env.payload as MeetingStartedPayload
-        set((s) => ({ activeMeetings: { ...s.activeMeetings, [p.channel_id]: p.meeting_id } }))
-        break
-      }
-      case 'meeting.ended': {
-        const p = env.payload as MeetingEndedPayload
-        set((s) => {
-          const activeMeetings = { ...s.activeMeetings }
-          delete activeMeetings[p.channel_id]
-          return { activeMeetings }
-        })
-        window.dispatchEvent(new CustomEvent('sharp:meeting-updated', { detail: p }))
-        break
-      }
-      case 'meeting.phrase':
-      case 'meeting.summary_ready': {
-        const p = env.payload as { meeting_id: string; channel_id: string }
-        window.dispatchEvent(new CustomEvent('sharp:meeting-updated', { detail: p }))
-        break
-      }
-      case 'voice.roast_armed': {
-        const p = env.payload as { channel_id: string; armed: boolean }
-        set((s) =>
-          s.voice.channelId === p.channel_id
-            ? { voice: { ...s.voice, roastArmed: p.armed } }
-            : {},
-        )
-        break
-      }
-      case 'voice.trigger_fired': {
-        const p = env.payload as VoiceTriggerFiredPayload
-        if (get().voice.channelId === p.channel_id) {
-          toastInfo(`🎙️ ${p.display_name} triggered “${p.phrase}”`)
-        }
-        break
-      }
-      case 'voice.annotate': {
-        const p = env.payload as VoiceAnnotatePayload
-        if (get().voice.channelId === p.channel_id) annotations.applyRemote(p)
-        break
-      }
-      case 'voice.annotate_clear': {
-        const p = env.payload as VoiceAnnotateClearPayload
-        if (get().voice.channelId === p.channel_id) annotations.clearAll()
-        break
-      }
-      case 'voice.annotate_state': {
-        const p = env.payload as VoiceAnnotateStatePayload
-        if (get().voice.channelId !== p.channel_id) break
-        set((s) => {
-          const room = s.voiceRooms[p.channel_id]
-          const iAmSharer = s.myConnId ? room?.[s.myConnId]?.screen_on ?? false : false
-          return {
-            voice: {
-              ...s.voice,
-              annotationsAllowed: p.allowed,
-              // Drop the pen when drawing is revoked for non-sharers.
-              annotating: !p.allowed && !iAmSharer ? false : s.voice.annotating,
-            },
-          }
-        })
-        break
-      }
-      case 'voice.error': {
-        const p = env.payload as VoiceErrorPayload
-        if (p.code === 'annotate_denied') {
-          // Non-fatal: server refused a draw/allow/clear. Stay in the call; just
-          // drop the pen so the UI reflects that drawing isn't permitted.
-          set((s) => ({ voice: { ...s.voice, annotating: false } }))
-          break
-        }
-        if (p.code === 'camera_full') {
-          set((s) => ({ voice: { ...s.voice, cameraStatus: 'off', localStream: null } }))
-          toastError(voiceErrorMessage(p.code))
-          break
-        }
-        if (p.code === 'screen_taken') {
-          // Non-fatal: discard the acquired-but-unpublished share and stay in the call.
-          get().voice.client?.stopScreenShare()
-          set((s) => ({ voice: { ...s.voice, screenStatus: 'off', localScreenStream: null } }))
-          toastError(voiceErrorMessage(p.code))
-          break
-        }
-        if (p.code === 'link_revoked') {
-          // The guest's call link was regenerated — non-recoverable for this
-          // token. Tear the call down and mark the guest session revoked so the
-          // guest page shows the invalid-link state instead of Rejoin.
-          stopVoiceRecognizer()
-          get().voice.client?.stop()
-          annotations.reset()
-          annotations.setSend(null, null)
-          set({
-            voice: emptyVoiceState(),
-            callPoll: null,
-            guestRevoked: true,
-            guestPendingJoin: false,
-          })
-          toastError(voiceErrorMessage(p.code))
-          break
-        }
-        stopVoiceRecognizer()
-        get().voice.client?.stop()
-        annotations.reset()
-        annotations.setSend(null, null)
-        set({ voice: emptyVoiceState(), callPoll: null })
-        toastError(voiceErrorMessage(p.code))
-        break
-      }
-      case 'message.created': {
-        const { message, duck_streak } = env.payload as MessageCreatedPayload
-        applyMessageCreated(set, message, me?.id ?? null, duck_streak)
-        queueDecryptions(set, [message])
-        // Ultra-soft cue when a top-level message lands in the channel you're
-        // looking at (others' messages only — DM/mention/reply get the fuller
-        // notification chime via notification.created instead).
-        const focusedHere =
-          typeof document !== 'undefined' &&
-          document.hasFocus() &&
-          get().currentChannelId === message.channel_id
-        if (focusedHere && !message.parent_id && message.user.id !== me?.id) {
-          sound.messageReceived()
-        }
-        break
-      }
-      case 'duck.streak': {
-        const { channel_id, duck_streak } = env.payload as DuckStreakPayload
-        applyDuckStreak(set, channel_id, duck_streak)
-        break
-      }
-      case 'voice_trigger.created': {
-        const p = env.payload as VoiceTriggerCreatedPayload
-        set((s) => {
-          const current = s.channelVoiceTriggers[p.channel_id]
-          if (!current || current.some((trigger) => trigger.id === p.trigger.id)) return {}
-          return {
-            channelVoiceTriggers: {
-              ...s.channelVoiceTriggers,
-              [p.channel_id]: [...current, p.trigger],
-            },
-          }
-        })
-        break
-      }
-      case 'voice_trigger.deleted': {
-        const p = env.payload as VoiceTriggerDeletedPayload
-        set((s) => {
-          const current = s.channelVoiceTriggers[p.channel_id]
-          if (!current) return {}
-          return {
-            channelVoiceTriggers: {
-              ...s.channelVoiceTriggers,
-              [p.channel_id]: current.filter((trigger) => trigger.id !== p.trigger_id),
-            },
-          }
-        })
-        break
-      }
-      case 'message.updated': {
-        const { message } = env.payload as MessageUpdatedPayload
-        applyMessageUpdated(set, message)
-        queueDecryptions(set, [message])
-        break
-      }
-      case 'message.deleted': {
-        const p = env.payload as MessageDeletedPayload
-        applyMessageDeleted(set, p)
-        void removeIndexedMessage(p.message_id)
-        break
-      }
-      case 'reaction.added': {
-        const p = env.payload as ReactionPayload
-        get().applyReaction(p.message_id, p.channel_id, p.emoji, p.user_id, true)
-        break
-      }
-      case 'reaction.removed': {
-        const p = env.payload as ReactionPayload
-        get().applyReaction(p.message_id, p.channel_id, p.emoji, p.user_id, false)
-        break
-      }
-      case 'user.updated': {
-        const { user } = env.payload as UserUpdatedPayload
-        set((s) => ({
-          users: { ...s.users, [user.id]: user },
-          // The broadcast redacts email; merge so we keep our own address.
-          me: s.me?.id === user.id ? { ...s.me, ...user } : s.me,
-        }))
-        break
-      }
-      case 'channel.created': {
-        const { channel } = env.payload as ChannelCreatedPayload
-        set((s) => ({
-          channels: s.channels.some((c) => c.id === channel.id)
-            ? s.channels.map((c) => (c.id === channel.id ? channel : c))
-            : [...s.channels, channel],
-        }))
-        if (channel.kind === 'dm') void get().refreshDmEncryption(channel.dm_user?.id)
-        break
-      }
-      case 'channel.updated': {
-        const { channel } = env.payload as ChannelUpdatedPayload
-        // Merge only mutable metadata so each viewer keeps their own
-        // unread_count / is_member / last_message_at / dm_user.
-        set((s) => ({
-          channels: s.channels.some((c) => c.id === channel.id)
-            ? s.channels.map((c) =>
-                c.id === channel.id
-                  ? { ...c, name: channel.name, topic: channel.topic, kind: channel.kind }
-                  : c,
-              )
-            : [...s.channels, channel],
-        }))
-        break
-      }
-      case 'channel.deleted': {
-        const { channel_id } = env.payload as ChannelDeletedPayload
-        dropChannel(set, get, channel_id)
-        break
-      }
-      case 'channel.member_joined': {
-        const p = env.payload as ChannelMemberPayload
-        set((s) => {
-          const members = s.members[p.channel_id]
-          const users = { ...s.users, [p.user.id]: p.user }
-          let channels = s.channels
-          if (me && p.user.id === me.id) {
-            channels = s.channels.map((c) =>
-              c.id === p.channel_id ? { ...c, is_member: true, my_role: p.role } : c,
-            )
-          }
-          return {
-            users,
-            channels,
-            members: members
-              ? {
-                  ...s.members,
-                  [p.channel_id]: members.some((m) => m.id === p.user.id)
-                    ? members.map((member) =>
-                        member.id === p.user.id ? { ...p.user, role: p.role } : member,
-                      )
-                    : [...members, { ...p.user, role: p.role }],
-                }
-              : s.members,
-          }
-        })
-        break
-      }
-      case 'channel.member_left': {
-        const p = env.payload as ChannelMemberPayload
-        set((s) => {
-          const members = s.members[p.channel_id]
-          let channels = s.channels
-          if (me && p.user.id === me.id) {
-            channels = s.channels.map((c) =>
-              c.id === p.channel_id ? { ...c, is_member: false, my_role: null } : c,
-            )
-          }
-          return {
-            channels,
-            members: members
-              ? { ...s.members, [p.channel_id]: members.filter((m) => m.id !== p.user.id) }
-              : s.members,
-          }
-        })
-        break
-      }
-      case 'channel.member_updated': {
-        const p = env.payload as ChannelMemberUpdatedPayload
-        set((s) => ({
-          members: s.members[p.channel_id]
-            ? {
-                ...s.members,
-                [p.channel_id]: s.members[p.channel_id].map((member) =>
-                  member.id === p.user_id ? { ...member, role: p.role } : member,
-                ),
-              }
-            : s.members,
-          channels:
-            me?.id === p.user_id
-              ? s.channels.map((channel) =>
-                  channel.id === p.channel_id ? { ...channel, my_role: p.role } : channel,
-                )
-              : s.channels,
-        }))
-        break
-      }
-      case 'doc.created': {
-        const { doc } = env.payload as DocCreatedPayload
-        set((s) => placeDoc(s, doc))
-        break
-      }
-      case 'doc.updated': {
-        const { doc } = env.payload as DocUpdatedPayload
-        set((s) => placeDoc(s, doc))
-        break
-      }
-      case 'doc.deleted': {
-        const p = env.payload as DocDeletedPayload
-        set((s) => applyDocDeleted(s, p))
-        break
-      }
-      case 'doc.mention': {
-        const { mention } = env.payload as DocMentionPayload
-        if (get().mentions.some((m) => m.id === mention.id)) break
-        set((s) => {
-          const mentions = [mention, ...s.mentions]
-          return { mentions, unreadMentionCount: countUnread(mentions) }
-        })
-        // Toast unless the user is already looking at the mentioned doc.
-        const prefix =
-          mention.doc.kind === 'canvas' ? 'x' : mention.doc.kind === 'board' ? 'b' : 'd'
-        const deepLink = `/${prefix}/${mention.doc.id}`
-        const viewing =
-          typeof window !== 'undefined' &&
-          window.location.pathname === deepLink
-        const visibleHere =
-          typeof document === 'undefined' || document.visibilityState === 'visible'
-        if (
-          !viewing &&
-          !dndActive(get()) &&
-          visibleHere &&
-          !streamShieldsChannel(get(), mention.doc.channel_id)
-        ) {
-          const docTitle = mention.doc.title || 'Untitled'
-          const who = mention.from_user.display_name
-          const isCanvas = mention.doc.kind === 'canvas'
-          const title = `${who} in ${isCanvas ? 'canvas' : 'doc'} ${docTitle}`
-          toastNotify('mentioned you', {
-            title,
-            initial: who.trim().charAt(0).toUpperCase() || '?',
-            onClick: () => navigateTo(deepLink),
-          })
-          playNotifySound()
-          void showOsNotification(`${who} mentioned you`, docTitle, {
-            deepLink,
-            tag: `sharp-doc-${mention.doc.id}`,
-          })
-        }
-        break
-      }
-      case 'prefs.updated': {
-        // Another device (or another tab) changed appearance. The payload is
-        // the fully merged blob, so applying it is idempotent — the originating
-        // tab re-applying its own change is a no-op.
-        const { ui } = env.payload as { ui: unknown }
-        const merged = normalizeUiPrefs(ui, get().ui)
-        applyUi(set, merged)
-        writeLocalUiPrefs(merged)
-        break
-      }
-      case 'notification.created': {
-        const { notification } = env.payload as NotificationCreatedPayload
-        // If its channel is already open in a focused window, treat it as seen:
-        // land it in the inbox pre-read so it never lingers as unread.
-        const focusedHere =
-          typeof document !== 'undefined' &&
-          document.hasFocus() &&
-          get().currentChannelId === notification.channel_id
-        const incoming =
-          focusedHere && !notification.read_at
-            ? { ...notification, read_at: new Date().toISOString() }
-            : notification
-        set((s) => {
-          const exists = s.notifications.some((n) => n.id === incoming.id)
-          return {
-            notifications: [
-              incoming,
-              ...s.notifications.filter((n) => n.id !== incoming.id),
-            ],
-            notifUnread:
-              !exists && !incoming.read_at ? s.notifUnread + 1 : s.notifUnread,
-          }
-        })
-        if (focusedHere && !notification.read_at) {
-          api.markNotificationsRead({ ids: [notification.id] }).catch(() => {})
-        }
-        // Alert (toast + OS notification) unless DND, or the message's channel is
-        // already open in a focused window.
-        const st = get()
-        const visibleHere =
-          typeof document === 'undefined' || document.visibilityState === 'visible'
-        // A brand-new DM channel may not be in the list yet, so the dm kind
-        // check can't rely on the channel lookup alone.
-        const shielded =
-          (notification.kind === 'dm' && streamChannelShielded(st, notification.channel_id)) ||
-          streamShieldsChannel(st, notification.channel_id)
-        if (!dndActive(st) && !focusedHere && visibleHere && !shielded) {
-          const title =
-            notification.kind === 'dm'
-              ? notification.actor.display_name
-              : notification.kind === 'task_assigned'
-                ? `${notification.actor.display_name} assigned you ${notification.task_identifier ?? 'a task'}`
-                : notification.kind === 'task_comment'
-                  ? `${notification.actor.display_name} commented on ${notification.task_identifier ?? 'a task'}`
-                  : `${notification.actor.display_name} in #${notification.channel_name}`
-          const path = notificationPath(notification)
-          const preview = gifPreviewText(notification.preview)
-          toastNotify(preview || 'sent you a message', {
-            title,
-            initial: notification.actor.display_name.trim().charAt(0).toUpperCase() || '?',
-            onClick: () => navigateTo(path),
-          })
-          playNotifySound()
-          void showOsNotification(title, preview, {
-            deepLink: path,
-            tag: notification.task_id
-              ? `sharp-task-${notification.task_id}`
-              : `sharp-${notification.channel_id}`,
-          })
-        }
-        break
-      }
-      case 'project.created':
-      case 'project.updated': {
-        const { project } = env.payload as ProjectCreatedPayload | ProjectUpdatedPayload
-        set((s) => ({
-          projects: s.projects.some((p) => p.id === project.id)
-            ? s.projects.map((p) => (p.id === project.id ? project : p))
-            : [...s.projects, project],
-        }))
-        break
-      }
-      case 'task.created':
-      case 'task.updated': {
-        const { task } = env.payload as TaskCreatedPayload | TaskUpdatedPayload
-        // Celebrate a task crossing into a completed-type state. Keyed on the
-        // state *type*, never its name — projects rename their states freely.
-        const before = get().tasksByProject[task.project_id]?.find(
-          (t) => t.id === task.id,
-        )
-        const typeOfState = (stateId: string | null | undefined) =>
-          get()
-            .projects.find((p) => p.id === task.project_id)
-            ?.states.find((st) => st.id === stateId)?.type
-        if (
-          env.type === 'task.updated' &&
-          before &&
-          before.state_id !== task.state_id &&
-          typeOfState(task.state_id) === 'completed'
-        ) {
-          confettiAt()
-        }
-        set((s) => {
-          const list = s.tasksByProject[task.project_id]
-          const tasksByProject = list
-            ? {
-                ...s.tasksByProject,
-                [task.project_id]: sortTasks([
-                  ...list.filter((t) => t.id !== task.id),
-                  task,
-                ]),
-              }
-            : s.tasksByProject
-          const stateOf = s.projects
-            .find((p) => p.id === task.project_id)
-            ?.states.find((st) => st.id === task.state_id)
-          const open =
-            !stateOf || (stateOf.type !== 'completed' && stateOf.type !== 'canceled')
-          let myTasks = s.myTasks.filter((t) => t.id !== task.id)
-          if (s.me && task.assignee_id === s.me.id && open) myTasks = [task, ...myTasks]
-          const detail = s.taskDetails[task.id]
-          const taskDetails = detail
-            ? { ...s.taskDetails, [task.id]: { ...detail, ...task } }
-            : s.taskDetails
-          return { tasksByProject, myTasks, taskDetails }
-        })
-        break
-      }
-      case 'task.deleted': {
-        const { task_id, project_id } = env.payload as TaskDeletedPayload
-        set((s) => {
-          const list = s.tasksByProject[project_id]
-          const taskDetails = { ...s.taskDetails }
-          delete taskDetails[task_id]
-          return {
-            tasksByProject: list
-              ? {
-                  ...s.tasksByProject,
-                  [project_id]: list.filter((t) => t.id !== task_id),
-                }
-              : s.tasksByProject,
-            myTasks: s.myTasks.filter((t) => t.id !== task_id),
-            taskDetails,
-          }
-        })
-        break
-      }
-      case 'task.comment.created':
-      case 'task.comment.updated':
-      case 'task.comment.deleted': {
-        const { comment } = env.payload as TaskCommentPayload
-        set((s) => {
-          const detail = s.taskDetails[comment.task_id]
-          if (!detail) return {}
-          const comments =
-            env.type === 'task.comment.created'
-              ? [...detail.comments.filter((c) => c.id !== comment.id), comment]
-              : detail.comments.map((c) => (c.id === comment.id ? comment : c))
-          return {
-            taskDetails: {
-              ...s.taskDetails,
-              [comment.task_id]: { ...detail, comments },
-            },
-          }
-        })
-        break
-      }
-      case 'task.labels.changed': {
-        void get().loadTaskLabels()
-        break
-      }
-      case 'poll.created':
-      case 'poll.updated': {
-        const { poll } = env.payload as PollCreatedPayload | PollUpdatedPayload
-        // A poll closing is the moment worth marking, not every incoming vote.
-        const wasOpen = get().pollsById[poll.id]?.closed_at == null
-        if (env.type === 'poll.updated' && wasOpen && poll.closed_at) confettiAt()
-        set((s) => ({ pollsById: { ...s.pollsById, [poll.id]: poll } }))
-        break
-      }
-      case 'poll.deleted': {
-        const { poll_id } = env.payload as PollDeletedPayload
-        set((s) => {
-          const pollsById = { ...s.pollsById }
-          delete pollsById[poll_id]
-          return { pollsById }
-        })
-        break
-      }
-      case 'voice.poll_state': {
-        const { room_id, poll } = env.payload as VoicePollStatePayload
-        if (get().voice.channelId === room_id) set({ callPoll: poll })
-        break
-      }
-      case 'calendar.meeting_created':
-      case 'calendar.meeting_updated': {
-        const { meeting } = env.payload as
-          | CalendarMeetingCreatedPayload
-          | CalendarMeetingUpdatedPayload
-        set((s) => ({
-          calendarItems: upsertMeetingItem(s.calendarItems, s.calendarRange, meeting),
-        }))
-        break
-      }
-      case 'calendar.meeting_cancelled': {
-        const { meeting_id } = env.payload as CalendarMeetingCancelledPayload
-        set((s) => ({
-          calendarItems: s.calendarItems.filter(
-            (i) => !(i.source === 'native' && i.meeting.id === meeting_id),
-          ),
-        }))
-        break
-      }
-      case 'calendar.synced': {
-        const p = env.payload as CalendarSyncedPayload
-        set((s) => ({
-          calendarConnections: s.calendarConnections.map((c) =>
-            c.id === p.account_id
-              ? { ...c, last_synced_at: p.last_synced_at }
-              : c,
-          ),
-        }))
-        // Refetch the visible window so newly-synced Google events appear.
-        const range = get().calendarRange
-        if (range) void get().loadCalendar(range.from, range.to)
-        break
-      }
-      case 'calendar.reminder': {
-        const p = env.payload as CalendarReminderPayload
-        if (
-          dndActive(get()) ||
-          (typeof document !== 'undefined' && document.visibilityState !== 'visible')
-        ) break
-        const when = p.kind === 'lead' ? 'starts soon' : 'starting now'
-        const title = p.title || 'Meeting'
-        const deepLink = p.join_path ?? '/calendar'
-        toastNotify(when, {
-          title,
-          initial: '📅',
-          onClick: () => navigateTo(deepLink),
-        })
-        playNotifySound()
-        void showOsNotification(title, when, {
-          deepLink,
-          tag: `sharp-cal-${p.ref_id}`,
-        })
-        break
-      }
-      default:
-        break
-    }
+    applyWsEventTo(env, set, get)
   },
 }))
-
-// --- calendar helpers ---
-
-function nativeItemFromMeeting(meeting: ScheduledMeeting): CalendarItem {
-  return {
-    source: 'native',
-    id: meeting.id,
-    title: meeting.title,
-    start_at: meeting.start_at,
-    end_at: meeting.end_at,
-    all_day: meeting.all_day,
-    join_path: meeting.join_path,
-    meeting,
-  }
-}
-
-function inCalendarRange(
-  range: { from: string; to: string } | null,
-  iso: string,
-): boolean {
-  if (!range) return false
-  return iso >= range.from && iso < range.to
-}
-
-/** Insert/replace a native meeting in the item list, honoring the loaded range. */
-function upsertMeetingItem(
-  items: CalendarItem[],
-  range: { from: string; to: string } | null,
-  meeting: ScheduledMeeting,
-): CalendarItem[] {
-  const filtered = items.filter(
-    (i) => !(i.source === 'native' && i.meeting.id === meeting.id),
-  )
-  if (meeting.status === 'cancelled') return filtered
-  if (!inCalendarRange(range, meeting.start_at)) return filtered
-  return [...filtered, nativeItemFromMeeting(meeting)]
-}
-
-function applyMyRsvp(
-  meeting: ScheduledMeeting,
-  myUserId: string | null,
-  response: string,
-): ScheduledMeeting {
-  return {
-    ...meeting,
-    my_response: response,
-    attendees: meeting.attendees.map((a) =>
-      a.user_id === myUserId ? { ...a, response } : a,
-    ),
-  }
-}
-
-// --- voice helpers ---
-
-function voiceRoomFromParticipants(
-  participants: VoiceRoomSnapshot['participants'],
-): VoiceRoom {
-  const room: VoiceRoom = {}
-  for (const participant of participants) {
-    room[participant.conn_id] = {
-      user_id: participant.user_id,
-      display_name: participant.display_name,
-      annotation_color: participant.annotation_color,
-      guest: participant.guest,
-      muted: participant.muted,
-      transcribing: participant.transcribing,
-      camera_on: participant.camera_on,
-      screen_on: participant.screen_on,
-      screen_stream_id: participant.screen_stream_id,
-      hand_raised: participant.hand_raised,
-      hand_raised_at: participant.hand_raised_at,
-      aura_style: participant.aura_style,
-      joined_at: participant.joined_at,
-    }
-  }
-  return room
-}
-
-function activeMeetingsFromSnapshots(snapshots: VoiceRoomSnapshot[]): Record<string, string> {
-  const meetings: Record<string, string> = {}
-  for (const snapshot of snapshots) {
-    if (snapshot.active_meeting_id) meetings[snapshot.channel_id] = snapshot.active_meeting_id
-  }
-  return meetings
-}
-
-function voiceRoomsFromSnapshots(snapshots: VoiceRoomSnapshot[]): Record<string, VoiceRoom> {
-  const rooms: Record<string, VoiceRoom> = {}
-  for (const snapshot of snapshots) {
-    rooms[snapshot.channel_id] = voiceRoomFromParticipants(snapshot.participants)
-  }
-  return rooms
-}
-
-function withPollVotes(
-  poll: Poll,
-  optionIds: string[],
-  userId: string,
-  displayName: string,
-): Poll {
-  const selected = new Set(optionIds)
-  const options = poll.options.map((option) => {
-    const voters = option.voters.filter((voter) => voter.id !== userId)
-    if (selected.has(option.id)) voters.push({ id: userId, display_name: displayName })
-    return { ...option, voters, count: voters.length }
-  })
-  const voterIds = new Set<string>()
-  for (const option of options) {
-    for (const voter of option.voters) voterIds.add(voter.id)
-  }
-  return { ...poll, options, my_votes: [...selected], total_voters: voterIds.size }
-}
-
-function voiceErrorMessage(code: string): string {
-  switch (code) {
-    case 'room_full':
-      return 'This voice room is full.'
-    case 'not_member':
-      return 'You do not have access to this call.'
-    case 'not_in_room':
-      return 'You are no longer in this voice room.'
-    case 'camera_full':
-      return 'Sixteen cameras are already active. You are still connected by audio.'
-    case 'screen_taken':
-      return 'Someone else is already sharing their screen.'
-    case 'link_revoked':
-      return 'This call link is no longer valid.'
-    case 'media_unavailable':
-      return 'Call media is unavailable. Check the LiveKit service, then rejoin.'
-    default:
-      return `Voice error: ${code}`
-  }
-}
-
-// --- channel helpers ---
-
-/** Remove a channel and all its cached state; navigate home if it was open. */
-function dropChannel(set: Setter, get: () => State, id: string) {
-  const wasCurrent = get().currentChannelId === id
-  set((s) => {
-    const members = { ...s.members }
-    delete members[id]
-    const byChannel = { ...s.byChannel }
-    delete byChannel[id]
-    const docsByChannel = { ...s.docsByChannel }
-    delete docsByChannel[id]
-    const trashByChannel = { ...s.trashByChannel }
-    delete trashByChannel[id]
-    const channelVoiceTriggers = { ...s.channelVoiceTriggers }
-    delete channelVoiceTriggers[id]
-    return {
-      channels: s.channels.filter((c) => c.id !== id),
-      members,
-      byChannel,
-      docsByChannel,
-      trashByChannel,
-      channelVoiceTriggers,
-    }
-  })
-  if (wasCurrent) navigateTo('/')
-}
-
-// --- doc helpers ---
-
-function sortDocs(docs: Doc[]): Doc[] {
-  return [...docs].sort((a, b) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0))
-}
-
-function countUnread(mentions: DocMention[]): number {
-  return mentions.reduce((n, m) => n + (m.read_at ? 0 : 1), 0)
-}
-
-type DocSlice = {
-  docsByChannel: Record<string, Doc[]>
-  trashByChannel: Record<string, Doc[]>
-  docMeta: Record<string, Doc>
-}
-
-function withoutDoc(map: Record<string, Doc[]>, channelId: string, id: string): Record<string, Doc[]> {
-  const list = map[channelId]
-  if (!list) return map
-  const next = list.filter((d) => d.id !== id)
-  return next.length === list.length ? map : { ...map, [channelId]: next }
-}
-
-/** Upsert a doc into the right bucket (active/trash) based on my_role + deleted_at. */
-function placeDoc(s: DocSlice, doc: Doc): DocSlice {
-  const cid = doc.channel_id
-  if (doc.my_role === 'none') return removeDoc(s, doc.id, cid)
-
-  const docMeta = { ...s.docMeta, [doc.id]: doc }
-  let docsByChannel = withoutDoc(s.docsByChannel, cid, doc.id)
-  let trashByChannel = withoutDoc(s.trashByChannel, cid, doc.id)
-
-  if (doc.deleted_at) {
-    // Only track trash for channels whose trash was explicitly loaded.
-    if (trashByChannel[cid]) {
-      trashByChannel = { ...trashByChannel, [cid]: sortDocs([...trashByChannel[cid], doc]) }
-    }
-  } else {
-    const cur = docsByChannel[cid] ?? []
-    docsByChannel = { ...docsByChannel, [cid]: sortDocs([...cur, doc]) }
-  }
-  return { docMeta, docsByChannel, trashByChannel }
-}
-
-function removeDoc(s: DocSlice, id: string, channelId?: string): DocSlice {
-  const cid = channelId ?? s.docMeta[id]?.channel_id
-  const docMeta = { ...s.docMeta }
-  delete docMeta[id]
-  if (!cid) return { ...s, docMeta }
-  return {
-    docMeta,
-    docsByChannel: withoutDoc(s.docsByChannel, cid, id),
-    trashByChannel: withoutDoc(s.trashByChannel, cid, id),
-  }
-}
-
-function applyDocDeleted(s: DocSlice, p: DocDeletedPayload): DocSlice {
-  if (p.permanent) return removeDoc(s, p.doc_id, p.channel_id)
-  const existing =
-    s.docMeta[p.doc_id] ?? s.docsByChannel[p.channel_id]?.find((d) => d.id === p.doc_id)
-  if (!existing) {
-    // Nothing cached: just drop from the active list if present.
-    return { ...s, docsByChannel: withoutDoc(s.docsByChannel, p.channel_id, p.doc_id) }
-  }
-  return placeDoc(s, { ...existing, deleted_at: existing.deleted_at ?? new Date().toISOString() })
-}
-
-// --- pure helpers ---
-
-type Setter = (
-  partial:
-    | Partial<State>
-    | ((s: State) => Partial<State> | State),
-) => void
-
-function updateReactions(
-  reactions: Message['reactions'],
-  emoji: string,
-  add: boolean,
-  isMe: boolean,
-): Message['reactions'] {
-  const idx = reactions.findIndex((r) => r.emoji === emoji)
-  if (add) {
-    if (idx === -1) return [...reactions, { emoji, count: 1, me: isMe }]
-    const r = reactions[idx]
-    if (isMe && r.me) return reactions
-    const next = [...reactions]
-    next[idx] = { ...r, count: r.count + 1, me: r.me || isMe }
-    return next
-  } else {
-    if (idx === -1) return reactions
-    const r = reactions[idx]
-    if (isMe && !r.me) return reactions
-    const count = r.count - 1
-    if (count <= 0) return reactions.filter((_, i) => i !== idx)
-    const next = [...reactions]
-    next[idx] = { ...r, count, me: isMe ? false : r.me }
-    return next
-  }
-}
-
-function upsertAscending(list: Message[], msg: Message): Message[] {
-  if (list.some((m) => m.id === msg.id)) {
-    return list.map((m) =>
-      m.id === msg.id && m.content === msg.content && m.decryptedText !== undefined
-        ? { ...msg, decryptedText: m.decryptedText, attachments: m.attachments }
-        : m.id === msg.id
-          ? msg
-          : m,
-    )
-  }
-  if (list.length === 0 || cmpId(msg.id, list[list.length - 1].id) > 0) {
-    return [...list, msg]
-  }
-  const next = [...list, msg]
-  next.sort((a, b) => cmpId(a.id, b.id))
-  return next
-}
-
-function findMessage(state: State, messageId: string): Message | null {
-  for (const channel of Object.values(state.byChannel)) {
-    const message = channel.list.find((item) => item.id === messageId)
-    if (message) return message
-  }
-  if (state.thread.parent?.id === messageId) return state.thread.parent
-  return state.thread.replies.find((item) => item.id === messageId) ?? null
-}
-
-async function decryptIncoming(message: Message): Promise<Message> {
-  if (!message.encrypted || message.deleted_at) return message
-  try {
-    const body = await decryptDmMessage(message)
-    void indexDecryptedMessage({
-      id: message.id,
-      channelId: message.channel_id,
-      text: body.text,
-      authorName: message.user.display_name,
-      ts: message.created_at,
-    })
-    return {
-      ...message,
-      decryptedText: body.text,
-      attachments: resolveEncryptedAttachments(message.attachments, body.attachments),
-    }
-  } catch {
-    return { ...message, decryptedText: null }
-  }
-}
-
-function patchDecryptedMessages(set: Setter, decrypted: Message[]): void {
-  const byId = new Map(decrypted.map((message) => [message.id, message]))
-  const transform = (message: Message): Message => {
-    const next = byId.get(message.id)
-    return next && message.content === next.content
-      ? { ...message, decryptedText: next.decryptedText, attachments: next.attachments }
-      : message
-  }
-  set((state) => {
-    const byChannel: Record<string, ChannelMessages> = {}
-    for (const [channelId, messages] of Object.entries(state.byChannel)) {
-      byChannel[channelId] = { ...messages, list: messages.list.map(transform) }
-    }
-    const replyTargets = { ...state.replyTargets }
-    for (const [channelId, message] of Object.entries(replyTargets)) {
-      replyTargets[channelId] = transform(message)
-    }
-    return {
-      byChannel,
-      replyTargets,
-      thread: {
-        ...state.thread,
-        parent: state.thread.parent ? transform(state.thread.parent) : null,
-        replies: state.thread.replies.map(transform),
-      },
-    }
-  })
-}
-
-function queueDecryptions(set: Setter, messages: Message[]): void {
-  const pending = messages.filter(
-    (message) => message.encrypted && !message.deleted_at && message.decryptedText === undefined,
-  )
-  if (!pending.length) return
-  void Promise.all(pending.map(decryptIncoming)).then((decrypted) =>
-    patchDecryptedMessages(set, decrypted),
-  )
-}
-
-function applyDuckStreak(
-  set: Setter,
-  channelId: string,
-  streak: { count: number; last_at: string } | undefined,
-) {
-  if (!streak) {
-    set((s) => ({
-      duckActivity: {
-        ...s.duckActivity,
-        [channelId]: { count: 0, lastAt: s.duckActivity[channelId]?.lastAt ?? 0 },
-      },
-    }))
-    return
-  }
-  const lastAt = Date.parse(streak.last_at)
-  set((s) => ({
-    duckActivity: {
-      ...s.duckActivity,
-      [channelId]: {
-        count: streak.count,
-        lastAt: Number.isFinite(lastAt) ? lastAt : Date.now(),
-      },
-    },
-  }))
-}
-
-function applyMessageCreated(
-  set: Setter,
-  message: Message,
-  myId: string | null,
-  duckStreak?: { count: number; last_at: string },
-) {
-  if (message.parent_id) {
-    set((s) => {
-      const cm = s.byChannel[message.channel_id]
-      let byChannel = s.byChannel
-      if (cm) {
-        const list = cm.list.map((m) =>
-          m.id === message.parent_id
-            ? { ...m, reply_count: m.reply_count + 1, last_reply_at: message.created_at }
-            : m,
-        )
-        byChannel = { ...s.byChannel, [message.channel_id]: { ...cm, list } }
-      }
-      let thread = s.thread
-      if (s.thread.open && s.thread.parentId === message.parent_id) {
-        if (!s.thread.replies.some((r) => r.id === message.id)) {
-          const parent = s.thread.parent
-            ? {
-                ...s.thread.parent,
-                reply_count: s.thread.parent.reply_count + 1,
-                last_reply_at: message.created_at,
-              }
-            : s.thread.parent
-          thread = { ...s.thread, parent, replies: [...s.thread.replies, message] }
-        }
-      }
-      return { byChannel, thread }
-    })
-    return
-  }
-
-  set((s) => {
-    const cm = s.byChannel[message.channel_id]
-    let byChannel = s.byChannel
-    if (cm?.loaded) {
-      byChannel = {
-        ...s.byChannel,
-        [message.channel_id]: { ...cm, list: upsertAscending(cm.list, message) },
-      }
-    }
-    const isCurrent = s.currentChannelId === message.channel_id
-    const fromMe = myId !== null && message.user.id === myId
-    const channels = s.channels.map((c) => {
-      if (c.id !== message.channel_id) return c
-      const bumpUnread = !isCurrent && !fromMe
-      return {
-        ...c,
-        last_message_at: message.created_at,
-        unread_count: bumpUnread ? c.unread_count + 1 : c.unread_count,
-      }
-    })
-    let duckActivity = s.duckActivity
-    // Shared channel streak comes from the server (`duck_streak` on message.created /
-    // duck.streak). Every member's top-level messages boost it; GIF-only posts skip.
-    if (!message.parent_id && duckStreak) {
-      const lastAt = Date.parse(duckStreak.last_at)
-      duckActivity = {
-        ...s.duckActivity,
-        [message.channel_id]: {
-          count: duckStreak.count,
-          lastAt: Number.isFinite(lastAt) ? lastAt : Date.now(),
-        },
-      }
-    }
-    return { byChannel, channels, duckActivity }
-  })
-}
-
-function applyMessageUpdated(set: Setter, message: Message) {
-  const transform = (m: Message): Message =>
-    m.id === message.id
-      ? {
-          ...m,
-          content: message.content,
-          encrypted: message.encrypted,
-          decryptedText: message.encrypted ? undefined : message.decryptedText,
-          edited_at: message.edited_at,
-          deleted_at: message.deleted_at,
-          reactions: message.reactions,
-          reply_count: message.reply_count,
-          last_reply_at: message.last_reply_at,
-          attachments: message.attachments,
-          reply_to: message.reply_to,
-        }
-      : m
-  set((s) => {
-    const byChannel: Record<string, ChannelMessages> = {}
-    for (const [cid, cm] of Object.entries(s.byChannel)) {
-      byChannel[cid] = { ...cm, list: cm.list.map(transform) }
-    }
-    let thread = s.thread
-    if (s.thread.open) {
-      thread = {
-        ...s.thread,
-        parent: s.thread.parent ? transform(s.thread.parent) : null,
-        replies: s.thread.replies.map(transform),
-      }
-    }
-    return { byChannel, thread }
-  })
-}
-
-function applyMessageDeleted(
-  set: Setter,
-  p: { message_id: string; channel_id: string; parent_id: string | null },
-) {
-  const markDeleted = (m: Message): Message =>
-    m.id === p.message_id
-      ? { ...m, content: '', deleted_at: new Date().toISOString() }
-      : m
-  set((s) => {
-    const cm = s.byChannel[p.channel_id]
-    let byChannel = s.byChannel
-    if (cm) {
-      let list: Message[]
-      if (p.parent_id) {
-        list = cm.list.map((m) =>
-          m.id === p.parent_id ? { ...m, reply_count: Math.max(0, m.reply_count - 1) } : m,
-        )
-      } else {
-        list = cm.list.map(markDeleted)
-      }
-      byChannel = { ...s.byChannel, [p.channel_id]: { ...cm, list } }
-    }
-    let thread = s.thread
-    if (s.thread.open) {
-      if (p.parent_id) {
-        thread = {
-          ...s.thread,
-          parent:
-            s.thread.parent && s.thread.parent.id === p.parent_id
-              ? { ...s.thread.parent, reply_count: Math.max(0, s.thread.parent.reply_count - 1) }
-              : s.thread.parent,
-          replies: s.thread.replies.map(markDeleted),
-        }
-      } else {
-        thread = { ...s.thread, parent: s.thread.parent ? markDeleted(s.thread.parent) : null }
-      }
-    }
-    return { byChannel, thread }
-  })
-}
 
 // Sound settings are edited through the sound engine's own API (it owns the
 // audio graph), but they are part of the synced appearance blob — route every
