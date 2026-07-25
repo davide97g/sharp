@@ -40,7 +40,7 @@ bun run dev / bun run build
 
 **Bun is the JS package manager and script runner** (not npm/yarn) — `bun install`, `bun run <script>`, `bun.lock` lockfiles — everywhere: locally, in `deploy/Dockerfile*` (`oven/bun` images), and in GitHub Actions (`oven-sh/setup-bun`).
 
-There is no test suite and no lint config; `cargo check` and `bun run build` (tsc) are the validation gates. Migrations in `server/migrations/` are embedded via `sqlx::migrate!()` and run automatically on server startup.
+No lint config. Three validation gates: `cargo check`, `cargo test` (45 Rust unit tests — pure logic: camera/screen slot accounting, phrase streaks, trigger matching, notification previews, token hashing, webhook HMAC), and `bun run build` (tsc). The web app has no tests. Migrations in `server/migrations/` are embedded via `sqlx::migrate!()` and run automatically on server startup.
 
 ## Architecture essentials
 

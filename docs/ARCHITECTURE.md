@@ -120,12 +120,19 @@ sharp/
 
 ## Validation gates
 
-There is no test suite and no lint config. These two commands are the entire safety net:
+No lint config. These three commands are the entire safety net:
 
 ```bash
 cd server && cargo check     # no DATABASE_URL needed — see invariant 3
+cd server && cargo test      # 45 unit tests, no DB, sub-second
 cd web    && bun run build   # tsc --noEmit + vite build
 ```
+
+The Rust tests cover the pure logic that is easy to break silently: camera and screen slot
+accounting in `ws/voice/`, phrase streaks and voice-trigger word-boundary matching,
+notification preview building, reset-token hashing, GitHub webhook HMAC. Add to them when
+you touch that kind of code — they need no database and run instantly. The web app has no
+tests, so `bun run build` (tsc) is all that guards it.
 
 Bun is the JS package manager and script runner everywhere — locally, in `deploy/Dockerfile*`,
 and in CI. Never `npm`/`yarn`. Migrations in `server/migrations/` are embedded via
