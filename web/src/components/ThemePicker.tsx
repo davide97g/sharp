@@ -1,4 +1,4 @@
-import { THEME_PRESETS, type ThemePreset } from '../lib/theme'
+import { THEMES, type Theme } from '../lib/theme'
 import { ChoiceCard } from '../ui'
 
 function ThemeCard({
@@ -9,7 +9,7 @@ function ThemeCard({
   selected,
   onSelect,
 }: {
-  preset: ThemePreset
+  preset: string
   title: string
   desc: string
   swatches: [string, string, string]
@@ -60,17 +60,23 @@ function colorMix(hex: string, alphaPct: number): string {
   return `rgb(${r} ${g} ${b} / ${alphaPct}%)`
 }
 
-/** Shared 4-preset picker used by the auth-stage setup + settings Appearance. */
+/**
+ * Shared preset picker used by the auth-stage setup + settings Appearance.
+ * `themes` defaults to the whole library; Appearance passes the subset matching
+ * the currently resolved scheme so a dark preset is never offered in light mode.
+ */
 export function ThemePicker({
   value,
   onChange,
+  themes = THEMES,
 }: {
-  value: ThemePreset
-  onChange: (preset: ThemePreset) => void
+  value: string
+  onChange: (preset: string) => void
+  themes?: Theme[]
 }) {
   return (
     <div className="grid grid-cols-2 gap-3">
-      {THEME_PRESETS.map((p) => (
+      {themes.map((p) => (
         <ThemeCard
           key={p.id}
           preset={p.id}

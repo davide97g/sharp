@@ -146,7 +146,7 @@ function AudioPlayerControls({
   const shownTime = playing || current > 0 ? current : total
 
   return (
-    <div className="flex min-w-0 max-w-xs items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] px-2.5 py-2">
+    <div className="flex w-72 max-w-full min-w-0 items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] px-2.5 py-2">
       {src && (
         <audio
           ref={audioRef}

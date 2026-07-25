@@ -28,7 +28,7 @@ import { createBackup, restoreBackup } from '../lib/e2ee/backup'
 import { isTauri, openPasskeyManagement } from '../lib/desktopAuth'
 import { isPasskeyCancellation, registerPasskey, supportsPasskeys } from '../lib/passkeys'
 import { getSoundSettings, setSoundSettings, sound, subscribeSoundSettings } from '../lib/sound'
-import { Button, Input, Select, SectionLabel, Spinner } from '../ui'
+import { Button, ChoiceCard, Input, Select, SectionLabel, Spinner } from '../ui'
 import { Modal } from './Modal'
 import { Avatar } from './Avatar'
 import { AvatarCropper } from './AvatarCropper'
@@ -45,7 +45,8 @@ import {
   type AudioAuraStyle,
 } from '../lib/meetingEffects'
 import { AudioAuraPreview } from './voice/AudioAuraAvatar'
-import { getThemePreset, setThemePreset, type ThemePreset } from '../lib/theme'
+import { DARK_THEMES, LIGHT_THEMES, resolveScheme } from '../lib/theme'
+import type { ColorScheme, Density } from '../lib/uiPrefs'
 
 type Tab =
   | 'profile'
@@ -97,17 +98,12 @@ export function UserSettingsModal({
   const uploadAvatar = useStore((s) => s.uploadAvatar)
   const removeAvatar = useStore((s) => s.removeAvatar)
   const setChatLayout = useStore((s) => s.setChatLayout)
-  const railPosition = useStore((s) => s.railPosition)
-  const setRailPosition = useStore((s) => s.setRailPosition)
-  const dockAutoHide = useStore((s) => s.dockAutoHide)
-  const setDockAutoHide = useStore((s) => s.setDockAutoHide)
 
   const navigate = useNavigate()
   const location = useLocation()
   const { section } = useParams<{ section?: string }>()
   const [modalTab, setModalTab] = useState<Tab>(initialTab ?? 'profile')
   const tab = page && isSettingsTab(section) ? section : modalTab
-  const [theme, setTheme] = useState<ThemePreset>(() => getThemePreset())
   const [name, setName] = useState(me?.display_name ?? '')
   const [savingName, setSavingName] = useState(false)
   const [cropFile, setCropFile] = useState<File | null>(null)
@@ -371,41 +367,7 @@ export function UserSettingsModal({
       ) : tab === 'notifications' ? (
         <NotificationsSettings />
       ) : tab === 'appearance' ? (
-        <div className="flex flex-col gap-3">
-          <SectionLabel size="xs">Theme</SectionLabel>
-          <ThemePicker
-            value={theme}
-            onChange={(preset) => {
-              setTheme(preset)
-              setThemePreset(preset)
-            }}
-          />
-          <p className="text-2xs text-[var(--color-text-faint)]">
-            Saved on this device. Themes change colors only — layout stays the same.
-          </p>
-          <div className="mt-3 border-t border-[var(--color-border)] pt-5">
-            <SectionLabel size="xs" className="mb-3">Navigation</SectionLabel>
-            <NavigationPicker value={railPosition} onChange={setRailPosition} />
-            {railPosition !== 'left' && (
-              <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] px-3 py-2">
-                <div>
-                  <div className="text-sm font-medium text-[var(--color-text)]">
-                    Automatically hide the dock
-                  </div>
-                  <div className="text-2xs text-[var(--color-text-faint)]">
-                    {railPosition === 'top'
-                      ? 'The dock tucks into a notch. Move the cursor to the notch to show it.'
-                      : 'The dock slides away. Move the cursor to the bottom edge to show it.'}
-                  </div>
-                </div>
-                <DockAutoHideSwitch checked={dockAutoHide} onChange={setDockAutoHide} />
-              </div>
-            )}
-            <p className="mt-3 text-2xs text-[var(--color-text-faint)]">
-              Desktop only. Mobile always uses its bottom tabs.
-            </p>
-          </div>
-        </div>
+        <AppearanceSettings />
       ) : tab === 'meetings' ? (
         <MeetingEffectsSettings userId={me.id} />
       ) : tab === 'streaming' ? (
@@ -1435,6 +1397,241 @@ function GiphyUsageBar({ usage }: { usage: GiphyUsage }) {
               ? `Resets in ${resetLabel}`
               : `Next free slot in ${resetLabel}`}
         </span>
+      </div>
+    </div>
+  )
+}
+
+// ---- Appearance tab ----
+
+const SCHEME_CHOICES: { value: ColorScheme; label: string }[] = [
+  { value: 'dark', label: 'Dark' },
+  { value: 'light', label: 'Light' },
+  { value: 'system', label: 'System' },
+]
+
+const DENSITY_CHOICES: { value: Density; label: string; desc: string }[] = [
+  { value: 'cozy', label: 'Cozy', desc: 'Roomy rows, full-size avatars.' },
+  { value: 'compact', label: 'Compact', desc: 'Tighter rows, more on screen.' },
+  { value: 'ultra', label: 'Ultra', desc: 'Maximum density, minimal chrome.' },
+]
+
+const SCALE_CHOICES: { value: number; label: string }[] = [
+  { value: 0.9, label: 'Small' },
+  { value: 1, label: 'Default' },
+  { value: 1.1, label: 'Large' },
+]
+
+/** Segmented row of mutually exclusive options. */
+function Segmented<T extends string | number>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T
+  options: { value: T; label: string }[]
+  onChange: (value: T) => void
+}) {
+  return (
+    <div
+      role="radiogroup"
+      className="inline-flex gap-1 rounded-lg border border-border bg-panel-2 p-1"
+    >
+      {options.map((o) => (
+        <Button
+          key={String(o.value)}
+          role="radio"
+          aria-checked={value === o.value}
+          size="sm"
+          variant={value === o.value ? 'primary' : 'ghost'}
+          onClick={() => onChange(o.value)}
+        >
+          {o.label}
+        </Button>
+      ))}
+    </div>
+  )
+}
+
+function AppearanceSettings() {
+  const ui = useStore((s) => s.ui)
+  const patchUi = useStore((s) => s.patchUi)
+  // What is actually on screen right now — with scheme 'system' this follows
+  // the OS, so the picker must offer that scheme's presets, not the stored one.
+  const scheme = resolveScheme(ui.scheme)
+  const themes = scheme === 'light' ? LIGHT_THEMES : DARK_THEMES
+  const activeTheme = scheme === 'light' ? ui.themeLight : ui.theme
+  const hue = ui.accentHue
+
+  return (
+    <div className="flex flex-col gap-3">
+      <SectionLabel size="xs">Color scheme</SectionLabel>
+      <Segmented
+        value={ui.scheme}
+        options={SCHEME_CHOICES}
+        onChange={(value) => patchUi({ scheme: value })}
+      />
+      <p className="text-2xs text-text-faint">
+        {ui.scheme === 'system'
+          ? 'Following your device — sharp switches when your OS does.'
+          : 'Synced to your account, so every device you sign in on matches.'}
+      </p>
+
+      <div className="mt-3 border-t border-border pt-5">
+        <SectionLabel size="xs" className="mb-3">
+          Theme
+        </SectionLabel>
+        <ThemePicker
+          themes={themes}
+          value={activeTheme}
+          onChange={(preset) =>
+            patchUi(scheme === 'light' ? { themeLight: preset } : { theme: preset })
+          }
+        />
+        <p className="mt-3 text-2xs text-text-faint">
+          {ui.scheme === 'system'
+            ? 'Light and dark keep separate picks — switch the scheme above to choose the other one.'
+            : 'Themes change colors only — layout stays the same.'}
+        </p>
+      </div>
+
+      <div className="mt-3 border-t border-border pt-5">
+        <SectionLabel size="xs" className="mb-3">
+          Accent color
+        </SectionLabel>
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={0}
+            max={359}
+            value={hue ?? 265}
+            aria-label="Accent hue"
+            onChange={(e) => patchUi({ accentHue: Number(e.target.value) })}
+            className="range-slider flex-1"
+            style={{
+              // The full hue wheel at the accent's own lightness/chroma, so the
+              // track previews exactly what each position produces.
+              background:
+                'linear-gradient(to right, ' +
+                [0, 60, 120, 180, 240, 300, 359]
+                  .map((h) =>
+                    scheme === 'light'
+                      ? `oklch(0.55 0.17 ${h})`
+                      : `oklch(0.68 0.16 ${h})`,
+                  )
+                  .join(',') +
+                ')',
+            }}
+          />
+          <span
+            className="h-6 w-6 shrink-0 rounded-full border border-border"
+            style={{ backgroundColor: 'var(--color-accent)' }}
+          />
+          <Button
+            size="xs"
+            variant="ghost"
+            disabled={hue === null}
+            onClick={() => patchUi({ accentHue: null })}
+          >
+            Reset
+          </Button>
+        </div>
+        <p className="mt-2 text-2xs text-text-faint">
+          {hue === null
+            ? 'Using the theme’s own accent.'
+            : 'Overrides the theme accent on every preset. Brightness is fixed so the accent stays readable.'}
+        </p>
+      </div>
+
+      <div className="mt-3 border-t border-border pt-5">
+        <SectionLabel size="xs" className="mb-3">
+          Density
+        </SectionLabel>
+        <div className="grid grid-cols-3 gap-3">
+          {DENSITY_CHOICES.map((d) => (
+            <ChoiceCard
+              key={d.value}
+              selected={ui.density === d.value}
+              onSelect={() => patchUi({ density: d.value })}
+              title={d.label}
+              description={d.desc}
+              selectedStyle="ring"
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-3 border-t border-border pt-5">
+        <SectionLabel size="xs" className="mb-3">
+          Interface scale
+        </SectionLabel>
+        <Segmented
+          value={ui.fontScale}
+          options={SCALE_CHOICES}
+          onChange={(value) => patchUi({ fontScale: value })}
+        />
+        <p className="mt-2 text-2xs text-text-faint">
+          Scales text, spacing, and panel widths together.
+        </p>
+      </div>
+
+      <div className="mt-3 border-t border-border pt-5">
+        <SectionLabel size="xs" className="mb-3">
+          Motion
+        </SectionLabel>
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={0}
+            max={150}
+            step={10}
+            value={Math.round(ui.motion * 100)}
+            aria-label="Animation speed"
+            onChange={(e) => patchUi({ motion: Number(e.target.value) / 100 })}
+            className="range-slider flex-1"
+            style={{
+              background: `linear-gradient(to right, var(--color-accent) ${(ui.motion / 1.5) * 100}%, var(--color-panel) ${(ui.motion / 1.5) * 100}%)`,
+            }}
+          />
+          <span className="w-16 text-right text-xs tabular-nums text-text-dim">
+            {ui.motion === 0 ? 'Still' : `${Math.round(ui.motion * 100)}%`}
+          </span>
+        </div>
+        <p className="mt-2 text-2xs text-text-faint">
+          Animation duration multiplier. If your system asks for reduced motion,
+          sharp already honors that regardless of this setting.
+        </p>
+      </div>
+
+      <div className="mt-3 border-t border-border pt-5">
+        <SectionLabel size="xs" className="mb-3">
+          Navigation
+        </SectionLabel>
+        <NavigationPicker
+          value={ui.railPosition}
+          onChange={(position) => patchUi({ railPosition: position })}
+        />
+        {ui.railPosition !== 'left' && (
+          <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2">
+            <div>
+              <div className="text-sm font-medium text-text">
+                Automatically hide the dock
+              </div>
+              <div className="text-2xs text-text-faint">
+                {ui.railPosition === 'top'
+                  ? 'The dock tucks into a notch. Move the cursor to the notch to show it.'
+                  : 'The dock slides away. Move the cursor to the bottom edge to show it.'}
+              </div>
+            </div>
+            <DockAutoHideSwitch
+              checked={ui.dockAutoHide}
+              onChange={(autoHide) => patchUi({ dockAutoHide: autoHide })}
+            />
+          </div>
+        )}
+        <p className="mt-3 text-2xs text-text-faint">
+          Desktop only. Mobile always uses its bottom tabs.
+        </p>
       </div>
     </div>
   )

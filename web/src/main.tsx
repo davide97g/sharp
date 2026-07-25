@@ -4,11 +4,16 @@ import { BrowserRouter } from 'react-router-dom'
 import { App } from './App'
 import { registerServiceWorker } from './lib/notify'
 import { installIosViewportFix } from './lib/iosViewport'
-import { applyTheme } from './lib/theme'
+import { applyUiPrefs, watchSystemScheme } from './lib/theme'
+import { useStore } from './store'
 import './index.css'
 
 installIosViewportFix()
-applyTheme()
+// The inline boot script in index.html already painted the saved theme; this
+// re-applies the full set (density included) from the same mirror, and keeps
+// following the OS while the scheme preference is "System".
+applyUiPrefs()
+watchSystemScheme(() => applyUiPrefs(useStore.getState().ui))
 
 // Tauri on macOS uses titleBarStyle: Overlay — the traffic lights float over
 // the content. Reserve a top inset (via --titlebar-h) and add a draggable

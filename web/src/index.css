@@ -1,4 +1,7 @@
 @import "tailwindcss";
+/* Appearance presets. Each overrides the core eleven tokens declared below;
+   everything else in @theme derives from them or is scheme-wide. */
+@import "./themes.css";
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
@@ -30,6 +33,18 @@
   --color-warning-soft: #362512;
   --color-warning-fg: #e59a58;
 
+  /* Derived chrome — mixed off the core tokens so every preset retints these
+     for free. Before this existed they were hard-coded hex and stayed dark on
+     light themes. Presence-online is literal because it must read as "green"
+     regardless of the accent; the light scheme overrides it in themes.css. */
+  --color-code-bg: color-mix(in oklab, var(--color-panel-2) 55%, var(--color-border));
+  --color-code-block-bg: color-mix(in oklab, var(--color-ink) 92%, var(--color-panel));
+  --color-scrollbar: color-mix(in oklab, var(--color-border) 65%, var(--color-text-faint));
+  --color-scrollbar-hover: color-mix(in oklab, var(--color-border) 35%, var(--color-text-faint));
+  --color-kbd-edge: color-mix(in oklab, var(--color-border) 55%, var(--color-text-faint));
+  --color-presence-online: #4fbf9f;
+  --color-presence-offline: color-mix(in oklab, var(--color-border) 40%, var(--color-text-faint));
+
   /* Sub-xs type steps — the app's dense-metadata band. Use these instead of
      raw text-[10px]/text-[11px]. */
   --text-2xs: 0.6875rem;
@@ -59,9 +74,22 @@
 }
 
 :root {
+  /* Default only — lib/theme.ts sets the resolved scheme inline, and light
+     presets declare their own in themes.css. */
   color-scheme: dark;
-  --motion-snap: 160ms;
-  --motion-smooth: 220ms;
+  /* Continuous appearance knobs. lib/theme.ts overwrites these in a runtime
+     <style id="sharp-ui"> block; the values here are the neutral fallback so
+     the app is correct with JS disabled or before the boot script runs. */
+  --font-scale: 1;
+  --motion-scale: 1;
+  --density-msg-y: 0.5rem;
+  --density-row-y: 0.125rem;
+  --density-gap: 0.5rem;
+  --density-avatar: 36px;
+  /* Scaled by --motion-scale so the motion slider (and 0 = still) reaches every
+     transition in the app without touching a single component. */
+  --motion-snap: calc(160ms * var(--motion-scale));
+  --motion-smooth: calc(220ms * var(--motion-scale));
   --motion-spring: cubic-bezier(0.22, 1, 0.36, 1);
   /* Layer bands — use z-(--z-*) utilities, never arbitrary z-[NN]. */
   --z-dropdown: 30;
@@ -83,50 +111,6 @@
   --safe-left: env(safe-area-inset-left, 0px);
 }
 
-/* Appearance presets — override the @theme surface/accent tokens. Default is
-   the unset data-theme (current purple-on-ink palette above). */
-:root[data-theme='slack'] {
-  --color-ink: #1a0f1c;
-  --color-panel: #2c1630;
-  --color-panel-2: #351c3a;
-  --color-border: #4a2a52;
-  --color-border-soft: #3a2240;
-  --color-accent: #2eb67d;
-  --color-accent-hover: #3ecf8e;
-  --color-accent-soft: #1a3d2e;
-  --color-text: #e8e0ea;
-  --color-text-dim: #b8a8bc;
-  --color-text-faint: #8a7a90;
-}
-
-:root[data-theme='teams'] {
-  --color-ink: #0f111a;
-  --color-panel: #1b1f2e;
-  --color-panel-2: #22273a;
-  --color-border: #2f3548;
-  --color-border-soft: #272c3d;
-  --color-accent: #5b5fc7;
-  --color-accent-hover: #7b7fd4;
-  --color-accent-soft: #2a2d55;
-  --color-text: #e2e4f0;
-  --color-text-dim: #a0a6c0;
-  --color-text-faint: #6e7490;
-}
-
-:root[data-theme='one-piece'] {
-  --color-ink: #0a1628;
-  --color-panel: #122640;
-  --color-panel-2: #1a3254;
-  --color-border: #2a4a6e;
-  --color-border-soft: #1e3a58;
-  --color-accent: #e85d4c;
-  --color-accent-hover: #f0c14b;
-  --color-accent-soft: #3d2818;
-  --color-text: #e8d5c4;
-  --color-text-dim: #b8a090;
-  --color-text-faint: #7a6a58;
-}
-
 :root[data-tauri-mac] {
   --titlebar-h: 28px;
 }
@@ -137,6 +121,13 @@ body,
   height: 100%;
   width: 100%;
   max-width: 100%;
+}
+
+/* Interface scale. The whole app is sized in rem, so scaling the root font size
+   scales type, spacing, and panel widths together — an "everything bigger"
+   control rather than a text-only one. */
+html {
+  font-size: calc(100% * var(--font-scale));
 }
 
 @supports (height: 100dvh) {
@@ -481,7 +472,7 @@ body {
 .home-quick-action kbd,
 .home-sidebar-hint kbd {
   border: 1px solid var(--color-border);
-  border-bottom-color: #383842;
+  border-bottom-color: var(--color-kbd-edge);
   border-radius: 0.3rem;
   background: rgb(28 28 34 / 74%);
   color: var(--color-text-faint);
@@ -1112,13 +1103,13 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #33333d;
+  background: var(--color-scrollbar);
   border-radius: 8px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #43434f;
+  background: var(--color-scrollbar-hover);
   background-clip: padding-box;
 }
 
@@ -1187,7 +1178,7 @@ input[type='range'].range-slider::-moz-range-track {
   margin: 0.1rem 0;
 }
 .md code {
-  background: #24242c;
+  background: var(--color-code-bg);
   border: 1px solid var(--color-border);
   border-radius: 5px;
   padding: 0.05rem 0.3rem;
@@ -1195,7 +1186,7 @@ input[type='range'].range-slider::-moz-range-track {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .md pre {
-  background: #101015;
+  background: var(--color-code-block-bg);
   border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 0.7rem 0.85rem;
@@ -1649,7 +1640,7 @@ input[type='range'].range-slider::-moz-range-track {
   width: 3px;
   height: 3px;
   border-radius: 999px;
-  background: #f0e9ff;
+  background: color-mix(in srgb, var(--color-accent-hover) 25%, white);
   box-shadow: 0 0 6px 1px color-mix(in srgb, var(--color-accent-hover) 90%, white);
   opacity: 0;
   animation: duck-streak-firework 900ms cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
@@ -1677,7 +1668,7 @@ input[type='range'].range-slider::-moz-range-track {
   animation-delay: 210ms;
   width: 2px;
   height: 2px;
-  background: #c4b5ff;
+  background: color-mix(in srgb, var(--color-accent-hover) 65%, white);
 }
 .duck-streak-tip i:nth-child(5) {
   --fx: 2px;
@@ -1690,7 +1681,7 @@ input[type='range'].range-slider::-moz-range-track {
   --fx: -12px;
   --fy: 2px;
   animation-delay: 340ms;
-  background: #9b8cff;
+  background: var(--color-accent-hover);
 }
 @keyframes duck-streak-sheen {
   from {
@@ -1805,7 +1796,7 @@ input[type='range'].range-slider::-moz-range-track {
   70%, 100% { box-shadow: 0 0 0 6px rgba(79, 191, 159, 0); }
 }
 .call-poll-pop { animation: sharp-fade-in 160ms ease-out; }
-.call-poll-live-dot { background: #4fbf9f; animation: sharp-poll-live 1.6s ease-out infinite; }
+.call-poll-live-dot { background: var(--color-presence-online); animation: sharp-poll-live 1.6s ease-out infinite; }
 @media (hover: hover) and (pointer: fine) {
   .voice-channel-button:hover,
   .voice-live-tile:hover { transform: translateY(-1px) scale(1.055); }
@@ -1881,6 +1872,11 @@ input[type='range'].range-slider::-moz-range-track {
 .voice-aura-avatar.is-preview .voice-aura-avatar-body {
   animation: sharp-aura-breathe 920ms cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
+
+/* Audio auras are named artistic effects (Helios, Mercury, Eclipse …) whose
+   palettes are the effect itself — they are deliberately theme-independent and
+   must NOT be swapped for accent tokens. The one exception is the disc fill,
+   which uses --color-panel so the avatar sits on the current surface. */
 
 /* 01 Helios — hot corona, voice becomes sunlight. */
 .aura-helios .voice-aura-halo {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Message, ReplyPreview } from '../lib/types'
 import { useStore } from '../store'
+import { AVATAR_PX } from '../lib/theme'
 import { useCoarsePointer } from '../lib/useMediaQuery'
 import { Avatar } from './Avatar'
 import { UserChip } from './UserCard'
@@ -147,6 +148,7 @@ export function MessageItem({
   dm?: boolean
 }) {
   const me = useStore((s) => s.me)
+  const density = useStore((s) => s.ui.density)
   const toggleReaction = useStore((s) => s.toggleReaction)
   const editMessage = useStore((s) => s.editMessage)
   const deleteMessage = useStore((s) => s.deleteMessage)
@@ -350,7 +352,7 @@ export function MessageItem({
     return (
       <div
         id={`msg-${message.id}`}
-        className={`group relative flex px-4 ${freshOnMount ? 'message-arrival' : ''} ${grouped ? 'py-0.5' : 'pt-2 mt-1'} ${
+        className={`group relative flex px-4 ${freshOnMount ? 'message-arrival' : ''} ${grouped ? 'py-(--density-row-y)' : 'pt-(--density-msg-y) mt-1'} ${
           isMine ? 'justify-end' : 'justify-start'
         }`}
         data-message-mine={isMine || undefined}
@@ -497,7 +499,7 @@ export function MessageItem({
           : actioned
             ? 'bg-[var(--color-accent-soft)]/25 ring-1 ring-inset ring-[var(--color-accent)]'
             : 'hover:bg-[var(--color-panel)]/50'
-      } ${grouped ? 'py-0.5' : 'pt-2 pb-0.5 mt-1'}`}
+      } ${grouped ? 'py-(--density-row-y)' : 'pt-(--density-msg-y) pb-0.5 mt-1'}`}
       data-message-mine={isMine || undefined}
       onMouseEnter={onMessagePointerEnter}
       onMouseLeave={onMessagePointerLeave}
@@ -505,7 +507,7 @@ export function MessageItem({
     >
       {burst}
       {/* gutter: avatar or hover timestamp */}
-      <div className="relative w-9 shrink-0">
+      <div className="relative w-(--density-avatar) shrink-0">
         {grouped ? (
           // Absolute + nowrap so the hover timestamp never reflows the row height.
           <span className="absolute right-0 top-0.5 whitespace-nowrap text-3xs leading-5 tabular-nums text-[var(--color-text-faint)] opacity-0 group-hover:opacity-100 max-md:hidden">
@@ -517,7 +519,12 @@ export function MessageItem({
             {fmtTime(message.created_at)}
           </span>
         ) : (
-          <Avatar id={message.user.id} name={message.user.display_name} size={36} online={online} />
+          <Avatar
+            id={message.user.id}
+            name={message.user.display_name}
+            size={AVATAR_PX[density]}
+            online={online}
+          />
         )}
       </div>
 

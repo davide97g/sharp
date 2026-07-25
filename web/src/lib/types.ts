@@ -135,6 +135,8 @@ export type Prefs = {
   dnd_start: number | null // minutes-of-day, local time
   dnd_end: number | null
   tz_offset: number // minutes east of UTC
+  /** Opaque appearance blob; shape owned by lib/uiPrefs.ts, not the server. */
+  ui: Record<string, unknown>
 }
 
 /** Partial update accepted by PUT /prefs. */

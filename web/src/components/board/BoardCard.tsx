@@ -123,12 +123,16 @@ function BoardCardImpl({
             </span>
           ))}
           {/* TODO(ds): Avatar — card assignee circle; kept custom for the '?'
-              unknown-member fallback and its hard-coded #4b4b56 fill. */}
+              unknown-member fallback. */}
           {assigneeId && (
             <span
               className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-3xs font-semibold text-white"
               title={assignee?.display_name ?? 'Unknown'}
-              style={{ backgroundColor: assignee ? userColor(assignee.id) : '#4b4b56' }}
+              style={{
+                backgroundColor: assignee
+                  ? userColor(assignee.id)
+                  : 'var(--color-presence-offline)',
+              }}
             >
               {assignee ? initials(assignee.display_name) : '?'}
             </span>

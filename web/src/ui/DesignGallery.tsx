@@ -2,7 +2,8 @@
 // The living companion to docs/DESIGN_SYSTEM.md — every primitive rendered live so
 // humans can see variants, spacing, and theme behaviour in one scroll.
 //
-// Import discipline: ONLY from the barrel ('./index'), lib/boardColors, and react.
+// Import discipline: ONLY from the barrel ('./index'), lib/boardColors, lib/theme
+// (the preset table this page audits), and react.
 import {
   useEffect,
   useState,
@@ -79,6 +80,7 @@ import {
   type IconProps,
 } from './index'
 import { PALETTE_KEYS, BOARD_COLORS } from '../lib/boardColors'
+import { THEMES } from '../lib/theme'
 
 // ── Local helpers ────────────────────────────────────────────────────────────
 
@@ -142,7 +144,32 @@ const TOKEN_GROUPS: { group: string; tokens: string[] }[] = [
   { group: 'Danger', tokens: ['danger', 'danger-hover', 'danger-soft', 'danger-fg'] },
   { group: 'Success', tokens: ['success', 'success-soft', 'success-fg'] },
   { group: 'Warning', tokens: ['warning', 'warning-soft', 'warning-fg'] },
+  {
+    group: 'Derived chrome',
+    tokens: [
+      'code-bg',
+      'code-block-bg',
+      'scrollbar',
+      'scrollbar-hover',
+      'kbd-edge',
+      'presence-online',
+      'presence-offline',
+    ],
+  },
 ]
+
+/** Every --color-* token a preset is expected to resolve. Drives the audit.
+ *  Board-palette tokens are deliberately out of scope: they are scheme-wide
+ *  (@theme for dark, one [data-scheme='light'] block), so no single preset can
+ *  drop them. */
+const AUDITED_TOKENS = TOKEN_GROUPS.flatMap((g) => g.tokens)
+
+/** The tokens every preset must declare for itself (see themes.css). */
+const CORE_TOKENS = new Set(
+  TOKEN_GROUPS.filter((g) => ['Surfaces', 'Accent', 'Text'].includes(g.group)).flatMap(
+    (g) => g.tokens,
+  ),
+)
 
 /** Reads a --color-<name> var live so it retints when the theme preset changes. */
 function Swatch({ name, themeKey }: { name: string; themeKey: string }) {
@@ -164,17 +191,104 @@ function Swatch({ name, themeKey }: { name: string; themeKey: string }) {
   )
 }
 
-const THEMES: { value: string; label: string }[] = [
-  { value: '', label: 'Default (purple)' },
-  { value: 'slack', label: 'Slack (aubergine)' },
-  { value: 'teams', label: 'Teams (indigo)' },
-  { value: 'one-piece', label: 'One Piece' },
-]
+const THEME_OPTIONS: { value: string; label: string }[] = THEMES.map((t) => ({
+  value: t.id === 'default' ? '' : t.id,
+  label: `${t.title} (${t.scheme})`,
+}))
+
+/**
+ * Coverage audit. Walks every preset, reads all audited tokens, and reports the
+ * ones that fail to resolve or that never move off the default palette — which
+ * is what a preset block with a typo'd selector or a missing token looks like.
+ *
+ * Presets are declared as `:root[data-theme=...]`, so this has to swap the
+ * attribute on `documentElement` itself; a detached probe element does not match
+ * `:root` and would silently report a pass for everything. The swap and restore
+ * happen in one synchronous block, so no frame renders the wrong theme.
+ */
+function useTokenAudit(): { theme: string; problems: string[] }[] | null {
+  const [report, setReport] = useState<{ theme: string; problems: string[] }[] | null>(
+    null,
+  )
+  useEffect(() => {
+    const root = document.documentElement
+    const prevTheme = root.getAttribute('data-theme')
+    const prevScheme = root.getAttribute('data-scheme')
+    const read = () => {
+      const cs = getComputedStyle(root)
+      return Object.fromEntries(
+        AUDITED_TOKENS.map((n) => [n, cs.getPropertyValue(`--color-${n}`).trim()]),
+      )
+    }
+    const apply = (id: string, scheme: string) => {
+      if (id === 'default') root.removeAttribute('data-theme')
+      else root.setAttribute('data-theme', id)
+      root.setAttribute('data-scheme', scheme)
+    }
+
+    apply('default', 'dark')
+    const base = read()
+    const out = THEMES.map((t) => {
+      apply(t.id, t.scheme)
+      const values = read()
+      const problems = AUDITED_TOKENS.flatMap((name) => {
+        if (!values[name]) return [`${name} (unset)`]
+        // The core eleven must differ from the default palette — matching it
+        // means the preset block never applied. Derived and semantic tokens are
+        // legitimately shared, so only flag those when they fail to resolve.
+        if (t.id !== 'default' && CORE_TOKENS.has(name) && values[name] === base[name]) {
+          return [`${name} (same as default)`]
+        }
+        return []
+      })
+      return { theme: t.id, problems }
+    })
+
+    if (prevTheme === null) root.removeAttribute('data-theme')
+    else root.setAttribute('data-theme', prevTheme)
+    if (prevScheme === null) root.removeAttribute('data-scheme')
+    else root.setAttribute('data-scheme', prevScheme)
+    setReport(out)
+  }, [])
+  return report
+}
+
+function TokenAudit() {
+  const report = useTokenAudit()
+  if (!report) return null
+  const broken = report.filter((r) => r.problems.length > 0)
+  return (
+    <div
+      className={`rounded-lg border px-3 py-2 text-2xs ${
+        broken.length
+          ? 'border-danger bg-danger-soft text-danger-fg'
+          : 'border-border bg-panel-2 text-text-dim'
+      }`}
+    >
+      {broken.length === 0 ? (
+        <>Token audit: all {report.length} presets resolve every audited token.</>
+      ) : (
+        <>
+          <div className="font-semibold">Token audit failed</div>
+          {broken.map((r) => (
+            <div key={r.theme} className="mt-1 font-mono">
+              {r.theme}: {r.problems.join(', ')}
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  )
+}
 
 function TokensSection() {
   const [theme, setTheme] = useState(() => document.documentElement.dataset.theme || '')
   useEffect(() => {
+    // The scheme attribute drives the shared light-semantics override, so it has
+    // to follow the preset or a light preset previews with dark tones.
     document.documentElement.dataset.theme = theme
+    document.documentElement.dataset.scheme =
+      THEMES.find((t) => t.id === (theme || 'default'))?.scheme ?? 'dark'
   }, [theme])
 
   return (
@@ -185,19 +299,23 @@ function TokensSection() {
         <>
           Every colour is a CSS variable in <code className="font-mono text-xs">index.css</code>, retinted by 4 theme
           presets. Never hard-code hex — use the semantic utility (<code className="font-mono text-xs">bg-panel</code>,{' '}
-          <code className="font-mono text-xs">text-danger-fg</code>). Switch the preset to watch swatches (and this whole
-          page) retint live.
+          <code className="font-mono text-xs">text-danger-fg</code>). Presets live in{' '}
+          <code className="font-mono text-xs">themes.css</code> and declare only the core eleven — the rest derive.
+          Switch the preset to watch swatches (and this whole page) retint live.
         </>
       }
     >
-      <Demo label="Theme preset" code="document.documentElement.dataset.theme = '' | 'slack' | 'teams' | 'one-piece'">
-        <Select uiSize="sm" value={theme} onChange={(e) => setTheme(e.target.value)} className="w-56">
-          {THEMES.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.label}
-            </option>
-          ))}
-        </Select>
+      <Demo label="Theme preset" code="document.documentElement.dataset.theme = '<preset id>'">
+        <div className="flex flex-col gap-2">
+          <Select uiSize="sm" value={theme} onChange={(e) => setTheme(e.target.value)} className="w-56">
+            {THEME_OPTIONS.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </Select>
+          <TokenAudit />
+        </div>
       </Demo>
       {TOKEN_GROUPS.map((g) => (
         <div key={g.group}>

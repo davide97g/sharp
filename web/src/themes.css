@@ -1,0 +1,262 @@
+/* Appearance presets.
+ *
+ * Static CSS on purpose: the inline boot script in index.html sets `data-theme`
+ * before the bundle loads, so the very first paint is already the right palette.
+ *
+ * A preset only declares the **core eleven** — surfaces, accent ramp, text
+ * triad. Everything else derives:
+ *   - code / scrollbar / kbd / presence tokens are `color-mix()` off those
+ *     eleven (see the derived block in index.css), so they retint for free;
+ *   - semantic tones (danger/success/warning) and the board palette come from
+ *     the dark set in @theme, with one shared `[data-scheme='light']` override
+ *     below rather than a per-theme copy.
+ *
+ * Adding a preset: a block here + an entry in `THEMES` (lib/theme.ts). The
+ * /design gallery's token audit will flag anything you forget.
+ */
+
+/* --- light-scheme semantics -------------------------------------------------
+ * The @theme defaults are tuned for dark surfaces; on a light panel they read as
+ * muddy neon. One override set serves every light preset. */
+:root[data-scheme='light'] {
+  --color-danger: #c62828;
+  --color-danger-hover: #b71c1c;
+  --color-danger-soft: #fde8e8;
+  --color-danger-fg: #b3261e;
+  --color-success: #1e7a4f;
+  --color-success-soft: #e3f5ec;
+  --color-success-fg: #14663f;
+  --color-warning: #a8620d;
+  --color-warning-soft: #fdf0dd;
+  --color-warning-fg: #8a4f08;
+
+  --color-presence-online: #128a63;
+
+  --board-gray-bg: #ececf0;
+  --board-gray-fg: #55555f;
+  --board-blue-bg: #e2edfd;
+  --board-blue-fg: #1d5fb5;
+  --board-green-bg: #e3f5ec;
+  --board-green-fg: #14663f;
+  --board-yellow-bg: #fbf1cf;
+  --board-yellow-fg: #7d6209;
+  --board-orange-bg: #fdeadb;
+  --board-orange-fg: #9a4d10;
+  --board-red-bg: #fde8e8;
+  --board-red-fg: #b3261e;
+  --board-purple-bg: #efe5fd;
+  --board-purple-fg: #6b2fb5;
+  --board-pink-bg: #fce4f1;
+  --board-pink-fg: #a52a72;
+}
+
+/* --- presets ---------------------------------------------------------------
+ * `default` is the bare @theme palette in index.css and carries no attribute. */
+
+:root[data-theme='daylight'] {
+  color-scheme: light;
+  --color-ink: #f7f7f9;
+  --color-panel: #ffffff;
+  --color-panel-2: #f1f1f5;
+  --color-border: #e0e0e6;
+  --color-border-soft: #ebebf0;
+  --color-accent: #6a5af0;
+  --color-accent-hover: #5a49e6;
+  --color-accent-soft: #e6e3fd;
+  --color-text: #1b1b21;
+  --color-text-dim: #5c5c69;
+  --color-text-faint: #8b8b99;
+}
+
+:root[data-theme='nord'] {
+  --color-ink: #2e3440;
+  --color-panel: #3b4252;
+  --color-panel-2: #434c5e;
+  --color-border: #4c566a;
+  --color-border-soft: #454e60;
+  --color-accent: #88c0d0;
+  --color-accent-hover: #9fd0de;
+  --color-accent-soft: #33475a;
+  --color-text: #eceff4;
+  --color-text-dim: #d8dee9;
+  --color-text-faint: #9aa5b5;
+}
+
+:root[data-theme='dracula'] {
+  --color-ink: #21222c;
+  --color-panel: #282a36;
+  --color-panel-2: #31333f;
+  --color-border: #44475a;
+  --color-border-soft: #3a3d4d;
+  --color-accent: #bd93f9;
+  --color-accent-hover: #caa9fa;
+  --color-accent-soft: #3a2f55;
+  --color-text: #f8f8f2;
+  --color-text-dim: #c3c4cd;
+  --color-text-faint: #8b8ea3;
+}
+
+:root[data-theme='catppuccin-mocha'] {
+  --color-ink: #11111b;
+  --color-panel: #1e1e2e;
+  --color-panel-2: #292a3d;
+  --color-border: #45475a;
+  --color-border-soft: #313244;
+  --color-accent: #cba6f7;
+  --color-accent-hover: #d7bbfa;
+  --color-accent-soft: #3b2f52;
+  --color-text: #cdd6f4;
+  --color-text-dim: #a6adc8;
+  --color-text-faint: #6c7086;
+}
+
+:root[data-theme='catppuccin-latte'] {
+  color-scheme: light;
+  --color-ink: #e6e9ef;
+  --color-panel: #eff1f5;
+  --color-panel-2: #dce0e8;
+  --color-border: #ccd0da;
+  --color-border-soft: #dce0e8;
+  --color-accent: #8839ef;
+  --color-accent-hover: #7a2fd8;
+  --color-accent-soft: #e6dbfb;
+  --color-text: #4c4f69;
+  --color-text-dim: #6c6f85;
+  /* Latte's own overlay0 (#9ca0b0) only reaches 2.3:1 on this panel — too weak
+     for 11px metadata. overlay2 keeps the palette and clears the bar. */
+  --color-text-faint: #7c7f93;
+}
+
+:root[data-theme='tokyo-night'] {
+  --color-ink: #16161e;
+  --color-panel: #1a1b26;
+  --color-panel-2: #24283b;
+  --color-border: #3b4261;
+  --color-border-soft: #2f3450;
+  --color-accent: #7aa2f7;
+  --color-accent-hover: #92b4f9;
+  --color-accent-soft: #26314f;
+  --color-text: #c0caf5;
+  --color-text-dim: #9aa5ce;
+  --color-text-faint: #6b7394;
+}
+
+:root[data-theme='gruvbox'] {
+  --color-ink: #1d2021;
+  --color-panel: #282828;
+  --color-panel-2: #32302f;
+  --color-border: #504945;
+  --color-border-soft: #3c3836;
+  --color-accent: #fabd2f;
+  --color-accent-hover: #fbcf5c;
+  --color-accent-soft: #4a3c1a;
+  --color-text: #ebdbb2;
+  --color-text-dim: #bdae93;
+  --color-text-faint: #928374;
+}
+
+:root[data-theme='solarized-light'] {
+  color-scheme: light;
+  --color-ink: #eee8d5;
+  --color-panel: #fdf6e3;
+  --color-panel-2: #f2ecd8;
+  --color-border: #ded7c0;
+  --color-border-soft: #e8e1cc;
+  --color-accent: #268bd2;
+  --color-accent-hover: #1c6fa8;
+  --color-accent-soft: #d7e7f4;
+  --color-text: #073642;
+  --color-text-dim: #586e75;
+  /* Solarized base1 (#93a1a1) is 2.5:1 here; base00 is the lightest tone that
+     stays legible for metadata. */
+  --color-text-faint: #657b83;
+}
+
+:root[data-theme='paper'] {
+  color-scheme: light;
+  --color-ink: #f4f2ed;
+  --color-panel: #fbfaf7;
+  --color-panel-2: #efece5;
+  --color-border: #ddd8cd;
+  --color-border-soft: #e7e3da;
+  --color-accent: #3a3a38;
+  --color-accent-hover: #1f1f1e;
+  --color-accent-soft: #e4e1d8;
+  --color-text: #1a1a18;
+  --color-text-dim: #55534d;
+  --color-text-faint: #8a877e;
+}
+
+:root[data-theme='high-contrast'] {
+  --color-ink: #000000;
+  --color-panel: #0a0a0a;
+  --color-panel-2: #141414;
+  --color-border: #7a7a7a;
+  --color-border-soft: #5a5a5a;
+  --color-accent: #ffd400;
+  --color-accent-hover: #ffe64d;
+  --color-accent-soft: #3a3000;
+  --color-text: #ffffff;
+  --color-text-dim: #e0e0e0;
+  --color-text-faint: #b8b8b8;
+}
+
+:root[data-theme='terminal'] {
+  /* The one preset that also swaps the type family — a phosphor terminal in a
+     humanist sans is just a green theme. */
+  --font-sans: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --color-ink: #000000;
+  --color-panel: #061206;
+  --color-panel-2: #0b1d0b;
+  --color-border: #1c3d1c;
+  --color-border-soft: #143014;
+  --color-accent: #33ff66;
+  --color-accent-hover: #66ff8f;
+  --color-accent-soft: #0f2f18;
+  --color-text: #c8ffd4;
+  --color-text-dim: #7fd99a;
+  --color-text-faint: #4f9c66;
+}
+
+:root[data-theme='slack'] {
+  --color-ink: #1a0f1c;
+  --color-panel: #2c1630;
+  --color-panel-2: #351c3a;
+  --color-border: #4a2a52;
+  --color-border-soft: #3a2240;
+  --color-accent: #2eb67d;
+  --color-accent-hover: #3ecf8e;
+  --color-accent-soft: #1a3d2e;
+  --color-text: #e8e0ea;
+  --color-text-dim: #b8a8bc;
+  --color-text-faint: #8a7a90;
+}
+
+:root[data-theme='teams'] {
+  --color-ink: #0f111a;
+  --color-panel: #1b1f2e;
+  --color-panel-2: #22273a;
+  --color-border: #2f3548;
+  --color-border-soft: #272c3d;
+  --color-accent: #5b5fc7;
+  --color-accent-hover: #7b7fd4;
+  --color-accent-soft: #2a2d55;
+  --color-text: #e2e4f0;
+  --color-text-dim: #a0a6c0;
+  --color-text-faint: #6e7490;
+}
+
+:root[data-theme='one-piece'] {
+  --color-ink: #0a1628;
+  --color-panel: #122640;
+  --color-panel-2: #1a3254;
+  --color-border: #2a4a6e;
+  --color-border-soft: #1e3a58;
+  --color-accent: #e85d4c;
+  --color-accent-hover: #f0c14b;
+  --color-accent-soft: #3d2818;
+  --color-text: #e8d5c4;
+  --color-text-dim: #b8a090;
+  --color-text-faint: #7a6a58;
+}

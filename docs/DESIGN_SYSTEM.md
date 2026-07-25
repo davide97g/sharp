@@ -14,7 +14,7 @@ If a variant you need is missing, extend the primitive in `web/src/ui/` (new var
 
 ## Tokens
 
-All colors are CSS variables defined in `web/src/index.css` `@theme`, themeable via `:root[data-theme=...]` presets (default purple, `slack`, `teams`, `one-piece`). **Never hard-code hex in components** — it breaks the theme presets. Tailwind v4 generates utilities from `@theme`, so prefer the short form:
+All colors are CSS variables defined in `web/src/index.css` `@theme`, themeable via `:root[data-theme=...]` presets in `web/src/themes.css`. **Never hard-code hex in components** — it breaks the theme presets. Tailwind v4 generates utilities from `@theme`, so prefer the short form:
 
 | Token | Utility | Role |
 |---|---|---|
@@ -27,8 +27,35 @@ All colors are CSS variables defined in `web/src/index.css` `@theme`, themeable 
 | `--color-danger` / `-hover` / `-soft` / `-fg` | `bg-danger`, `text-danger-fg` | destructive |
 | `--color-success` / `-soft` / `-fg` | `text-success-fg` | positive |
 | `--color-warning` / `-soft` / `-fg` | `text-warning-fg` | caution |
+| `--color-code-bg` / `-code-block-bg` | `bg-code-bg` | inline code / code block fill |
+| `--color-scrollbar` / `-hover` | — | custom scrollbar thumb |
+| `--color-kbd-edge` | `border-b-kbd-edge` | `Kbd` bottom bevel |
+| `--color-presence-online` / `-offline` | — | presence dots |
+
+The last four rows are `color-mix()` derivations of the core eleven, so they retint with every preset — that is the whole reason they exist. Do not replace them with hex.
 
 Legacy long form `bg-[var(--color-panel)]` is equivalent; use short form in new code.
+
+### Themes
+
+A preset is one `:root[data-theme='<id>']` block in `web/src/themes.css` declaring only the **core eleven** — `ink`, `panel`, `panel-2`, `border`, `border-soft`, `accent`, `accent-hover`, `accent-soft`, `text`, `text-dim`, `text-faint`. Semantic tones and the board palette are scheme-wide (dark set in `@theme`, one `:root[data-scheme='light']` override), and the derived chrome above comes free.
+
+Fifteen ship today: `default`, `daylight`, `nord`, `dracula`, `catppuccin-mocha`, `catppuccin-latte`, `tokyo-night`, `gruvbox`, `solarized-light`, `paper`, `high-contrast`, `terminal`, `slack`, `teams`, `one-piece`. Light presets also declare `color-scheme: light`.
+
+**Adding one:** the CSS block + an entry in `THEMES` (`web/src/lib/theme.ts`, with `scheme` and an optional `pairWith` sibling for System mode). Then open `/design` — the token audit walks every preset and names anything that fails to resolve.
+
+### Density & scale
+
+User-controlled, so never hard-code a row height or avatar size on a chat surface:
+
+| Token | Use |
+|---|---|
+| `--density-msg-y` | leading padding of a message that starts a group |
+| `--density-row-y` | padding of a message collapsed into the group above |
+| `--density-gap` | gap between related rows |
+| `--density-avatar` | avatar box (`w-(--density-avatar)`); the px number is `AVATAR_PX[density]` in `lib/theme.ts` for JS call sites |
+
+`--font-scale` scales the root font size, so everything sized in rem grows together — that is the interface-scale control, and it is why arbitrary px sizing is a bug.
 
 ### Type scale
 
@@ -48,7 +75,7 @@ Legacy long form `bg-[var(--color-panel)]` is equivalent; use short form in new 
 
 ### Motion
 
-`--motion-snap` (160ms) for hover/press, `--motion-smooth` (220ms) + `--motion-spring` easing for movement. Every looping/entrance animation must honor `prefers-reduced-motion` (`motion-reduce:animate-none` or a media block). Signature micro-interactions live in the primitives (button press-scale, `.micro-icon-button` spring) — you get them for free by using the primitives.
+`--motion-snap` (160ms) for hover/press, `--motion-smooth` (220ms) + `--motion-spring` easing for movement. Both are `calc()`-multiplied by `--motion-scale`, the user's motion slider (0 = still) — so use the tokens, never a literal duration, or the slider will not reach your animation. Every looping/entrance animation must honor `prefers-reduced-motion` (`motion-reduce:animate-none` or a media block). Signature micro-interactions live in the primitives (button press-scale, `.micro-icon-button` spring) — you get them for free by using the primitives.
 
 ### Focus
 

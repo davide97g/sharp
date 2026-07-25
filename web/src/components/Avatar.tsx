@@ -90,7 +90,9 @@ export function Avatar({
           style={{
             width: size * 0.32,
             height: size * 0.32,
-            backgroundColor: online ? '#4fbf9f' : '#4b4b56',
+            backgroundColor: online
+              ? 'var(--color-presence-online)'
+              : 'var(--color-presence-offline)',
             borderColor: 'var(--color-panel)',
           }}
         />

@@ -1,5 +1,20 @@
 import { create } from 'zustand'
-import { api, ApiRequestError, clearToken, setSessionToken, setToken } from './lib/api'
+import {
+  api,
+  ApiRequestError,
+  clearToken,
+  getToken,
+  setSessionToken,
+  setToken,
+} from './lib/api'
+import { applyUiPrefs } from './lib/theme'
+import {
+  normalizeUiPrefs,
+  readLocalUiPrefs,
+  writeLocalUiPrefs,
+  type RailPosition,
+  type UiPrefs,
+} from './lib/uiPrefs'
 import type { VoiceClient } from './lib/voice'
 import { annotations } from './lib/annotations'
 import {
@@ -45,6 +60,8 @@ import {
   type NotificationSetupState,
 } from './lib/notify'
 import {
+  adoptSoundSettings,
+  setSoundSink,
   playHuddleRingSound,
   playNotifySound,
   playVoiceJoinSound,
@@ -170,7 +187,10 @@ export type VoiceRoom = Record<
 >
 
 export type VoiceStageMode = 'expanded' | 'compact' | 'mini' | 'full'
-export type RailPosition = 'left' | 'bottom' | 'top'
+// Owned by lib/uiPrefs.ts now that it is part of the synced appearance blob;
+// re-exported so the existing `import type { RailPosition } from '../store'`
+// call sites keep working.
+export type { RailPosition } from './lib/uiPrefs'
 
 type VoiceState = {
   channelId: string | null
@@ -397,9 +417,14 @@ type State = {
   // chat layout preference: null until the user has chosen (triggers first-run chooser)
   chatLayout: ChatLayout | null
 
-  // Device-local desktop navigation preference.
+  // The synced appearance blob (theme, scheme, accent, density, scale, motion,
+  // rail, sounds). Server-backed via PATCH /prefs/ui; see lib/uiPrefs.ts.
+  ui: UiPrefs
+  // Desktop navigation preference. Mirrors `ui.railPosition` so the many
+  // existing readers do not have to reach into the blob.
   railPosition: RailPosition
   // Bottom dock only: slide away until the cursor nears the bottom edge.
+  // Mirrors `ui.dockAutoHide`.
   dockAutoHide: boolean
 
   // --- streaming mode (privacy shield) ---
@@ -658,6 +683,8 @@ type State = {
 
   // profile + chat layout
   setChatLayout: (layout: ChatLayout) => Promise<void>
+  /** Merge an appearance patch: apply locally, mirror, sync, roll back on failure. */
+  patchUi: (patch: Partial<UiPrefs>) => void
   setRailPosition: (position: RailPosition) => void
   setDockAutoHide: (autoHide: boolean) => void
   setStreamManual: (on: boolean) => void
@@ -692,8 +719,6 @@ function emptyChannelMessages(): ChannelMessages {
 }
 
 const NOISE_SUPPRESSION_KEY = 'sharp.noiseSuppression'
-const RAIL_POSITION_KEY = 'sharp.railPosition'
-const DOCK_AUTOHIDE_KEY = 'sharp.dockAutoHide'
 const STREAM_MANUAL_KEY = 'sharp.streamManual'
 const STREAM_REVERT_NICKS_KEY = 'sharp.streamRevertNicknames'
 
@@ -705,21 +730,18 @@ function storedNoiseSuppression(): boolean {
   }
 }
 
-function storedRailPosition(): RailPosition {
-  try {
-    const stored = window.localStorage.getItem(RAIL_POSITION_KEY)
-    return stored === 'bottom' || stored === 'top' ? stored : 'left'
-  } catch {
-    return 'left'
-  }
-}
+/** Local mirror of the appearance blob, replaced by the server copy on login. */
+const initialUi = readLocalUiPrefs()
 
-function storedDockAutoHide(): boolean {
-  try {
-    return window.localStorage.getItem(DOCK_AUTOHIDE_KEY) === '1'
-  } catch {
-    return false
-  }
+/**
+ * Push a resolved appearance blob everywhere it is consumed: store state, the
+ * two mirrored fields, the DOM (theme attribute + runtime vars), and the sound
+ * engine. Persistence is the caller's job — hydration must not write back.
+ */
+function applyUi(set: (partial: Partial<State>) => void, next: UiPrefs) {
+  set({ ui: next, railPosition: next.railPosition, dockAutoHide: next.dockAutoHide })
+  applyUiPrefs(next)
+  adoptSoundSettings(next.sounds)
 }
 
 function storedStreamManual(): boolean {
@@ -837,8 +859,9 @@ export const useStore = create<State>((set, get) => ({
   notificationState: initialNotificationState(),
   notifHasMore: false,
   chatLayout: null,
-  railPosition: storedRailPosition(),
-  dockAutoHide: storedDockAutoHide(),
+  ui: initialUi,
+  railPosition: initialUi.railPosition,
+  dockAutoHide: initialUi.dockAutoHide,
   streamManual: storedStreamManual(),
   streamRevealAllUntil: null,
   streamRevealChannels: {},
@@ -2643,6 +2666,22 @@ export const useStore = create<State>((set, get) => ({
         chatLayout: prefs.chat_layout,
         nicknames: nickRes.nicknames ?? {},
       })
+      // The server blob wins over the local mirror outright — no merge, no
+      // clock comparison. Missing fields fall back to what this device had, so
+      // a first login on a fresh account keeps the theme chosen at signup.
+      const local = get().ui
+      const merged = normalizeUiPrefs(prefs.ui, local)
+      applyUi(set, merged)
+      writeLocalUiPrefs(merged)
+      // Nothing stored server-side yet (fresh account, or an upgrade from the
+      // pre-0029 localStorage-only keys): adopt what this device has so the
+      // choice actually follows the user. Signup picks a theme before a token
+      // exists, so this is the only place that write can happen.
+      if (!prefs.ui || Object.keys(prefs.ui).length === 0) {
+        void api.patchUiPrefs(merged).catch(() => {
+          // Best-effort — the local mirror already holds the value.
+        })
+      }
     } catch (e) {
       if (e instanceof Error) toastError(e.message)
     }
@@ -2694,22 +2733,28 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
+  patchUi(patch) {
+    const prev = get().ui
+    const next = normalizeUiPrefs({ ...prev, ...patch }, prev)
+    applyUi(set, next)
+    // The mirror is what the boot script reads, so write it before the network.
+    writeLocalUiPrefs(next)
+    // Anonymous surfaces (the login theme picker) have no row to patch yet;
+    // the mirror is enough and gets flushed once the session exists.
+    if (!getToken()) return
+    void api.patchUiPrefs(patch).catch((e) => {
+      applyUi(set, prev)
+      writeLocalUiPrefs(prev)
+      if (e instanceof Error) toastError(e.message)
+    })
+  },
+
   setRailPosition(position) {
-    set({ railPosition: position })
-    try {
-      window.localStorage.setItem(RAIL_POSITION_KEY, position)
-    } catch {
-      // The preference is still usable for this session if storage is unavailable.
-    }
+    get().patchUi({ railPosition: position })
   },
 
   setDockAutoHide(autoHide) {
-    set({ dockAutoHide: autoHide })
-    try {
-      window.localStorage.setItem(DOCK_AUTOHIDE_KEY, autoHide ? '1' : '0')
-    } catch {
-      // The preference is still usable for this session if storage is unavailable.
-    }
+    get().patchUi({ dockAutoHide: autoHide })
   },
 
   setStreamManual(on) {
@@ -3567,6 +3612,16 @@ export const useStore = create<State>((set, get) => ({
         }
         break
       }
+      case 'prefs.updated': {
+        // Another device (or another tab) changed appearance. The payload is
+        // the fully merged blob, so applying it is idempotent — the originating
+        // tab re-applying its own change is a no-op.
+        const { ui } = env.payload as { ui: unknown }
+        const merged = normalizeUiPrefs(ui, get().ui)
+        applyUi(set, merged)
+        writeLocalUiPrefs(merged)
+        break
+      }
       case 'notification.created': {
         const { notification } = env.payload as NotificationCreatedPayload
         // If its channel is already open in a focused window, treat it as seen:
@@ -4313,6 +4368,11 @@ function applyMessageDeleted(
     return { byChannel, thread }
   })
 }
+
+// Sound settings are edited through the sound engine's own API (it owns the
+// audio graph), but they are part of the synced appearance blob — route every
+// change back through the store so it reaches the server and other devices.
+setSoundSink((s) => useStore.getState().patchUi({ sounds: s }))
 
 // Global typing pruner.
 if (typeof window !== 'undefined') {

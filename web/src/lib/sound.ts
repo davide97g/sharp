@@ -43,15 +43,19 @@ export function getSoundSettings(): SoundSettings {
   return settings
 }
 
-/** Merge a patch into the sound settings, persist it, and notify subscribers. */
-export function setSoundSettings(patch: Partial<SoundSettings>) {
-  settings = {
-    enabled: patch.enabled ?? settings.enabled,
-    volume:
-      patch.volume !== undefined
-        ? Math.min(1, Math.max(0, patch.volume))
-        : settings.volume,
-  }
+/**
+ * Where a settings change should be persisted beyond this module. The store
+ * registers a sink that folds it into the synced appearance blob; until then
+ * (and if it ever fails) the localStorage mirror below is the only record.
+ */
+let sink: ((settings: SoundSettings) => void) | null = null
+
+export function setSoundSink(fn: (settings: SoundSettings) => void) {
+  sink = fn
+}
+
+function commit(next: SoundSettings) {
+  settings = next
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
   } catch {
@@ -62,6 +66,32 @@ export function setSoundSettings(patch: Partial<SoundSettings>) {
     master.gain.setTargetAtTime(settings.volume, ctx.currentTime, 0.02)
   }
   for (const fn of listeners) fn()
+}
+
+function merge(patch: Partial<SoundSettings>): SoundSettings {
+  return {
+    enabled: patch.enabled ?? settings.enabled,
+    volume:
+      patch.volume !== undefined
+        ? Math.min(1, Math.max(0, patch.volume))
+        : settings.volume,
+  }
+}
+
+/** Merge a patch into the sound settings, persist it, and notify subscribers. */
+export function setSoundSettings(patch: Partial<SoundSettings>) {
+  const next = merge(patch)
+  commit(next)
+  sink?.(next)
+}
+
+/**
+ * Apply settings that arrived from outside (server hydration, another device)
+ * without echoing them back to the sink — that would be a sync loop.
+ */
+export function adoptSoundSettings(next: SoundSettings) {
+  if (next.enabled === settings.enabled && next.volume === settings.volume) return
+  commit(merge(next))
 }
 
 /** Subscribe to settings changes (for a reactive settings UI). Returns unsubscribe. */

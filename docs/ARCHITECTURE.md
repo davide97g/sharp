@@ -1022,7 +1022,11 @@ user_prefs(user_id uuid PK, dnd boolean NOT NULL default false,
   notify_reply boolean NOT NULL default true, notify_task boolean NOT NULL default true,
   notify_poll boolean NOT NULL default true, dnd_scheduled boolean NOT NULL default false,
   dnd_start integer, dnd_end integer,                -- minutes-of-day, user-local; may wrap midnight
-  tz_offset integer NOT NULL default 0)              -- minutes east of UTC
+  tz_offset integer NOT NULL default 0,              -- minutes east of UTC
+  -- migration 0029: opaque client-owned appearance blob (theme, scheme, accent
+  -- hue, density, interface scale, motion, rail, sounds). No schema, no CHECK —
+  -- the shape lives in web/src/lib/uiPrefs.ts so a new preference costs no migration.
+  ui jsonb NOT NULL default '{}'::jsonb)
 push_subscriptions(id uuid PK, user_id uuid, endpoint text UNIQUE NOT NULL,
   p256dh text NOT NULL, auth text NOT NULL, created_at timestamptz)
 expo_push_tokens(id uuid PK, user_id uuid REFERENCES users(id), token text UNIQUE NOT NULL,
@@ -1078,6 +1082,7 @@ PrefsUpdate = Partial<Pick<Prefs, notify_*|dnd_scheduled|dnd_start|dnd_end|tz_of
 | PUT | `/prefs` | `PrefsUpdate` → `204` (per-type toggles + scheduled DND; omitted fields unchanged) |
 | PUT | `/prefs/dnd` | `{dnd}` → `204` |
 | PUT | `/prefs/chat-layout` | `{chat_layout: 'bubble'\|'classic'}` → `204` |
+| PATCH | `/prefs/ui` | JSON object → merged `ui` object (shallow top-level merge; ≤ 8 KB; non-object → 400; also emits `prefs.updated` to the caller's own sessions) |
 | PUT | `/channels/{id}/prefs` | `{mode: 'all'\|'mentions'\|'muted'}` (or legacy `{muted}`) → `204` |
 | GET | `/push/vapid` | → `{public_key: string\|null}` |
 | POST | `/push/subscribe` | `{endpoint, keys:{p256dh, auth}}` → `204` (upsert by endpoint) |
@@ -1094,9 +1099,46 @@ attachments as blobs with the `Authorization` header.
 ## WebSocket event addition (existing `/api/v1/ws`)
 
 - `notification.created` `{notification: Notification}` — to the recipient only.
+- `prefs.updated` `{ui: object}` — emitted by `PATCH /prefs/ui` to the caller's **own**
+  user id, i.e. all their other tabs and devices. The payload is the fully merged blob,
+  so applying it is idempotent and the originating tab needs no echo suppression.
 - `app.visibility` `{visible: boolean}` — sent on connect, visibility changes, page show,
   and page hide. Visible connection ids are refreshed in Redis (`sharp:visible:<user_id>`)
   with an expiry, so every server replica shares the foreground-delivery decision.
+
+## Appearance (theme, density, motion)
+
+Every appearance preference lives in one place: `user_prefs.ui` (jsonb, migration 0029),
+edited with `PATCH /prefs/ui`. The server never interprets the blob — the shape, the
+defaults, and the validation all live in `web/src/lib/uiPrefs.ts` (`UiPrefs`,
+`normalizeUiPrefs`), so adding a preference needs no migration and no endpoint.
+
+- **Two tiers.** `localStorage['sharp.ui']` is a *mirror*, read by the inline boot script
+  in `web/index.html` so the first paint is already themed. `user_prefs.ui` is the
+  *truth*: it arrives with `loadInboxAndPrefs()` and replaces the mirror wholesale — no
+  merge, no clock comparison. `store.patchUi()` applies optimistically and rolls back on
+  failure; `prefs.updated` keeps other devices in step.
+- **Merge semantics.** `PATCH /prefs/ui` does a top-level `jsonb ||` merge, so a nested
+  object (`sounds`) replaces the stored one wholesale — always send it complete.
+  Payloads over 8 KB, and anything that is not a JSON object, are rejected.
+- **Palettes are static CSS.** Each preset is one `:root[data-theme='<id>']` block in
+  `web/src/themes.css` declaring only the **core eleven** tokens (5 surfaces, 3 accent,
+  3 text). Semantic tones and the board palette are scheme-wide: the dark set lives in
+  `index.css` `@theme`, and one `:root[data-scheme='light']` block in `themes.css`
+  overrides them for every light preset. Code/scrollbar/kbd/presence tokens are
+  `color-mix()` derivations of the core eleven, so they retint for free.
+- **Continuous knobs are runtime CSS.** `applyUiPrefs()` (`web/src/lib/theme.ts`) writes a
+  single `<style id="sharp-ui">` block holding `--font-scale`, `--motion-scale`, the
+  `--density-*` set, and — when `accentHue` is set — an OKLCH-derived accent ramp at fixed
+  lightness/chroma so a user-picked hue can never become unreadable. `--motion-snap` and
+  `--motion-smooth` are `calc()`-scaled by `--motion-scale`, which is how one slider (0 =
+  still) reaches every transition without touching a component.
+- **Scheme.** `scheme: 'dark'|'light'|'system'` picks between `theme` and `themeLight`;
+  `system` follows `prefers-color-scheme` live via `watchSystemScheme`. The resolved
+  scheme is published as `data-scheme` plus an inline `color-scheme`.
+- Adding a preset = a block in `themes.css` + an entry in `THEMES` (`lib/theme.ts`). The
+  `/design` gallery's token audit walks every preset against a detached probe element and
+  reports any token that fails to resolve.
 
 ## Notification semantics
 

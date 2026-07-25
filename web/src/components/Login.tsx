@@ -9,7 +9,7 @@ import { sound } from '../lib/sound'
 import { Button } from '../ui'
 import { BrandLockup, LOGIN_BRAND_ID } from './BrandLockup'
 import { isPasskeyCancellation, loginWithPasskey, supportsPasskeys } from '../lib/passkeys'
-import { getThemePreset, setThemePreset, type ThemePreset } from '../lib/theme'
+import { DARK_THEMES } from '../lib/theme'
 import { ThemePicker } from './ThemePicker'
 import { AuthField } from './auth/AuthField'
 import { BadgeCard } from './auth/BadgeCard'
@@ -42,7 +42,7 @@ const REG_STEPS = [
     key: 'look',
     label: 'Look',
     title: 'Pick your look.',
-    sub: 'Four house themes. The whole room repaints as you choose — change it later in Settings.',
+    sub: 'The whole room repaints as you choose — change it later in Settings.',
   },
 ] as const
 
@@ -76,7 +76,8 @@ export function Login() {
   const [name, setName] = useState('')
   const [regEmail, setRegEmail] = useState('')
   const [regPassword, setRegPassword] = useState('')
-  const [theme, setTheme] = useState<ThemePreset>(() => getThemePreset())
+  const theme = useStore((s) => s.ui.theme)
+  const patchUi = useStore((s) => s.patchUi)
   const [errors, setErrors] = useState<{ name?: string; email?: string; password?: string }>({})
   const [formError, setFormError] = useState<string | null>(null)
   const [issued, setIssued] = useState(false)
@@ -668,11 +669,15 @@ export function Login() {
 
                   {step === 2 && (
                     <div className="auth-rise" style={{ '--i': 0 } as CSSProperties}>
+                      {/* Signing up is a dark-scheme moment by definition —
+                          the auth stage has no light variant. The choice lands
+                          in the local mirror and is flushed to the server on
+                          the first prefs sync after registration. */}
                       <ThemePicker
+                        themes={DARK_THEMES}
                         value={theme}
                         onChange={(p) => {
-                          setTheme(p)
-                          setThemePreset(p)
+                          patchUi({ theme: p, scheme: 'dark' })
                           sound.previewTick()
                         }}
                       />

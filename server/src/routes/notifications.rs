@@ -3,6 +3,7 @@ use crate::error::{AppError, AppResult};
 use crate::notify;
 use crate::routes::channel_kind;
 use crate::state::SharedState;
+use crate::ws::envelope;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
@@ -87,7 +88,7 @@ pub async fn get_prefs(
 ) -> AppResult<Json<serde_json::Value>> {
     let prefs_row = sqlx::query(
         "SELECT dnd, chat_layout, notify_dm, notify_mention, notify_reply, notify_task,
-                notify_poll, dnd_scheduled, dnd_start, dnd_end, tz_offset
+                notify_poll, dnd_scheduled, dnd_start, dnd_end, tz_offset, ui
          FROM user_prefs WHERE user_id = $1",
     )
     .bind(auth.id)
@@ -116,6 +117,12 @@ pub async fn get_prefs(
         .as_ref()
         .and_then(|r| r.try_get::<i32, _>("tz_offset").ok())
         .unwrap_or(0);
+    // Opaque client-owned appearance blob; absent row = `{}` and the client
+    // falls back to its own defaults (web/src/lib/uiPrefs.ts).
+    let ui: serde_json::Value = prefs_row
+        .as_ref()
+        .and_then(|r| r.try_get::<serde_json::Value, _>("ui").ok())
+        .unwrap_or_else(|| json!({}));
 
     // Per-channel modes; also derive the legacy muted-id list for older clients.
     let rows = sqlx::query("SELECT channel_id, mode FROM channel_prefs WHERE user_id = $1")
@@ -147,6 +154,7 @@ pub async fn get_prefs(
         "dnd_start": dnd_start,
         "dnd_end": dnd_end,
         "tz_offset": tz_offset,
+        "ui": ui,
     })))
 }
 
@@ -221,6 +229,55 @@ pub async fn set_prefs(
     .execute(&state.pool)
     .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Upper bound on the stored appearance blob. It is client-owned and never
+/// interpreted by the server, so it needs a hard ceiling.
+const UI_PREFS_MAX_BYTES: usize = 8 * 1024;
+
+/// Shallow-merge a patch into `user_prefs.ui` and fan the result out to the
+/// caller's other sessions.
+///
+/// The merge is **top-level only** (`jsonb ||`): a nested object in the patch
+/// replaces the stored one wholesale, so clients always send a complete
+/// sub-object rather than a partial one.
+pub async fn patch_ui_prefs(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Json(body): Json<serde_json::Value>,
+) -> AppResult<Json<serde_json::Value>> {
+    if !body.is_object() {
+        return Err(AppError::Validation(
+            "ui prefs patch must be a JSON object".to_string(),
+        ));
+    }
+    if serde_json::to_string(&body)
+        .map(|s| s.len())
+        .unwrap_or(usize::MAX)
+        > UI_PREFS_MAX_BYTES
+    {
+        return Err(AppError::Validation(format!(
+            "ui prefs patch exceeds {UI_PREFS_MAX_BYTES} bytes"
+        )));
+    }
+
+    let row = sqlx::query(
+        "INSERT INTO user_prefs (user_id, ui) VALUES ($1, $2)
+         ON CONFLICT (user_id) DO UPDATE SET ui = user_prefs.ui || $2::jsonb
+         RETURNING ui",
+    )
+    .bind(auth.id)
+    .bind(&body)
+    .fetch_one(&state.pool)
+    .await?;
+    let ui: serde_json::Value = row.try_get("ui")?;
+
+    // Live cross-device sync: the same user's other tabs/devices apply the
+    // merged blob as-is (idempotent, so the originating tab can re-apply too).
+    let ev = envelope("prefs.updated", json!({ "ui": ui }));
+    state.hub.broadcast(ev, vec![auth.id]).await;
+
+    Ok(Json(ui))
 }
 
 #[derive(Deserialize)]

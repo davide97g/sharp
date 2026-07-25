@@ -10,7 +10,42 @@
       content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
     <meta name="theme-color" content="#0e0e11" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
+    <!-- Appearance boot: paint the saved theme before the bundle loads, so a
+         non-default (or light) preset never flashes the default palette. Reads
+         the same localStorage mirror as lib/uiPrefs.ts and mirrors a subset of
+         lib/theme.ts::applyUiPrefs — keep the two in sync. Deliberately inline,
+         synchronous, and failure-tolerant: any problem falls through to the
+         stylesheet defaults. -->
+    <script>
+      (function () {
+        try {
+          var p = JSON.parse(localStorage.getItem('sharp.ui') || '{}')
+          var scheme = p.scheme || 'dark'
+          if (scheme === 'system') {
+            scheme = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+          }
+          var id = scheme === 'light' ? p.themeLight || 'daylight' : p.theme || 'default'
+          var root = document.documentElement
+          if (id !== 'default') root.setAttribute('data-theme', id)
+          root.setAttribute('data-scheme', scheme)
+          root.style.colorScheme = scheme
+          // Inline properties, not a <style> block: they always win, whatever
+          // order the app stylesheet lands in. Mirrors lib/theme.ts.
+          if (typeof p.fontScale === 'number') root.style.setProperty('--font-scale', p.fontScale)
+          if (typeof p.motion === 'number') root.style.setProperty('--motion-scale', p.motion)
+          if (typeof p.accentHue === 'number') {
+            var h = Math.round(p.accentHue)
+            var l = scheme === 'light'
+            root.style.setProperty('--color-accent', 'oklch(' + (l ? '0.55 0.17 ' : '0.68 0.16 ') + h + ')')
+            root.style.setProperty('--color-accent-hover', 'oklch(' + (l ? '0.49 0.17 ' : '0.74 0.16 ') + h + ')')
+            root.style.setProperty('--color-accent-soft', 'oklch(' + (l ? '0.93 0.05 ' : '0.32 0.08 ') + h + ')')
+          }
+        } catch (e) {
+          /* defaults from the stylesheet are fine */
+        }
+      })()
+    </script>
     <meta name="description" content="Self-hosted team chat, docs, canvas, and calls." />
     <!-- iOS / iPadOS home-screen PWA -->
     <meta name="apple-mobile-web-app-capable" content="yes" />

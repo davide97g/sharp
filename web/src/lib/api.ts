@@ -67,6 +67,7 @@ import type {
   SharpyStatusResponse,
   SharpyStreamEvent,
 } from './types'
+import type { UiPrefs } from './uiPrefs'
 
 const TOKEN_KEY = 'sharp.token'
 const SERVER_URL_KEY = 'sharp.serverUrl'
@@ -745,6 +746,15 @@ export const api = {
   },
   setChatLayout(chat_layout: 'bubble' | 'classic') {
     return request<void>('/prefs/chat-layout', { method: 'PUT', body: { chat_layout } })
+  },
+  /**
+   * Merge a patch into the server-side appearance blob and get the merged
+   * result back. The merge is top-level only, so nested values (`sounds`) must
+   * be sent complete. The server also fans the result out over WS as
+   * `prefs.updated`, which is how other devices pick the change up.
+   */
+  patchUiPrefs(patch: Partial<UiPrefs>) {
+    return request<Record<string, unknown>>('/prefs/ui', { method: 'PATCH', body: patch })
   },
   setChannelMute(channelId: string, muted: boolean) {
     return request<void>(`/channels/${channelId}/prefs`, {

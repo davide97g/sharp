@@ -289,7 +289,11 @@ function DmRow({
     >
       <span
         className="h-2 w-2 shrink-0 rounded-full"
-        style={{ backgroundColor: online ? '#4fbf9f' : '#4b4b56' }}
+        style={{
+          backgroundColor: online
+            ? 'var(--color-presence-online)'
+            : 'var(--color-presence-offline)',
+        }}
       />
       <span className={`min-w-0 flex-1 truncate ${unread && !active ? 'font-semibold text-[var(--color-text)]' : ''} ${shielded ? 'stream-blur' : ''}`}>
         {channelLabel(channel, nicknames)}
