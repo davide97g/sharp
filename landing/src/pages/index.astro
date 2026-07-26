@@ -1,14 +1,296 @@
 ---
+import "@fontsource-variable/inter";
 import "../styles/global.css";
+import {
+  GITHUB_OWNER,
+  docsUrl as docs,
+  origin,
+  releases,
+  repo,
+  updated,
+  updatedLabel,
+  version,
+} from "../site";
 
-const GITHUB_OWNER = "davide97g";
-const repo = `https://github.com/${GITHUB_OWNER}/sharp`;
-const releases = `${repo}/releases/latest`;
+/* Canonical origin comes from `site` in astro.config.mjs — one place to edit. */
+const siteUrl = origin(Astro.site);
+/* Canonical + og:url keep the trailing slash so they match the sitemap entry. */
+const canonical = `${siteUrl}/`;
+const ogImage = `${siteUrl}/og.png`;
 
-const title = "sharp — Team chat, docs, canvas, calls & tasks. Your server. No compromises.";
+/* Title ≤ 60 chars, description ≈ 155 — both fully visible in the SERP. */
+const title = "sharp — open-source self-hosted Slack alternative";
 const description =
-  "An open-source, self-hosted Slack replacement: channels, threads, DMs, collaborative docs and canvas, voice/video calls, a Linear-lite task tracker with GitHub sync, file uploads and full-text search — running on your own server from a single container.";
-const siteUrl = "https://sharp.davideghiotto.it";
+  "sharp is an open-source, self-hosted Slack alternative: chat, docs, canvas, boards, video calls, tasks and an AI assistant in one container.";
+
+/* One source of truth for the feature grid — also feeds schema.org featureList. */
+const features = [
+  {
+    icon: "#",
+    title: "Chat, threads & DMs",
+    points: [
+      "Public channels, private groups & direct messages",
+      "One-level threads, reactions, @mentions, presence",
+      "Disappearing messages with a per-channel TTL",
+      "GIF picker, voice messages, @/# autocomplete",
+    ],
+  },
+  {
+    icon: "¶",
+    title: "Collaborative docs",
+    points: [
+      "Block-based docs living inside any channel",
+      "Real-time co-editing over Yjs with live cursors",
+      "Owner / editor / viewer roles per doc",
+      "<code>[[doc]]</code> chips bridge chat and docs",
+    ],
+  },
+  {
+    icon: "◈",
+    title: "Canvas & boards",
+    points: [
+      "Infinite tldraw whiteboards, self-hosted assets",
+      "Notion-style kanban boards as a doc kind",
+      "Same permissions and inbox as docs",
+      "One click from any channel",
+    ],
+  },
+  {
+    icon: "◉",
+    title: "Voice, video & screen share",
+    points: [
+      "LiveKit SFU calls in any channel, DM or standalone room",
+      "Up to 25 participants, 16 cameras, 1 screen share",
+      "Picture-in-picture keeps the call floating",
+      "Guest links — join by name, no account",
+    ],
+  },
+  {
+    icon: "✦",
+    title: "Sharpy, the AI assistant",
+    points: [
+      "RAG answers grounded in your own workspace",
+      "Every retrieval re-checks channel and doc permissions",
+      "Any OpenAI-compatible endpoint, including local models",
+      "No API key set? The whole feature disappears",
+    ],
+  },
+  {
+    icon: "◪",
+    title: "Tasks & projects",
+    points: [
+      "Linear-lite tracker with <code>SHARP-123</code> identifiers",
+      "List and board views, keyboard-first peek panel",
+      "Create a task straight from a chat message",
+      "GitHub branches and PRs move state automatically",
+    ],
+  },
+  {
+    icon: "▦",
+    title: "Calendar & meetings",
+    points: [
+      "Workspace calendar with scheduled meetings",
+      "Two-way Google Calendar sync (opt-in)",
+      "Meetings open straight into a call room",
+      "Live transcription and meeting notes",
+    ],
+  },
+  {
+    icon: "◍",
+    title: "Polls & decisions",
+    points: [
+      "Polls in channels, sticky to the top while open",
+      "In-call poll overlay for live votes",
+      "Results broadcast in real time",
+      "Everyone gets a <code>poll_ended</code> notification",
+    ],
+  },
+  {
+    icon: "⌕",
+    title: "Files & search",
+    points: [
+      "Drag-and-drop uploads, images inline",
+      "Instant Postgres full-text search across channels",
+      "Files on your own S3 or MinIO bucket",
+      "Quick switcher jumps to channels, docs and tasks",
+    ],
+  },
+  {
+    icon: "◔",
+    title: "Notifications you control",
+    points: [
+      "Unified inbox across chat, docs, canvas and tasks",
+      "Web push, native macOS APNs, in-app toasts",
+      "Per-channel mode: all, mentions only, or muted",
+      "Do-not-disturb with scheduled quiet hours",
+    ],
+  },
+  {
+    icon: "⚿",
+    title: "Privacy & encryption",
+    points: [
+      "Opt-in end-to-end encrypted DMs with per-device keys",
+      "Passkeys plus password login, argon2 hashes",
+      "Notification previews you can strip back",
+      "Streaming mode blurs the workspace while you share",
+    ],
+  },
+  {
+    icon: "⌂",
+    title: "Yours, everywhere",
+    points: [
+      "One container plus Postgres; Redis for multi-replica",
+      "AGPL-3.0, zero telemetry, zero tracking",
+      "Web app plus native macOS, Windows and Linux builds",
+      "Every integration is optional and inert until configured",
+    ],
+  },
+];
+
+/* FAQ — one array drives both the visible <details> list and FAQPage schema,
+   so the markup can never drift from the answers Google and LLMs read. */
+const faqs = [
+  {
+    q: "What is sharp?",
+    a: "sharp is an open-source, self-hosted team communication platform — a Slack alternative you run yourself. One Rust binary serves chat, collaborative docs, whiteboards, kanban boards, a calendar, voice and video calls, a task tracker and an AI assistant, backed by Postgres. It is licensed AGPL-3.0.",
+  },
+  {
+    q: "Is sharp free?",
+    a: "Yes. sharp is AGPL-3.0 licensed with no paid tier, no seat count and no feature gates — the software costs $0. You pay only for the machine you run it on, which for a small team is a $5–10/month VPS plus whatever object storage you use for uploads.",
+  },
+  {
+    q: "What do I need to self-host sharp?",
+    a: "Docker Compose and a Postgres 16 database with the pgvector extension — the bundled compose file provides both. Everything else is optional: Redis for multi-replica fanout, S3 or MinIO for uploads, LiveKit for calls, an OpenAI-compatible API for the AI assistant, SMTP or Resend for email.",
+  },
+  {
+    q: "How long does setup take?",
+    a: "About five minutes. Clone the repo, copy .env.example to .env, set a JWT secret and a Postgres password, then run docker compose up -d. Migrations apply automatically on startup and the first account you register becomes the workspace owner.",
+  },
+  {
+    q: "Does sharp send data to third parties?",
+    a: "No. sharp ships zero telemetry and zero tracking, and calls no external service on its own. Every integration — Google Calendar, GitHub, GIFs, AI, push, email — stays completely inert until you set its environment variable, and the feature disappears from the UI.",
+  },
+  {
+    q: "Does sharp support voice and video calls?",
+    a: "Yes, through a self-hosted LiveKit SFU. Any channel, DM or standalone room becomes a call with webcam video and screen sharing including system audio. Limits are 25 participants, 16 cameras and 1 screen share per room. Picture-in-picture keeps a call floating while you work elsewhere.",
+  },
+  {
+    q: "Are direct messages end-to-end encrypted?",
+    a: "Optionally, yes. E2EE DMs use per-device X25519 and Ed25519 keys; the server performs zero cryptography and stores only opaque ciphertext plus public keys. It is a Keybase-style design without forward secrecy, and encrypted DMs are never indexed by the AI assistant.",
+  },
+  {
+    q: "How does the AI assistant work?",
+    a: "Sharpy is retrieval-augmented: workspace messages, docs and tasks are embedded into pgvector, and every retrieval re-checks channel membership and doc roles, so Sharpy can never surface content the asker cannot already read. It talks to any OpenAI-compatible endpoint, including a local model.",
+  },
+  {
+    q: "Can I use sharp on desktop and mobile?",
+    a: "sharp runs in any modern browser, and native Tauri 2 desktop builds are published for macOS, Windows and Linux — you point them at your own server URL and sign in through the system browser. A React Native mobile app is in development; the web app is responsive in the meantime.",
+  },
+  {
+    q: "How does sharp handle tasks and issues?",
+    a: "With a built-in Linear-lite tracker: projects carry a key, issues get identifiers like SHARP-123, and workflow states drive list and board views. Turn any chat message into a task, and GitHub sync moves state automatically — started when a branch or PR opens, completed on merge.",
+  },
+  {
+    q: "Does sharp scale beyond one server?",
+    a: "Yes. Set REDIS_URL and WebSocket events fan out through Redis pub/sub, so several replicas stay in sync behind a load balancer. Media never touches the app server: LiveKit carries call traffic with simulcast, dynacast and adaptive subscriptions.",
+  },
+  {
+    q: "What does the AGPL-3.0 license mean for me?",
+    a: "Run it, fork it, even sell hosting for it — you just have to publish your modifications under the same license. Internal use inside your own company carries no obligation beyond that, and there is no contributor license agreement or commercial edition behind a paywall.",
+  },
+];
+
+const faqSchema = faqs.map((f) => ({
+  "@type": "Question",
+  name: f.q,
+  acceptedAnswer: { "@type": "Answer", text: f.a },
+}));
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": `${siteUrl}/#website`,
+      url: canonical,
+      name: "sharp",
+      description,
+      inLanguage: "en",
+      publisher: { "@id": `${siteUrl}/#author` },
+    },
+    {
+      "@type": "Person",
+      "@id": `${siteUrl}/#author`,
+      name: "Davide Ghiotto",
+      url: "https://davideghiotto.it",
+      sameAs: [`https://github.com/${GITHUB_OWNER}`],
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": `${siteUrl}/#software`,
+      name: "sharp",
+      alternateName: "sharp — self-hosted Slack alternative",
+      applicationCategory: "CommunicationApplication",
+      applicationSubCategory: "Team chat, collaborative docs and video calls",
+      operatingSystem: "Web, macOS, Windows, Linux, Docker",
+      softwareVersion: version,
+      dateModified: updated,
+      url: siteUrl,
+      downloadUrl: releases,
+      installUrl: releases,
+      codeRepository: repo,
+      license: "https://www.gnu.org/licenses/agpl-3.0.html",
+      isAccessibleForFree: true,
+      description,
+      image: ogImage,
+      screenshot: ogImage,
+      softwareRequirements: "Docker, PostgreSQL 16 with pgvector",
+      programmingLanguage: ["Rust", "TypeScript"],
+      author: { "@id": `${siteUrl}/#author` },
+      offers: {
+        "@type": "Offer",
+        price: "0",
+        priceCurrency: "USD",
+        availability: "https://schema.org/InStock",
+      },
+      featureList: features.map((f) => f.title),
+    },
+    {
+      "@type": "HowTo",
+      "@id": `${siteUrl}/#selfhost`,
+      name: "How to self-host sharp",
+      description:
+        "Deploy sharp — an open-source Slack alternative — on your own server with Docker Compose in about five minutes.",
+      totalTime: "PT5M",
+      supply: [
+        { "@type": "HowToSupply", name: "A Linux server or VPS with Docker" },
+        { "@type": "HowToSupply", name: "A domain name pointed at that server" },
+      ],
+      step: [
+        {
+          "@type": "HowToStep",
+          name: "Clone and configure",
+          text: "Clone the repository, enter deploy/, copy .env.example to .env and set JWT_SECRET plus POSTGRES_PASSWORD.",
+        },
+        {
+          "@type": "HowToStep",
+          name: "Point DNS at your box",
+          text: "Create an A record for your domain so the bundled Caddy service can issue TLS certificates automatically.",
+        },
+        {
+          "@type": "HowToStep",
+          name: "Start the stack",
+          text: "Run docker compose up -d. Migrations apply on startup; open the domain and register the first account, which becomes the workspace owner.",
+        },
+      ],
+    },
+    {
+      "@type": "FAQPage",
+      "@id": `${siteUrl}/#faq`,
+      mainEntity: faqSchema,
+    },
+  ],
+};
 ---
 
 <!doctype html>
@@ -19,20 +301,36 @@ const siteUrl = "https://sharp.davideghiotto.it";
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="canonical" href={siteUrl} />
+    <link rel="canonical" href={canonical} />
+    <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
+    <link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt" />
     <meta name="theme-color" content="#0e0e11" />
+    <meta
+      name="robots"
+      content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"
+    />
+    <meta name="author" content="Davide Ghiotto" />
+    <meta name="generator" content={`sharp ${version}`} />
 
     <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_US" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
-    <meta property="og:url" content={siteUrl} />
+    <meta property="og:url" content={canonical} />
     <meta property="og:site_name" content="sharp" />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="sharp — self-hosted team chat, docs, canvas, calls and tasks"
+    />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
 
-    <link rel="preconnect" href="https://rsms.me/" />
-    <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} is:inline />
   </head>
   <body>
     <!-- Animated gradient orbs -->
@@ -43,16 +341,20 @@ const siteUrl = "https://sharp.davideghiotto.it";
     <!-- Floating particles -->
     <div class="particles" id="particles" aria-hidden="true"></div>
 
+    <a class="skip-link" href="#what">Skip to content</a>
+
     <!-- ===== Nav ===== -->
-    <nav class="nav" id="nav">
+    <nav class="nav" id="nav" aria-label="Primary">
       <div class="container nav-inner">
         <a class="brand" href="/">
           <span class="hash">#</span> sharp
         </a>
         <div class="nav-links">
           <a class="hide-sm" href="#features">Features</a>
-          <a class="hide-sm" href="#tasks">Tasks</a>
+          <a class="hide-sm" href="#sharpy">AI</a>
+          <a class="hide-sm" href="#compare">Compare</a>
           <a class="hide-sm" href="#selfhost">Self-host</a>
+          <a class="hide-sm" href="#faq">FAQ</a>
           <a class="hide-sm" href="#download">Download</a>
           <a class="gh" href={repo} rel="noopener">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.5v-1.7c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.8 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
@@ -71,13 +373,13 @@ const siteUrl = "https://sharp.davideghiotto.it";
           <span class="pill"><span class="dot"></span> Open source · AGPL-3.0 · self-hosted</span>
         </div>
         <h1 class="headline reveal" style="transition-delay:0.2s">
-          <span id="headlineText">Chat, docs, canvas, calls &amp; tasks. Your server.</span><span class="typing-cursor"></span>
+          <span id="headlineText">The self-hosted Slack alternative.</span><span class="typing-cursor"></span>
         </h1>
         <p class="subline reveal" style="transition-delay:0.3s">
-          sharp is an open-source Slack replacement — channels, threads and DMs,
-          real-time collaborative docs and canvas, voice/video calls with screen
-          sharing, a Linear-lite task tracker, file uploads and full-text search —
-          self-hosted in a single container. Your data never leaves your infrastructure.
+          Chat, collaborative docs, whiteboards, kanban boards, voice and video
+          calls, a calendar, a Linear-lite task tracker and an AI assistant —
+          one open-source container on your own server. Your data never leaves
+          your infrastructure.
         </p>
         <div class="cta-row reveal" style="transition-delay:0.4s">
           <a id="downloadCta" class="btn btn-primary" href={releases} rel="noopener">
@@ -89,7 +391,7 @@ const siteUrl = "https://sharp.davideghiotto.it";
 
         <!-- ===== App mock with 3D tilt ===== -->
         <div class="mock-wrap reveal" style="transition-delay:0.5s">
-          <div class="mock" id="mockTilt">
+          <div class="mock" id="mockTilt" role="img" aria-label="Screenshot-style mock of the sharp app showing the #general channel, a doc link and an open thread">
             <div class="mock-bar">
               <span class="tl"></span><span class="tl"></span><span class="tl"></span>
               <span class="title">sharp — #general</span>
@@ -109,7 +411,7 @@ const siteUrl = "https://sharp.davideghiotto.it";
                 <div class="side-item">Jordan Lee <span class="pdot"></span></div>
                 <div class="side-item">Priya Shah <span class="pdot"></span></div>
               </aside>
-              <main class="mock-main">
+              <div class="mock-main">
                 <div class="chan-head">
                   # general
                   <span class="topic">— company-wide announcements &amp; watercooler</span>
@@ -143,7 +445,7 @@ const siteUrl = "https://sharp.davideghiotto.it";
                   </div>
                 </div>
                 <div class="composer">Message #general — Enter to send, Shift+Enter for newline</div>
-              </main>
+              </div>
               <aside class="mock-thread">
                 <div class="thread-head">Thread <span>· 3 replies</span></div>
                 <div class="msg" style="margin-bottom:14px">
@@ -167,264 +469,439 @@ const siteUrl = "https://sharp.davideghiotto.it";
       </div>
     </header>
 
-    <!-- ===== Stats ===== -->
-    <section id="stats">
-      <div class="container">
-        <div class="stats-grid">
-          <div class="stat-item reveal" style="transition-delay:0s">
-            <div class="stat-number"><span class="count-up" data-target="100">0</span>%</div>
-            <div class="stat-label">Open source · AGPL-3.0</div>
-          </div>
-          <div class="stat-item reveal" style="transition-delay:0.1s">
-            <div class="stat-number"><span class="count-up" data-target="1">0</span></div>
-            <div class="stat-label">Container to deploy</div>
-          </div>
-          <div class="stat-item reveal" style="transition-delay:0.2s">
-            <div class="stat-number"><span class="count-up" data-target="0">0</span></div>
-            <div class="stat-label">Telemetry · Zero tracking</div>
-          </div>
-          <div class="stat-item reveal" style="transition-delay:0.3s">
-            <div class="stat-number"><span class="count-up" data-target="3">0</span></div>
-            <div class="stat-label">Desktop platforms</div>
+    <main>
+      <!-- ===== Stats ===== -->
+      <section id="stats" aria-label="sharp at a glance">
+        <div class="container">
+          <div class="stats-grid">
+            <div class="stat-item reveal" style="transition-delay:0s">
+              <div class="stat-number"><span class="count-up" data-target="1">0</span></div>
+              <div class="stat-label">Container to deploy</div>
+            </div>
+            <div class="stat-item reveal" style="transition-delay:0.1s">
+              <div class="stat-number"><span class="count-up" data-target="25">0</span></div>
+              <div class="stat-label">People per call · 16 cameras</div>
+            </div>
+            <div class="stat-item reveal" style="transition-delay:0.2s">
+              <div class="stat-number"><span class="count-up" data-target="0">0</span></div>
+              <div class="stat-label">Telemetry · zero tracking</div>
+            </div>
+            <div class="stat-item reveal" style="transition-delay:0.3s">
+              <div class="stat-number">$<span class="count-up" data-target="0">0</span></div>
+              <div class="stat-label">License cost · AGPL-3.0</div>
+            </div>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- ===== Features ===== -->
-    <section id="features">
-      <div class="container">
-        <div class="section-head reveal">
-          <div class="eyebrow">Why sharp</div>
-          <h2>One workspace. Chat, docs, canvas, calls &amp; tasks.</h2>
-          <p>Everything a team needs to talk, write, draw, meet and ship — and nothing that phones home.</p>
-        </div>
-        <div class="features stagger" id="featuresGrid">
-          <div class="card">
-            <div class="icon">#</div>
-            <h3>Sharp chat</h3>
-            <ul>
-              <li>Threads that keep replies out of the way</li>
-              <li>@mentions &amp; emoji reactions</li>
-              <li>Public channels, private groups &amp; DMs</li>
-              <li>@people &amp; #resource autocomplete in the composer</li>
-            </ul>
-          </div>
-          <div class="card">
-            <div class="icon">¶</div>
-            <h3>Collaborative docs</h3>
-            <ul>
-              <li>Block-based docs live inside any channel</li>
-              <li>Real-time co-editing, cursors &amp; presence</li>
-              <li>Per-doc roles &amp; live sharing controls</li>
-              <li><code>[[doc]]</code> links bridge chat &amp; docs</li>
-            </ul>
-          </div>
-          <div class="card">
-            <div class="icon">◈</div>
-            <h3>Shared canvas</h3>
-            <ul>
-              <li>Infinite whiteboards powered by tldraw</li>
-              <li>Sketch, diagram &amp; brainstorm together live</li>
-              <li>Same roles &amp; sharing model as docs</li>
-              <li>One click from any channel</li>
-            </ul>
-          </div>
-          <div class="card">
-            <div class="icon">◉</div>
-            <h3>Voice, video &amp; screen share</h3>
-            <ul>
-              <li>LiveKit SFU calls in any channel or DM</li>
-              <li>Webcam video &amp; screen sharing with audio</li>
-              <li>Picture-in-picture keeps the call floating</li>
-              <li>Guest links — join by name, no account</li>
-            </ul>
-          </div>
-          <div class="card">
-            <div class="icon">⌕</div>
-            <h3>Files &amp; search</h3>
-            <ul>
-              <li>Drag-and-drop uploads, images inline</li>
-              <li>Instant Postgres full-text search</li>
-              <li>Files on your own S3/MinIO storage</li>
-              <li>Nothing ever leaves your infrastructure</li>
-            </ul>
-          </div>
-          <div class="card">
-            <div class="icon">◔</div>
-            <h3>Never miss a mention</h3>
-            <ul>
-              <li>Unified mention inbox across chat, docs &amp; canvas</li>
-              <li>Web push + native OS notifications</li>
-              <li>Per-channel mute &amp; do-not-disturb</li>
-              <li>Toasts while you work, push while away</li>
-            </ul>
-          </div>
-          <div class="card">
-            <div class="icon">⌂</div>
-            <h3>Yours, everywhere</h3>
-            <ul>
-              <li>Self-host in one container, plain Postgres</li>
-              <li>AGPL-3.0 · zero telemetry, zero tracking</li>
-              <li>Web app in any modern browser</li>
-              <li>Native macOS, Windows &amp; Linux via Tauri</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-    </section>
+      <!-- ===== What is sharp (definition block, built to be quoted) ===== -->
+      <section id="what" class="what">
+        <div class="container">
+          <div class="what-layout">
+            <div class="reveal">
+              <div class="eyebrow">What is sharp?</div>
+              <h2>An open-source Slack alternative you host yourself</h2>
+              <p class="answer">
+                sharp is an open-source, self-hosted team communication platform.
+                A single Rust binary serves chat, collaborative docs, whiteboards,
+                kanban boards, a calendar, LiveKit voice and video calls, a
+                Linear-lite task tracker and an AI assistant — backed by Postgres,
+                deployed as one container, licensed AGPL-3.0.
+              </p>
+              <p class="answer-sub">
+                It is built for teams that want the whole Slack-plus-Notion-plus-Linear
+                bundle without per-seat pricing, capped message history, or their
+                conversations sitting in someone else's data centre.
+              </p>
+              <p class="freshness">
+                Version {version} · last updated <time datetime={updated}>{updatedLabel}</time> ·
+                <a href={docs} rel="noopener">architecture docs</a>
+              </p>
+            </div>
 
-    <!-- ===== Tasks (Linear-lite) ===== -->
-    <section id="tasks" class="tasks-section">
-      <div class="container">
-        <div class="section-head reveal">
-          <div class="eyebrow">Tasks</div>
-          <h2>Linear-lite, built in.</h2>
-          <p>
-            A native issue tracker for the same workspace — projects, workflow states,
-            list &amp; board views, chat bridging, and GitHub sync. No third-party SaaS.
+            <dl class="spec reveal" style="transition-delay:0.15s">
+              <div><dt>License</dt><dd>AGPL-3.0 · no paid tier</dd></div>
+              <div><dt>Server</dt><dd>Rust (axum) · one binary</dd></div>
+              <div><dt>Database</dt><dd>Postgres 16 + pgvector</dd></div>
+              <div><dt>Realtime</dt><dd>WebSocket · Redis pub/sub for replicas</dd></div>
+              <div><dt>Calls</dt><dd>Self-hosted LiveKit SFU</dd></div>
+              <div><dt>Clients</dt><dd>Web · macOS · Windows · Linux</dd></div>
+              <div><dt>Storage</dt><dd>Your own S3 or MinIO bucket</dd></div>
+              <div><dt>Telemetry</dt><dd>None</dd></div>
+            </dl>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== Features ===== -->
+      <section id="features">
+        <div class="container">
+          <div class="section-head reveal">
+            <div class="eyebrow">Why sharp</div>
+            <h2>One workspace. Chat, docs, canvas, calls, tasks &amp; AI.</h2>
+            <p>Everything a team needs to talk, write, draw, meet and ship — and nothing that phones home.</p>
+          </div>
+          <div class="features stagger" id="featuresGrid">
+            {features.map((f) => (
+              <article class="card">
+                <div class="icon" aria-hidden="true">{f.icon}</div>
+                <h3>{f.title}</h3>
+                <ul>
+                  {f.points.map((p) => <li><span set:html={p} /></li>)}
+                </ul>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== Tasks (Linear-lite) ===== -->
+      <section id="tasks" class="tasks-section">
+        <div class="container">
+          <div class="section-head reveal">
+            <div class="eyebrow">Tasks</div>
+            <h2>Linear-lite, built in.</h2>
+            <p>
+              A native issue tracker for the same workspace — projects, workflow states,
+              list &amp; board views, chat bridging, and GitHub sync. No third-party SaaS.
+            </p>
+          </div>
+
+          <div class="tasks-layout">
+            <div class="tasks-copy reveal-left">
+              <ul class="tasks-points">
+                <li>
+                  <strong>Projects &amp; identifiers</strong>
+                  <span><code>SHARP-123</code> keys allocate from a sequence. Dense list rows or a state board — your call.</span>
+                </li>
+                <li>
+                  <strong>Create from chat</strong>
+                  <span>Turn a message into a task. Bare identifiers auto-linkify; chips deep-link back.</span>
+                </li>
+                <li>
+                  <strong>GitHub sync</strong>
+                  <span>Branch &amp; PR names move state for you — started on open, completed on merge.</span>
+                </li>
+                <li>
+                  <strong>Keyboard-first</strong>
+                  <span>Peek panel, property pickers, <code>c</code> to create. Same muscle memory as Linear.</span>
+                </li>
+              </ul>
+            </div>
+
+            <div class="tasks-mock reveal-right" aria-hidden="true">
+              <div class="tm-bar">
+                <span class="tm-proj"><span class="tm-key">SHARP</span> Engineering</span>
+                <span class="tm-views"><span class="on">List</span><span>Board</span></span>
+              </div>
+              <div class="tm-group">
+                <div class="tm-group-head"><span class="tm-dot started"></span> In Progress <em>3</em></div>
+                <div class="tm-row active">
+                  <span class="tm-pri high" title="High"></span>
+                  <span class="tm-id">SHARP-128</span>
+                  <span class="tm-title">Wire GitHub webhook state automation</span>
+                  <span class="tm-label">backend</span>
+                  <span class="tm-avatar" style="background:#7c6cff">JL</span>
+                </div>
+                <div class="tm-row">
+                  <span class="tm-pri urgent" title="Urgent"></span>
+                  <span class="tm-id">SHARP-124</span>
+                  <span class="tm-title">Task peek: comments + activity feed</span>
+                  <span class="tm-label">web</span>
+                  <span class="tm-avatar" style="background:#ff8a5c">MK</span>
+                </div>
+                <div class="tm-row">
+                  <span class="tm-pri med" title="Medium"></span>
+                  <span class="tm-id">SHARP-119</span>
+                  <span class="tm-title">Create task from message toolbar</span>
+                  <span class="tm-label">chat</span>
+                  <span class="tm-avatar" style="background:#3ddc84">PS</span>
+                </div>
+              </div>
+              <div class="tm-group">
+                <div class="tm-group-head"><span class="tm-dot todo"></span> Todo <em>2</em></div>
+                <div class="tm-row">
+                  <span class="tm-pri none" title="No priority"></span>
+                  <span class="tm-id">SHARP-131</span>
+                  <span class="tm-title">Sharpy embeddings for task titles</span>
+                  <span class="tm-label">ai</span>
+                  <span class="tm-due">Fri</span>
+                </div>
+                <div class="tm-row">
+                  <span class="tm-pri low" title="Low"></span>
+                  <span class="tm-id">SHARP-132</span>
+                  <span class="tm-title">Filter bar: assignee + label + priority</span>
+                  <span class="tm-label">web</span>
+                  <span class="tm-due">Mon</span>
+                </div>
+              </div>
+              <div class="tm-peek">
+                <div class="tm-peek-id">SHARP-128</div>
+                <div class="tm-peek-title">Wire GitHub webhook state automation</div>
+                <div class="tm-props">
+                  <div><span>Status</span><strong><i class="tm-dot started"></i> In Progress</strong></div>
+                  <div><span>Priority</span><strong>High</strong></div>
+                  <div><span>Assignee</span><strong>Jordan Lee</strong></div>
+                  <div><span>GitHub</span><strong class="tm-gh">davide97g/sharp#128</strong></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== Sharpy (AI assistant) ===== -->
+      <section id="sharpy" class="sharpy-section">
+        <div class="container">
+          <div class="section-head reveal">
+            <div class="eyebrow">Sharpy</div>
+            <h2>An AI assistant that only sees what you can see</h2>
+            <p>
+              Retrieval-augmented answers over your own messages, docs and tasks —
+              running against any OpenAI-compatible endpoint, including a model on
+              your own hardware.
+            </p>
+          </div>
+
+          <div class="tasks-layout">
+            <div class="reveal-left">
+              <ul class="tasks-points">
+                <li>
+                  <strong>Grounded in your workspace</strong>
+                  <span>Messages, docs and task titles are embedded into pgvector and cited back as sources with every answer.</span>
+                </li>
+                <li>
+                  <strong>Permission-aware retrieval</strong>
+                  <span>Every lookup re-checks channel membership and doc roles per request. Encrypted DMs are never embedded at all.</span>
+                </li>
+                <li>
+                  <strong>Your model, your keys</strong>
+                  <span>Point <code>AI_BASE_URL</code> at OpenAI, DeepSeek, Ollama or anything compatible. Chat-only providers still work.</span>
+                </li>
+                <li>
+                  <strong>Off by default</strong>
+                  <span>No <code>AI_API_KEY</code>, no feature: Sharpy disappears from the UI and nothing is ever embedded.</span>
+                </li>
+              </ul>
+            </div>
+
+            <div class="ask-mock reveal-right" aria-hidden="true">
+              <div class="ask-head"><span class="ask-star">✦</span> Ask Sharpy</div>
+              <div class="ask-q">Where did we land on the storage backend for uploads?</div>
+              <div class="ask-a">
+                You settled on MinIO behind the S3 API in <strong>#engineering</strong>
+                on Tuesday — Jordan wanted the bucket on the same box as Postgres for
+                the first year, with the option to swap in Backblaze later.<span class="ask-caret"></span>
+              </div>
+              <div class="ask-sources">
+                <span class="ask-src"># engineering</span>
+                <span class="ask-src">¶ Launch plan</span>
+                <span class="ask-src">SHARP-118</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== Compare ===== -->
+      <section id="compare" class="compare-section">
+        <div class="container">
+          <div class="section-head reveal">
+            <div class="eyebrow">Compare</div>
+            <h2>sharp vs hosted chat SaaS</h2>
+            <p>
+              The trade is simple: you take on a container and a database, and you
+              get your data, your limits and your bill back.
+            </p>
+          </div>
+
+          <div class="table-wrap reveal-scale">
+            <table class="cmp">
+              <caption class="sr-only">
+                Comparison of sharp with typical hosted team-chat SaaS across cost,
+                data ownership, history limits and bundled features
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">&nbsp;</th>
+                  <th scope="col">sharp (self-hosted)</th>
+                  <th scope="col">Typical hosted chat SaaS</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">Software cost</th>
+                  <td class="yes">$0 · AGPL-3.0, no seat count</td>
+                  <td>Per-seat, per-month, per-tier</td>
+                </tr>
+                <tr>
+                  <th scope="row">Where messages live</th>
+                  <td class="yes">Your Postgres, your disk</td>
+                  <td>The vendor's cloud</td>
+                </tr>
+                <tr>
+                  <th scope="row">Message history</th>
+                  <td class="yes">Unlimited — until you delete it</td>
+                  <td>Often capped on free and lower tiers</td>
+                </tr>
+                <tr>
+                  <th scope="row">Docs, canvas &amp; boards</th>
+                  <td class="yes">Built in, same permissions as channels</td>
+                  <td>Add-on product or separate subscription</td>
+                </tr>
+                <tr>
+                  <th scope="row">Issue tracker</th>
+                  <td class="yes">Built in, with GitHub sync</td>
+                  <td>Usually a third-party integration</td>
+                </tr>
+                <tr>
+                  <th scope="row">AI assistant</th>
+                  <td class="yes">Built in · your model, your keys</td>
+                  <td>Paid upgrade on the vendor's model</td>
+                </tr>
+                <tr>
+                  <th scope="row">Video calls</th>
+                  <td class="yes">Self-hosted LiveKit · 25 people, 16 cameras</td>
+                  <td>Vendor SFU, tier-limited</td>
+                </tr>
+                <tr>
+                  <th scope="row">End-to-end encrypted DMs</th>
+                  <td class="yes">Optional, per-device keys</td>
+                  <td>Rare</td>
+                </tr>
+                <tr>
+                  <th scope="row">Telemetry</th>
+                  <td class="yes">None</td>
+                  <td>Product analytics by default</td>
+                </tr>
+                <tr>
+                  <th scope="row">Source code</th>
+                  <td class="yes">Public, forkable, auditable</td>
+                  <td>Proprietary</td>
+                </tr>
+                <tr>
+                  <th scope="row">You operate</th>
+                  <td>One container, Postgres, backups</td>
+                  <td class="yes">Nothing</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p class="cmp-note reveal">
+            <strong>Already looking at self-hosted options?</strong>
+            Mattermost, Rocket.Chat and Zulip are all mature, open-source and worth
+            your shortlist — Zulip especially if threading is your whole religion.
+            sharp is the newer, narrower bet: one workspace where chat, docs, canvas,
+            boards, calls, calendar, tasks and AI ship together in a single container,
+            with every integration optional and inert until you configure it.
           </p>
         </div>
+      </section>
 
-        <div class="tasks-layout">
-          <div class="tasks-copy reveal-left">
-            <ul class="tasks-points">
-              <li>
-                <strong>Projects &amp; identifiers</strong>
-                <span><code>SHARP-123</code> keys allocate from a sequence. Dense list rows or a state board — your call.</span>
-              </li>
-              <li>
-                <strong>Create from chat</strong>
-                <span>Turn a message into a task. Bare identifiers auto-linkify; chips deep-link back.</span>
-              </li>
-              <li>
-                <strong>GitHub sync</strong>
-                <span>Branch &amp; PR names move state for you — started on open, completed on merge.</span>
-              </li>
-              <li>
-                <strong>Keyboard-first</strong>
-                <span>Peek panel, property pickers, <code>c</code> to create. Same muscle memory as Linear.</span>
-              </li>
-            </ul>
+      <!-- ===== Self-host ===== -->
+      <section id="selfhost" class="selfhost">
+        <div class="container">
+          <div class="section-head reveal">
+            <div class="eyebrow">Self-host</div>
+            <h2>Up and running in 5 minutes</h2>
+            <p>One container plus Postgres. Copy, paste, and you own your team's workspace.</p>
           </div>
-
-          <div class="tasks-mock reveal-right" aria-hidden="true">
-            <div class="tm-bar">
-              <span class="tm-proj"><span class="tm-key">SHARP</span> Engineering</span>
-              <span class="tm-views"><span class="on">List</span><span>Board</span></span>
+          <div class="code-block reveal-scale">
+            <div class="code-top">
+              <span class="label">bash</span>
+              <button id="copyBtn" class="copy-btn" type="button">Copy</button>
             </div>
-            <div class="tm-group">
-              <div class="tm-group-head"><span class="tm-dot started"></span> In Progress <em>3</em></div>
-              <div class="tm-row active">
-                <span class="tm-pri high" title="High"></span>
-                <span class="tm-id">SHARP-128</span>
-                <span class="tm-title">Wire GitHub webhook state automation</span>
-                <span class="tm-label">backend</span>
-                <span class="tm-avatar" style="background:#7c6cff">JL</span>
-              </div>
-              <div class="tm-row">
-                <span class="tm-pri urgent" title="Urgent"></span>
-                <span class="tm-id">SHARP-124</span>
-                <span class="tm-title">Task peek: comments + activity feed</span>
-                <span class="tm-label">web</span>
-                <span class="tm-avatar" style="background:#ff8a5c">MK</span>
-              </div>
-              <div class="tm-row">
-                <span class="tm-pri med" title="Medium"></span>
-                <span class="tm-id">SHARP-119</span>
-                <span class="tm-title">Create task from message toolbar</span>
-                <span class="tm-label">chat</span>
-                <span class="tm-avatar" style="background:#3ddc84">PS</span>
-              </div>
-            </div>
-            <div class="tm-group">
-              <div class="tm-group-head"><span class="tm-dot todo"></span> Todo <em>2</em></div>
-              <div class="tm-row">
-                <span class="tm-pri none" title="No priority"></span>
-                <span class="tm-id">SHARP-131</span>
-                <span class="tm-title">Sharpy embeddings for task titles</span>
-                <span class="tm-label">ai</span>
-                <span class="tm-due">Fri</span>
-              </div>
-              <div class="tm-row">
-                <span class="tm-pri low" title="Low"></span>
-                <span class="tm-id">SHARP-132</span>
-                <span class="tm-title">Filter bar: assignee + label + priority</span>
-                <span class="tm-label">web</span>
-                <span class="tm-due">Mon</span>
-              </div>
-            </div>
-            <div class="tm-peek">
-              <div class="tm-peek-id">SHARP-128</div>
-              <div class="tm-peek-title">Wire GitHub webhook state automation</div>
-              <div class="tm-props">
-                <div><span>Status</span><strong><i class="tm-dot started"></i> In Progress</strong></div>
-                <div><span>Priority</span><strong>High</strong></div>
-                <div><span>Assignee</span><strong>Jordan Lee</strong></div>
-                <div><span>GitHub</span><strong class="tm-gh">davide97g/sharp#128</strong></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ===== Self-host ===== -->
-    <section id="selfhost" class="selfhost">
-      <div class="container">
-        <div class="section-head reveal">
-          <div class="eyebrow">Self-host</div>
-          <h2>Up and running in 5 minutes</h2>
-          <p>One container plus Postgres. Copy, paste, and you own your team's chat.</p>
-        </div>
-        <div class="code-block reveal-scale">
-          <div class="code-top">
-            <span class="label">bash</span>
-            <button id="copyBtn" class="copy-btn" type="button">Copy</button>
-          </div>
-          <pre><code id="codeText"><span class="cmd">git clone</span> {repo} \
+            <pre><code id="codeText"><span class="cmd">git clone</span> {repo} \
   && <span class="cmd">cd</span> sharp/deploy \
   && <span class="cmd">cp</span> .env.example .env \
   && <span class="cmd">docker compose</span> up -d</code></pre>
-        </div>
-        <div class="steps">
-          <div class="step reveal" style="transition-delay:0.1s"><span class="n">1</span> Point DNS at your box</div>
-          <div class="step reveal" style="transition-delay:0.2s"><span class="n">2</span> Set secrets in <code>.env</code></div>
-          <div class="step reveal" style="transition-delay:0.3s"><span class="n">3</span> Register the first account</div>
-        </div>
-      </div>
-    </section>
+          </div>
+          <div class="steps">
+            <div class="step reveal" style="transition-delay:0.1s"><span class="n">1</span> Point DNS at your box</div>
+            <div class="step reveal" style="transition-delay:0.2s"><span class="n">2</span> Set secrets in <code>.env</code></div>
+            <div class="step reveal" style="transition-delay:0.3s"><span class="n">3</span> Register the first account</div>
+          </div>
 
-    <!-- ===== Download ===== -->
-    <section id="download">
-      <div class="container">
-        <div class="section-head reveal">
-          <div class="eyebrow">Download</div>
-          <h2>Get the desktop app</h2>
-          <p>Native builds for every platform. Point it at your server URL and sign in.</p>
-        </div>
-        <div class="dl-grid stagger" id="dlGrid">
-          <div class="dl-card">
-            <div class="os">🍎</div>
-            <h3>macOS</h3>
-            <p>Apple Silicon &amp; Intel · .dmg</p>
-            <a class="btn btn-primary" href={releases} rel="noopener">Download</a>
-          </div>
-          <div class="dl-card">
-            <div class="os">🪟</div>
-            <h3>Windows</h3>
-            <p>64-bit installer · .exe</p>
-            <a class="btn btn-ghost" href={releases} rel="noopener">Download</a>
-          </div>
-          <div class="dl-card">
-            <div class="os">🐧</div>
-            <h3>Linux</h3>
-            <p>AppImage &amp; .deb</p>
-            <a class="btn btn-ghost" href={releases} rel="noopener">Download</a>
+          <div class="req-grid">
+            <div class="req reveal">
+              <h3>Required</h3>
+              <ul>
+                <li>Docker Compose on a Linux host</li>
+                <li>Postgres 16 with <code>pgvector</code> (bundled)</li>
+                <li>A domain — Caddy handles TLS</li>
+                <li>Two secrets: <code>JWT_SECRET</code>, <code>POSTGRES_PASSWORD</code></li>
+              </ul>
+            </div>
+            <div class="req reveal" style="transition-delay:0.1s">
+              <h3>Optional &amp; inert until set</h3>
+              <ul>
+                <li><code>REDIS_URL</code> — multi-replica fanout</li>
+                <li><code>LIVEKIT_*</code> — voice, video, screen share</li>
+                <li><code>S3_*</code> — uploads on your own bucket</li>
+                <li><code>AI_*</code> — Sharpy, embeddings, transcription</li>
+                <li><code>GOOGLE_*</code>, <code>GITHUB_*</code> — calendar &amp; task sync</li>
+                <li><code>RESEND_API_KEY</code> or <code>SMTP_*</code> — password reset</li>
+              </ul>
+            </div>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
+
+      <!-- ===== Download ===== -->
+      <section id="download">
+        <div class="container">
+          <div class="section-head reveal">
+            <div class="eyebrow">Download</div>
+            <h2>Get the desktop app</h2>
+            <p>Native builds for every platform. Point it at your server URL and sign in through your browser.</p>
+          </div>
+          <div class="dl-grid stagger" id="dlGrid">
+            <div class="dl-card">
+              <div class="os" aria-hidden="true">🍎</div>
+              <h3>macOS</h3>
+              <p>Apple Silicon &amp; Intel · .dmg</p>
+              <a class="btn btn-primary" href={releases} rel="noopener">Download</a>
+            </div>
+            <div class="dl-card">
+              <div class="os" aria-hidden="true">🪟</div>
+              <h3>Windows</h3>
+              <p>64-bit installer · .exe</p>
+              <a class="btn btn-ghost" href={releases} rel="noopener">Download</a>
+            </div>
+            <div class="dl-card">
+              <div class="os" aria-hidden="true">🐧</div>
+              <h3>Linux</h3>
+              <p>AppImage &amp; .deb</p>
+              <a class="btn btn-ghost" href={releases} rel="noopener">Download</a>
+            </div>
+          </div>
+          <p class="dl-note reveal">
+            Prefer the browser? The web app runs on any modern browser and is
+            responsive on phones. A React Native mobile app is in development.
+          </p>
+        </div>
+      </section>
+
+      <!-- ===== FAQ ===== -->
+      <section id="faq" class="faq-section">
+        <div class="container">
+          <div class="section-head reveal">
+            <div class="eyebrow">FAQ</div>
+            <h2>Frequently asked questions</h2>
+            <p>Licensing, hosting requirements, encryption, AI, and what happens when you skip an environment variable.</p>
+          </div>
+          <div class="faq-list reveal">
+            {faqs.map((f, i) => (
+              <details class="faq-item" open={i === 0}>
+                <summary><h3>{f.q}</h3><span class="faq-mark" aria-hidden="true"></span></summary>
+                <p>{f.a}</p>
+              </details>
+            ))}
+          </div>
+        </div>
+      </section>
+    </main>
 
     <!-- ===== Footer ===== -->
     <footer>
@@ -432,11 +909,16 @@ const siteUrl = "https://sharp.davideghiotto.it";
         <a class="brand" href="/"><span class="hash" style="color:var(--accent)">#</span> sharp</a>
         <div class="footer-links">
           <a href={repo} rel="noopener">GitHub</a>
+          <a href={docs} rel="noopener">Docs</a>
           <a href={`${repo}/blob/main/LICENSE`} rel="noopener">AGPL-3.0</a>
           <a href="#selfhost">Self-host</a>
-          <a href="#download">Download</a>
+          <a href="#faq">FAQ</a>
+          <a href="/llms.txt">llms.txt</a>
         </div>
-        <div>Built in the open.</div>
+        <div>
+          v{version} · built in the open by
+          <a href="https://davideghiotto.it" rel="noopener author">Davide Ghiotto</a>
+        </div>
       </div>
     </footer>
 
@@ -444,6 +926,10 @@ const siteUrl = "https://sharp.davideghiotto.it";
     <script is:inline>
       (function () {
         "use strict";
+
+        var reduceMotion =
+          window.matchMedia &&
+          window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
         /* ── OS detect for CTA ── */
         (function () {
@@ -480,7 +966,7 @@ const siteUrl = "https://sharp.davideghiotto.it";
         /* ── Floating particles ── */
         (function () {
           var container = document.getElementById("particles");
-          if (!container) return;
+          if (!container || reduceMotion) return;
           var count = 30;
           for (var i = 0; i < count; i++) {
             var p = document.createElement("div");
@@ -536,7 +1022,7 @@ const siteUrl = "https://sharp.davideghiotto.it";
         /* ── 3D tilt on mock ── */
         (function () {
           var mock = document.getElementById("mockTilt");
-          if (!mock) return;
+          if (!mock || reduceMotion) return;
           var wrap = mock.parentElement;
           var isMobile = window.innerWidth < 860;
           if (isMobile) return;
@@ -561,7 +1047,7 @@ const siteUrl = "https://sharp.davideghiotto.it";
         (function () {
           var glow = document.getElementById("heroGlow");
           var hero = document.getElementById("hero");
-          if (!glow || !hero) return;
+          if (!glow || !hero || reduceMotion) return;
 
           hero.addEventListener("mousemove", function (e) {
             var rect = hero.getBoundingClientRect();
@@ -576,6 +1062,12 @@ const siteUrl = "https://sharp.davideghiotto.it";
         (function () {
           var counters = document.querySelectorAll(".count-up");
           if (!counters.length) return;
+          if (reduceMotion) {
+            counters.forEach(function (el) {
+              el.textContent = el.getAttribute("data-target");
+            });
+            return;
+          }
 
           function animateCounter(el) {
             var target = parseInt(el.getAttribute("data-target"), 10);
@@ -611,8 +1103,6 @@ const siteUrl = "https://sharp.davideghiotto.it";
           counters.forEach(function (el) { obs.observe(el); });
         })();
 
-        /* ── Typing cursor blink (CSS already handles this) ── */
-
         /* ── Smooth anchor scroll ── */
         (function () {
           document.querySelectorAll('a[href^="#"]').forEach(function (a) {
@@ -621,7 +1111,7 @@ const siteUrl = "https://sharp.davideghiotto.it";
               var target = document.getElementById(id);
               if (target) {
                 e.preventDefault();
-                target.scrollIntoView({ behavior: "smooth" });
+                target.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth" });
               }
             });
           });

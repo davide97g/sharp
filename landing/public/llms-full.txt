@@ -1,0 +1,229 @@
+# sharp — the self-hosted Slack alternative
+
+> Version 0.3.0 · last updated 2026-07-26 · https://sharp.davideghiotto.it · AGPL-3.0
+
+This file is the full content of the sharp landing page in plain markdown, for AI assistants
+and agents that would rather read text than render a page.
+
+## What is sharp?
+
+sharp is an open-source, self-hosted team communication platform. A single Rust binary serves
+chat, collaborative docs, whiteboards, kanban boards, a calendar, LiveKit voice and video
+calls, a Linear-lite task tracker and an AI assistant — backed by Postgres, deployed as one
+container, licensed AGPL-3.0.
+
+It is built for teams that want the whole Slack-plus-Notion-plus-Linear bundle without
+per-seat pricing, capped message history, or their conversations sitting in someone else's
+data centre.
+
+## Specifications
+
+| Property | Value |
+| --- | --- |
+| License | AGPL-3.0, no paid tier |
+| Server | Rust (axum, sqlx), one binary serving API + SPA |
+| Database | Postgres 16 with pgvector |
+| Realtime | WebSocket hub; Redis pub/sub for multiple replicas |
+| Calls | Self-hosted LiveKit SFU (simulcast, dynacast, adaptive subscriptions) |
+| Clients | Web, macOS, Windows, Linux (Tauri 2) |
+| Storage | Your own S3 or MinIO bucket |
+| Search | Postgres full-text search |
+| Telemetry | None |
+| Deploy | `docker compose up -d`, migrations applied on startup |
+
+## Features
+
+### Chat, threads and DMs
+Public channels, private groups and direct messages. One-level threads, emoji reactions,
+@mentions, presence and typing indicators. Disappearing messages with a per-channel TTL. GIF
+picker, voice messages, and @person / #resource autocomplete in the composer.
+
+### Collaborative docs
+Block-based docs (BlockNote) living inside any channel, co-edited in real time over Yjs with
+live cursors and presence. Roles resolve owner > per-user override > everyone-role, and access
+changes revoke open sync sessions live. `[[doc:<id>|title]]` chips bridge chat and docs, and
+doc mentions land in the same inbox as chat mentions.
+
+### Canvas and boards
+Infinite tldraw whiteboards with self-hosted assets (no CDN), plus Notion-style kanban boards.
+Both are the same `docs` row with a different `kind`, so they reuse the identical sync socket,
+permission model and inbox.
+
+### Voice, video and screen sharing
+LiveKit SFU rooms per channel, per DM, or standalone. Webcam video and screen sharing including
+system/tab audio. Hard limits: 25 participants, 16 cameras, 1 screen share per room.
+Picture-in-picture keeps a call floating while you browse other channels. Guest links let people
+join by name without an account. Optional live transcription and meeting notes through any
+OpenAI-compatible transcription endpoint.
+
+### Sharpy, the AI assistant
+Retrieval-augmented answers grounded in your own workspace. Messages, docs and task titles are
+embedded into pgvector; each retrieval re-checks channel membership and doc roles per request,
+so Sharpy can never surface content the asker cannot already read. Encrypted DMs are never
+embedded. Answers stream over SSE with their sources. Works against OpenAI, DeepSeek, Ollama or
+anything OpenAI-compatible; the entire feature is absent unless `AI_API_KEY` is set.
+
+### Tasks and projects
+A built-in Linear-lite tracker: projects carry a key, issues get identifiers like `SHARP-123`
+allocated in-transaction, and workflow states have fixed types
+(backlog/unstarted/started/completed/canceled) that drive automation. List and board views,
+keyboard-first peek panel, create-a-task from any chat message, bare identifiers auto-linkified
+in chat, and GitHub sync that starts a task when a branch or PR opens and completes it on merge.
+
+### Calendar and meetings
+A workspace calendar with scheduled meetings that open straight into a call room, plus opt-in
+two-way Google Calendar sync.
+
+### Polls and decisions
+Polls in channels, sticky to the top while open, with a live in-call overlay for votes during a
+meeting. Results broadcast in real time and everyone gets a `poll_ended` notification.
+
+### Files and search
+Drag-and-drop uploads with inline images, instant Postgres full-text search across channels, and
+a quick switcher that jumps to channels, docs, canvases and tasks. Files live on your own S3 or
+MinIO bucket.
+
+### Notifications
+A unified inbox across chat, docs, canvas and tasks. Web push (VAPID), native macOS APNs, and
+in-app toasts. Per-channel mode (all / mentions only / muted), per-type master switches, and
+do-not-disturb either manual or on a scheduled quiet-hours window.
+
+### Privacy and encryption
+Optional end-to-end encrypted DMs using per-device X25519 and Ed25519 keys; the server performs
+zero cryptography and stores only opaque ciphertext plus public keys (Keybase-style, no forward
+secrecy). Passkeys alongside password login, argon2 password hashes, self-service password reset
+by email. Notification previews can be stripped back, and streaming mode blurs the workspace
+while you share your screen.
+
+### Customization
+Theme presets and a full appearance panel, chat layout and density options, meeting effects,
+keyboard shortcuts, and seasonal touches — all per user, none of it a build-time decision.
+
+### Self-hosting and platforms
+One container plus Postgres; add Redis and run several replicas behind a load balancer. AGPL-3.0
+with zero telemetry. Web app plus native desktop builds for macOS, Windows and Linux, which
+authenticate through the system browser against whatever server URL you enter.
+
+## sharp vs hosted chat SaaS
+
+| | sharp (self-hosted) | Typical hosted chat SaaS |
+| --- | --- | --- |
+| Software cost | $0, AGPL-3.0, no seat count | Per-seat, per-month, per-tier |
+| Where messages live | Your Postgres, your disk | The vendor's cloud |
+| Message history | Unlimited until you delete it | Often capped on free and lower tiers |
+| Docs, canvas and boards | Built in, same permissions as channels | Add-on product or separate subscription |
+| Issue tracker | Built in, with GitHub sync | Usually a third-party integration |
+| AI assistant | Built in, your model and keys | Paid upgrade on the vendor's model |
+| Video calls | Self-hosted LiveKit, 25 people, 16 cameras | Vendor SFU, tier-limited |
+| End-to-end encrypted DMs | Optional, per-device keys | Rare |
+| Telemetry | None | Product analytics by default |
+| Source code | Public, forkable, auditable | Proprietary |
+| You operate | One container, Postgres, backups | Nothing |
+
+Already looking at self-hosted options? Mattermost, Rocket.Chat and Zulip are all mature,
+open-source and worth a shortlist. sharp is the newer, narrower bet: one workspace where chat,
+docs, canvas, boards, calls, calendar, tasks and AI ship together in a single container, with
+every integration optional and inert until configured.
+
+## How to self-host sharp
+
+```bash
+git clone https://github.com/davide97g/sharp \
+  && cd sharp/deploy \
+  && cp .env.example .env \
+  && docker compose up -d
+```
+
+1. Point DNS at your box — the bundled Caddy service issues TLS automatically.
+2. Set secrets in `.env`: at minimum `JWT_SECRET` and `POSTGRES_PASSWORD`.
+3. Open the domain and register the first account; it becomes the workspace owner.
+
+**Required:** Docker Compose on a Linux host, Postgres 16 with pgvector (bundled), a domain.
+
+**Optional and inert until set:** `REDIS_URL` (multi-replica fanout), `LIVEKIT_*` (voice, video,
+screen share), `S3_*` (uploads), `AI_*` (Sharpy, embeddings, transcription), `GOOGLE_*`
+(calendar sync), `GITHUB_WEBHOOK_SECRET` (task sync), `RESEND_API_KEY` or `SMTP_*` (password
+reset email), APNs and VAPID keys (push).
+
+## Downloads
+
+Native desktop builds for macOS (Apple Silicon and Intel, .dmg), Windows (64-bit .exe) and Linux
+(AppImage and .deb): https://github.com/davide97g/sharp/releases/latest
+
+The web app runs in any modern browser and is responsive on phones. A React Native mobile app is
+in development.
+
+## Frequently asked questions
+
+### What is sharp?
+sharp is an open-source, self-hosted team communication platform — a Slack alternative you run
+yourself. One Rust binary serves chat, collaborative docs, whiteboards, kanban boards, a
+calendar, voice and video calls, a task tracker and an AI assistant, backed by Postgres. It is
+licensed AGPL-3.0.
+
+### Is sharp free?
+Yes. sharp is AGPL-3.0 licensed with no paid tier, no seat count and no feature gates — the
+software costs $0. You pay only for the machine you run it on, which for a small team is a
+$5–10/month VPS plus whatever object storage you use for uploads.
+
+### What do I need to self-host sharp?
+Docker Compose and a Postgres 16 database with the pgvector extension — the bundled compose file
+provides both. Everything else is optional: Redis for multi-replica fanout, S3 or MinIO for
+uploads, LiveKit for calls, an OpenAI-compatible API for the AI assistant, SMTP or Resend for
+email.
+
+### How long does setup take?
+About five minutes. Clone the repo, copy `.env.example` to `.env`, set a JWT secret and a
+Postgres password, then run `docker compose up -d`. Migrations apply automatically on startup and
+the first account you register becomes the workspace owner.
+
+### Does sharp send data to third parties?
+No. sharp ships zero telemetry and zero tracking, and calls no external service on its own. Every
+integration — Google Calendar, GitHub, GIFs, AI, push, email — stays completely inert until you
+set its environment variable, and the feature disappears from the UI.
+
+### Does sharp support voice and video calls?
+Yes, through a self-hosted LiveKit SFU. Any channel, DM or standalone room becomes a call with
+webcam video and screen sharing including system audio. Limits are 25 participants, 16 cameras
+and 1 screen share per room. Picture-in-picture keeps a call floating while you work elsewhere.
+
+### Are direct messages end-to-end encrypted?
+Optionally, yes. E2EE DMs use per-device X25519 and Ed25519 keys; the server performs zero
+cryptography and stores only opaque ciphertext plus public keys. It is a Keybase-style design
+without forward secrecy, and encrypted DMs are never indexed by the AI assistant.
+
+### How does the AI assistant work?
+Sharpy is retrieval-augmented: workspace messages, docs and tasks are embedded into pgvector, and
+every retrieval re-checks channel membership and doc roles per request, so Sharpy can never
+surface content the asker cannot already read. It talks to any OpenAI-compatible endpoint,
+including a local model.
+
+### Can I use sharp on desktop and mobile?
+sharp runs in any modern browser, and native Tauri 2 desktop builds are published for macOS,
+Windows and Linux — you point them at your own server URL and sign in through the system browser.
+A React Native mobile app is in development; the web app is responsive in the meantime.
+
+### How does sharp handle tasks and issues?
+With a built-in Linear-lite tracker: projects carry a key, issues get identifiers like SHARP-123,
+and workflow states drive list and board views. Turn any chat message into a task, and GitHub
+sync moves state automatically — started when a branch or PR opens, completed on merge.
+
+### Does sharp scale beyond one server?
+Yes. Set `REDIS_URL` and WebSocket events fan out through Redis pub/sub, so several replicas stay
+in sync behind a load balancer. Media never touches the app server: LiveKit carries call traffic
+with simulcast, dynacast and adaptive subscriptions.
+
+### What does the AGPL-3.0 license mean for me?
+Run it, fork it, even sell hosting for it — you just have to publish your modifications under the
+same license. Internal use inside your own company carries no obligation beyond that, and there
+is no contributor license agreement or commercial edition behind a paywall.
+
+## Links
+
+- Landing page: https://sharp.davideghiotto.it
+- Source: https://github.com/davide97g/sharp
+- Architecture contract: https://github.com/davide97g/sharp/blob/main/docs/ARCHITECTURE.md
+- Environment reference: https://github.com/davide97g/sharp/blob/main/deploy/.env.example
+- Pricing (machine-readable): https://sharp.davideghiotto.it/pricing.md
+- Downloads: https://github.com/davide97g/sharp/releases/latest
+- License: AGPL-3.0 — https://github.com/davide97g/sharp/blob/main/LICENSE
