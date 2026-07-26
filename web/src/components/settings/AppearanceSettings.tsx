@@ -8,7 +8,7 @@
 
 import { useSyncExternalStore } from 'react'
 import { useStore } from '../../store'
-import { activePack } from '../../lib/seasonal'
+import { EVENT_PACKS, activePack, type EventPack } from '../../lib/seasonal'
 import {
   getSoundSettings,
   setSoundPack,
@@ -65,13 +65,26 @@ export const SCALE_CHOICES: { value: number; label: string }[] = [
 ]
 
 
+const MONTHS = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+]
+
+/** `Oct 24 – Nov 1` — the pack's yearly window, for the preview cards. */
+function packWindow(pack: EventPack): string {
+  const day = ([m, d]: [number, number]) => `${MONTHS[m - 1]} ${d}`
+  return `${day(pack.from)} – ${day(pack.to)}`
+}
+
 export function AppearanceSettings() {
   const ui = useStore((s) => s.ui)
   const patchUi = useStore((s) => s.patchUi)
+  const seasonPreview = useStore((s) => s.seasonPreview)
+  const setSeasonPreview = useStore((s) => s.setSeasonPreview)
   // What is actually on screen right now — with scheme 'system' this follows
   // the OS, so the picker must offer that scheme's presets, not the stored one.
   const scheme = resolveScheme(ui.scheme)
-  const seasonalPack = activePack()
+  const seasonalPack = activePack(undefined, seasonPreview)
   const themes = scheme === 'light' ? LIGHT_THEMES : DARK_THEMES
   const activeTheme = scheme === 'light' ? ui.themeLight : ui.theme
   const hue = ui.accentHue
@@ -270,12 +283,83 @@ export function AppearanceSettings() {
           onChange={(value) => patchUi({ seasonal: value })}
         />
         <p className="mt-2 text-2xs text-text-faint">
-          {seasonalPack
-            ? `${seasonalPack.name} is running now. `
-            : 'Nothing running today. '}
+          {seasonPreview && seasonalPack
+            ? `Previewing ${seasonalPack.name}. `
+            : seasonalPack
+              ? `${seasonalPack.name} is running now. `
+              : 'Nothing running today. '}
           Subtle recolours the accent and swaps a few words; Full adds falling
           particles.
         </p>
+
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <SectionLabel size="xs">Try it now</SectionLabel>
+          <Button
+            size="xs"
+            variant="ghost"
+            disabled={!seasonPreview}
+            onClick={() => setSeasonPreview(null)}
+          >
+            Reset
+          </Button>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {EVENT_PACKS.map((pack) => (
+            <ChoiceCard
+              key={pack.id}
+              selected={seasonPreview === pack.id}
+              onSelect={() =>
+                setSeasonPreview(seasonPreview === pack.id ? null : pack.id)
+              }
+              title={pack.name}
+              description={packWindow(pack)}
+              selectedStyle="ring"
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className="h-4 w-4 shrink-0 rounded-full"
+                  style={{
+                    // The pack's own accent at the current scheme's lightness —
+                    // exactly what applying it produces.
+                    backgroundColor:
+                      scheme === 'light'
+                        ? `oklch(0.55 0.17 ${pack.accentHue})`
+                        : `oklch(0.68 0.16 ${pack.accentHue})`,
+                  }}
+                />
+                <span className="truncate text-xs leading-none">
+                  {pack.reactions.slice(0, 4).join('')}
+                </span>
+              </div>
+            </ChoiceCard>
+          ))}
+        </div>
+        <p className="mt-2 text-2xs text-text-faint">
+          Pins a pack regardless of the date, on this device only — it is a
+          preview, so it never syncs to your other devices. Reset hands control
+          back to the calendar.
+        </p>
+        {seasonPreview && ui.seasonal === 'off' && (
+          <p className="mt-2 text-2xs text-warning-fg">
+            Seasonal is Off, so the preview is not showing — pick Subtle or Full.
+          </p>
+        )}
+        {seasonPreview && ui.seasonal === 'subtle' && seasonalPack?.effect && (
+          <p className="mt-2 text-2xs text-text-faint">
+            Full intensity would also add {seasonalPack.effect}.
+          </p>
+        )}
+        {seasonPreview && ui.focusMode && (
+          <p className="mt-2 text-2xs text-warning-fg">
+            Focus mode is on, which overrides seasonal packs entirely.
+          </p>
+        )}
+        {seasonPreview && ui.accentHue !== null && (
+          <p className="mt-2 text-2xs text-warning-fg">
+            Your accent override wins over the pack colour — reset it above to
+            see {seasonalPack?.name}’s hue.
+          </p>
+        )}
       </div>
 
       <div className="mt-3 border-t border-border pt-5">

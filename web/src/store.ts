@@ -18,6 +18,7 @@ import {
   type RailPosition,
   type UiPrefs,
 } from './lib/uiPrefs'
+import { packPreview, setPackPreview } from './lib/seasonal'
 import type { VoiceClient } from './lib/voice'
 import { annotations } from './lib/annotations'
 import {
@@ -344,6 +345,10 @@ export type State = {
   // The synced appearance blob (theme, scheme, accent, density, scale, motion,
   // rail, sounds). Server-backed via PATCH /prefs/ui; see lib/uiPrefs.ts.
   ui: UiPrefs
+  /** Seasonal pack pinned for preview ("Try it now"), overriding the calendar.
+   *  Device-local; the value lives in lib/seasonal.ts, this mirrors it so the
+   *  components that render a pack re-render when it changes. */
+  seasonPreview: string | null
   /** Per-channel chat wallpapers, from `channel_prefs.wallpaper`. */
   channelWallpapers: Record<string, Wallpaper>
   // Desktop navigation preference. Mirrors `ui.railPosition` so the many
@@ -619,6 +624,8 @@ export type State = {
   setChatLayout: (layout: ChatLayout) => Promise<void>
   /** Merge an appearance patch: apply locally, mirror, sync, roll back on failure. */
   patchUi: (patch: Partial<UiPrefs>) => void
+  /** Pin a seasonal pack regardless of the date, or `null` to follow the calendar. */
+  setSeasonPreview: (packId: string | null) => void
   setChannelWallpaper: (channelId: string, wallpaper: Wallpaper) => Promise<void>
   setRailPosition: (position: RailPosition) => void
   setDockAutoHide: (autoHide: boolean) => void
@@ -752,6 +759,7 @@ export const useStore = create<State>((set, get) => ({
   notifHasMore: false,
   chatLayout: null,
   ui: initialUi,
+  seasonPreview: packPreview(),
   channelWallpapers: {},
   railPosition: initialUi.railPosition,
   dockAutoHide: initialUi.dockAutoHide,
@@ -2677,6 +2685,15 @@ export const useStore = create<State>((set, get) => ({
       writeLocalUiPrefs(prev)
       if (e instanceof Error) toastError(e.message)
     })
+  },
+
+  setSeasonPreview(packId) {
+    setPackPreview(packId)
+    set({ seasonPreview: packPreview() })
+    // The accent retint and `data-season` come out of applyUiPrefs, which reads
+    // the pack itself — re-run it with the unchanged prefs, keeping the
+    // streaming shield's borrowed focus mode intact.
+    applyUiPrefs(get().ui, streamingActive(get()))
   },
 
   async setChannelWallpaper(channelId, wallpaper) {

@@ -55,6 +55,9 @@ export const KEYS = {
   voiceWidgetCorner: 'sharp.voiceWidgetCorner',
   /** Legacy single-flag video blur, superseded by the scoped videoBackground key. */
   videoBlurLegacy: 'sharp.videoBlur',
+  /** Seasonal pack forced on from Settings → Appearance ("Try it now"). Device-local
+   *  on purpose: it is a preview of a dated event, not a preference to sync. */
+  seasonPreview: 'sharp.seasonPreview',
 } as const
 
 /**

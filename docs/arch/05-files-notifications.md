@@ -234,6 +234,15 @@ and swaps the reaction row; only `full` renders `SeasonalLayer`, a single
 `pointer-events:none` canvas whose rAF loop stops while the tab is hidden. A user-chosen
 `accentHue` always beats a pack's.
 
+**Preview override** ("Try it now" in Settings → Appearance): `setPackPreview(id)` pins one
+pack regardless of the date, persisted in `sharp.seasonPreview` (device-local, deliberately
+**not** in the synced blob — a preview is not a preference). `activePack(now, preview)` takes
+it as a parameter defaulting to the stored value, so it beats the calendar and nothing else:
+intensity, Focus mode, reduced motion and an explicit `accentHue` all still win. The store
+mirrors it as `seasonPreview` and `setSeasonPreview` re-runs `applyUiPrefs`, so the accent,
+`data-season`, the particle layer and the reaction row all switch live; the components that
+render a pack subscribe to that field rather than reading the module value.
+
 ## Notification semantics
 
 Triggers, computed on message create:

@@ -10,6 +10,13 @@
 //   3. Focus mode and `prefers-reduced-motion` force it off regardless.
 // `subtle` is the default: colour and copy change, particles do not. A work
 // tool should not start snowing on someone who never asked for snow.
+//
+// The **preview override** (`setPackPreview`) pins one pack regardless of the
+// date, so a pack can be seen — and reviewed — without waiting for October. It
+// is device-local (localStorage, never the synced blob) and beats the calendar
+// but nothing above it: intensity, Focus mode and reduced-motion still win.
+
+import { KEYS, readLocal, removeLocal, writeLocal } from './localPrefs'
 
 export type SeasonalIntensity = 'off' | 'subtle' | 'full'
 
@@ -113,13 +120,38 @@ export const EVENT_PACKS: EventPack[] = [
   },
 ]
 
+export function packById(id: string | null | undefined): EventPack | null {
+  return EVENT_PACKS.find((p) => p.id === id) ?? null
+}
+
+/** The pinned pack id, or null when the calendar decides. */
+export function packPreview(): string | null {
+  if (typeof window === 'undefined') return null
+  return packById(readLocal(KEYS.seasonPreview))?.id ?? null
+}
+
+/**
+ * Pin a pack (or `null` to hand control back to the calendar). Persisted so a
+ * reload keeps the preview — the point is to walk the whole app in-season.
+ * Callers must re-apply appearance afterwards; the store action does.
+ */
+export function setPackPreview(id: string | null) {
+  if (id && packById(id)) writeLocal(KEYS.seasonPreview, id)
+  else removeLocal(KEYS.seasonPreview)
+}
+
 /**
  * The pack in force for a given local date, if any.
  *
  * Windows are compared as month/day so they repeat every year, and a window may
- * wrap the year boundary (New Year runs 31 Dec – 2 Jan).
+ * wrap the year boundary (New Year runs 31 Dec – 2 Jan). A preview override
+ * short-circuits the whole comparison.
  */
-export function activePack(now: Date = new Date()): EventPack | null {
+export function activePack(
+  now: Date = new Date(),
+  preview: string | null = packPreview(),
+): EventPack | null {
+  if (preview) return packById(preview)
   const md = (now.getMonth() + 1) * 100 + now.getDate()
   for (const pack of EVENT_PACKS) {
     const from = pack.from[0] * 100 + pack.from[1]

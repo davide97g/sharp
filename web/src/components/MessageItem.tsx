@@ -3,7 +3,7 @@ import type { Message, ReplyPreview } from '../lib/types'
 import { useStore } from '../store'
 import { AVATAR_PX } from '../lib/theme'
 import type { MessageLayout } from '../lib/uiPrefs'
-import { activePack, type SeasonalIntensity } from '../lib/seasonal'
+import { activePack, packPreview, type SeasonalIntensity } from '../lib/seasonal'
 import { useCoarsePointer } from '../lib/useMediaQuery'
 import { Avatar } from './Avatar'
 import { UserChip } from './UserCard'
@@ -23,9 +23,12 @@ const BASE_REACTIONS = ['👍', '✅', '👀', '❤️', '😂', '🎉']
  * (deduped, same length) so the palette stays one row — Halloween week offers
  * 🎃 without permanently costing you 🎉.
  */
-export function reactionPalette(seasonal: SeasonalIntensity): string[] {
+export function reactionPalette(
+  seasonal: SeasonalIntensity,
+  preview: string | null = packPreview(),
+): string[] {
   if (seasonal === 'off') return BASE_REACTIONS
-  const pack = activePack()
+  const pack = activePack(undefined, preview)
   if (!pack) return BASE_REACTIONS
   const merged = [...pack.reactions, ...BASE_REACTIONS.filter((e) => !pack.reactions.includes(e))]
   return merged.slice(0, BASE_REACTIONS.length)
@@ -177,7 +180,10 @@ export const MessageItem = memo(function MessageItem({
   const density = useStore((s) => s.ui.density)
   const timestampStyle = useStore((s) => s.ui.timestampStyle)
   const nameColors = useStore((s) => s.ui.nameColors)
-  const palette = reactionPalette(useStore((s) => s.ui.seasonal))
+  const palette = reactionPalette(
+    useStore((s) => s.ui.seasonal),
+    useStore((s) => s.seasonPreview),
+  )
   const toggleReaction = useStore((s) => s.toggleReaction)
   const editMessage = useStore((s) => s.editMessage)
   const deleteMessage = useStore((s) => s.deleteMessage)

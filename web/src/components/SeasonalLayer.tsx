@@ -28,9 +28,12 @@ export function SeasonalLayer() {
   const intensity = useStore((s) => s.ui.seasonal)
   const focusMode = useStore((s) => s.ui.focusMode)
   const motion = useStore((s) => s.ui.motion)
+  // Subscribed, not just read, so pinning a pack from Settings starts the
+  // weather immediately instead of on the next unrelated render.
+  const preview = useStore((s) => s.seasonPreview)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
-  const pack = activePack()
+  const pack = activePack(undefined, preview)
   const effect = pack?.effect ?? null
   const reduced =
     typeof window !== 'undefined' &&
