@@ -70,9 +70,11 @@ Client → server:
   `helios|mercury|voiceprint|kinetic-type|eclipse`; an absent/unknown value clears the broadcast
   (`aura_style=null`, viewers fall back to their own local style). Also sent as `aura_style` on
   `voice.join`. Broadcasts `voice.participant_updated`.
-- `voice.move` `{channel_id, x: number, y: number}` — set the sender's position on the spatial
-  floor. Coordinates are normalized (`x` left→right, `y` top→bottom), non-finite values are
-  rejected and everything else is clamped to `[0,1]`. Broadcasts the light
+- `voice.move` `{channel_id, x: number, y: number, conn_id?: string}` — set a position on the
+  spatial floor. Coordinates are normalized (`x` left→right, `y` top→bottom), non-finite values
+  are rejected and everything else is clamped to `[0,1]`. `conn_id` defaults to the sender;
+  **any participant may move any other participant** in the same room (both ends must currently
+  be in it), because the floor is shared furniture. Broadcasts the light
   `voice.participant_moved` (not `participant_updated`). A move from a connection that is no
   longer in the room is dropped silently — no `voice.error`, because a leave routinely races
   the last throttled move. Guests may send it.
@@ -162,7 +164,9 @@ Server → client:
   from the centre that skips any point within 0.11 of someone already standing there, so
   arrivals never stack. No RNG — the spawn is a pure function of who is already in the room. Demoting a registered participant to channel viewer removes all of that
   user's connections from the room immediately.
-- `voice.move`: clamp and store; broadcast `voice.participant_moved`. Positions are room state
+- `voice.move`: require the *sender* to be in the room (else a stale connection could shove
+  people around a call it already left), clamp and store on the target conn, broadcast
+  `voice.participant_moved`. Positions are room state
   and therefore always broadcast, whether or not any client is currently in the spatial view —
   the server has no notion of who is looking at the floor plan.
 - **Broadcast targeting**: every voice broadcast (`participant_joined`/`left`/`updated`/`moved` and
@@ -260,6 +264,9 @@ Server → client:
   collapsed/expanded without leaving the call. Camera-off participants show as circular
   avatars; camera-on participants use a responsive video grid. Controls (mute, camera,
   leave) and Meet-style device pickers live on the overlay. There is no sidebar voice bar.
+- **Microphone capture is forced to mono** (`channelCount: 1`). A stereo capture device with
+  signal on only one input — common with audio interfaces and virtual devices — otherwise
+  publishes a half-silent stereo track and every listener hears that person out of one speaker.
 - Local preview is mirrored; remote video is not. Remote audio continues through hidden
   audio elements independently of navigation.
 - Camera stays active while the voice session is open across channel / docs / canvas
@@ -279,11 +286,18 @@ Server → client:
   `moveVoiceSelf` is the sole writer, optimistic locally and throttled to one `voice.move` every
   70 ms with a trailing send so the resting position always lands.
 - Audio: `web/src/lib/voice.ts` (`setSpatialAudio` / `setSpatialPosition`) routes each remote mic
-  through a `PannerNode` (HRTF, inverse distance) instead of straight out of its `<audio>`
-  element. The element stays attached and muted — Chrome only feeds a WebRTC stream into an
-  AudioContext while it is also attached to a media element. The unit square maps onto an 8 m
-  room with the listener facing -Z, so "up the floor plan" is "in front of you". Screen-share
-  audio is never spatialized.
+  through `source → PannerNode → GainNode → destination` instead of straight out of its
+  `<audio>` element. The element stays attached at `volume = 0` — Chrome only feeds a WebRTC
+  stream into an AudioContext while it is also attached to a media element, and a *muted*
+  element feeds silence into the graph on some builds. Screen-share audio is never spatialized.
+- **Direction and distance are separate nodes, deliberately.** The listener sits at the origin
+  facing -Z and never moves; each peer's panner is placed on a fixed-radius circle in the
+  direction of that peer (`rolloffFactor: 0` switches the built-in distance model off), so the
+  left/right image is equally strong for someone beside you and someone across the room. All of
+  the distance falloff lives in the gain node, following `spatialGain` in `web/src/lib/spatial.ts`
+  — a smooth, strictly decreasing curve with a floor of 0.06, so a far corner is a murmur and
+  never a mute. There are **no volume steps**: the zone rings drawn around you
+  (`SPATIAL_ZONE_RADII`) are a legend for that curve, not thresholds in it.
 - The positions are pushed into the audio engine by `useSpatialAudio`, mounted by `VideoStage`
   rather than the floor plan, so minimizing the call or going picture-in-picture keeps the
   positional mix alive. A live screen share takes the stage back; the audio stays spatial.

@@ -809,6 +809,11 @@ async fn handle_aura(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &W
 /// pointer/keyboard rate, so a move broadcasts a 4-field `voice.participant_moved`
 /// rather than the whole participant, and a move from a connection that already
 /// left is dropped without an error (the client throttles, the leave races it).
+///
+/// Anyone in the room may move anyone else (`conn_id` in the payload, defaulting to
+/// the sender). The floor is a shared object like a whiteboard — pulling someone
+/// into your huddle is the point — so the only check is that both ends are in this
+/// room.
 async fn handle_move(state: &SharedState, conn_id: Uuid, payload: &Value) {
     let Some(channel_id) = channel_id(payload) else {
         return;
@@ -823,19 +828,23 @@ async fn handle_move(state: &SharedState, conn_id: Uuid, payload: &Value) {
         return;
     }
     let (x, y) = (clamp_unit(x), clamp_unit(y));
+    let target = uuid_field(payload, "conn_id").unwrap_or(conn_id);
 
     let moved = {
         let mut guard = state.voice_rooms.lock().unwrap();
-        guard
-            .get_mut(&channel_id)
-            .and_then(|room| room.participants.get_mut(&conn_id))
-            .map(|participant| {
-                participant.pos_x = x;
-                participant.pos_y = y;
-            })
-            .is_some()
+        match guard.get_mut(&channel_id) {
+            // The mover must be in the room too, or a stale connection could shove
+            // people around a call it already left.
+            Some(room) if room.participants.contains_key(&conn_id) => {
+                room.participants.get_mut(&target).map(|participant| {
+                    participant.pos_x = x;
+                    participant.pos_y = y;
+                })
+            }
+            _ => None,
+        }
     };
-    if !moved {
+    if moved.is_none() {
         return;
     }
 
@@ -844,7 +853,7 @@ async fn handle_move(state: &SharedState, conn_id: Uuid, payload: &Value) {
         "voice.participant_moved",
         json!({
             "channel_id": channel_id.to_string(),
-            "conn_id": conn_id.to_string(),
+            "conn_id": target.to_string(),
             "x": x,
             "y": y,
         }),

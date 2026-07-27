@@ -11,6 +11,7 @@ import {
   type RemoteTrackPublication,
 } from 'livekit-client'
 import type { VoiceParticipant } from './types'
+import { spatialDirection, spatialGain } from './spatial'
 import { videoBackgroundImageUrl, type VideoBackground } from './videoBackgrounds'
 // RNNoise worklet script + wasm resolved to bundled asset URLs (no CDN). These
 // are just URL strings; the worklet/wasm code is emitted as separate assets and
@@ -55,12 +56,18 @@ type RemoteMedia = {
 }
 
 // One remote microphone routed through the Web Audio graph instead of straight
-// out of its <audio> element. The element stays attached and muted: Chrome only
+// out of its <audio> element. The element stays attached at volume 0: Chrome only
 // feeds a WebRTC stream into an AudioContext while it is also attached to a
 // media element (crbug.com/121673).
+//
+// source → panner (direction only) → gain (distance only) → destination.
+// Splitting the two is what makes the image readable: the panner always sits at a
+// fixed radius, so left is unmistakably left even for someone right next to you,
+// and the gain node carries the whole distance curve on its own.
 type SpatialNode = {
   source: MediaStreamAudioSourceNode
   panner: PannerNode
+  gain: GainNode
 }
 
 type SpeakingDetector = {
@@ -72,15 +79,12 @@ type SpeakingDetector = {
   level: number
 }
 
-// Spatial audio. The floor plan is a unit square; these map it onto a room in
-// metres for the Web Audio distance model. The rolloff is deliberately gentle —
-// someone across the room should be faint but still followable, not gone.
-const SPATIAL_ROOM_METRES = 8
-const SPATIAL_REF_DISTANCE = 1.5
-const SPATIAL_ROLLOFF = 0.9
-const SPATIAL_MAX_DISTANCE = 20
-// Time constant for position glides: long enough to kill zipper noise while
-// dragging, short enough that the pan tracks the avatar.
+// Spatial audio. The listener stays at the origin facing -Z and every peer is placed
+// relative to them, so there is only ever one coordinate system to reason about.
+// Panners sit on a circle of this radius — distance is the gain node's job.
+const SPATIAL_DIRECTION_RADIUS = 1.4
+// Time constant for glides: long enough to kill zipper noise while dragging, short
+// enough that the pan tracks the avatar.
 const SPATIAL_GLIDE = 0.07
 
 const SPEAKING_THRESHOLD = 0.04
@@ -582,26 +586,24 @@ export class VoiceClient {
         }
       }
     }
-    if (enabled) this.applyListenerPosition()
+    if (enabled) this.applySpatialPositions()
   }
 
   /**
-   * Place a participant on the floor. `connId === myConnId` moves the listener;
-   * anyone else moves their panner. Safe to call with spatial audio off — the
-   * position is remembered and applied when it is switched on.
+   * Place a participant on the floor. Everything is stored in floor units and
+   * resolved relative to the listener at render time, so moving yourself simply
+   * re-aims every peer. Safe to call with spatial audio off — positions are
+   * remembered and applied when it is switched on.
    */
   setSpatialPosition(connId: string, x: number, y: number) {
     if (this.stopped) return
     if (connId === this.myConnId) {
       this.listenerPosition = { x, y }
-      if (this.spatial) this.applyListenerPosition()
+      if (this.spatial) this.applySpatialPositions()
       return
     }
     this.spatialPositions.set(connId, { x, y })
-    if (!this.spatial) return
-    const media = this.remoteMedia.get(connId)
-    if (!media) return
-    for (const node of media.spatialNodes.values()) this.applyPannerPosition(node.panner, x, y)
+    if (this.spatial) this.applySpatialPositions(connId)
   }
 
   private wireSpatialTrack(connId: string, trackSid: string, media: RemoteMedia) {
@@ -612,28 +614,32 @@ export class VoiceClient {
     try {
       const context = this.ensureAudioContext()
       const source = context.createMediaStreamSource(new MediaStream([track]))
+      // rolloffFactor 0 disables the built-in distance model outright: distance is
+      // the gain node's job, and letting both act would double the falloff.
       const panner = new PannerNode(context, {
         panningModel: 'HRTF',
         distanceModel: 'inverse',
-        refDistance: SPATIAL_REF_DISTANCE,
-        rolloffFactor: SPATIAL_ROLLOFF,
-        maxDistance: SPATIAL_MAX_DISTANCE,
+        refDistance: SPATIAL_DIRECTION_RADIUS,
+        rolloffFactor: 0,
       })
+      const gain = new GainNode(context, { gain: 1 })
       source.connect(panner)
-      panner.connect(context.destination)
-      node = { source, panner }
+      panner.connect(gain)
+      gain.connect(context.destination)
+      node = { source, panner, gain }
     } catch (error) {
       // No AudioContext (or a browser that refuses the graph): leave the element
       // playing normally rather than dropping this peer's audio entirely.
       console.warn('Spatial audio unavailable for a peer', error)
       return
     }
-    const position = this.spatialPositions.get(connId)
-    this.applyPannerPosition(node.panner, position?.x ?? 0.5, position?.y ?? 0.5)
     media.spatialNodes.set(trackSid, node)
+    this.applySpatialNode(node, connId)
     // Element stays attached (Chrome needs it) but silent — the graph plays now.
+    // Volume rather than muted: a muted element feeds silence into the graph on
+    // some builds, and volume 0 is honoured everywhere.
     const element = media.audioElements.get(trackSid)
-    if (element) element.muted = true
+    if (element) element.volume = 0
   }
 
   private unwireSpatialTrack(trackSid: string, media: RemoteMedia) {
@@ -642,36 +648,43 @@ export class VoiceClient {
     media.spatialNodes.delete(trackSid)
     node.source.disconnect()
     node.panner.disconnect()
+    node.gain.disconnect()
     const element = media.audioElements.get(trackSid)
-    if (element) element.muted = false
+    if (element) element.volume = 1
   }
 
-  private applyListenerPosition() {
+  /** Re-aim one peer's nodes, or everyone's when the listener itself moved. */
+  private applySpatialPositions(connId?: string) {
+    if (connId) {
+      const media = this.remoteMedia.get(connId)
+      if (!media) return
+      for (const node of media.spatialNodes.values()) this.applySpatialNode(node, connId)
+      return
+    }
+    for (const [peerId, media] of this.remoteMedia) {
+      for (const node of media.spatialNodes.values()) this.applySpatialNode(node, peerId)
+    }
+  }
+
+  private applySpatialNode(node: SpatialNode, connId: string) {
     const context = this.audioContext
     if (!context) return
-    const { x, z } = spatialMetres(this.listenerPosition.x, this.listenerPosition.y)
-    const listener = context.listener
-    if (listener.positionX) {
-      listener.positionX.setTargetAtTime(x, context.currentTime, SPATIAL_GLIDE)
-      listener.positionY.setTargetAtTime(0, context.currentTime, SPATIAL_GLIDE)
-      listener.positionZ.setTargetAtTime(z, context.currentTime, SPATIAL_GLIDE)
+    const position = this.spatialPositions.get(connId) ?? { x: 0.5, y: 0.5 }
+    const dx = position.x - this.listenerPosition.x
+    const dy = position.y - this.listenerPosition.y
+    const direction = spatialDirection(dx, dy)
+    const now = context.currentTime
+    const x = direction.x * SPATIAL_DIRECTION_RADIUS
+    const z = direction.z * SPATIAL_DIRECTION_RADIUS
+    if (node.panner.positionX) {
+      node.panner.positionX.setTargetAtTime(x, now, SPATIAL_GLIDE)
+      node.panner.positionY.setTargetAtTime(0, now, SPATIAL_GLIDE)
+      node.panner.positionZ.setTargetAtTime(z, now, SPATIAL_GLIDE)
     } else {
       // Safari still only has the deprecated setter.
-      listener.setPosition(x, 0, z)
+      node.panner.setPosition(x, 0, z)
     }
-  }
-
-  private applyPannerPosition(panner: PannerNode, x: number, y: number) {
-    const context = this.audioContext
-    if (!context) return
-    const world = spatialMetres(x, y)
-    if (panner.positionX) {
-      panner.positionX.setTargetAtTime(world.x, context.currentTime, SPATIAL_GLIDE)
-      panner.positionY.setTargetAtTime(0, context.currentTime, SPATIAL_GLIDE)
-      panner.positionZ.setTargetAtTime(world.z, context.currentTime, SPATIAL_GLIDE)
-    } else {
-      panner.setPosition(world.x, 0, world.z)
-    }
+    node.gain.gain.setTargetAtTime(spatialGain(Math.hypot(dx, dy)), now, SPATIAL_GLIDE)
   }
 
   async setVideoInput(deviceId: string) {
@@ -1139,12 +1152,6 @@ async function getUserMediaWithFallback(
   }
 }
 
-// Floor plan (0..1, y downwards on screen) to Web Audio world metres. The listener
-// faces -Z by default, so "further up the floor plan" becomes "in front of you".
-function spatialMetres(x: number, y: number): { x: number; z: number } {
-  return { x: (x - 0.5) * SPATIAL_ROOM_METRES, z: (y - 0.5) * SPATIAL_ROOM_METRES }
-}
-
 function trackDeviceId(track?: MediaStreamTrack | null): string | null {
   const id = track?.getSettings().deviceId
   return id || null
@@ -1155,6 +1162,11 @@ function audioConstraints(deviceId?: string | null): MediaTrackConstraints {
     echoCancellation: true,
     noiseSuppression: true,
     autoGainControl: true,
+    // Force mono. A stereo capture device that only carries signal on its left
+    // input (common with audio interfaces and some virtual devices) otherwise
+    // publishes a half-silent stereo track, and every listener hears that person
+    // out of one speaker only.
+    channelCount: 1,
   }
   if (deviceId) return { ...base, deviceId: { exact: deviceId } }
   return base

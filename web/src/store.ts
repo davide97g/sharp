@@ -547,6 +547,7 @@ export type State = {
   setVoiceStageMode: (mode: VoiceStageMode) => void
   setVoiceSpatial: (enabled: boolean) => void
   moveVoiceSelf: (x: number, y: number) => void
+  moveVoiceParticipant: (connId: string, x: number, y: number) => void
   toggleAnnotating: () => void
   setAnnotationsAllowed: (allowed: boolean) => void
   clearAnnotations: () => void
@@ -661,11 +662,14 @@ function emptyChannelMessages(): ChannelMessages {
 
 /** Local mirror of the appearance blob, replaced by the server copy on login. */
 // Spatial moves are produced at pointer/animation rate but only need to travel often
-// enough to sound continuous. Send at most every MOVE_SEND_MS, always with a trailing
-// send so the final resting position is the one everyone else ends up with.
+// enough to sound continuous. Send at most every MOVE_SEND_MS per moved participant,
+// always with a trailing send so the final resting position is the one everyone else
+// ends up with. Keyed by conn id because you can drag other people too.
 const MOVE_SEND_MS = 70
-let lastMoveSentAt = 0
-let pendingMoveTimer: ReturnType<typeof setTimeout> | null = null
+const moveThrottles = new Map<
+  string,
+  { lastSentAt: number; timer: ReturnType<typeof setTimeout> | null }
+>()
 
 const initialUi = readLocalUiPrefs()
 // Sounds can fire before the first `applyUi` (splash, login), so seed the pack
@@ -2320,45 +2324,54 @@ export const useStore = create<State>((set, get) => ({
     get().voice.client?.setSpatialAudio(enabled)
   },
 
-  // Optimistic on purpose, unlike the rest of the voice slice: your own avatar must
-  // track the pointer with no round trip. The server clamps and echoes the same value
-  // back through voice.participant_moved, so a rejected move self-corrects.
   moveVoiceSelf(x, y) {
-    const { voice, myConnId, ws } = get()
+    const myConnId = get().myConnId
+    if (myConnId) get().moveVoiceParticipant(myConnId, x, y)
+  },
+
+  // Optimistic on purpose, unlike the rest of the voice slice: a dragged avatar must
+  // track the pointer with no round trip. The server clamps and echoes the same value
+  // back through voice.participant_moved, so a rejected move self-corrects. Anyone in
+  // the room may move anyone — the floor is shared furniture.
+  moveVoiceParticipant(connId, x, y) {
+    const { voice, ws } = get()
     const channelId = voice.channelId
-    if (!channelId || !myConnId || voice.status !== 'connected') return
+    if (!channelId || voice.status !== 'connected') return
     const clamped = { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) }
     set((s) => {
       const room = s.voiceRooms[channelId]
-      const entry = room?.[myConnId]
+      const entry = room?.[connId]
       if (!entry) return {}
       return {
         voiceRooms: {
           ...s.voiceRooms,
-          [channelId]: { ...room, [myConnId]: { ...entry, pos_x: clamped.x, pos_y: clamped.y } },
+          [channelId]: { ...room, [connId]: { ...entry, pos_x: clamped.x, pos_y: clamped.y } },
         },
       }
     })
+    if (!ws) return
 
+    const throttle = moveThrottles.get(connId) ?? { lastSentAt: 0, timer: null }
+    moveThrottles.set(connId, throttle)
     const send = () => {
-      lastMoveSentAt = Date.now()
-      pendingMoveTimer = null
+      throttle.lastSentAt = Date.now()
+      throttle.timer = null
       const latest = get()
-      const position = latest.voiceRooms[channelId]?.[myConnId]
+      const position = latest.voiceRooms[channelId]?.[connId]
       if (!position || latest.voice.channelId !== channelId) return
       latest.ws?.send('voice.move', {
         channel_id: channelId,
+        conn_id: connId,
         x: position.pos_x,
         y: position.pos_y,
       })
     }
-    if (!ws) return
-    const elapsed = Date.now() - lastMoveSentAt
+    const elapsed = Date.now() - throttle.lastSentAt
     if (elapsed >= MOVE_SEND_MS) {
-      if (pendingMoveTimer) clearTimeout(pendingMoveTimer)
+      if (throttle.timer) clearTimeout(throttle.timer)
       send()
-    } else if (!pendingMoveTimer) {
-      pendingMoveTimer = setTimeout(send, MOVE_SEND_MS - elapsed)
+    } else if (!throttle.timer) {
+      throttle.timer = setTimeout(send, MOVE_SEND_MS - elapsed)
     }
   },
 

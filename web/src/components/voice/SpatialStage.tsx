@@ -4,8 +4,9 @@
 // Contract: docs/arch/04-voice.md (`voice.move` / `voice.participant_moved`).
 //
 // Two halves that must not be confused:
-//   - Positions are ROOM state. They come from the server, are shared by everyone,
-//     and only your own avatar is yours to move (store action `moveVoiceSelf`).
+//   - Positions are ROOM state. They come from the server and are shared by everyone;
+//     anyone may drag anyone (store action `moveVoiceParticipant`), the way you would
+//     shuffle chairs around a table.
 //   - Panning is a LISTENER concern. It lives entirely in lib/voice.ts and is driven
 //     from `useSpatialAudio`, which is mounted by the stage shell rather than this
 //     component — minimizing the call must not silence the positional audio.
@@ -15,6 +16,7 @@
 // numbers are authoritative, never the pixels.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { SPATIAL_ZONE_RADII } from '../../lib/spatial'
 import { useStore } from '../../store'
 import { Badge, Kbd } from '../../ui'
 import { AudioAuraAvatar } from './AudioAuraAvatar'
@@ -23,9 +25,6 @@ import { HandIcon, MicIcon } from './callIcons'
 /** Keyboard step per press, and the larger step while Shift is held. */
 const STEP = 0.035
 const STEP_FAST = 0.1
-/** Radius (in floor units) of the "clear voice" ring drawn around you — mirrors
- *  the panner's reference distance, so the ring is where people start to fade. */
-const CLEAR_RADIUS = 0.19
 
 type SpatialPerson = {
   connId: string
@@ -76,8 +75,10 @@ export function SpatialStage({
   const localStream = useStore((s) => s.voice.localStream)
   const remoteStreams = useStore((s) => s.voice.remoteStreams)
   const moveVoiceSelf = useStore((s) => s.moveVoiceSelf)
+  const moveVoiceParticipant = useStore((s) => s.moveVoiceParticipant)
   const floorRef = useRef<HTMLDivElement>(null)
-  const [dragging, setDragging] = useState(false)
+  // Which avatar the current gesture is carrying — anyone's, not just your own.
+  const [draggingConnId, setDraggingConnId] = useState<string | null>(null)
 
   const people = useMemo<SpatialPerson[]>(() => {
     return Object.entries(room ?? {}).map(([connId, entry]) => ({
@@ -109,28 +110,31 @@ export function SpatialStage({
     }
   }
 
-  const moveTo = (clientX: number, clientY: number) => {
+  const moveTo = (connId: string, clientX: number, clientY: number) => {
     const point = pointToFloor(clientX, clientY)
-    if (point) moveVoiceSelf(point.x, point.y)
+    if (point) moveVoiceParticipant(connId, point.x, point.y)
   }
 
   const onFloorPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || !self) return
-    // Walk to a tapped spot, then keep following the pointer — one gesture covers
-    // both "go there" and "drag me around".
+    // Grabbing an avatar carries that person; grabbing bare floor walks you there.
+    // One handler for both, so the pointer capture and the drag state have a single
+    // owner no matter what was under the finger.
+    const avatar = (event.target as HTMLElement).closest<HTMLElement>('[data-conn-id]')
+    const connId = avatar?.dataset.connId ?? self.connId
     event.currentTarget.setPointerCapture(event.pointerId)
-    setDragging(true)
-    moveTo(event.clientX, event.clientY)
+    setDraggingConnId(connId)
+    moveTo(connId, event.clientX, event.clientY)
   }
 
   const onFloorPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragging) return
-    moveTo(event.clientX, event.clientY)
+    if (!draggingConnId) return
+    moveTo(draggingConnId, event.clientX, event.clientY)
   }
 
   const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragging) return
-    setDragging(false)
+    if (!draggingConnId) return
+    setDraggingConnId(null)
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
@@ -182,29 +186,38 @@ export function SpatialStage({
         onPointerCancel={endDrag}
         onKeyDown={onKeyDown}
         className={`spatial-floor relative min-h-0 flex-1 touch-none overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
-          dragging ? 'cursor-grabbing' : 'cursor-pointer'
+          draggingConnId ? 'cursor-grabbing' : 'cursor-pointer'
         }`}
       >
-        {self && (
-          <div
-            aria-hidden
-            className="pointer-events-none absolute rounded-full border border-dashed border-[var(--color-accent)]/35 bg-[var(--color-accent)]/6"
-            style={{
-              left: `${self.x * 100}%`,
-              top: `${self.y * 100}%`,
-              width: `${CLEAR_RADIUS * 200}%`,
-              height: `${CLEAR_RADIUS * 200}%`,
-              transform: 'translate(-50%, -50%)',
-            }}
-          />
-        )}
+        {self &&
+          SPATIAL_ZONE_RADII.map((radius, index) => (
+            <div
+              key={radius}
+              aria-hidden
+              className="pointer-events-none absolute rounded-full border border-dashed border-[var(--color-accent)]/30"
+              style={{
+                left: `${self.x * 100}%`,
+                top: `${self.y * 100}%`,
+                width: `${radius * 200}%`,
+                height: `${radius * 200}%`,
+                transform: 'translate(-50%, -50%)',
+                // Innermost zone reads as a lit area; the outer two are just contour lines.
+                background:
+                  index === 0 ? 'color-mix(in srgb, var(--color-accent) 8%, transparent)' : undefined,
+              }}
+            >
+              <span className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--color-panel)] px-1 text-[0.55rem] font-semibold leading-none text-[var(--color-text-faint)]">
+                {index + 1}
+              </span>
+            </div>
+          ))}
         {people.map((person) => (
           <FloorAvatar
             key={person.connId}
             person={person}
             self={self}
             size={avatarSize}
-            dragging={dragging && person.local}
+            dragging={draggingConnId === person.connId}
             audioAuraEnabled={audioAuraEnabled}
             stream={
               person.cameraOn
@@ -218,8 +231,8 @@ export function SpatialStage({
       </div>
       {!compact && (
         <p className="shrink-0 text-center text-2xs text-[var(--color-text-faint)]">
-          Drag yourself or click the floor to walk · <Kbd>W</Kbd> <Kbd>A</Kbd> <Kbd>S</Kbd>{' '}
-          <Kbd>D</Kbd> to step · voices come from where people stand
+          Drag anyone, or click the floor to walk · <Kbd>W</Kbd> <Kbd>A</Kbd> <Kbd>S</Kbd>{' '}
+          <Kbd>D</Kbd> to step · rings 1–3 mark how far voices have faded
         </p>
       )}
     </div>
@@ -259,6 +272,7 @@ function FloorAvatar({
 
   return (
     <div
+      data-conn-id={person.connId}
       className={`absolute flex select-none flex-col items-center gap-1 ${
         dragging ? '' : 'transition-[left,top] duration-100 ease-out motion-reduce:transition-none'
       }`}
@@ -267,8 +281,8 @@ function FloorAvatar({
         top: `${person.y * 100}%`,
         transform: `translate(-50%, -50%) scale(${scale})`,
         opacity,
-        zIndex: person.local ? 2 : 1,
-        cursor: person.local ? (dragging ? 'grabbing' : 'grab') : 'default',
+        zIndex: dragging ? 3 : person.local ? 2 : 1,
+        cursor: dragging ? 'grabbing' : 'grab',
       }}
     >
       <div
