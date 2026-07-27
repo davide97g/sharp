@@ -185,7 +185,7 @@ function GardenMinimap({
 
   return (
     <div
-      className="pointer-events-none absolute bottom-4 right-4 z-(--z-dropdown) hidden overflow-hidden rounded-xl border border-white/12 bg-[#10120f] shadow-2xl sm:block"
+      className="pointer-events-none absolute bottom-24 right-2 z-(--z-dropdown) origin-bottom-right scale-75 overflow-hidden rounded-xl border border-white/12 bg-[#10120f] shadow-2xl sm:bottom-4 sm:right-4 sm:scale-100"
       aria-label="Garden minimap"
     >
       <canvas ref={canvasRef} className="block h-28 w-40" />
@@ -201,14 +201,42 @@ function RoomList({
   currentId,
   teleportingId,
   onTeleport,
+  onTemple,
 }: {
   rooms: GardenRoom[]
   currentId: string | null
   teleportingId: string | null
   onTeleport: (room: GardenRoom) => void
+  onTemple: () => void
 }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      <button
+        type="button"
+        disabled={teleportingId !== null}
+        onClick={onTemple}
+        className="group mb-1 flex min-h-16 w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-left outline-none transition-colors hover:bg-[#293025] focus-visible:ring-2 focus-visible:ring-[#a8c983] disabled:cursor-default disabled:opacity-55"
+      >
+        <span className="flex h-12 w-12 shrink-0 items-end justify-center overflow-hidden rounded-lg bg-[#1d241a]">
+          <img
+            src="/assets/garden/feudal-japan/wooden_gate.png"
+            alt=""
+            className="h-12 w-12 object-contain"
+            style={{ imageRendering: 'pixelated' }}
+          />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-[var(--color-text)]">
+            Zen temple
+          </span>
+          <span className="block truncate text-xs text-[var(--color-text-faint)]">
+            DnD · calm melody
+          </span>
+        </span>
+        <span className="text-xs font-semibold text-[#a8c983] opacity-70 transition-opacity group-hover:opacity-100">
+          {teleportingId === 'temple' ? 'Flying…' : 'Travel'}
+        </span>
+      </button>
       {rooms.map((room) => {
         const current = room.channel_id === currentId
         return (
@@ -356,7 +384,9 @@ export function GardenView() {
   })
   const [melodyVolume, setMelodyVolume] = useState(() => {
     if (typeof window === 'undefined') return 0.34
-    const parsed = Number(window.localStorage.getItem('sharp.garden.zen-volume'))
+    const stored = window.localStorage.getItem('sharp.garden.zen-volume')
+    if (stored === null) return 0.34
+    const parsed = Number(stored)
     return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : 0.34
   })
   const melodyRef = useRef<HTMLAudioElement | null>(null)
@@ -448,6 +478,10 @@ export function GardenView() {
   }, [channelId, space, teleportingId])
 
   useEffect(() => {
+    if (error && teleportingId) setTeleportingId(null)
+  }, [error, teleportingId])
+
+  useEffect(() => {
     if (melodyRef.current) melodyRef.current.volume = melodyVolume
     window.localStorage.setItem('sharp.garden.zen-volume', String(melodyVolume))
   }, [melodyVolume])
@@ -457,6 +491,15 @@ export function GardenView() {
     setTeleportingId(room.channel_id)
     setRoomsOpen(false)
     window.dispatchEvent(new CustomEvent('sharp:garden-teleport', { detail: room }))
+  }
+
+  function walkToTemple() {
+    if (teleportingId) return
+    setTeleportingId('temple')
+    setRoomsOpen(false)
+    sound.garden.interact()
+    window.dispatchEvent(new Event('sharp:garden-teleport-temple'))
+    window.setTimeout(() => setTeleportingId((current) => current === 'temple' ? null : current), 1600)
   }
 
   function ensureMelody() {
@@ -608,6 +651,7 @@ export function GardenView() {
             currentId={channelId}
             teleportingId={teleportingId}
             onTeleport={teleportTo}
+            onTemple={walkToTemple}
           />
           <div className="border-t border-[var(--color-border)] p-2">
             <Button
@@ -638,6 +682,7 @@ export function GardenView() {
             currentId={channelId}
             teleportingId={teleportingId}
             onTeleport={teleportTo}
+            onTemple={walkToTemple}
           />
           <div className="border-t border-[var(--color-border)] p-2">
             <Button

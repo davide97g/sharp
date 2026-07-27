@@ -27,9 +27,10 @@ and chooses its variant deterministically from the plot index. DMs never get Gar
 
 ```ts
 GardenMap = {
-  version: number
+  version: 2
   tile_size: 16
   spawn: { x: number, y: number }
+  temple: { x: number, y: number }
   rooms: Array<{
     channel_id: string
     name: string
@@ -64,6 +65,13 @@ Client to server:
 - `garden.room_enter {channel_id}` — accepted only for a visible channel membership and while
   the peer is within 4.5 tiles of that plot's deterministic doorway.
 - `garden.room_exit {}` — return to the hub outside the current building.
+- `garden.room_teleport {channel_id}` — move directly to a visible room. Public non-members join
+  through the normal channel membership flow first; the server chooses a random safe arrival
+  coordinate and never reveals an inaccessible private room.
+- `garden.temple_teleport {}` — while in the hub, travel to the public temple threshold using
+  the same visual transition as room teleport.
+- `garden.zen {enabled}` — publish Zen presence. Enabling is accepted only within 4.5 tiles of
+  the hub temple; disabling is accepted from any Garden space.
 
 Server to client:
 
@@ -73,8 +81,11 @@ Server to client:
 - `garden.peer_left {conn_id}`
 - `garden.corrected {seq, x, y}` — authoritative position after an invalid speed jump.
 - `garden.space_changed {space, channel_id?, peer}`
+- `garden.temple_arrived {peer}`
+- `garden.peer_zen {conn_id, zen_mode}`
 - `garden.map_changed {version}`
-- `garden.error {code, channel_id?}`, where current codes are `not_member` and `not_at_door`.
+- `garden.error {code, channel_id?}`, where current codes include `not_member`, `not_at_door`,
+  and `not_at_temple`.
 
 `GardenPeer` is:
 
@@ -90,6 +101,7 @@ Server to client:
   facing: 'up' | 'down' | 'left' | 'right'
   moving: boolean
   seq: number
+  zen_mode: boolean
 }
 ```
 
@@ -118,10 +130,19 @@ returns everyone to the hub. No Garden movement or visit history is persisted.
 - Phaser Arcade bodies prevent the local player from crossing buildings, mature trees, room
   walls, the shared table, chairs, crates, and planters. The server remains authoritative for
   movement speed and scene bounds.
-- Arrow keys and WASD move; pointer/touch chooses a destination. The room list can guide the
-  avatar to a doorway without requiring canvas precision. `Enter` enters a nearby room and
-  `Escape` exits the current room; both are declared in the shared shortcut registry and may be
-  rebound.
+- Arrow keys and WASD move; pointer/touch chooses a destination; `Space` performs a visual jump
+  with a deforming ground shadow and landing dust. The room rail can guide the avatar to a
+  doorway or the Zen temple without requiring canvas precision. `Enter` enters a nearby room or
+  the temple, `Escape` exits, and `R` opens the accessible room-creation dialog. Semantic
+  shortcuts are declared in the shared shortcut registry and may be rebound.
+- The persistent desktop room rail and mobile sheet show only ACL-visible rooms. Room teleport
+  uses an Escape-like spin and lift, a brief black transition, and a randomized spin-down
+  arrival. Reduced-motion users receive a short opacity transition instead. The bottom-right
+  minimap tracks the hub paths, visible rooms, temple, and current player position.
+- Entering the temple enables device DnD while preserving its prior state, publishes
+  `zen_mode` to Garden peers, and opens a quiet temple interior. Leaving restores DnD only when
+  Garden originally enabled it. A CC0 ambient loop starts by default; the device-local melody
+  toggle and volume remain user-controlled.
 - First room entry asks whether Garden may manage room audio. The answer is device-local
   (`sharp.gardenAudio`). Camera remains off. If another call is active, Garden preserves it and
   shows a conflict message.
@@ -132,5 +153,9 @@ returns everyone to the hub. No Garden movement or visit history is persisted.
   and Garden stay usable beneath it.
 
 The runtime generates an original Sharp map from the durable room coordinates and renders it
-with open-source Phaser plus the attributed CC0 asset subset. It does not copy WorkAdventure or
-Pokémon code, maps, characters, names, or other game assets.
+with open-source Phaser plus attributed CC0 subsets. Ninja Adventure supplies the base world and
+character sheets; PixelKensei's Feudal Japan Props Vol. 2 supplies temple pieces; qubodup's
+CC0 Dark Shrine Loop supplies Zen ambience. Provenance is stored beside each asset. Interaction,
+collision, jump, landing, teleport, creation, and Zen one-shots are synthesized through Sharp's
+existing audio mixer, so they require no additional copyrighted samples. Garden does not copy
+WorkAdventure or Pokémon code, maps, characters, names, sounds, or extracted game assets.

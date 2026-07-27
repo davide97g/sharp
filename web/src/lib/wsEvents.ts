@@ -351,6 +351,20 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
         syncGardenAudio(set, get)
         break
       }
+      case 'garden.temple_arrived': {
+        const p = env.payload as { peer: GardenPeer }
+        if (p.peer.conn_id !== get().myConnId) break
+        set((s) => ({
+          garden: {
+            ...s.garden,
+            space: 'hub',
+            channelId: null,
+            self: p.peer,
+            error: null,
+          },
+        }))
+        break
+      }
       case 'garden.map_changed': {
         if (get().garden.active) void get().loadGarden()
         break

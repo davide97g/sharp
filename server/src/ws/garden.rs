@@ -193,6 +193,7 @@ pub async fn handle_event(
         "garden.move" => handle_move(state, conn_id, &payload, tx).await,
         "garden.room_enter" => handle_room_enter(state, user_id, conn_id, &payload, tx).await,
         "garden.room_teleport" => handle_room_teleport(state, user_id, conn_id, &payload, tx).await,
+        "garden.temple_teleport" => handle_temple_teleport(state, conn_id, tx).await,
         "garden.room_exit" => handle_room_exit(state, conn_id, tx).await,
         "garden.zen" => handle_zen(state, conn_id, &payload, tx).await,
         _ => {}
@@ -484,6 +485,42 @@ async fn handle_room_teleport(
         json!({ "space": "room", "channel_id": channel_id, "peer": peer }),
     );
     broadcast_joined(state, &peer).await;
+}
+
+async fn handle_temple_teleport(state: &SharedState, conn_id: Uuid, tx: &WsSender) {
+    let peer = {
+        let mut guard = state.garden.peers.lock().unwrap();
+        let Some(peer) = guard.get_mut(&conn_id) else {
+            return;
+        };
+        if peer.channel_id.is_some() {
+            return;
+        }
+        peer.x = TEMPLE_X;
+        peer.y = TEMPLE_Y + 3.0;
+        peer.moving = false;
+        peer.zen_mode = false;
+        peer.clone()
+    };
+    send(tx, "garden.temple_arrived", json!({ "peer": peer }));
+    let targets = targets_for_space(state, &GardenSpace::Hub).await;
+    state
+        .hub
+        .broadcast(
+            envelope(
+                "garden.peer_moved",
+                json!({
+                    "conn_id": peer.conn_id.to_string(),
+                    "seq": peer.seq,
+                    "x": peer.x,
+                    "y": peer.y,
+                    "facing": peer.facing,
+                    "moving": false,
+                }),
+            ),
+            targets,
+        )
+        .await;
 }
 
 async fn handle_zen(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &WsSender) {

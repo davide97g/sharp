@@ -602,6 +602,7 @@ export type State = {
   ) => void
   enterGardenRoom: (channelId: string) => Promise<void>
   teleportGardenRoom: (channelId: string) => Promise<void>
+  teleportGardenTemple: () => void
   exitGardenRoom: () => void
   setGardenZen: (enabled: boolean) => void
   setGardenAudio: (mode: Exclude<GardenAudioMode, 'ask'>) => void
@@ -2003,6 +2004,10 @@ export const useStore = create<State>((set, get) => ({
       await get().loadGarden()
     }
     get().ws?.send('garden.room_teleport', { channel_id: channelId })
+  },
+
+  teleportGardenTemple() {
+    get().ws?.send('garden.temple_teleport', {})
   },
 
   exitGardenRoom() {

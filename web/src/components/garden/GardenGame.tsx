@@ -220,16 +220,37 @@ export function GardenGame({
             this.waypoints = []
             this.target = { x: pointer.worldX, y: pointer.worldY }
           })
+          const routeToPlaza = () => {
+            const plaza = { x: 52 * TILE, y: 64 * TILE }
+            const playerY = this.player.node.y / TILE
+            if (Math.hypot(this.player.node.x / TILE - 52, playerY - 64) < 3) {
+              return [plaza]
+            }
+            if (playerY > 66) return [plaza]
+            const roomRows = [...new Set(map.rooms.map((room) => room.door_y))]
+            if (roomRows.length === 0) return [plaza]
+            const nearestRow = roomRows.reduce((nearest, candidate) =>
+              Math.abs(candidate - playerY) < Math.abs(nearest - playerY)
+                ? candidate
+                : nearest,
+            )
+            // Houses occupy the area north of each doorway. First step into
+            // the clear band south of the row, then cross to the central path.
+            const safeY = (nearestRow + 4) * TILE
+            return [
+              { x: this.player.node.x, y: safeY },
+              { x: plaza.x, y: safeY },
+              plaza,
+            ]
+          }
           const walkToRoom = (event: Event) => {
             if (zenMode || space !== 'hub') return
             const room = (event as CustomEvent<GardenRoom>).detail
-            const plaza = { x: 52 * TILE, y: 64 * TILE }
-            const elbow = { x: room.door_x * TILE, y: plaza.y }
-            // Houses face south. For plots below the plaza, stop on the north
-            // threshold, still inside the server's 4.5-tile entry radius.
-            const approachY = room.door_y > 64 ? room.door_y - 4 : room.door_y
-            const door = { x: room.door_x * TILE, y: approachY * TILE }
-            this.waypoints = [plaza, elbow, door].filter(
+            const safeY = (room.door_y + 4) * TILE
+            const central = { x: 52 * TILE, y: safeY }
+            const elbow = { x: room.door_x * TILE, y: safeY }
+            const door = { x: room.door_x * TILE, y: room.door_y * TILE }
+            this.waypoints = [...routeToPlaza(), central, elbow, door].filter(
               (point, index, points) =>
                 index === 0 ||
                 point.x !== points[index - 1].x ||
@@ -241,11 +262,14 @@ export function GardenGame({
             const room = (event as CustomEvent<GardenRoom>).detail
             this.startTeleport(room)
           }
+          const teleportToTemple = () => this.startTempleTeleport()
           window.addEventListener('sharp:garden-walk-to', walkToRoom)
           window.addEventListener('sharp:garden-teleport', teleportToRoom)
+          window.addEventListener('sharp:garden-teleport-temple', teleportToTemple)
           this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
             window.removeEventListener('sharp:garden-walk-to', walkToRoom)
             window.removeEventListener('sharp:garden-teleport', teleportToRoom)
+            window.removeEventListener('sharp:garden-teleport-temple', teleportToTemple)
           })
 
           this.cameras.main.setBounds(0, 0, this.worldWidth, this.worldHeight)
@@ -514,7 +538,7 @@ export function GardenGame({
           }
           if (this.reducedMotion) {
             this.cameras.main.fadeOut(120, 0, 0, 0)
-            this.time.delayedCall(120, commit)
+            window.setTimeout(commit, 120)
             return
           }
           this.tweens.add({
@@ -536,8 +560,82 @@ export function GardenGame({
             duration: 500,
             ease: 'Cubic.in',
           })
-          this.time.delayedCall(260, () => this.cameras.main.fadeOut(280, 0, 0, 0))
-          this.time.delayedCall(545, commit)
+          window.setTimeout(() => {
+            if (this.scene.isActive()) this.cameras.main.fadeOut(280, 0, 0, 0)
+          }, 260)
+          window.setTimeout(commit, 545)
+        }
+
+        private startTempleTeleport() {
+          if (space !== 'hub' || zenMode || this.player.teleporting) return
+          this.player.teleporting = true
+          this.target = null
+          this.waypoints = []
+          const body = this.player.node.body as import('phaser').Physics.Arcade.Body
+          body.setVelocity(0, 0)
+          sound.garden.teleport()
+
+          const commit = () => {
+            let completed = false
+            const finish = () => {
+              if (completed) return
+              completed = true
+              unsubscribe()
+              const self = useStore.getState().garden.self
+              if (self) {
+                this.player.node.setPosition(self.x * TILE, self.y * TILE)
+                body.reset(self.x * TILE, self.y * TILE)
+              }
+              this.playTeleportArrival()
+            }
+            const unsubscribe = useStore.subscribe((state) => {
+              const self = state.garden.self
+              if (
+                self &&
+                Math.hypot(self.x - map.temple.x, self.y - map.temple.y) <= 4.5
+              ) {
+                finish()
+              }
+            })
+            useStore.getState().teleportGardenTemple()
+            window.setTimeout(() => {
+              if (completed) return
+              unsubscribe()
+              this.player.teleporting = false
+              this.player.airOffset = 0
+              this.player.sprite.setAngle(0)
+              this.cameras.main.fadeIn(180, 0, 0, 0)
+            }, 1800)
+          }
+
+          if (this.reducedMotion) {
+            this.cameras.main.fadeOut(120, 0, 0, 0)
+            window.setTimeout(commit, 120)
+            return
+          }
+          this.tweens.add({
+            targets: this.player,
+            airOffset: 84,
+            duration: 520,
+            ease: 'Cubic.in',
+          })
+          this.tweens.add({
+            targets: this.player.sprite,
+            angle: 720,
+            duration: 520,
+            ease: 'Cubic.in',
+          })
+          this.tweens.add({
+            targets: this.player.shadow,
+            alpha: 0,
+            scale: 0.08,
+            duration: 500,
+            ease: 'Cubic.in',
+          })
+          window.setTimeout(() => {
+            if (this.scene.isActive()) this.cameras.main.fadeOut(280, 0, 0, 0)
+          }, 260)
+          window.setTimeout(commit, 545)
         }
 
         private playTeleportArrival() {
