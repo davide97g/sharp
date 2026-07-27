@@ -102,8 +102,9 @@ optimistically.
 
 ## GitHub sync (Phase C)
 
-Env-first, inert when unset (Sharpy pattern): `GITHUB_TOKEN` (PAT), `GITHUB_WEBHOOK_SECRET`,
-`GITHUB_REPOS` (`owner/name` comma allowlist). `server/src/github.rs` + webhook route.
+Env-first, inert when unset (Sharpy pattern): `GITHUB_WEBHOOK_SECRET`, plus optional
+`GITHUB_REPOS` (`owner/name` comma allowlist). No PAT — sync is inbound-only, so there are
+no outbound GitHub API calls. `server/src/routes/github.rs`.
 Inbound (HMAC-verified, allowlisted): branch `create`/`push` with `key-123` in the branch
 name upserts a `branch` link and moves `backlog|unstarted` tasks to the first
 `started` state; `pull_request` opened/edited/ready links by branch name, PR title, or
