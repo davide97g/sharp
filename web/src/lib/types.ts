@@ -333,6 +333,9 @@ export type VoiceParticipant = {
   hand_raised_at: number | null
   // Audio-aura style this participant broadcasts; null falls back to the viewer's local style.
   aura_style: string | null
+  // Spatial-room position, normalized 0..1 (x = left→right, y = top→bottom).
+  pos_x: number
+  pos_y: number
   joined_at: string
 }
 
@@ -517,6 +520,14 @@ export type VoiceParticipantLeftPayload = {
 export type VoiceParticipantUpdatedPayload = {
   channel_id: string
   participant: VoiceParticipant
+}
+// Spatial-room movement. Deliberately thinner than participant_updated: it
+// arrives at pointer rate, so only the moved coordinates travel.
+export type VoiceParticipantMovedPayload = {
+  channel_id: string
+  conn_id: string
+  x: number
+  y: number
 }
 export type VoiceErrorPayload = { channel_id: string; code: string }
 // Screen-share annotation relays (server -> client).

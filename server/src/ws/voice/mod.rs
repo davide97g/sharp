@@ -80,7 +80,45 @@ pub struct VoiceParticipant {
     /// Audio-aura style this participant broadcasts to the room, so every viewer
     /// sees their chosen signature. `None` falls back to the viewer's local style.
     pub aura_style: Option<String>,
+    /// Position in the spatial room, normalized to 0..1 on both axes (x = left to
+    /// right, y = top to bottom of the floor plan). Assigned a spread-out spawn at
+    /// join and moved by `voice.move`. Every client gets it even when the spatial
+    /// view is off — switching views must not need a round trip.
+    pub pos_x: f64,
+    pub pos_y: f64,
     pub joined_at: DateTime<Utc>,
+}
+
+/// Spawn points walk a golden-angle spiral out from the middle of the floor, so
+/// each new arrival lands clear of everyone already standing there. Deterministic
+/// (no RNG) and collision-aware: the first point at least `SPAWN_MIN_GAP` from
+/// every occupied spot wins, falling back to the center when the floor is packed.
+const SPAWN_MIN_GAP: f64 = 0.11;
+const SPAWN_GOLDEN_ANGLE: f64 = 2.399_963_229_728_653;
+
+fn spawn_position(room: &VoiceRoom) -> (f64, f64) {
+    let taken: Vec<(f64, f64)> = room
+        .participants
+        .values()
+        .map(|participant| (participant.pos_x, participant.pos_y))
+        .collect();
+    for step in 0..64 {
+        let angle = step as f64 * SPAWN_GOLDEN_ANGLE;
+        let radius = 0.055 * (step as f64).sqrt();
+        let x = clamp_unit(0.5 + radius * angle.cos());
+        let y = clamp_unit(0.5 + radius * angle.sin());
+        if taken
+            .iter()
+            .all(|(ox, oy)| ((x - ox).powi(2) + (y - oy).powi(2)).sqrt() >= SPAWN_MIN_GAP)
+        {
+            return (x, y);
+        }
+    }
+    (0.5, 0.5)
+}
+
+fn clamp_unit(value: f64) -> f64 {
+    value.clamp(0.0, 1.0)
 }
 
 /// The audio-aura styles a client may broadcast. Validated server-side so an
@@ -284,6 +322,7 @@ pub async fn handle_voice_event(
         "voice.mute" => handle_mute(state, conn_id, &payload, tx).await,
         "voice.transcribe" => handle_transcribe(state, conn_id, &payload, tx).await,
         "voice.aura" => handle_aura(state, conn_id, &payload, tx).await,
+        "voice.move" => handle_move(state, conn_id, &payload).await,
         "voice.phrase" => handle_phrase(state, conn_id, &payload, tx).await,
         "voice.camera" => handle_camera(state, conn_id, &payload, tx).await,
         "voice.screen" => handle_screen(state, conn_id, &payload, tx).await,
@@ -560,6 +599,7 @@ async fn handle_join(
             JoinResult::Full
         } else {
             let annotation_color = pick_annotation_color(room, conn_id);
+            let (pos_x, pos_y) = spawn_position(room);
             let participant = VoiceParticipant {
                 conn_id,
                 user_id,
@@ -574,6 +614,8 @@ async fn handle_join(
                 hand_raised_at: None,
                 annotation_color,
                 aura_style: sanitize_aura_style(payload),
+                pos_x,
+                pos_y,
                 joined_at: Utc::now(),
             };
             room.participants.insert(conn_id, participant.clone());
@@ -761,6 +803,53 @@ async fn handle_aura(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &W
     };
 
     broadcast_participant_updated(state, channel_id, participant).await;
+}
+
+/// Spatial-room movement. Deliberately quiet and light: coordinates arrive at
+/// pointer/keyboard rate, so a move broadcasts a 4-field `voice.participant_moved`
+/// rather than the whole participant, and a move from a connection that already
+/// left is dropped without an error (the client throttles, the leave races it).
+async fn handle_move(state: &SharedState, conn_id: Uuid, payload: &Value) {
+    let Some(channel_id) = channel_id(payload) else {
+        return;
+    };
+    let (Some(x), Some(y)) = (
+        payload.get("x").and_then(Value::as_f64),
+        payload.get("y").and_then(Value::as_f64),
+    ) else {
+        return;
+    };
+    if !x.is_finite() || !y.is_finite() {
+        return;
+    }
+    let (x, y) = (clamp_unit(x), clamp_unit(y));
+
+    let moved = {
+        let mut guard = state.voice_rooms.lock().unwrap();
+        guard
+            .get_mut(&channel_id)
+            .and_then(|room| room.participants.get_mut(&conn_id))
+            .map(|participant| {
+                participant.pos_x = x;
+                participant.pos_y = y;
+            })
+            .is_some()
+    };
+    if !moved {
+        return;
+    }
+
+    let targets = voice_targets(state, channel_id, &[]).await;
+    let event = envelope(
+        "voice.participant_moved",
+        json!({
+            "channel_id": channel_id.to_string(),
+            "conn_id": conn_id.to_string(),
+            "x": x,
+            "y": y,
+        }),
+    );
+    state.hub.broadcast(event, targets).await;
 }
 
 async fn handle_hand(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &WsSender) {
@@ -1134,6 +1223,8 @@ mod tests {
             hand_raised_at: None,
             annotation_color: ANNOTATION_PALETTE[0].to_string(),
             aura_style: None,
+            pos_x: 0.5,
+            pos_y: 0.5,
             joined_at: Utc::now(),
         }
     }
@@ -1169,6 +1260,8 @@ mod tests {
             hand_raised_at: None,
             annotation_color: ANNOTATION_PALETTE[0].to_string(),
             aura_style: None,
+            pos_x: 0.5,
+            pos_y: 0.5,
             joined_at: Utc::now(),
         }
     }
@@ -1468,5 +1561,36 @@ mod tests {
                 if participant.screen_on
                     && participant.screen_stream_id.as_deref() == Some("stream-new")
         ));
+    }
+
+    #[test]
+    fn first_spawn_is_the_center_of_the_floor() {
+        assert_eq!(spawn_position(&VoiceRoom::default()), (0.5, 0.5));
+    }
+
+    #[test]
+    fn spawns_stay_apart_and_inside_the_floor() {
+        let mut room = VoiceRoom::default();
+        let mut placed: Vec<(f64, f64)> = Vec::new();
+        for _ in 0..MAX_PARTICIPANTS {
+            let (x, y) = spawn_position(&room);
+            assert!((0.0..=1.0).contains(&x) && (0.0..=1.0).contains(&y));
+            for (ox, oy) in &placed {
+                let distance = ((x - ox).powi(2) + (y - oy).powi(2)).sqrt();
+                assert!(distance >= SPAWN_MIN_GAP, "spawned on top of a neighbour");
+            }
+            placed.push((x, y));
+            let mut participant = participant(false);
+            participant.pos_x = x;
+            participant.pos_y = y;
+            room.participants.insert(participant.conn_id, participant);
+        }
+    }
+
+    #[test]
+    fn positions_clamp_into_the_unit_square() {
+        assert_eq!(clamp_unit(-0.4), 0.0);
+        assert_eq!(clamp_unit(1.7), 1.0);
+        assert_eq!(clamp_unit(0.25), 0.25);
     }
 }

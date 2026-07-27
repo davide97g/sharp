@@ -47,6 +47,7 @@ import {
   activeMeetingsFromSnapshots,
   emptyVoiceState,
   voiceErrorMessage,
+  voiceRoomEntry,
   voiceRoomFromParticipants,
   voiceRoomsFromSnapshots,
 } from './store/voiceHelpers'
@@ -102,6 +103,7 @@ import type {
   VoiceErrorPayload,
   VoiceParticipantJoinedPayload,
   VoiceParticipantLeftPayload,
+  VoiceParticipantMovedPayload,
   VoiceParticipantUpdatedPayload,
   VoicePollStatePayload,
   VoiceStatePayload,
@@ -228,21 +230,7 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
             ...s.voiceRooms,
             [p.channel_id]: {
               ...(s.voiceRooms[p.channel_id] ?? {}),
-              [p.participant.conn_id]: {
-                user_id: p.participant.user_id,
-                display_name: p.participant.display_name,
-                annotation_color: p.participant.annotation_color,
-                guest: p.participant.guest,
-                muted: p.participant.muted,
-                transcribing: p.participant.transcribing,
-                camera_on: p.participant.camera_on,
-                screen_on: p.participant.screen_on,
-                  screen_stream_id: p.participant.screen_stream_id,
-                  hand_raised: p.participant.hand_raised,
-                  hand_raised_at: p.participant.hand_raised_at,
-                  aura_style: p.participant.aura_style,
-                  joined_at: p.participant.joined_at,
-              },
+              [p.participant.conn_id]: voiceRoomEntry(p.participant),
             },
           },
         }))
@@ -314,6 +302,21 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
         }
         break
       }
+      case 'voice.participant_moved': {
+        const p = env.payload as VoiceParticipantMovedPayload
+        set((s) => {
+          const room = s.voiceRooms[p.channel_id]
+          const entry = room?.[p.conn_id]
+          if (!entry) return {}
+          return {
+            voiceRooms: {
+              ...s.voiceRooms,
+              [p.channel_id]: { ...room, [p.conn_id]: { ...entry, pos_x: p.x, pos_y: p.y } },
+            },
+          }
+        })
+        break
+      }
       case 'voice.participant_updated': {
         const p = env.payload as VoiceParticipantUpdatedPayload
         // Detect a false→true hand-raise transition for another participant (never
@@ -332,21 +335,7 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
               ...s.voiceRooms,
               [p.channel_id]: {
                 ...room,
-                [p.participant.conn_id]: {
-                  user_id: p.participant.user_id,
-                  display_name: p.participant.display_name,
-                  annotation_color: p.participant.annotation_color,
-                  guest: p.participant.guest,
-                  muted: p.participant.muted,
-                  transcribing: p.participant.transcribing,
-                  camera_on: p.participant.camera_on,
-                  screen_on: p.participant.screen_on,
-                screen_stream_id: p.participant.screen_stream_id,
-                hand_raised: p.participant.hand_raised,
-                hand_raised_at: p.participant.hand_raised_at,
-                aura_style: p.participant.aura_style,
-                joined_at: p.participant.joined_at,
-                },
+                [p.participant.conn_id]: voiceRoomEntry(p.participant),
               },
             },
           }

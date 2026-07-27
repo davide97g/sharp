@@ -84,10 +84,14 @@ export function Composer({
   channel,
   parentId,
   placeholder,
+  compact,
 }: {
   channel: Channel
   parentId?: string
   placeholder?: string
+  /** Narrow surfaces (call chat rail): mobile-style "+" sheet row, no voice
+      recording — you're already on a live mic in a call. */
+  compact?: boolean
 }) {
   // Draft text is stored per composer so each chat (and each thread) keeps its
   // own in-progress message instead of one input bleeding across chats.
@@ -135,6 +139,8 @@ export function Composer({
   const [pollOpen, setPollOpen] = useState(false)
   const isGuest = useStore((s) => s.isGuest)
   const isMobile = useIsMobile()
+  // The condensed single-row layout: on mobile, and on any compact surface.
+  const condensed = compact || isMobile
   // Mobile "+" sheet holding attach / GIF / poll so the input row stays roomy.
   const [plusOpen, setPlusOpen] = useState(false)
   const plusRef = useRef<HTMLDivElement>(null)
@@ -144,7 +150,8 @@ export function Composer({
   const [recorder, setRecorder] = useState<VoiceRecorder | null>(null)
   const [recordMs, setRecordMs] = useState(0)
   const recorderRef = useRef<VoiceRecorder | null>(null)
-  const [recordingSupported] = useState(isRecordingSupported)
+  const [recordingSupportedRaw] = useState(isRecordingSupported)
+  const recordingSupported = recordingSupportedRaw && !compact
 
   const gifCommand = /^\/gif(?:\s+(.*))?$/.exec(value)
   const slashGifOpen = gifEnabled && gifCommand !== null && dismissedGifCommand !== value
@@ -192,7 +199,7 @@ export function Composer({
   // Close the mobile "+" sheet when moving to a different chat or leaving mobile.
   useEffect(() => {
     setPlusOpen(false)
-  }, [draftKey, isMobile])
+  }, [draftKey, condensed])
 
   // Populate the picker. People (@) resolve from the already-loaded directory
   // (channel members first); emoji (:) from the local shortcode index; resources
@@ -691,9 +698,16 @@ export function Composer({
   const canSend = !sending && !uploading && (!!value.trim() || readyIds.length > 0)
 
   return (
-    <div className="composer-wrap relative px-4 pb-3 pt-1 md:pb-4" data-has-draft={!!value || undefined}>
+    <div
+      className={`composer-wrap relative ${
+        compact ? 'px-2 pb-2 pt-1' : 'px-4 pb-3 pt-1 md:pb-4'
+      }`}
+      data-has-draft={!!value || undefined}
+    >
       {gifOpen && (
-        <div className="composer-picker absolute bottom-full left-4 z-30 mb-2">
+        <div
+          className={`composer-picker absolute bottom-full z-30 mb-2 ${compact ? 'left-2' : 'left-4'}`}
+        >
           <GifPicker
             ref={gifPickerRef}
             key={slashGifOpen ? `slash:${gifInitialQuery}` : 'manual'}
@@ -705,7 +719,11 @@ export function Composer({
         </div>
       )}
       {pickerOpen && !gifOpen && (
-        <div className="composer-picker absolute bottom-full left-4 right-4 z-20 mb-1 max-h-64 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1.5 shadow-2xl">
+        <div
+          className={`composer-picker absolute bottom-full z-20 mb-1 max-h-64 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1.5 shadow-2xl ${
+            compact ? 'left-2 right-2' : 'left-4 right-4'
+          }`}
+        >
           <div className="flex items-center justify-between px-2 py-1">
             <SectionLabel as="span" size="3xs">
               {trigger?.type === '@'
@@ -781,7 +799,9 @@ export function Composer({
           setDragOver(false)
           if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files)
         }}
-        className={`composer-shell relative rounded-xl border bg-[var(--color-panel)] px-3 py-2 transition ${
+        className={`composer-shell relative rounded-xl border bg-[var(--color-panel)] transition ${
+          compact ? 'px-1.5 py-1' : 'px-3 py-2'
+        } ${
           dragOver
             ? 'border-[var(--color-accent)] ring-2 ring-[var(--color-accent-soft)]'
             : 'border-[var(--color-border)] focus-within:border-[var(--color-accent)] focus-within:ring-2 focus-within:ring-[var(--color-accent-soft)]'
@@ -906,9 +926,10 @@ export function Composer({
             }}
           />
 
-          {/* Mobile: one "+" that opens a sheet with attach / GIF / poll, so the
-              text field keeps the full width. Desktop keeps the inline buttons. */}
-          {isMobile ? (
+          {/* Condensed (mobile + call rail): one "+" that opens a sheet with
+              attach / GIF / poll, so the text field keeps the full width.
+              Roomy desktop keeps the inline buttons. */}
+          {condensed ? (
             (() => {
               const canPoll = channel.kind !== 'dm' && !isGuest && canPost
               return (
@@ -921,13 +942,15 @@ export function Composer({
                     }}
                     aria-label="Add attachment, GIF, or poll"
                     aria-expanded={plusOpen}
-                    className={`mb-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+                    className={`mb-0.5 flex shrink-0 items-center justify-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+                      compact ? 'h-9 w-9' : 'h-11 w-11'
+                    } ${
                       plusOpen
                         ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]'
                         : 'text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]'
                     }`}
                   >
-                    <PlusIcon open={plusOpen} />
+                    <PlusIcon open={plusOpen} size={compact ? 18 : 22} />
                   </button>
                   {plusOpen && (
                       <div
@@ -1028,9 +1051,10 @@ export function Composer({
             className="composer-textarea min-h-11 max-h-[260px] flex-1 resize-none bg-transparent py-2.5 text-base text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:outline-none md:min-h-0 md:py-1.5 md:text-sm"
           />
 
-          {/* Mobile: an icon that flips between voice-record (empty) and send —
-              the WhatsApp affordance. Desktop keeps the labelled Send button. */}
-          {isMobile ? (
+          {/* Condensed: an icon that flips between voice-record (empty) and send —
+              the WhatsApp affordance. Compact surfaces have no voice recording, so
+              it's the send icon only. Roomy desktop keeps the labelled Send button. */}
+          {condensed ? (
             !canSend && recordingSupported && !value.trim() && readyIds.length === 0 ? (
               <IconButton
                 label="Record a voice message"
@@ -1048,12 +1072,12 @@ export function Composer({
                 title={uploading ? 'Waiting for uploads…' : 'Send'}
                 variant="accent"
                 shape="circle"
-                size="xl"
+                size={compact ? 'md' : 'xl'}
                 className="composer-send mb-0.5"
                 onClick={doSend}
                 disabled={!canSend}
               >
-                <SendIcon />
+                <SendIcon size={compact ? 16 : 20} />
               </IconButton>
             )
           ) : (
@@ -1104,11 +1128,11 @@ function PaperclipGlyph() {
 }
 
 // Rotates from a plus into a close (×) while the sheet is open.
-function PlusIcon({ open }: { open: boolean }) {
+function PlusIcon({ open, size = 22 }: { open: boolean; size?: number }) {
   return (
     <svg
-      width="22"
-      height="22"
+      width={size}
+      height={size}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -1123,9 +1147,9 @@ function PlusIcon({ open }: { open: boolean }) {
   )
 }
 
-function SendIcon() {
+function SendIcon({ size = 20 }: { size?: number }) {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
       <path d="M3.4 20.4 21 12 3.4 3.6 3.39 10.2 15 12l-11.61 1.8z" />
     </svg>
   )

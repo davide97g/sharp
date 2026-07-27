@@ -1865,6 +1865,14 @@ input[type='range'].range-slider::-moz-range-track {
 .voice-speaker-avatar { transition: transform var(--motion-snap) var(--motion-spring), filter var(--motion-snap) ease; }
 .voice-speaker-avatar.is-speaking { animation: sharp-speaking-ring 720ms ease-in-out infinite; }
 .voice-stage { transform-origin: bottom right; animation: sharp-stage-in 360ms var(--motion-spring) both; }
+/* Spatial view floor: a dot lattice so movement reads as movement, plus a soft
+   vignette that keeps avatars near the edges from looking clipped. */
+.spatial-floor {
+  background-image:
+    radial-gradient(circle at center, color-mix(in srgb, var(--color-border) 90%, transparent) 1px, transparent 1px),
+    radial-gradient(ellipse at center, transparent 55%, color-mix(in srgb, var(--color-ink) 45%, transparent) 100%);
+  background-size: 28px 28px, 100% 100%;
+}
 
 /* Live call poll: quiet entrance + the same green "live" pulse as speaking. */
 @keyframes sharp-poll-live {

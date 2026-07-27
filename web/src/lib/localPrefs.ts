@@ -53,6 +53,8 @@ export const KEYS = {
   sidebarOpen: 'sharp.sidebarOpen',
   /** Which corner the floating voice widget is parked in. */
   voiceWidgetCorner: 'sharp.voiceWidgetCorner',
+  /** Spatial call view (floor plan + positional audio): a per-device viewing choice. */
+  voiceSpatial: 'sharp.voiceSpatial',
   /** Legacy single-flag video blur, superseded by the scoped videoBackground key. */
   videoBlurLegacy: 'sharp.videoBlur',
   /** Seasonal pack forced on from Settings → Appearance ("Try it now"). Device-local

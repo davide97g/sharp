@@ -6,31 +6,39 @@
 // never merge optimistically. A local guess that disagrees with the next snapshot shows a
 // participant who is not there.
 
-import type { Poll, VoiceRoomSnapshot } from '../types'
+import type { Poll, VoiceParticipant, VoiceRoomSnapshot } from '../types'
 import { KEYS, readLocalBool, writeLocalBool } from '../localPrefs'
 import { loadVideoBackground } from '../videoBackgrounds'
 import type { VoiceRoom, VoiceState } from '../../store'
+
+/** The one place a wire participant becomes a room entry — snapshots and the
+ *  joined/updated events all go through it, so a new field is added once. */
+export function voiceRoomEntry(participant: VoiceParticipant): VoiceRoom[string] {
+  return {
+    user_id: participant.user_id,
+    display_name: participant.display_name,
+    annotation_color: participant.annotation_color,
+    guest: participant.guest,
+    muted: participant.muted,
+    transcribing: participant.transcribing,
+    camera_on: participant.camera_on,
+    screen_on: participant.screen_on,
+    screen_stream_id: participant.screen_stream_id,
+    hand_raised: participant.hand_raised,
+    hand_raised_at: participant.hand_raised_at,
+    aura_style: participant.aura_style,
+    pos_x: participant.pos_x,
+    pos_y: participant.pos_y,
+    joined_at: participant.joined_at,
+  }
+}
 
 export function voiceRoomFromParticipants(
   participants: VoiceRoomSnapshot['participants'],
 ): VoiceRoom {
   const room: VoiceRoom = {}
   for (const participant of participants) {
-    room[participant.conn_id] = {
-      user_id: participant.user_id,
-      display_name: participant.display_name,
-      annotation_color: participant.annotation_color,
-      guest: participant.guest,
-      muted: participant.muted,
-      transcribing: participant.transcribing,
-      camera_on: participant.camera_on,
-      screen_on: participant.screen_on,
-      screen_stream_id: participant.screen_stream_id,
-      hand_raised: participant.hand_raised,
-      hand_raised_at: participant.hand_raised_at,
-      aura_style: participant.aura_style,
-      joined_at: participant.joined_at,
-    }
+    room[participant.conn_id] = voiceRoomEntry(participant)
   }
   return room
 }
@@ -102,6 +110,17 @@ export function storedNoiseSuppression(): boolean {
   return readLocalBool(KEYS.noiseSuppression, true)
 }
 
+// Spatial view is a per-device viewing choice (it changes what YOU hear, not what the
+// room broadcasts), so it lives next to the other device-local call prefs. Off by
+// default — plain stereo is what people expect when they join a call.
+export function saveVoiceSpatial(enabled: boolean) {
+  writeLocalBool(KEYS.voiceSpatial, enabled)
+}
+
+export function storedVoiceSpatial(): boolean {
+  return readLocalBool(KEYS.voiceSpatial, false)
+}
+
 /** The idle voice slice — also the reset applied on every leave/kick/error path. */
 export function emptyVoiceState(): VoiceState {
   const videoBackground = loadVideoBackground()
@@ -120,6 +139,7 @@ export function emptyVoiceState(): VoiceState {
     cameraStatus: 'off',
     screenStatus: 'off',
     stageMode: 'expanded',
+    spatial: storedVoiceSpatial(),
     audioDeviceId: null,
     videoDeviceId: null,
     localStream: null,

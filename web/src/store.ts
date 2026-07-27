@@ -46,7 +46,7 @@ import { applyUi } from './lib/store/uiHelpers'
 import {
   emptyVoiceState,
   saveNoiseSuppression,
-  storedNoiseSuppression,
+  saveVoiceSpatial,
 } from './lib/store/voiceHelpers'
 
 // The pure state predicates live in lib/store/predicates.ts; every caller imports them
@@ -170,6 +170,8 @@ export type VoiceRoom = Record<
     hand_raised: boolean
     hand_raised_at: number | null
     aura_style: string | null
+    pos_x: number
+    pos_y: number
     joined_at: string
   }
 >
@@ -195,6 +197,10 @@ export type VoiceState = {
   cameraStatus: 'off' | 'starting' | 'on'
   screenStatus: 'off' | 'starting' | 'on'
   stageMode: VoiceStageMode
+  // Spatial view: floor plan instead of the grid, and remote audio panned by where
+  // people stand. Device-local (see storedVoiceSpatial) — your positions are shared,
+  // your way of listening to them is not.
+  spatial: boolean
   audioDeviceId: string | null
   videoDeviceId: string | null
   localStream: MediaStream | null
@@ -539,6 +545,8 @@ export type State = {
   setVoiceAudioDevice: (deviceId: string) => Promise<void>
   setVoiceVideoDevice: (deviceId: string) => Promise<void>
   setVoiceStageMode: (mode: VoiceStageMode) => void
+  setVoiceSpatial: (enabled: boolean) => void
+  moveVoiceSelf: (x: number, y: number) => void
   toggleAnnotating: () => void
   setAnnotationsAllowed: (allowed: boolean) => void
   clearAnnotations: () => void
@@ -652,6 +660,13 @@ function emptyChannelMessages(): ChannelMessages {
 
 
 /** Local mirror of the appearance blob, replaced by the server copy on login. */
+// Spatial moves are produced at pointer/animation rate but only need to travel often
+// enough to sound continuous. Send at most every MOVE_SEND_MS, always with a trailing
+// send so the final resting position is the one everyone else ends up with.
+const MOVE_SEND_MS = 70
+let lastMoveSentAt = 0
+let pendingMoveTimer: ReturnType<typeof setTimeout> | null = null
+
 const initialUi = readLocalUiPrefs()
 // Sounds can fire before the first `applyUi` (splash, login), so seed the pack
 // from the mirror at module load rather than waiting for hydration.
@@ -1864,30 +1879,16 @@ export const useStore = create<State>((set, get) => ({
     const devicePrefs = loadVoiceDevicePrefs(me.id)
     set({
       callPoll: null,
+      // The idle slice is the shape of record; only what joining actually decides is
+      // overridden here (device prefs and the per-user background beat the defaults).
       voice: {
+        ...emptyVoiceState(),
         channelId,
         status: 'connecting',
-        muted: false,
-        noiseSuppression: storedNoiseSuppression(),
-        noiseSuppressionAvailable: true,
         videoBackground,
-        handRaised: false,
-        transcribing: false,
-        transcriptionAvailable: false,
-        roastArmed: false,
-        speaking: {},
-        cameraStatus: 'off',
-        screenStatus: 'off',
         stageMode: opts?.stageMode ?? 'expanded',
         audioDeviceId: devicePrefs.audioDeviceId,
         videoDeviceId: devicePrefs.videoDeviceId,
-        localStream: null,
-        remoteStreams: {},
-        localScreenStream: null,
-        remoteScreenStreams: {},
-        client: null,
-        annotationsAllowed: false,
-        annotating: false,
       },
     })
     annotations.reset()
@@ -2074,6 +2075,9 @@ export const useStore = create<State>((set, get) => ({
         },
       }))
       client.syncPeers(payload.participants)
+      // Positional audio is remembered per device; tracks subscribed later pick it
+      // up on their own (handleTrackSubscribed checks the flag).
+      if (active.spatial) client.setSpatialAudio(true)
       playVoiceJoinSound()
     } catch (error) {
       client.stop()
@@ -2308,6 +2312,54 @@ export const useStore = create<State>((set, get) => ({
   setVoiceStageMode(mode) {
     if (!get().voice.channelId) return
     set((s) => ({ voice: { ...s.voice, stageMode: mode } }))
+  },
+
+  setVoiceSpatial(enabled) {
+    saveVoiceSpatial(enabled)
+    set((s) => ({ voice: { ...s.voice, spatial: enabled } }))
+    get().voice.client?.setSpatialAudio(enabled)
+  },
+
+  // Optimistic on purpose, unlike the rest of the voice slice: your own avatar must
+  // track the pointer with no round trip. The server clamps and echoes the same value
+  // back through voice.participant_moved, so a rejected move self-corrects.
+  moveVoiceSelf(x, y) {
+    const { voice, myConnId, ws } = get()
+    const channelId = voice.channelId
+    if (!channelId || !myConnId || voice.status !== 'connected') return
+    const clamped = { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) }
+    set((s) => {
+      const room = s.voiceRooms[channelId]
+      const entry = room?.[myConnId]
+      if (!entry) return {}
+      return {
+        voiceRooms: {
+          ...s.voiceRooms,
+          [channelId]: { ...room, [myConnId]: { ...entry, pos_x: clamped.x, pos_y: clamped.y } },
+        },
+      }
+    })
+
+    const send = () => {
+      lastMoveSentAt = Date.now()
+      pendingMoveTimer = null
+      const latest = get()
+      const position = latest.voiceRooms[channelId]?.[myConnId]
+      if (!position || latest.voice.channelId !== channelId) return
+      latest.ws?.send('voice.move', {
+        channel_id: channelId,
+        x: position.pos_x,
+        y: position.pos_y,
+      })
+    }
+    if (!ws) return
+    const elapsed = Date.now() - lastMoveSentAt
+    if (elapsed >= MOVE_SEND_MS) {
+      if (pendingMoveTimer) clearTimeout(pendingMoveTimer)
+      send()
+    } else if (!pendingMoveTimer) {
+      pendingMoveTimer = setTimeout(send, MOVE_SEND_MS - elapsed)
+    }
   },
 
   toggleAnnotating() {

@@ -23,6 +23,8 @@ import { CallPollOverlay } from '../CallPollOverlay'
 import { CreatePollModal } from '../CreatePollModal'
 import { useAudioAuraPreference, setAudioAuraPreference } from '../../lib/meetingEffects'
 import { AudioAuraAvatar, AudioAuraPreview } from './AudioAuraAvatar'
+import { HandIcon, MicIcon } from './callIcons'
+import { SpatialStage, useSpatialAudio } from './SpatialStage'
 import { useDismiss } from '../../ui'
 
 type StageParticipant = {
@@ -111,6 +113,8 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
   const channel = useStore((s) => s.channels.find((candidate) => candidate.id === channelId))
   const toggleTranscription = useStore((s) => s.toggleTranscription)
   const setVoiceStageMode = useStore((s) => s.setVoiceStageMode)
+  const spatial = useStore((s) => s.voice.spatial)
+  const setVoiceSpatial = useStore((s) => s.setVoiceSpatial)
   const isMobile = useIsMobile()
   const [mics, setMics] = useState<MediaDeviceOption[]>([])
   const [cameras, setCameras] = useState<MediaDeviceOption[]>([])
@@ -134,6 +138,9 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
       Object.values(remoteScreenStreams).some((stream) => stream.getVideoTracks().length > 0),
   )
   const pip = useVoicePip(hasFallbackVideo)
+  // Positional audio must survive minimize/PiP, so it is driven here rather than
+  // from the floor plan itself.
+  useSpatialAudio()
 
   useEffect(() => {
     if (activeMeetingId && transcribing) setHandledNotesMeetingId(activeMeetingId)
@@ -359,6 +366,19 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
   const headerBtnClass =
     'flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-dim)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]'
 
+  const spatialToggle = (
+    <button
+      type="button"
+      aria-label={spatial ? 'Switch to grid view' : 'Switch to spatial view'}
+      title={spatial ? 'Grid view' : 'Spatial view — hear people from where they stand'}
+      aria-pressed={spatial}
+      onClick={() => setVoiceSpatial(!spatial)}
+      className={`${headerBtnClass} ${spatial ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]' : ''}`}
+    >
+      <SpatialIcon />
+    </button>
+  )
+
   const stageBody = activeScreen ? (
     <div className="flex h-full min-h-0 flex-col gap-2">
       <div className="min-h-0 flex-1">
@@ -421,6 +441,14 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
         </ul>
       )}
     </div>
+  ) : spatial ? (
+    // A live screen share outranks the floor plan (above); positional audio keeps
+    // running either way, so switching back loses nothing.
+    <SpatialStage
+      resolveName={resolveName}
+      audioAuraEnabled={audioAuraEnabled}
+      compact={stageMode === 'compact'}
+    />
   ) : isMobile && anyCamera && mobileFocus ? (
     <div className="flex h-full min-h-0 flex-col gap-2">
       <div className="min-h-0 flex-1">
@@ -578,6 +606,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
               <div className="truncate text-sm font-semibold">{roomName}</div>
             </div>
             <div className="ml-auto flex items-center gap-1">
+              {spatialToggle}
               {!isGuest && (channel || currentLinkToken) && (
                 <CopyLinkControl channelId={channel?.id} directToken={currentLinkToken} buttonClass={headerBtnClass} />
               )}
@@ -766,6 +795,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
             Notes on · {sharingCount} sharing
           </div>
         )}
+        {spatialToggle}
         {!isGuest && (channel || currentLinkToken) && (
           <CopyLinkControl channelId={channel?.id} directToken={currentLinkToken} buttonClass={headerBtnClass} />
         )}
@@ -825,6 +855,18 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
     {audioAuraPrompt}
     {notesConsentPrompt}
     </>
+  )
+}
+
+// Three figures on a floor: the spatial view in one glyph.
+function SpatialIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <ellipse cx="12" cy="12" rx="9.5" ry="6.5" />
+      <circle cx="8" cy="10" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="9" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="12.5" cy="15" r="1.6" fill="currentColor" stroke="none" />
+    </svg>
   )
 }
 
@@ -2498,49 +2540,6 @@ function CaptionsIcon({ compact = false }: { compact?: boolean }) {
     >
       <rect x="3" y="5" width="18" height="14" rx="2" />
       <path d="M7 11h2M13 11h4M7 15h4M15 15h2" />
-    </svg>
-  )
-}
-
-function HandIcon({ compact = false }: { compact?: boolean }) {
-  const size = compact ? 14 : 18
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M18 11V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2" />
-      <path d="M14 10V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v2" />
-      <path d="M10 10.5V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v8" />
-      <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
-    </svg>
-  )
-}
-
-function MicIcon({ off }: { off: boolean }) {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <rect x="9" y="2" width="6" height="12" rx="3" />
-      <path d="M5 10a7 7 0 0 0 14 0" />
-      <path d="M12 17v5" />
-      {off && <path d="m3 3 18 18" />}
     </svg>
   )
 }

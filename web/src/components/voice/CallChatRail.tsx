@@ -133,6 +133,7 @@ export function CallChatRail({ channelId }: { channelId: string }) {
       <Composer
         key={channel.id}
         channel={channel}
+        compact
         placeholder={`Message ${isDm ? channelLabel(channel, nicknames) : '#' + channel.name}`}
       />
     </div>
