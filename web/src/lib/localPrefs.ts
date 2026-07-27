@@ -55,6 +55,8 @@ export const KEYS = {
   voiceWidgetCorner: 'sharp.voiceWidgetCorner',
   /** Spatial call view (floor plan + positional audio): a per-device viewing choice. */
   voiceSpatial: 'sharp.voiceSpatial',
+  /** Most-recent in-call reaction emoji (newest first), so the quick row self-tunes. */
+  callReactionsRecent: 'sharp.callReactionsRecent',
   /** Legacy single-flag video blur, superseded by the scoped videoBackground key. */
   videoBlurLegacy: 'sharp.videoBlur',
   /** Seasonal pack forced on from Settings → Appearance ("Try it now"). Device-local

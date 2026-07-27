@@ -73,6 +73,7 @@ import {
   SparkleIcon,
   DotsIcon,
   SendIcon,
+  GithubIcon,
   GearIcon,
   LockIcon,
   EyeIcon,
@@ -144,6 +145,7 @@ const TOKEN_GROUPS: { group: string; tokens: string[] }[] = [
   { group: 'Danger', tokens: ['danger', 'danger-hover', 'danger-soft', 'danger-fg'] },
   { group: 'Success', tokens: ['success', 'success-soft', 'success-fg'] },
   { group: 'Warning', tokens: ['warning', 'warning-soft', 'warning-fg'] },
+  { group: 'Share (live out)', tokens: ['share', 'share-soft', 'share-fg'] },
   {
     group: 'Derived chrome',
     tokens: [
@@ -1067,6 +1069,7 @@ const ICONS: { name: string; Comp: ComponentType<IconProps> }[] = [
   { name: 'SparkleIcon', Comp: SparkleIcon },
   { name: 'DotsIcon', Comp: DotsIcon },
   { name: 'SendIcon', Comp: SendIcon },
+  { name: 'GithubIcon', Comp: GithubIcon },
   { name: 'GearIcon', Comp: GearIcon as ComponentType<IconProps> },
   { name: 'LockIcon', Comp: LockIcon as ComponentType<IconProps> },
   { name: 'EyeIcon', Comp: EyeIcon as ComponentType<IconProps> },

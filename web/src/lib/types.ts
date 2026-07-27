@@ -542,6 +542,14 @@ export type VoiceAnnotatePayload = {
   size?: number
 }
 export type VoiceAnnotateClearPayload = { channel_id: string }
+// Ephemeral in-call reaction relay (server -> client). Not persisted anywhere.
+export type VoiceReactionPayload = {
+  channel_id: string
+  conn_id: string
+  user_id: string
+  display_name: string
+  emoji: string
+}
 export type VoiceAnnotateStatePayload = { channel_id: string; allowed: boolean }
 export type VoiceTriggerCreatedPayload = { channel_id: string; trigger: VoiceTrigger }
 export type VoiceTriggerDeletedPayload = { channel_id: string; trigger_id: string }
@@ -797,8 +805,38 @@ export type Project = {
   created_by: string
   archived_at: string | null
   created_at: string
+  /** Branch naming convention; '' means the built-in `{identifier}-{slug}`. */
+  branch_template: string
   states: TaskState[]
   open_count: number
+  github_repos: ProjectGithubRepo[]
+}
+
+/** A repository linked to a project. Webhook secret and PAT stay server-side. */
+export type ProjectGithubRepo = {
+  id: string
+  project_id: string
+  repo: string // owner/name
+  visibility: '' | 'public' | 'private' | 'internal'
+  default_branch: string
+  hook_installed: boolean // we created the webhook through the API
+  hook_active: boolean // a signed delivery has arrived
+  has_token: boolean
+  last_error: string
+  last_event_at: string | null
+  last_event_kind: string
+  created_at: string
+}
+
+/** `GET /projects/:id/github` — status plus what manual setup needs. */
+export type ProjectGithubSetup = {
+  project: Project
+  webhook_url: string
+  events: string[]
+  /** Webhook secret per link id — shown so it can be pasted into GitHub. */
+  secrets: Record<string, string>
+  /** A global GITHUB_WEBHOOK_SECRET is also configured on this server. */
+  env_fallback: boolean
 }
 
 export type TaskGithubLink = {

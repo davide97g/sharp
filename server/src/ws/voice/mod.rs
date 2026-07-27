@@ -18,11 +18,12 @@
 //! Guardrail: the room mutex is a `std::sync::Mutex`. Never hold the guard across an
 //! `.await` — take what you need, drop the guard, then do the async work.
 //!
-//! Split across four files, all sharing this module's `VoiceRoom` state:
+//! Split across five files, all sharing this module's `VoiceRoom` state:
 //!   - this file — membership (join/leave), mic/camera/screen/hand, room lifecycle,
 //!     snapshots, and the event dispatch table
 //!   - `polls.rs` — in-call polls, including the boundary where a call poll is persisted
 //!   - `annotate.rs` — drawing over a shared screen
+//!   - `reactions.rs` — ephemeral emoji reactions
 //!   - `meeting.rs` — transcript phrases, voice triggers, and meeting records
 
 use crate::livekit::{self, MediaCredentials, MAX_CAMERAS, MAX_PARTICIPANTS};
@@ -42,6 +43,7 @@ use uuid::Uuid;
 mod annotate;
 mod meeting;
 mod polls;
+mod reactions;
 
 // The submodules are implementation detail of `ws::voice`; everything the rest of the
 // crate (and this file, and the tests below) uses is re-exported here, so `ws::voice::X`
@@ -58,6 +60,7 @@ pub(crate) use polls::{
     broadcast_null_poll, build_call_poll, handle_poll_close, handle_poll_create, handle_poll_vote,
     CallPoll,
 };
+pub(crate) use reactions::handle_react;
 pub use polls::{broadcast_for_persistent_poll, expire_call_polls};
 const MAX_SCREENS: usize = 1;
 
@@ -235,6 +238,9 @@ pub struct VoiceRoom {
     pub poll: Option<CallPoll>,
     /// Whether the current sharer permits others to draw over the shared screen.
     pub annotations_allowed: bool,
+    /// Recent `voice.react` timestamps per connection — the reaction rate limit's
+    /// sliding window (see `reactions.rs`). Dropped with the participant.
+    pub reaction_windows: HashMap<Uuid, VecDeque<Instant>>,
 }
 
 pub type VoiceRooms = Mutex<HashMap<Uuid, VoiceRoom>>;
@@ -337,6 +343,7 @@ pub async fn handle_voice_event(
         "voice.annotate_allow" => handle_annotate_allow(state, conn_id, &payload, tx).await,
         "voice.annotate" => handle_annotate(state, user_id, conn_id, &payload, tx).await,
         "voice.annotate_clear" => handle_annotate_clear(state, conn_id, &payload, tx).await,
+        "voice.react" => handle_react(state, user_id, conn_id, &payload).await,
         _ => {}
     }
 }
@@ -348,6 +355,7 @@ pub async fn cleanup_conn(state: &SharedState, user_id: Uuid, conn_id: Uuid) {
         for (channel_id, room) in guard.iter_mut() {
             if let Some(participant) = room.participants.remove(&conn_id) {
                 room.attendance_ids.remove(&conn_id);
+                room.reaction_windows.remove(&conn_id);
                 // Losing the sharer's conn ends the share, so revoke annotations.
                 let annotations_reset = reset_annotations_if_screen_gone(room);
                 removed.push((
@@ -414,6 +422,7 @@ pub async fn remove_member_from_room(state: &SharedState, channel_id: Uuid, user
             .collect();
         for conn_id in &conn_ids {
             room.attendance_ids.remove(conn_id);
+            room.reaction_windows.remove(conn_id);
         }
         // Evicting the sharer ends the share, so revoke annotations.
         let annotations_reset = reset_annotations_if_screen_gone(room);
@@ -711,6 +720,7 @@ async fn handle_leave(
         };
         let removed = room.participants.remove(&conn_id);
         room.attendance_ids.remove(&conn_id);
+        room.reaction_windows.remove(&conn_id);
         // A departing sharer ends the share, so revoke annotations.
         let annotations_reset = removed.is_some() && reset_annotations_if_screen_gone(room);
         let meeting_id = room.active_meeting_id;

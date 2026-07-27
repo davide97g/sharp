@@ -222,6 +222,8 @@ fn is_client_voice_event(event_type: &str) -> bool {
             | "voice.phrase"
             | "voice.hand"
             | "voice.aura"
+            | "voice.move"
+            | "voice.react"
             | "voice.poll_create"
             | "voice.poll_vote"
             | "voice.poll_close"
@@ -240,6 +242,14 @@ mod tests {
         assert!(is_client_voice_event("voice.annotate_allow"));
         assert!(is_client_voice_event("voice.annotate"));
         assert!(is_client_voice_event("voice.annotate_clear"));
+    }
+
+    /// Every client-sendable `voice.*` event in docs/arch/04-voice.md must be
+    /// listed here or it dies before any voice-level validation runs.
+    #[test]
+    fn spatial_and_reaction_events_reach_voice_handler() {
+        assert!(is_client_voice_event("voice.move"));
+        assert!(is_client_voice_event("voice.react"));
     }
 
     #[test]

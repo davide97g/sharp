@@ -95,6 +95,14 @@ Client → server:
   `annotations_allowed == true` or the sender is the sharer (else `annotate_denied`).
 - `voice.annotate_clear` `{channel_id}` — clear all live strokes. Sharer only (else
   `annotate_denied`).
+- `voice.react` `{channel_id, emoji: string}` — send one live reaction. `emoji` is trimmed
+  and must be a **pictographic** string of at most 8 chars: any ASCII, whitespace, or
+  control character is rejected, so a reaction can never carry text onto everyone's
+  stage. Rate limited per connection to **5 per 2 seconds** (sliding window). Sender must
+  be an active participant. Every refusal — bad payload, not in room, over the limit — is
+  a **silent drop**, with no `voice.error`: a tap routinely races a leave, and the client
+  mirrors the same window so a dropped reaction was never shown locally either. Guests
+  may send it.
 
 Server → client:
 
@@ -142,6 +150,11 @@ Server → client:
   (local echo is drawn directly). Nothing is persisted; late joiners see only strokes drawn
   after they join.
 - `voice.annotate_clear` `{channel_id}` — relay of the sharer's clear-all to the room audience.
+- `voice.reaction` `{channel_id, conn_id, user_id, display_name, emoji}` — relay of one
+  accepted `voice.react` to the room audience, stamped with the sender's `conn_id`,
+  `user_id`, and the **server-known** `display_name` (never a client-supplied name).
+  Clients ignore events whose `conn_id` matches their own — the sender's own reaction is
+  echoed locally the moment it is tapped. Nothing is persisted; late joiners see nothing.
 - `voice.error`
   `{channel_id, code: "room_full"|"camera_full"|"screen_taken"|"media_unavailable"|"not_member"|"not_in_room"|"link_revoked"|"annotate_denied"}`
   — sent only to the offending connection. `camera_full` and `screen_taken` do not end the
@@ -231,6 +244,9 @@ Server → client:
   screen share ends for any reason — `voice.screen` disable, or the sharer leaving,
   disconnecting, being evicted, or the room closing — the server clears `annotations_allowed`
   and broadcasts `voice.annotate_state {allowed:false}`, but only if it was previously `true`.
+- `voice.react`: a pure relay (`server/src/ws/voice/reactions.rs`), nothing stored. The
+  per-connection window lives on the room (`reaction_windows`) and is dropped with the
+  participant on every removal path, so a rejoining conn starts with a full budget.
 - WS disconnect: remove that conn from every room it is in, broadcast
   `voice.participant_left` for each, close durable attendance, and drop empty rooms. Last leave
   finalizes the meeting and queues AI notes.
@@ -275,6 +291,42 @@ Server → client:
 - Live transcription does not use the browser Web Speech API. A separate selected/default mic
   capture uses hand-rolled RMS VAD, records 300 ms–15 s Opus WebM segments (MP4 fallback), and
   serially posts them to the server proxy. Mute pauses this capture; leaving releases it fully.
+
+## Screen-share feedback (client-only)
+
+Sharing is the one call state that can leak something, so the **sharer** is told at window
+scale while **viewers** get only identification. No wire additions — everything derives
+from `voice.screenStatus` and the roster's `screen_on`.
+
+- `web/src/components/voice/ScreenShareBeacon.tsx` — mounted by `VideoStage` in *every*
+  stage mode (including `mini` and picture-in-picture, which is exactly where a forgotten
+  share hides) and portaled to `document.body`: a breathing viewport frame plus one pill
+  that names the state and stops it. The frame is suppressed in `full`, where the stage
+  already owns the screen. The pill's **Stop sharing** and the call bar's share button are
+  the same action.
+- Semantic tone `--color-share` / `-soft` / `-fg` ("live out"), deliberately not accent,
+  success, or danger — see `docs/DESIGN_SYSTEM.md`. Used by the beacon, the local
+  `ScreenTile` frame + `Live` chip, the share control's active state, the mini widget's
+  border, and the sharer badge on grid/spatial avatars.
+- The avatar badge sits in the free top-left corner rather than replacing the speaking
+  ring: a sharer who is talking must still read as talking.
+
+## In-call reactions
+
+Meet-style ephemeral emoji, wired through `voice.react` / `voice.reaction` above.
+
+- `web/src/lib/callReactions.ts` — the live feed, **outside the zustand store** for the
+  same reason as `annotations.ts`: entries are pure ephemera with a TTL, and the overlay is
+  their only reader. Each entry carries its room id, so a reaction from the call you just
+  left can never surface in the next one (which is why there is no `reset()` on the
+  join/leave paths). Also owns the quick-row vocabulary: `DEFAULT_REACTIONS`, the
+  device-local recents (`sharp.callReactionsRecent`), and `allowLocalReaction`, the mirror
+  of the server's window.
+- `web/src/components/voice/CallReactions.tsx` — `ReactionControl` (call-bar button →
+  popover: eight quick emoji that re-order around what you send, plus emoji search for
+  anything else) and `CallReactionStream` (the rising overlay, `pointer-events: none`
+  throughout, with the sender's resolved name attached). Present in `expanded`, `compact`,
+  and `full`; picture-in-picture and the mini widget do not render reactions.
 
 ## Spatial view and positional audio
 
@@ -343,10 +395,14 @@ receives a limited guest JWT bound to that room — no chat, no other REST.
   `VoiceConfigAuth` to distinguish both token kinds; config/transcription succeed for guests
   while trigger management returns 403. On the main WS, a guest may only send `ping`
   plus `voice.join`, `voice.leave`, `voice.mute`, `voice.camera`, `voice.screen`,
-  `voice.hand`, `voice.aura`, `voice.transcribe`, and `voice.phrase`, and only when the event's
+  `voice.hand`, `voice.aura`, `voice.move`, `voice.react`, `voice.transcribe`, and
+  `voice.phrase`, and only when the event's
   `channel_id` matches its bound channel. Remaining guest permissions are enforced by the
   voice handlers. Guest
-  connect/disconnect does **not** emit presence.
+  connect/disconnect does **not** emit presence. The current allowlist is
+  `is_client_voice_event` in `server/src/ws/session.rs` — one list for registered and guest
+  callers, and an event missing from it is dropped before any voice-level validation runs,
+  so every client-sendable `voice.*` event above must appear there.
 - **Revocation at join**: `voice.join` re-checks the guest token's `link` against the
   channel's current `voice_link_token`. If an owner/editor has regenerated (or the link was removed),
   the guest gets `voice.error` `code: "link_revoked"` and cannot join, even with an

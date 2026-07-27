@@ -20,7 +20,7 @@ import { SPATIAL_ZONE_RADII } from '../../lib/spatial'
 import { useStore } from '../../store'
 import { Badge, Kbd } from '../../ui'
 import { AudioAuraAvatar } from './AudioAuraAvatar'
-import { HandIcon, MicIcon } from './callIcons'
+import { HandIcon, MicIcon, ScreenBadgeIcon } from './callIcons'
 
 /** Keyboard step per press, and the larger step while Shift is held. */
 const STEP = 0.035
@@ -35,6 +35,7 @@ type SpatialPerson = {
   handRaised: boolean
   speaking: boolean
   cameraOn: boolean
+  sharing: boolean
   x: number
   y: number
   local: boolean
@@ -90,6 +91,7 @@ export function SpatialStage({
       handRaised: entry.hand_raised,
       speaking: Boolean(speaking[connId]),
       cameraOn: entry.camera_on,
+      sharing: entry.screen_on,
       x: entry.pos_x,
       y: entry.pos_y,
       local: connId === myConnId,
@@ -327,6 +329,14 @@ function FloorAvatar({
             title="Muted"
           >
             <MicIcon off />
+          </span>
+        )}
+        {person.sharing && (
+          <span
+            className="absolute -left-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full border-2 border-[var(--color-panel)] bg-share text-white"
+            title={`${person.name} is sharing their screen`}
+          >
+            <ScreenBadgeIcon />
           </span>
         )}
       </div>

@@ -54,6 +54,7 @@ import type {
   ScheduledMeeting,
   Poll,
   Project,
+  ProjectGithubSetup,
   Task,
   TaskComment,
   TaskCreateInput,
@@ -295,8 +296,34 @@ export const api = {
       request<Project>('/projects', { method: 'POST', body: input }),
     updateProject: (
       id: string,
-      input: { name?: string; icon?: string; channel_id?: string | null; archived?: boolean },
+      input: {
+        name?: string
+        icon?: string
+        channel_id?: string | null
+        archived?: boolean
+        branch_template?: string
+      },
     ) => request<Project>(`/projects/${id}`, { method: 'PATCH', body: input }),
+    // GitHub links. Every mutation answers with the same setup payload as `github()`.
+    github: (projectId: string) =>
+      request<ProjectGithubSetup>(`/projects/${projectId}/github`),
+    connectGithub: (projectId: string, input: { repo: string; token?: string }) =>
+      request<ProjectGithubSetup>(`/projects/${projectId}/github`, { method: 'POST', body: input }),
+    updateGithub: (
+      projectId: string,
+      linkId: string,
+      input: { token?: string | null; rotate_secret?: boolean },
+    ) =>
+      request<ProjectGithubSetup>(`/projects/${projectId}/github/${linkId}`, {
+        method: 'PATCH',
+        body: input,
+      }),
+    verifyGithub: (projectId: string, linkId: string) =>
+      request<ProjectGithubSetup>(`/projects/${projectId}/github/${linkId}/verify`, {
+        method: 'POST',
+      }),
+    disconnectGithub: (projectId: string, linkId: string) =>
+      request<ProjectGithubSetup>(`/projects/${projectId}/github/${linkId}`, { method: 'DELETE' }),
     list: (
       projectId: string,
       filters: {

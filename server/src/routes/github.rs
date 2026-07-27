@@ -1,25 +1,45 @@
-//! GitHub → tasks sync (Phase 7C). One HMAC-verified webhook endpoint; inert
-//! unless `GITHUB_WEBHOOK_SECRET` is set. Any task identifier (`KEY-123`)
-//! appearing in a branch name, PR title, or PR body links that branch/PR to the
-//! task and drives state automation:
+//! GitHub → tasks sync (Phase 7C, per-project links in 7E). One HMAC-verified
+//! webhook endpoint. Any task identifier (`KEY-123`) appearing in a branch name,
+//! PR title, or PR body links that branch/PR to the task and drives state
+//! automation:
 //!
 //!   - branch created / pushed / PR opened  → backlog|unstarted tasks move to
 //!     the project's first `started` state
 //!   - PR merged                            → first `completed` state
 //!   - PR closed unmerged                   → link state updated, task untouched
 //!
+//! Two ways a delivery is trusted, checked in this order:
+//!
+//!   1. **Per-project links** (`project_github_repos`): each row owns a webhook
+//!      secret generated here, so connecting a repo needs no env var and no
+//!      restart. A delivery is matched against the secrets of every row naming
+//!      that repository; matched rows also *scope* automation to their projects'
+//!      keys, so a repo only moves tasks of the projects it is linked to.
+//!   2. **Env fallback** (`GITHUB_WEBHOOK_SECRET` + optional `GITHUB_REPOS`):
+//!      the original global path, kept for deploys already wired that way. It
+//!      matches identifiers of *every* project key.
+//!
 //! Processing is idempotent: links upsert on `(task_id, url)` and state moves
 //! no-op when the task is already at/past the target type. Automation writes
 //! `task_activity` with a NULL actor and fans out `task.updated` as usual.
+//!
+//! Outbound calls (verify repo, install webhook) live in `crate::github_api` and
+//! only happen for links that carry a PAT; the PAT is sealed at rest with the
+//! same AES-256-GCM helper the calendar tokens use.
 
+use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
+use crate::models::Project;
 use crate::routes::tasks::{apply_state_change, broadcast_all, load_task, record_activity};
 use crate::state::SharedState;
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
+use axum::Json;
 use hmac::{Hmac, Mac};
+use rand::RngCore;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::Sha256;
 use sqlx::{PgPool, Row};
@@ -91,8 +111,17 @@ fn extract_identifiers(text: &str, keys: &HashSet<String>) -> Vec<(String, i64)>
     out
 }
 
-async fn project_keys(pool: &PgPool) -> AppResult<HashSet<String>> {
-    let rows = sqlx::query("SELECT key FROM projects").fetch_all(pool).await?;
+/// Keys of every project, or of `only` when the delivery came in on a per-project link.
+async fn project_keys(pool: &PgPool, only: Option<&[Uuid]>) -> AppResult<HashSet<String>> {
+    let rows = match only {
+        Some(ids) => {
+            sqlx::query("SELECT key FROM projects WHERE id = ANY($1)")
+                .bind(ids)
+                .fetch_all(pool)
+                .await?
+        }
+        None => sqlx::query("SELECT key FROM projects").fetch_all(pool).await?,
+    };
     let mut keys = HashSet::with_capacity(rows.len());
     for row in rows {
         keys.insert(row.try_get::<String, _>("key")?);
@@ -212,21 +241,65 @@ fn text<'a>(value: &'a Value, pointer: &str) -> &'a str {
     value.pointer(pointer).and_then(Value::as_str).unwrap_or("")
 }
 
+/// One `project_github_repos` row, as the webhook path needs it.
+struct RepoLink {
+    id: Uuid,
+    project_id: Uuid,
+    secret: String,
+    hook_active: bool,
+}
+
+async fn links_for_repo(pool: &PgPool, repo: &str) -> AppResult<Vec<RepoLink>> {
+    let rows = sqlx::query(
+        "SELECT id, project_id, secret, hook_active FROM project_github_repos
+         WHERE lower(repo) = lower($1)",
+    )
+    .bind(repo)
+    .fetch_all(pool)
+    .await?;
+    let mut links = Vec::with_capacity(rows.len());
+    for row in rows {
+        links.push(RepoLink {
+            id: row.try_get("id")?,
+            project_id: row.try_get("project_id")?,
+            secret: row.try_get("secret")?,
+            hook_active: row.try_get("hook_active")?,
+        });
+    }
+    Ok(links)
+}
+
+/// Stamp the delivery on matched links. The first signed delivery flips
+/// `hook_active`, which is the "Connected" light in the project panel — so that
+/// transition (and only that one) fans out `project.updated`.
+async fn record_delivery(state: &SharedState, links: &[RepoLink], event: &str) -> AppResult<()> {
+    for link in links {
+        sqlx::query(
+            "UPDATE project_github_repos
+             SET hook_active = true, last_event_at = now(), last_event_kind = $2, last_error = ''
+             WHERE id = $1",
+        )
+        .bind(link.id)
+        .bind(event)
+        .execute(&state.pool)
+        .await?;
+        if !link.hook_active {
+            let project = crate::routes::tasks::load_project(&state.pool, link.project_id).await?;
+            broadcast_all(state, "project.updated", json!({ "project": project })).await?;
+        }
+    }
+    Ok(())
+}
+
 pub async fn webhook(
     State(state): State<SharedState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> AppResult<StatusCode> {
-    let Some(github) = &state.config.github else {
-        return Err(AppError::NotFound("github sync not configured".to_string()));
-    };
     let signature = headers
         .get("x-hub-signature-256")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if !verify_signature(&github.webhook_secret, &body, signature) {
-        return Err(AppError::Unauthorized("bad webhook signature".to_string()));
-    }
     let event = headers
         .get("x-github-event")
         .and_then(|v| v.to_str().ok())
@@ -234,17 +307,70 @@ pub async fn webhook(
         .to_string();
     let payload: Value = serde_json::from_slice(&body)
         .map_err(|_| AppError::BadRequest("malformed payload".to_string()))?;
-
     let repo = text(&payload, "/repository/full_name").to_string();
-    if !github.repos.is_empty() && !github.repos.contains(&repo.to_lowercase()) {
-        return Ok(StatusCode::ACCEPTED); // signed but not allowlisted: ignore quietly
+
+    // 1. Per-project links: the ones whose own secret signs this body.
+    let matched: Vec<RepoLink> = links_for_repo(&state.pool, &repo)
+        .await?
+        .into_iter()
+        .filter(|link| verify_signature(&link.secret, &body, signature))
+        .collect();
+
+    let scope: Option<Vec<Uuid>> = if matched.is_empty() {
+        // 2. Env fallback, with its allowlist and workspace-wide key scope.
+        let Some(github) = &state.config.github else {
+            return Err(AppError::Unauthorized("bad webhook signature".to_string()));
+        };
+        if !verify_signature(&github.webhook_secret, &body, signature) {
+            return Err(AppError::Unauthorized("bad webhook signature".to_string()));
+        }
+        if !github.repos.is_empty() && !github.repos.contains(&repo.to_lowercase()) {
+            return Ok(StatusCode::ACCEPTED); // signed but not allowlisted: ignore quietly
+        }
+        None
+    } else {
+        record_delivery(&state, &matched, &event).await?;
+        Some(matched.iter().map(|link| link.project_id).collect())
+    };
+
+    // GitHub sends `ping` when a webhook is created: a signed delivery is all we
+    // wanted from it.
+    if event == "ping" {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    if event == "repository" {
+        update_visibility(&state, &matched, &payload).await?;
+        return Ok(StatusCode::NO_CONTENT);
     }
 
-    if let Err(error) = handle_event(&state, &event, &repo, &payload).await {
+    if let Err(error) = handle_event(&state, &event, &repo, &payload, scope.as_deref()).await {
         // GitHub retries on 5xx; our failures are data-shaped, not transient.
         tracing::warn!("github webhook processing failed: {}", error);
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// `repository` events carry visibility flips (privatized / publicized) and renames.
+async fn update_visibility(
+    state: &SharedState,
+    links: &[RepoLink],
+    payload: &Value,
+) -> AppResult<()> {
+    let visibility = match text(payload, "/action") {
+        "privatized" => "private",
+        "publicized" => "public",
+        _ => return Ok(()),
+    };
+    for link in links {
+        sqlx::query("UPDATE project_github_repos SET visibility = $2 WHERE id = $1")
+            .bind(link.id)
+            .bind(visibility)
+            .execute(&state.pool)
+            .await?;
+        let project = crate::routes::tasks::load_project(&state.pool, link.project_id).await?;
+        broadcast_all(state, "project.updated", json!({ "project": project })).await?;
+    }
+    Ok(())
 }
 
 async fn handle_event(
@@ -252,8 +378,9 @@ async fn handle_event(
     event: &str,
     repo: &str,
     payload: &Value,
+    scope: Option<&[Uuid]>,
 ) -> AppResult<()> {
-    let keys = project_keys(&state.pool).await?;
+    let keys = project_keys(&state.pool, scope).await?;
     if keys.is_empty() {
         return Ok(());
     }
@@ -355,9 +482,373 @@ async fn handle_event(
     Ok(())
 }
 
+// ---------- per-project repository links (Phase 7E) ----------
+
+/// Accept what people actually paste: `owner/name`, a browser URL, or an SSH remote.
+/// Returns the canonical `owner/name`.
+pub fn normalize_repo(input: &str) -> AppResult<String> {
+    let mut repo = input.trim().to_string();
+    for prefix in [
+        "https://github.com/",
+        "http://github.com/",
+        "git@github.com:",
+        "ssh://git@github.com/",
+        "github.com/",
+    ] {
+        if let Some(rest) = repo.strip_prefix(prefix) {
+            repo = rest.to_string();
+            break;
+        }
+    }
+    repo = repo
+        .trim_end_matches('/')
+        .trim_end_matches(".git")
+        .trim_end_matches('/')
+        .to_string();
+    // Drop anything after the repo segment (/tree/main, ?tab=…, #readme).
+    let mut parts = repo.splitn(3, '/');
+    let owner = parts.next().unwrap_or("");
+    let name = parts.next().unwrap_or("");
+    let name = name
+        .split(['?', '#'])
+        .next()
+        .unwrap_or("")
+        .trim_end_matches(".git");
+    let valid = |segment: &str| {
+        !segment.is_empty()
+            && segment.len() <= 100
+            && segment
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    };
+    if !valid(owner) || !valid(name) {
+        return Err(AppError::Validation(
+            "expected a repository like owner/name or a github.com URL".to_string(),
+        ));
+    }
+    Ok(format!("{owner}/{name}"))
+}
+
+fn new_secret() -> String {
+    let mut bytes = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Public URL GitHub must POST to. Mirrors the password-reset link resolution:
+/// explicit `APP_URL`, else the caller's Origin/Host.
+fn webhook_url(state: &SharedState, headers: &HeaderMap) -> AppResult<String> {
+    let base = crate::auth::resolve_app_url(state, headers).ok_or_else(|| {
+        AppError::BadRequest(
+            "cannot determine this server's public URL — set APP_URL to enable GitHub setup"
+                .to_string(),
+        )
+    })?;
+    Ok(format!("{base}/api/v1/integrations/github/webhook"))
+}
+
+async fn project_or_404(pool: &PgPool, project_id: Uuid) -> AppResult<()> {
+    crate::routes::tasks::load_project(pool, project_id).await.map(|_| ())
+}
+
+/// The secret + token of one link, for the paths that need them.
+struct LinkSecrets {
+    repo: String,
+    secret: String,
+    token: Option<String>,
+    hook_id: Option<i64>,
+}
+
+async fn link_secrets(state: &SharedState, link_id: Uuid, project_id: Uuid) -> AppResult<LinkSecrets> {
+    let row = sqlx::query(
+        "SELECT repo, secret, token_enc, hook_id FROM project_github_repos
+         WHERE id = $1 AND project_id = $2",
+    )
+    .bind(link_id)
+    .bind(project_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("repository link not found".to_string()))?;
+    let token_enc: Option<String> = row.try_get("token_enc")?;
+    let token = match token_enc {
+        Some(sealed) => Some(
+            crate::calendar_crypto::decrypt(&state.config.jwt_secret, &sealed)
+                .map_err(|_| AppError::BadRequest("stored token could not be read".to_string()))?,
+        ),
+        None => None,
+    };
+    Ok(LinkSecrets {
+        repo: row.try_get("repo")?,
+        secret: row.try_get("secret")?,
+        token,
+        hook_id: row.try_get("hook_id")?,
+    })
+}
+
+/// Verify the repo and install/refresh the webhook, recording what we learned.
+/// Never fails the request: a token problem is a *status* on the link, so the panel
+/// can show it and offer a retry.
+async fn sync_link(
+    state: &SharedState,
+    link_id: Uuid,
+    secrets: &LinkSecrets,
+    hook_url: &str,
+) -> AppResult<()> {
+    let Some(token) = &secrets.token else {
+        return Ok(());
+    };
+    let info = match crate::github_api::get_repo(token, &secrets.repo).await {
+        Ok(info) => info,
+        Err(error) => {
+            sqlx::query("UPDATE project_github_repos SET last_error = $2 WHERE id = $1")
+                .bind(link_id)
+                .bind(error)
+                .execute(&state.pool)
+                .await?;
+            return Ok(());
+        }
+    };
+    let hook = crate::github_api::install_hook(
+        token,
+        &info.full_name,
+        hook_url,
+        &secrets.secret,
+        secrets.hook_id,
+    )
+    .await;
+    let (hook_id, error) = match hook {
+        Ok(id) => (Some(id), String::new()),
+        Err(error) if !info.can_admin => (
+            None,
+            format!(
+                "{error} This token cannot manage webhooks on {} — add the `admin:repo_hook` \
+                 scope, or add the webhook by hand with the URL and secret below.",
+                info.full_name
+            ),
+        ),
+        Err(error) => (None, error),
+    };
+    sqlx::query(
+        "UPDATE project_github_repos
+         SET repo = $2, visibility = $3, default_branch = $4,
+             hook_id = COALESCE($5, hook_id), last_error = $6
+         WHERE id = $1",
+    )
+    .bind(link_id)
+    .bind(&info.full_name)
+    .bind(&info.visibility)
+    .bind(&info.default_branch)
+    .bind(hook_id)
+    .bind(error)
+    .execute(&state.pool)
+    .await?;
+    Ok(())
+}
+
+/// Project payload + everything the setup panel needs, including each link's
+/// webhook secret — the user must paste it into GitHub when there is no token.
+async fn github_response(
+    state: &SharedState,
+    project_id: Uuid,
+    headers: &HeaderMap,
+) -> AppResult<Json<Value>> {
+    let project = crate::routes::tasks::load_project(&state.pool, project_id).await?;
+    let rows = sqlx::query(
+        "SELECT id, secret FROM project_github_repos WHERE project_id = $1 ORDER BY created_at",
+    )
+    .bind(project_id)
+    .fetch_all(&state.pool)
+    .await?;
+    let mut secrets = serde_json::Map::new();
+    for row in rows {
+        secrets.insert(
+            row.try_get::<Uuid, _>("id")?.to_string(),
+            Value::String(row.try_get::<String, _>("secret")?),
+        );
+    }
+    Ok(Json(json!({
+        "project": project,
+        "webhook_url": webhook_url(state, headers).unwrap_or_default(),
+        "events": crate::github_api::HOOK_EVENTS,
+        "secrets": secrets,
+        "env_fallback": state.config.github.is_some(),
+    })))
+}
+
+async fn broadcast_project(state: &SharedState, project_id: Uuid) -> AppResult<Project> {
+    let project = crate::routes::tasks::load_project(&state.pool, project_id).await?;
+    broadcast_all(state, "project.updated", json!({ "project": project })).await?;
+    Ok(project)
+}
+
+pub async fn get_project_github(
+    State(state): State<SharedState>,
+    Path(project_id): Path<Uuid>,
+    headers: HeaderMap,
+    _auth: AuthUser,
+) -> AppResult<Json<Value>> {
+    project_or_404(&state.pool, project_id).await?;
+    github_response(&state, project_id, &headers).await
+}
+
+#[derive(Deserialize)]
+pub struct ConnectRepoRequest {
+    pub repo: String,
+    /// Optional PAT. With it we verify the repo and install the webhook ourselves;
+    /// without it the panel shows manual setup instructions.
+    pub token: Option<String>,
+}
+
+pub async fn connect_repo(
+    State(state): State<SharedState>,
+    Path(project_id): Path<Uuid>,
+    headers: HeaderMap,
+    auth: AuthUser,
+    Json(body): Json<ConnectRepoRequest>,
+) -> AppResult<Json<Value>> {
+    project_or_404(&state.pool, project_id).await?;
+    let repo = normalize_repo(&body.repo)?;
+    let token = body.token.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    let token_enc = match &token {
+        Some(token) => Some(
+            crate::calendar_crypto::encrypt(&state.config.jwt_secret, token)
+                .map_err(|_| AppError::BadRequest("could not store the token".to_string()))?,
+        ),
+        None => None,
+    };
+    let existing: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM project_github_repos WHERE project_id = $1 AND lower(repo) = lower($2)",
+    )
+    .bind(project_id)
+    .bind(&repo)
+    .fetch_optional(&state.pool)
+    .await?;
+    if existing.is_some() {
+        return Err(AppError::Validation(
+            "this repository is already linked to the project".to_string(),
+        ));
+    }
+    let link_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO project_github_repos (project_id, repo, secret, token_enc, connected_by)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id",
+    )
+    .bind(project_id)
+    .bind(&repo)
+    .bind(new_secret())
+    .bind(&token_enc)
+    .bind(auth.id)
+    .fetch_one(&state.pool)
+    .await?;
+
+    if token.is_some() {
+        let hook_url = webhook_url(&state, &headers)?;
+        let secrets = link_secrets(&state, link_id, project_id).await?;
+        sync_link(&state, link_id, &secrets, &hook_url).await?;
+    }
+    broadcast_project(&state, project_id).await?;
+    github_response(&state, project_id, &headers).await
+}
+
+#[derive(Deserialize)]
+pub struct UpdateRepoRequest {
+    /// `Some(Some(pat))` sets/replaces the token, `Some(None)` clears it back to
+    /// manual mode, absent leaves it alone.
+    #[serde(default, deserialize_with = "crate::routes::github::de_opt_opt_string")]
+    pub token: Option<Option<String>>,
+    /// Generate a fresh webhook secret (and re-point the hook if we own it).
+    #[serde(default)]
+    pub rotate_secret: bool,
+}
+
+/// `{"token": null}` must mean "clear", not "absent" — serde needs the nudge.
+pub fn de_opt_opt_string<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
+}
+
+pub async fn update_repo(
+    State(state): State<SharedState>,
+    Path((project_id, link_id)): Path<(Uuid, Uuid)>,
+    headers: HeaderMap,
+    _auth: AuthUser,
+    Json(body): Json<UpdateRepoRequest>,
+) -> AppResult<Json<Value>> {
+    project_or_404(&state.pool, project_id).await?;
+    link_secrets(&state, link_id, project_id).await?; // 404s on a foreign link
+    if let Some(token) = body.token {
+        let token = token.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+        let token_enc = match &token {
+            Some(token) => Some(
+                crate::calendar_crypto::encrypt(&state.config.jwt_secret, token)
+                    .map_err(|_| AppError::BadRequest("could not store the token".to_string()))?,
+            ),
+            None => None,
+        };
+        sqlx::query(
+            "UPDATE project_github_repos SET token_enc = $2, last_error = '' WHERE id = $1",
+        )
+        .bind(link_id)
+        .bind(&token_enc)
+        .execute(&state.pool)
+        .await?;
+    }
+    if body.rotate_secret {
+        sqlx::query("UPDATE project_github_repos SET secret = $2, hook_active = false WHERE id = $1")
+            .bind(link_id)
+            .bind(new_secret())
+            .execute(&state.pool)
+            .await?;
+    }
+    let hook_url = webhook_url(&state, &headers)?;
+    let secrets = link_secrets(&state, link_id, project_id).await?;
+    sync_link(&state, link_id, &secrets, &hook_url).await?;
+    broadcast_project(&state, project_id).await?;
+    github_response(&state, project_id, &headers).await
+}
+
+/// Re-check the repo and webhook now (the panel's "Re-check" button).
+pub async fn verify_repo(
+    State(state): State<SharedState>,
+    Path((project_id, link_id)): Path<(Uuid, Uuid)>,
+    headers: HeaderMap,
+    _auth: AuthUser,
+) -> AppResult<Json<Value>> {
+    project_or_404(&state.pool, project_id).await?;
+    let secrets = link_secrets(&state, link_id, project_id).await?;
+    let hook_url = webhook_url(&state, &headers)?;
+    sync_link(&state, link_id, &secrets, &hook_url).await?;
+    broadcast_project(&state, project_id).await?;
+    github_response(&state, project_id, &headers).await
+}
+
+pub async fn disconnect_repo(
+    State(state): State<SharedState>,
+    Path((project_id, link_id)): Path<(Uuid, Uuid)>,
+    headers: HeaderMap,
+    _auth: AuthUser,
+) -> AppResult<Json<Value>> {
+    project_or_404(&state.pool, project_id).await?;
+    let secrets = link_secrets(&state, link_id, project_id).await?;
+    // Best effort: leaving a dead hook behind is noisy but not fatal.
+    if let (Some(token), Some(hook_id)) = (&secrets.token, secrets.hook_id) {
+        if let Err(error) = crate::github_api::delete_hook(token, &secrets.repo, hook_id).await {
+            tracing::warn!("github hook delete failed for {}: {}", secrets.repo, error);
+        }
+    }
+    sqlx::query("DELETE FROM project_github_repos WHERE id = $1 AND project_id = $2")
+        .bind(link_id)
+        .bind(project_id)
+        .execute(&state.pool)
+        .await?;
+    broadcast_project(&state, project_id).await?;
+    github_response(&state, project_id, &headers).await
+}
+
 #[cfg(test)]
 mod tests {
-    use super::extract_identifiers;
+    use super::{extract_identifiers, normalize_repo, verify_signature};
     use std::collections::HashSet;
 
     fn keys(list: &[&str]) -> HashSet<String> {
@@ -388,5 +879,40 @@ mod tests {
         assert!(extract_identifiers("sharp-12a", &ks).is_empty()); // digits not word-end
         assert!(extract_identifiers("other-9", &ks).is_empty()); // unknown key
         assert!(extract_identifiers("sharp-", &ks).is_empty()); // no number
+    }
+
+    #[test]
+    fn normalizes_the_shapes_people_paste() {
+        for input in [
+            "fortitudex/sharp",
+            " fortitudex/sharp ",
+            "https://github.com/fortitudex/sharp",
+            "https://github.com/fortitudex/sharp.git",
+            "https://github.com/fortitudex/sharp/tree/main",
+            "git@github.com:fortitudex/sharp.git",
+            "github.com/fortitudex/sharp",
+        ] {
+            assert_eq!(normalize_repo(input).unwrap(), "fortitudex/sharp", "{input}");
+        }
+    }
+
+    #[test]
+    fn rejects_non_repositories() {
+        for input in ["", "sharp", "owner/", "/name", "owner/na me", "owner/na*me"] {
+            assert!(normalize_repo(input).is_err(), "{input:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn signature_check_is_secret_specific() {
+        // Fixture: GitHub's documented example (secret "It's a Secret to Everybody",
+        // body "Hello, World!").
+        let body = b"Hello, World!";
+        let signature =
+            "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17";
+        assert!(verify_signature("It's a Secret to Everybody", body, signature));
+        assert!(!verify_signature("another project's secret", body, signature));
+        assert!(!verify_signature("It's a Secret to Everybody", b"tampered", signature));
+        assert!(!verify_signature("It's a Secret to Everybody", body, "nope"));
     }
 }

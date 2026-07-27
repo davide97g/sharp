@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import { sound } from '../lib/sound'
 import { cn } from './cn'
 import { IconButton } from './IconButton'
@@ -34,6 +35,11 @@ export interface ModalProps {
  * THE dialog primitive — Escape + backdrop dismiss, open/close sound, focus
  * trap, mobile full-bleed / desktop top-anchored card. Never hand-roll a
  * `fixed inset-0` dialog; extend this instead.
+ *
+ * Rendered into `document.body` so the card is never positioned or clipped by an
+ * ancestor that establishes a containing block (a transform, a filter, or the
+ * `content-visibility` containment on chat rows). React events still bubble
+ * through the component tree, so callers keep their handlers.
  */
 export function Modal({
   title,
@@ -90,7 +96,7 @@ export function Modal({
     return () => sound.modalClose()
   }, [])
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-(--z-modal) flex items-stretch justify-center bg-black/60 p-0 backdrop-blur-sm sm:items-start sm:p-4 sm:pt-[max(12vh,calc(var(--safe-top)+1.5rem))] sm:pb-[max(1rem,var(--safe-bottom))] sm:pl-[max(1rem,var(--safe-left))] sm:pr-[max(1rem,var(--safe-right))]"
       onMouseDown={onClose}
@@ -125,6 +131,7 @@ export function Modal({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

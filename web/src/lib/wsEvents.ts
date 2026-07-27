@@ -15,6 +15,7 @@
 
 import { api } from './api'
 import { annotations } from './annotations'
+import { callReactions } from './callReactions'
 import { gifPreviewText } from './gif'
 import { navigateTo } from './nav'
 import { notificationPath } from './types'
@@ -106,6 +107,7 @@ import type {
   VoiceParticipantMovedPayload,
   VoiceParticipantUpdatedPayload,
   VoicePollStatePayload,
+  VoiceReactionPayload,
   VoiceStatePayload,
   VoiceTriggerCreatedPayload,
   VoiceTriggerDeletedPayload,
@@ -453,6 +455,20 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
               annotating: !p.allowed && !iAmSharer ? false : s.voice.annotating,
             },
           }
+        })
+        break
+      }
+      case 'voice.reaction': {
+        const p = env.payload as VoiceReactionPayload
+        // Own reactions are echoed locally the moment they are tapped, so the
+        // relay of our own event would double them.
+        if (p.conn_id === get().myConnId) break
+        callReactions.push({
+          channelId: p.channel_id,
+          connId: p.conn_id,
+          userId: p.user_id,
+          name: p.display_name,
+          emoji: p.emoji,
         })
         break
       }

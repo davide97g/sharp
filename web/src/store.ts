@@ -21,6 +21,7 @@ import {
 import { packPreview, setPackPreview } from './lib/seasonal'
 import type { VoiceClient } from './lib/voice'
 import { annotations } from './lib/annotations'
+import { allowLocalReaction, callReactions, rememberReaction } from './lib/callReactions'
 import {
   loadVideoBackground,
   saveVideoBackground,
@@ -551,6 +552,7 @@ export type State = {
   toggleAnnotating: () => void
   setAnnotationsAllowed: (allowed: boolean) => void
   clearAnnotations: () => void
+  sendVoiceReaction: (emoji: string) => void
 
   // docs actions
   loadChannelDocs: (channelId: string) => Promise<void>
@@ -2393,6 +2395,27 @@ export const useStore = create<State>((set, get) => ({
     if (!channelId) return
     get().ws?.send('voice.annotate_clear', { channel_id: channelId })
     annotations.clearAll()
+  },
+
+  sendVoiceReaction(emoji) {
+    const { channelId } = get().voice
+    const { myConnId, me, ws } = get()
+    if (!channelId || !myConnId) return
+    // Mirrors the server's per-connection window, so a reaction the server would
+    // drop is never echoed locally as if it had landed.
+    if (!allowLocalReaction()) return
+    rememberReaction(emoji)
+    // Shown immediately; the relay of our own event is ignored in wsEvents.
+    // Guests have no `me`, so their identity comes from the room roster.
+    const mine = get().voiceRooms[channelId]?.[myConnId]
+    callReactions.push({
+      channelId,
+      connId: myConnId,
+      userId: me?.id ?? mine?.user_id ?? myConnId,
+      name: me?.display_name ?? mine?.display_name ?? 'You',
+      emoji,
+    })
+    ws?.send('voice.react', { channel_id: channelId, emoji })
   },
 
   totalUnread() {

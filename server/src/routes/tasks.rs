@@ -1,8 +1,8 @@
 use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    MessageUser, Project, Task, TaskActivity, TaskComment, TaskDetail, TaskGithubLink, TaskLabel,
-    TaskState,
+    MessageUser, Project, ProjectGithubRepo, Task, TaskActivity, TaskComment, TaskDetail,
+    TaskGithubLink, TaskLabel, TaskState,
 };
 use crate::state::SharedState;
 use crate::ws::envelope;
@@ -103,9 +103,47 @@ async fn project_states(pool: &PgPool, project_ids: &[Uuid]) -> AppResult<Vec<Ta
     Ok(states)
 }
 
+/// Repository links for the given projects, keyed by project. Never selects
+/// `secret`/`token_enc` — only [`crate::routes::github`] may touch those.
+pub async fn project_github_repos(
+    pool: &PgPool,
+    project_ids: &[Uuid],
+) -> AppResult<Vec<ProjectGithubRepo>> {
+    if project_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows = sqlx::query(
+        "SELECT id, project_id, repo, visibility, default_branch, hook_id IS NOT NULL AS hook_installed,
+                hook_active, token_enc IS NOT NULL AS has_token, last_error, last_event_at,
+                last_event_kind, created_at
+         FROM project_github_repos WHERE project_id = ANY($1) ORDER BY created_at",
+    )
+    .bind(project_ids)
+    .fetch_all(pool)
+    .await?;
+    let mut repos = Vec::with_capacity(rows.len());
+    for row in rows {
+        repos.push(ProjectGithubRepo {
+            id: row.try_get("id")?,
+            project_id: row.try_get("project_id")?,
+            repo: row.try_get("repo")?,
+            visibility: row.try_get("visibility")?,
+            default_branch: row.try_get("default_branch")?,
+            hook_installed: row.try_get("hook_installed")?,
+            hook_active: row.try_get("hook_active")?,
+            has_token: row.try_get("has_token")?,
+            last_error: row.try_get("last_error")?,
+            last_event_at: row.try_get("last_event_at")?,
+            last_event_kind: row.try_get("last_event_kind")?,
+            created_at: row.try_get("created_at")?,
+        });
+    }
+    Ok(repos)
+}
+
 async fn load_projects_where(pool: &PgPool, ids: Option<&[Uuid]>) -> AppResult<Vec<Project>> {
     let base = "SELECT p.id, p.key, p.name, p.icon, p.channel_id, p.created_by, p.archived_at,
-                p.created_at,
+                p.created_at, p.branch_template,
                 (SELECT count(*) FROM tasks t JOIN task_states s ON s.id = t.state_id
                  WHERE t.project_id = p.id AND t.deleted_at IS NULL
                    AND s.type NOT IN ('completed','canceled')) AS open_count
@@ -135,6 +173,13 @@ async fn load_projects_where(pool: &PgPool, ids: Option<&[Uuid]>) -> AppResult<V
             .or_default()
             .push(state);
     }
+    let mut repos_by_project: HashMap<Uuid, Vec<ProjectGithubRepo>> = HashMap::new();
+    for repo in project_github_repos(pool, &project_ids).await? {
+        repos_by_project
+            .entry(repo.project_id)
+            .or_default()
+            .push(repo);
+    }
     for row in rows {
         let id: Uuid = row.try_get("id")?;
         projects.push(Project {
@@ -146,8 +191,10 @@ async fn load_projects_where(pool: &PgPool, ids: Option<&[Uuid]>) -> AppResult<V
             created_by: row.try_get("created_by")?,
             archived_at: row.try_get("archived_at")?,
             created_at: row.try_get("created_at")?,
+            branch_template: row.try_get("branch_template")?,
             states: states_by_project.remove(&id).unwrap_or_default(),
             open_count: row.try_get("open_count")?,
+            github_repos: repos_by_project.remove(&id).unwrap_or_default(),
         });
     }
     Ok(projects)
@@ -412,6 +459,73 @@ pub struct UpdateProjectRequest {
     #[serde(default)]
     pub channel_id: Option<Option<Uuid>>,
     pub archived: Option<bool>,
+    /// Branch naming convention; `''` resets to the built-in `{identifier}-{slug}`.
+    pub branch_template: Option<String>,
+}
+
+/// Tokens a branch template may use. `{identifier}` (or `{key}`+`{number}`) is
+/// mandatory: GitHub sync links branches by scanning them for `KEY-123`, so a
+/// convention without the identifier would silently break automation.
+pub const BRANCH_TOKENS: [&str; 5] = ["identifier", "key", "number", "slug", "user"];
+
+fn validate_branch_template(template: &str) -> AppResult<String> {
+    let template = template.trim();
+    if template.is_empty() {
+        return Ok(String::new());
+    }
+    if template.chars().count() > 120 {
+        return Err(AppError::Validation(
+            "branch template must be 120 characters or fewer".to_string(),
+        ));
+    }
+    // Walk the placeholders: every `{…}` must name a known token.
+    let mut rest = template;
+    let mut tokens: Vec<&str> = Vec::new();
+    while let Some(open) = rest.find('{') {
+        let after = &rest[open + 1..];
+        let Some(close) = after.find('}') else {
+            return Err(AppError::Validation(
+                "branch template has an unclosed `{`".to_string(),
+            ));
+        };
+        let token = &after[..close];
+        if !BRANCH_TOKENS.contains(&token) {
+            return Err(AppError::Validation(format!(
+                "unknown branch template token `{{{token}}}` (allowed: {})",
+                BRANCH_TOKENS
+                    .iter()
+                    .map(|t| format!("{{{t}}}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+        }
+        tokens.push(token);
+        rest = &after[close + 1..];
+    }
+    if rest.contains('}') {
+        return Err(AppError::Validation(
+            "branch template has a stray `}`".to_string(),
+        ));
+    }
+    let has_identifier =
+        tokens.contains(&"identifier") || (tokens.contains(&"key") && tokens.contains(&"number"));
+    if !has_identifier {
+        return Err(AppError::Validation(
+            "branch template must include {identifier}, or both {key} and {number}, so GitHub \
+             can link branches to tasks"
+                .to_string(),
+        ));
+    }
+    // Characters git rejects outright, plus whitespace.
+    if template
+        .chars()
+        .any(|c| c.is_whitespace() || "~^:?*[\\\"'<>|".contains(c))
+    {
+        return Err(AppError::Validation(
+            "branch template contains characters git does not allow in a branch name".to_string(),
+        ));
+    }
+    Ok(template.to_string())
 }
 
 pub async fn update_project(
@@ -443,6 +557,14 @@ pub async fn update_project(
         sqlx::query("UPDATE projects SET channel_id = $2 WHERE id = $1")
             .bind(project_id)
             .bind(channel_id)
+            .execute(&state.pool)
+            .await?;
+    }
+    if let Some(template) = &body.branch_template {
+        let template = validate_branch_template(template)?;
+        sqlx::query("UPDATE projects SET branch_template = $2 WHERE id = $1")
+            .bind(project_id)
+            .bind(template)
             .execute(&state.pool)
             .await?;
     }
@@ -1264,4 +1386,31 @@ pub async fn delete_label(
         .await?;
     broadcast_all(&state, "task.labels.changed", json!({})).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_branch_template;
+
+    #[test]
+    fn accepts_conventions_that_keep_the_identifier() {
+        assert_eq!(validate_branch_template("  ").unwrap(), ""); // '' = built-in default
+        assert_eq!(
+            validate_branch_template("{user}/{identifier}-{slug}").unwrap(),
+            "{user}/{identifier}-{slug}"
+        );
+        assert!(validate_branch_template("feature/{key}-{number}").is_ok());
+    }
+
+    #[test]
+    fn rejects_templates_that_would_break_linking() {
+        // No identifier: the webhook would never match a branch to a task.
+        assert!(validate_branch_template("{user}/{slug}").is_err());
+        assert!(validate_branch_template("{key}-{slug}").is_err()); // key without number
+        assert!(validate_branch_template("{unknown}-{identifier}").is_err());
+        assert!(validate_branch_template("{identifier").is_err());
+        assert!(validate_branch_template("{identifier}}").is_err());
+        assert!(validate_branch_template("{identifier} {slug}").is_err()); // space
+        assert!(validate_branch_template("{identifier}^{slug}").is_err()); // git-illegal
+    }
 }

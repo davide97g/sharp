@@ -97,7 +97,8 @@ export function TaskPeek({
   }
 
   function copyBranch() {
-    void navigator.clipboard.writeText(branchNameFor(detail!))
+    // Follows the project's branch convention, so the webhook links it on push.
+    void navigator.clipboard.writeText(branchNameFor(detail!, project, me?.display_name))
     toastInfo('Branch name copied')
   }
 

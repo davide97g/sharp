@@ -97,6 +97,7 @@ export function VoiceMiniWidget() {
     () => Object.values(room ?? {}).some((entry) => entry.screen_on),
     [room],
   )
+  const sharingLocally = Boolean(myConnId && room?.[myConnId]?.screen_on)
 
   // Live thumbnail of the active screen share (yours or a peer's), when its
   // stream has arrived; the monitor badge covers the not-yet-streaming case.
@@ -215,7 +216,11 @@ export function VoiceMiniWidget() {
       onClick={(event) => {
         if (event.detail === 0) expandCall()
       }}
-      className={`voice-mini-widget fixed z-50 flex touch-none select-none flex-col items-center gap-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-panel)] p-2.5 shadow-2xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+      className={`voice-mini-widget fixed z-50 flex touch-none select-none flex-col items-center gap-2.5 rounded-2xl border bg-[var(--color-panel)] p-2.5 shadow-2xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+        // Sharing from this device tints the widget itself: the minimized call is
+        // exactly where a forgotten share hides.
+        sharingLocally ? 'border-share' : 'border-[var(--color-border)]'
+      } ${
         hasPreview ? 'w-[176px]' : 'w-[88px]'
       } ${
         dragging
@@ -233,7 +238,7 @@ export function VoiceMiniWidget() {
         />
         {anyScreen && !share && (
           <span
-            className="absolute -bottom-0.5 -left-0.5 flex h-4 w-4 items-center justify-center rounded-full border-2 border-[var(--color-panel)] bg-[var(--color-accent)] text-white"
+            className="absolute -bottom-0.5 -left-0.5 flex h-4 w-4 items-center justify-center rounded-full border-2 border-[var(--color-panel)] bg-share text-white"
             aria-label="Someone is sharing their screen"
             title="Someone is sharing their screen"
           >
@@ -339,7 +344,12 @@ function SharePreview({ stream, local }: { stream: MediaStream; local: boolean }
         muted
         className="aspect-video w-full object-contain"
       />
-      <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white">
+      <span
+        className={`absolute bottom-1 left-1 flex items-center gap-1 rounded px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide text-white ${
+          local ? 'bg-share' : 'bg-black/60'
+        }`}
+      >
+        {local ? <span className="share-live-dot h-1 w-1 rounded-full" aria-hidden /> : null}
         {local ? 'Your screen' : 'Sharing'}
       </span>
     </div>

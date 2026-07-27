@@ -35,6 +35,13 @@ workspace-visible in v1 (single workspace, every user a member); Notion-boards
   `{from, to, …}`.
 - `task_github_links` — `repo` (`owner/name`), `kind` `branch|pr|issue`, `ref`, `url`
   (unique per task), `title`, `state` (`open|draft|merged|closed`).
+- `project_github_repos` (migration `0034_project_github.sql`) — one row per repository
+  wired to a project: `repo` (`owner/name`), `secret` (per-link webhook HMAC secret,
+  generated server-side), `token_enc` (PAT sealed with `calendar_crypto`, NULL in manual
+  mode), `visibility`, `default_branch`, `hook_id`/`hook_active`, `last_error`,
+  `last_event_at`/`last_event_kind`, `connected_by`. Unique per `(project_id, repo)`;
+  `lower(repo)` index is deliberately non-unique (a monorepo may feed several projects).
+  Same migration adds `projects.branch_template` (`''` = built-in `{identifier}-{slug}`).
 - `notifications` gains nullable `channel_id` + new `task_id` column; kind constraint
   extended with `task_assigned`, `task_comment`.
 
@@ -43,7 +50,13 @@ workspace-visible in v1 (single workspace, every user a member); Notion-boards
 ```
 TaskState = { id, project_id, name, color, type, position }
 Project   = { id, key, name, icon, channel_id?, created_by, archived_at?, created_at,
-              states: TaskState[], open_count }
+              branch_template, states: TaskState[], open_count,
+              github_repos: ProjectGithubRepo[] }
+ProjectGithubRepo = { id, project_id, repo, visibility: ''|'public'|'private'|'internal',
+              default_branch, hook_installed, hook_active, has_token, last_error,
+              last_event_at?, last_event_kind, created_at }
+ProjectGithubSetup = { project, webhook_url, events: string[],
+              secrets: { [link_id]: secret }, env_fallback }
 TaskGithubLink = { id, kind: 'branch'|'pr'|'issue', repo, ref, url, title, state, created_at }
 Task      = { id, project_id, number, identifier, title, description, state_id,
               priority: 0|1|2|3|4, assignee_id?, creator_id, parent_id?, due_date?,
@@ -64,7 +77,7 @@ number (small); `source_message_id` follows the string-bigint rule.
 |---|---|---|
 | GET | `/projects` | all projects with states + open counts (archived included; client filters) |
 | POST | `/projects` | `{key, name, icon?, channel_id?}` → `201 Project`; validates key, seeds states |
-| PATCH | `/projects/{id}` | `{name?, icon?, channel_id?, archived?}`; key immutable |
+| PATCH | `/projects/{id}` | `{name?, icon?, channel_id?, archived?, branch_template?}`; key immutable |
 | GET | `/projects/{id}/tasks?state_type=&assignee=&label=&priority=&q=` | non-deleted tasks |
 | POST | `/projects/{id}/tasks` | `{title, description?, state_id?, priority?, assignee_id?, label_ids?, due_date?, parent_id?, source_message_id?}` → `201 Task`; parent must be top-level; default state = first `unstarted` |
 | GET | `/tasks/{id}` | → `TaskDetail` |
@@ -77,6 +90,11 @@ number (small); `source_message_id` follows the string-bigint rule.
 | GET | `/me/tasks` | my open assigned tasks (state type not completed/canceled) |
 | GET | `/tasks/search?q=&limit=` | identifier prefix + title ILIKE, for pickers |
 | GET | `/task-labels` / POST / PATCH `/{id}` / DELETE `/{id}` | label CRUD (any user) |
+| GET | `/projects/{id}/github` | → `ProjectGithubSetup`; **reveals each link's webhook secret** (manual setup needs it) |
+| POST | `/projects/{id}/github` | `{repo, token?}` → `ProjectGithubSetup`; `repo` accepts `owner/name`, a github.com URL, or an SSH remote; with a token the server verifies the repo and installs the webhook |
+| PATCH | `/projects/{id}/github/{link_id}` | `{token?: string\|null, rotate_secret?}` — `null` token drops back to manual mode; then re-syncs |
+| POST | `/projects/{id}/github/{link_id}/verify` | re-check repo + webhook now |
+| DELETE | `/projects/{id}/github/{link_id}` | deletes our webhook (best effort) + the link |
 | POST | `/integrations/github/webhook` | unauthenticated; HMAC `X-Hub-Signature-256` |
 
 ## WS events (main socket, broadcast to all registered users)
@@ -100,11 +118,42 @@ mode), FilterBar. Store slices `projects`/`tasks`/`myTasks`; `task.*` WS handler
 in place; active project refetched on WS reconnect; drag writes `sort_order`
 optimistically.
 
-## GitHub sync (Phase C)
+## GitHub sync (Phase C; per-project links in Phase E)
 
-Env-first, inert when unset (Sharpy pattern): `GITHUB_WEBHOOK_SECRET`, plus optional
-`GITHUB_REPOS` (`owner/name` comma allowlist). No PAT — sync is inbound-only, so there are
-no outbound GitHub API calls. `server/src/routes/github.rs`.
+`server/src/routes/github.rs` owns the webhook and the link CRUD; outbound calls live in
+`server/src/github_api.rs` (pooled `crate::http` client, `2022-11-28` API version).
+
+**Trust resolution, in order:**
+
+1. **Per-project links** (`project_github_repos`) — every row owns a webhook secret
+   generated on connect, so wiring a repo needs no env var and no restart. A delivery is
+   verified against the secrets of every row naming that repository; matched rows also
+   *scope* automation to their projects' keys, so a repo only moves tasks of the projects
+   it is linked to. Matched rows get `hook_active = true` + `last_event_at`; the first
+   signed delivery (the `hook_active` flip) fans out `project.updated` — that's the
+   "Connected" light. `ping` is accepted as proof-of-wiring and nothing else;
+   `repository` privatized/publicized updates `visibility`.
+2. **Env fallback** — `GITHUB_WEBHOOK_SECRET` + optional `GITHUB_REPOS` allowlist, the
+   original global path, kept for deploys already wired that way. Matches identifiers of
+   *every* project key.
+
+A signature matching neither path is `401`; a signed-but-not-allowlisted env delivery is
+`202` and ignored.
+
+**Tokens are optional.** With a PAT (`repo` + `admin:repo_hook`) the server verifies the
+repo, records visibility/default branch, and installs — or adopts, by payload URL — the
+webhook for `push`/`create`/`pull_request`/`repository`. Failures never fail the request:
+they land in `last_error`, phrased for display, and the panel offers Re-check plus manual
+instructions. PATs are sealed with `calendar_crypto` (AES-256-GCM, key derived from
+`JWT_SECRET`) and never leave the server; `Project.github_repos` carries status only.
+
+**Branch convention:** `projects.branch_template` (`''` = `{identifier}-{slug}`), tokens
+`{identifier} {key} {number} {slug} {user}`. Validation requires `{identifier}` (or both
+`{key}` and `{number}`) — linking works by scanning branch names for `KEY-123`, so a
+convention without it would silently break automation — and rejects git-illegal
+characters. Rendering is client-side (`branchNameFor` / `renderBranchTemplate` in
+`taskUi.tsx`), matched by `BRANCH_TOKENS` in `routes/tasks.rs`.
+
 Inbound (HMAC-verified, allowlisted): branch `create`/`push` with `key-123` in the branch
 name upserts a `branch` link and moves `backlog|unstarted` tasks to the first
 `started` state; `pull_request` opened/edited/ready links by branch name, PR title, or

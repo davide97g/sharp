@@ -9,6 +9,7 @@ mod docs_sync;
 mod error;
 mod expo_push;
 mod gif;
+mod github_api;
 mod google_oauth;
 mod http;
 mod livekit;
@@ -582,6 +583,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/task-labels/:id",
             patch(routes::tasks::update_label).delete(routes::tasks::delete_label),
+        )
+        .route(
+            "/projects/:id/github",
+            get(routes::github::get_project_github).post(routes::github::connect_repo),
+        )
+        .route(
+            "/projects/:id/github/:link_id",
+            patch(routes::github::update_repo).delete(routes::github::disconnect_repo),
+        )
+        .route(
+            "/projects/:id/github/:link_id/verify",
+            post(routes::github::verify_repo),
         )
         .route(
             "/integrations/github/webhook",

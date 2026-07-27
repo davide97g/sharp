@@ -27,6 +27,7 @@ All colors are CSS variables defined in `web/src/index.css` `@theme`, themeable 
 | `--color-danger` / `-hover` / `-soft` / `-fg` | `bg-danger`, `text-danger-fg` | destructive |
 | `--color-success` / `-soft` / `-fg` | `text-success-fg` | positive |
 | `--color-warning` / `-soft` / `-fg` | `text-warning-fg` | caution |
+| `--color-share` / `-soft` / `-fg` | `bg-share`, `text-share-fg` | "live out" — you are broadcasting (screen share) |
 | `--color-code-bg` / `-code-block-bg` | `bg-code-bg` | inline code / code block fill |
 | `--color-scrollbar` / `-hover` | — | custom scrollbar thumb |
 | `--color-kbd-edge` | `border-b-kbd-edge` | `Kbd` bottom bevel |
@@ -107,7 +108,7 @@ Composites:
 
 | Component | Props | Notes |
 |---|---|---|
-| `Modal` | `title`, `onClose`, `size: 'md'\|'lg'\|'xl'`, `footer?`, `headerIcon?`, `children` (legacy `wide` still works) | Escape + backdrop + focus trap + open/close sound built in. **Never hand-roll `fixed inset-0` dialogs.** |
+| `Modal` | `title`, `onClose`, `size: 'md'\|'lg'\|'xl'`, `footer?`, `headerIcon?`, `children` (legacy `wide` still works) | Escape + backdrop + focus trap + open/close sound built in; portals into `document.body`, so it stays full-viewport even when opened from a transformed/contained ancestor (e.g. a chat row). **Never hand-roll `fixed inset-0` dialogs.** |
 | `ModalFooter` | children | `flex justify-end gap-2 pt-4` action row |
 | `SlideOver` | `side:'right'`, `width`, `title`, `onClose`, `portal?`, `footer?` | notification center / card panel pattern; Escape built in |
 | `Popover` | `open`, `onClose`, `align:'start'\|'end'`, `side:'bottom'\|'top'`, `width` — positioned panel + dismiss | all dropdown panels |

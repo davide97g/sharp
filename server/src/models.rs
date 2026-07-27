@@ -224,8 +224,35 @@ pub struct Project {
     pub created_by: Uuid,
     pub archived_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
+    /// Branch naming convention; `''` means the built-in `{identifier}-{slug}`.
+    pub branch_template: String,
     pub states: Vec<TaskState>,
     pub open_count: i64,
+    /// Repositories wired to this project. Secrets/tokens never appear here.
+    pub github_repos: Vec<ProjectGithubRepo>,
+}
+
+/// A repository linked to a project (Phase 7E). The webhook secret and the PAT stay
+/// server-side: clients get status only, plus `has_token` so the UI can say how the
+/// link was set up. The secret is revealed exactly once, by the manual-setup endpoint.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectGithubRepo {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub repo: String,
+    /// `''` unknown (manual link) | `public` | `private` | `internal`.
+    pub visibility: String,
+    pub default_branch: String,
+    /// We installed the webhook through the API (vs. the user pasting it by hand).
+    pub hook_installed: bool,
+    /// A signed delivery has arrived at least once.
+    pub hook_active: bool,
+    pub has_token: bool,
+    /// Last outbound failure, phrased for display; `''` when healthy.
+    pub last_error: String,
+    pub last_event_at: Option<DateTime<Utc>>,
+    pub last_event_kind: String,
+    pub created_at: DateTime<Utc>,
 }
 
 /// A workflow state. `type` drives automation (GitHub, completed_at); names are cosmetic.

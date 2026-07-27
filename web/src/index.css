@@ -32,6 +32,12 @@
   --color-warning: #c98a3d;
   --color-warning-soft: #362512;
   --color-warning-fg: #e59a58;
+  /* "Live out" — you are broadcasting something (screen share). Deliberately not
+     accent, success, or danger: sharing is neither a toggle, a good state, nor a
+     destructive one, and it must stay legible next to all three at once. */
+  --color-share: #2b93cc;
+  --color-share-soft: #10293a;
+  --color-share-fg: #63c6f0;
 
   /* Derived chrome — mixed off the core tokens so every preset retints these
      for free. Before this existed they were hard-coded hex and stayed dark on
@@ -165,6 +171,17 @@
 .message-row {
   content-visibility: auto;
   contain-intrinsic-size: auto 52px;
+}
+
+/* …but `content-visibility` implies `contain: layout paint style`, which clips
+ * anything drawn outside the row box (hover toolbar, reaction palette) and makes
+ * the row the containing block for `position: fixed` children. Drop the
+ * containment on the one row the user is interacting with — it is on screen
+ * anyway, so nothing is being skipped and there is no perf loss. */
+.message-row:hover,
+.message-row:focus-within,
+.message-row[data-message-open] {
+  content-visibility: visible;
 }
 
 /* --- celebrations ---------------------------------------------------------- */
@@ -1872,6 +1889,55 @@ input[type='range'].range-slider::-moz-range-track {
     radial-gradient(circle at center, color-mix(in srgb, var(--color-border) 90%, transparent) 1px, transparent 1px),
     radial-gradient(ellipse at center, transparent 55%, color-mix(in srgb, var(--color-ink) 45%, transparent) 100%);
   background-size: 28px 28px, 100% 100%;
+}
+
+/* Screen share, from the sharer's side. Sharing is the one call state that can
+   leak something, so it is announced at window scale — a breathing frame around
+   the whole viewport, not a badge you have to go looking for. The frame is inert
+   (pointer-events: none) and lives under the toast band so nothing it overlays
+   becomes unclickable. */
+@keyframes sharp-share-breathe {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+@keyframes sharp-share-live-dot {
+  0%, 100% { transform: scale(0.9); box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-share) 55%, transparent); }
+  50% { transform: scale(1.08); box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-share) 0%, transparent); }
+}
+.share-frame {
+  border: 3px solid var(--color-share);
+  box-shadow: inset 0 0 30px -10px color-mix(in srgb, var(--color-share) 75%, transparent);
+  animation: sharp-share-breathe 2.6s ease-in-out infinite;
+}
+/* Inherits its color, so the same dot works on the share-tinted pill and on the
+   solid-share "Live" chip without an override. */
+.share-live-dot {
+  background: currentColor;
+  animation: sharp-share-live-dot 1.5s ease-out infinite;
+}
+.share-tile {
+  border-color: var(--color-share);
+  box-shadow: 0 0 0 1px var(--color-share), 0 0 34px -14px var(--color-share);
+}
+
+/* In-call reactions rise once and are gone — the sender's name rides along so a
+   reaction is attributable without opening the roster. Horizontal drift is a
+   per-emoji CSS var so a burst fans out instead of stacking into one column. */
+@keyframes sharp-call-reaction-rise {
+  0% { opacity: 0; transform: translate3d(0, 16px, 0) scale(0.55); }
+  14% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.08); }
+  30% { transform: translate3d(calc(var(--drift) * 0.3), -34px, 0) scale(1); }
+  74% { opacity: 1; }
+  100% { opacity: 0; transform: translate3d(var(--drift), -150px, 0) scale(0.9); }
+}
+.call-reaction {
+  animation: sharp-call-reaction-rise 3.2s cubic-bezier(0.22, 0.72, 0.3, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .share-frame { animation: none; opacity: 0.95; }
+  .share-live-dot { animation: none; }
+  /* Still an event, just not a flight path. */
+  .call-reaction { animation: sharp-fade-in 160ms ease-out both; }
 }
 
 /* Live call poll: quiet entrance + the same green "live" pulse as speaking. */

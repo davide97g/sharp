@@ -222,5 +222,14 @@ export function SendIcon(p: IconProps) {
   )
 }
 
+// Brand mark, not a stroke glyph: GitHub's octocat only reads as itself filled.
+export function GithubIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden className={className}>
+      <path d="M12 1.5a10.5 10.5 0 0 0-3.32 20.46c.53.1.72-.23.72-.5v-1.78c-2.92.64-3.54-1.4-3.54-1.4-.48-1.22-1.17-1.55-1.17-1.55-.95-.65.07-.64.07-.64 1.06.08 1.62 1.09 1.62 1.09.93 1.6 2.45 1.14 3.05.87.09-.68.36-1.14.66-1.4-2.33-.27-4.78-1.17-4.78-5.2 0-1.15.41-2.09 1.08-2.83-.11-.27-.47-1.34.1-2.79 0 0 .88-.28 2.88 1.07a9.9 9.9 0 0 1 5.24 0c2-1.35 2.88-1.07 2.88-1.07.57 1.45.21 2.52.1 2.79.67.74 1.08 1.68 1.08 2.83 0 4.04-2.46 4.93-4.8 5.19.37.32.7.95.7 1.92v2.85c0 .28.19.61.73.5A10.5 10.5 0 0 0 12 1.5z" />
+    </svg>
+  )
+}
+
 // Re-export the pre-existing chrome glyphs so the registry is the one import site.
 export { GearIcon, LockIcon, EyeIcon, EyeOffIcon } from '../components/icons'

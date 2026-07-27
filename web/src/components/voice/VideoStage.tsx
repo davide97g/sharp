@@ -14,6 +14,8 @@ import {
   type VideoBackground,
 } from '../../lib/videoBackgrounds'
 import { VoiceMiniWidget } from './VoiceMiniWidget'
+import { CallReactionStream, ReactionControl } from './CallReactions'
+import { ScreenShareBeacon } from './ScreenShareBeacon'
 import { CallChatRail } from './CallChatRail'
 import { VoiceDuckSuggest } from './VoiceDuckSuggest'
 import { useVoicePip } from './VoicePip'
@@ -23,7 +25,7 @@ import { CallPollOverlay } from '../CallPollOverlay'
 import { CreatePollModal } from '../CreatePollModal'
 import { useAudioAuraPreference, setAudioAuraPreference } from '../../lib/meetingEffects'
 import { AudioAuraAvatar, AudioAuraPreview } from './AudioAuraAvatar'
-import { HandIcon, MicIcon } from './callIcons'
+import { HandIcon, MicIcon, ScreenBadgeIcon } from './callIcons'
 import { SpatialStage, useSpatialAudio } from './SpatialStage'
 import { useDismiss } from '../../ui'
 
@@ -38,6 +40,8 @@ type StageParticipant = {
   handRaised: boolean
   handRaisedAt: number | null
   cameraConnId: string | null
+  /** This person holds the room's single screen-share slot. */
+  sharing: boolean
 }
 
 type MediaDeviceOption = {
@@ -232,6 +236,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
         existing.muted = existing.muted && entry.muted
         existing.transcribing = existing.transcribing || entry.transcribing
         existing.speaking = existing.speaking || Boolean(speaking[connId])
+        existing.sharing = existing.sharing || entry.screen_on
         if (entry.hand_raised) {
           existing.handRaised = true
           existing.handRaisedAt = earliestHand(existing.handRaisedAt, entry.hand_raised_at)
@@ -251,6 +256,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
           handRaised: entry.hand_raised,
           handRaisedAt: entry.hand_raised ? entry.hand_raised_at : null,
           cameraConnId: entry.camera_on ? connId : null,
+          sharing: entry.screen_on,
         })
       }
     }
@@ -327,6 +333,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
       <>
         {pip.portal}
         <CallConnectionNotice status={voiceStatus} />
+        <ScreenShareBeacon />
         {audioAuraPrompt}
         {notesConsentPrompt}
         <button
@@ -344,6 +351,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
       <>
         <VoiceMiniWidget />
         <CallConnectionNotice status={voiceStatus} />
+        <ScreenShareBeacon />
         <CallPollOverlay mode="mini" />
         {audioAuraPrompt}
         {notesConsentPrompt}
@@ -407,6 +415,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
                   transcribing={participant.transcribing}
                   speaking={participant.speaking}
                   handRaised={participant.handRaised}
+                  sharing={participant.sharing}
                   connIds={participant.connIds}
                   audioAuraEnabled={audioAuraEnabled}
                   size={40}
@@ -431,6 +440,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
                   transcribing={participant.transcribing}
                   speaking={participant.speaking}
                   handRaised={participant.handRaised}
+                  sharing={participant.sharing}
                   connIds={participant.connIds}
                   audioAuraEnabled={audioAuraEnabled}
                   compact
@@ -468,6 +478,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
           transcribing={mobileFocus.transcribing}
           speaking={mobileFocus.speaking}
           handRaised={mobileFocus.handRaised}
+          sharing={mobileFocus.sharing}
           connIds={mobileFocus.connIds}
           audioAuraEnabled={audioAuraEnabled}
           compact={false}
@@ -498,6 +509,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
                   transcribing={participant.transcribing}
                   speaking={participant.speaking}
                   handRaised={participant.handRaised}
+                  sharing={participant.sharing}
                   connIds={participant.connIds}
                   audioAuraEnabled={audioAuraEnabled}
                   compact
@@ -535,6 +547,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
               transcribing={participant.transcribing}
               speaking={participant.speaking}
               handRaised={participant.handRaised}
+              sharing={participant.sharing}
               connIds={participant.connIds}
               audioAuraEnabled={audioAuraEnabled}
               compact={stageMode === 'compact'}
@@ -561,6 +574,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
             transcribing={participant.transcribing}
             speaking={participant.speaking}
             handRaised={participant.handRaised}
+            sharing={participant.sharing}
             connIds={participant.connIds}
             audioAuraEnabled={audioAuraEnabled}
             size={avatarSize}
@@ -656,6 +670,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
 
           <div className="relative min-h-0 flex-1 overflow-hidden px-8 pb-24 pt-2">
             {stageBody}
+            <CallReactionStream channelId={channelId} resolveName={resolveName} />
             {channel?.is_member ? <VoiceDuckSuggest /> : null}
           </div>
 
@@ -683,6 +698,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
         )}
       </section>
       {pollCreatorOpen ? <CreatePollModal mode="call" onClose={() => setPollCreatorOpen(false)} /> : null}
+      <ScreenShareBeacon />
       {audioAuraPrompt}
       {notesConsentPrompt}
       </>
@@ -841,6 +857,11 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
 
       <div className="relative min-h-0 flex-1 overflow-y-auto p-3">
         {stageBody}
+        <CallReactionStream
+          channelId={channelId}
+          resolveName={resolveName}
+          compact={stageMode === 'compact'}
+        />
         {channel?.is_member ? <VoiceDuckSuggest /> : null}
       </div>
 
@@ -852,6 +873,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
       <CallPollOverlay mode={stageMode} />
     </section>
     {pollCreatorOpen ? <CreatePollModal mode="call" onClose={() => setPollCreatorOpen(false)} /> : null}
+    <ScreenShareBeacon />
     {audioAuraPrompt}
     {notesConsentPrompt}
     </>
@@ -1006,6 +1028,7 @@ function AudioTile({
   transcribing,
   speaking,
   handRaised,
+  sharing,
   connIds,
   audioAuraEnabled,
   size,
@@ -1018,6 +1041,7 @@ function AudioTile({
   transcribing: boolean
   speaking: boolean
   handRaised: boolean
+  sharing: boolean
   connIds: string[]
   audioAuraEnabled: boolean
   size: number
@@ -1063,6 +1087,16 @@ function AudioTile({
             <CaptionsIcon compact />
           </span>
         )}
+        {/* Top-left is the only free corner, and sharing must not displace the
+            speaking ring — a sharer who is talking still needs to read as talking. */}
+        {sharing && (
+          <span
+            className="absolute -left-0.5 -top-0.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-[var(--color-ink)] bg-share text-white"
+            title={`${name} is sharing their screen`}
+          >
+            <ScreenBadgeIcon />
+          </span>
+        )}
       </div>
       <span className="flex w-full items-center justify-center gap-1 truncate text-xs font-medium text-[var(--color-text)]">
         <span className="truncate">
@@ -1085,6 +1119,7 @@ function VideoTile({
   transcribing,
   speaking,
   handRaised,
+  sharing,
   connIds,
   audioAuraEnabled,
   compact,
@@ -1098,6 +1133,7 @@ function VideoTile({
   transcribing: boolean
   speaking: boolean
   handRaised: boolean
+  sharing: boolean
   connIds: string[]
   audioAuraEnabled: boolean
   compact: boolean
@@ -1146,8 +1182,13 @@ function VideoTile({
           {local ? ' (you)' : ''}
         </span>
         {guest && <GuestBadge onDark />}
-        {(handRaised || transcribing || muted) && (
+        {(handRaised || transcribing || muted || sharing) && (
           <span className="ml-auto flex items-center gap-1">
+            {sharing && (
+              <span className="rounded-full bg-share p-1 text-white" title="Sharing their screen">
+                <ScreenBadgeIcon />
+              </span>
+            )}
             {handRaised && (
               <span
                 className="rounded-full bg-amber-400/90 p-1 text-[#3a2a00]"
@@ -1356,7 +1397,11 @@ function ScreenTile({
   return (
     <article
       ref={tileRef}
-      className="group relative flex h-full w-full overflow-hidden rounded-2xl border border-[var(--color-border)] bg-black"
+      // Your own share gets the share-toned frame; a peer's share does not, because
+      // for them the point is the content, not the fact that it is being sent.
+      className={`group relative flex h-full w-full overflow-hidden rounded-2xl border bg-black ${
+        local ? 'share-tile' : 'border-[var(--color-border)]'
+      }`}
       onDoubleClick={() => void toggleFullScreen()}
     >
       {hasVideo ? (
@@ -1438,7 +1483,14 @@ function ScreenTile({
         </div>
       ) : null}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/75 to-transparent px-3 pb-2.5 pt-6 text-sm font-medium text-white">
-        <ScreenShareIcon />
+        {local ? (
+          <span className="flex items-center gap-1.5 rounded-full bg-share px-2 py-0.5 text-2xs font-semibold uppercase tracking-wide text-white">
+            <span className="share-live-dot h-1.5 w-1.5 rounded-full" aria-hidden />
+            Live
+          </span>
+        ) : (
+          <ScreenShareIcon />
+        )}
         <span className="truncate">{local ? 'Your screen' : `${name}'s screen`}</span>
       </div>
     </article>
@@ -1538,6 +1590,7 @@ function StageControlsBar({
         >
           <CameraIcon off={cameraStatus === 'off'} />
         </CallControl>
+        <ReactionControl size="lg" disabled={voiceStatus !== 'connected'} />
         <CallControl
           label="More call controls"
           active={moreOpen || secondaryActive}
@@ -1600,6 +1653,7 @@ function StageControlsBar({
               : 'Share screen'
         }
         active={screenStatus !== 'off'}
+        tone="share"
         disabled={screenStatus === 'starting' || someoneElseSharing}
         onClick={() => void toggleVoiceScreen()}
       >
@@ -1613,6 +1667,7 @@ function StageControlsBar({
       >
         <HandIcon />
       </CallControl>
+      <ReactionControl disabled={voiceStatus !== 'connected'} />
       <CallMoreMenu canPoll={canPoll} onOpenPoll={onOpenPoll} />
       <CallControl label="Leave call" danger onClick={leaveVoice}>
         <LeaveIcon />
@@ -2192,6 +2247,9 @@ function DevicePickerSection({
 function CallControl({
   label,
   active = false,
+  // Which "on" reads: accent for a normal toggle, share for broadcasting your screen
+  // (the one active state that also shows up at window scale — see ScreenShareBeacon).
+  tone = 'accent',
   danger = false,
   disabled = false,
   size = 'md',
@@ -2200,6 +2258,7 @@ function CallControl({
 }: {
   label: string
   active?: boolean
+  tone?: 'accent' | 'share'
   danger?: boolean
   disabled?: boolean
   size?: 'md' | 'lg'
@@ -2219,7 +2278,9 @@ function CallControl({
         danger
           ? 'bg-danger-soft text-danger-fg hover:bg-danger-soft'
           : active
-            ? 'bg-[var(--color-accent)] text-white'
+            ? tone === 'share'
+              ? 'bg-share text-white'
+              : 'bg-[var(--color-accent)] text-white'
             : 'bg-[var(--color-panel-2)] text-[var(--color-text)] hover:bg-[var(--color-border)]'
       }`}
     >

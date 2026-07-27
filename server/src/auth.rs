@@ -353,7 +353,10 @@ fn hex_encode(bytes: &[u8]) -> String {
 
 /// Public base URL for links in emails: explicit `APP_URL`, else the request's
 /// Origin, else scheme (X-Forwarded-Proto) + Host.
-fn resolve_app_url(state: &SharedState, headers: &axum::http::HeaderMap) -> Option<String> {
+pub(crate) fn resolve_app_url(
+    state: &SharedState,
+    headers: &axum::http::HeaderMap,
+) -> Option<String> {
     if let Some(url) = &state.config.app_url {
         return Some(url.clone());
     }

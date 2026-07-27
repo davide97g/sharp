@@ -167,11 +167,56 @@ export function DueBadge({ due }: { due: string }) {
   )
 }
 
-/** Slug for the copy-branch-name flow: `sharp-123-fix-the-thing`, ≤ 60 chars. */
-export function branchNameFor(task: Task): string {
-  const slug = task.title
+/** The convention when a project has not set one. Mirrors the server default (''). */
+export const DEFAULT_BRANCH_TEMPLATE = '{identifier}-{slug}'
+
+/** Tokens a branch template may use — kept in lockstep with `BRANCH_TOKENS` in tasks.rs. */
+export const BRANCH_TOKENS = ['identifier', 'key', 'number', 'slug', 'user'] as const
+
+function slugify(text: string): string {
+  return text
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-  return `${task.identifier.toLowerCase()}-${slug}`.slice(0, 60).replace(/-+$/, '')
+}
+
+/**
+ * Branch name for the copy-branch flow, rendered from the project's convention
+ * (`{identifier}-{slug}` by default): `sharp-123-fix-the-thing`, ≤ 60 chars.
+ * `user` is the current member's handle — the caller passes it since taskUi has no store.
+ */
+export function branchNameFor(task: Task, project?: Project, user?: string): string {
+  const template = project?.branch_template?.trim() || DEFAULT_BRANCH_TEMPLATE
+  return renderBranchTemplate(template, {
+    identifier: task.identifier.toLowerCase(),
+    key: (project?.key ?? task.identifier.split('-')[0]).toLowerCase(),
+    number: String(task.number),
+    slug: slugify(task.title),
+    user: slugify(user ?? 'me') || 'me',
+  })
+}
+
+/** Substitute tokens, then trim to a legal, tidy branch name. */
+export function renderBranchTemplate(
+  template: string,
+  values: Record<(typeof BRANCH_TOKENS)[number], string>,
+): string {
+  const filled = template.replace(/\{(\w+)\}/g, (match, token: string) =>
+    token in values ? values[token as keyof typeof values] : match,
+  )
+  return filled
+    .replace(/\/{2,}/g, '/')
+    .slice(0, 60)
+    .replace(/[-/]+$/, '')
+}
+
+/** Preview a template against a stand-in task, for the convention editor. */
+export function branchTemplateExample(template: string, projectKey: string, user: string): string {
+  return renderBranchTemplate(template.trim() || DEFAULT_BRANCH_TEMPLATE, {
+    identifier: `${projectKey.toLowerCase()}-42`,
+    key: projectKey.toLowerCase(),
+    number: '42',
+    slug: 'fix-the-login-redirect',
+    user: slugify(user) || 'me',
+  })
 }

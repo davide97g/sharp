@@ -7,6 +7,7 @@ import { toastError } from '../../lib/toast'
 import { useStore } from '../../store'
 import type { Project } from '../../lib/types'
 import { Modal } from '../Modal'
+import { ProjectGithubButton } from './ProjectGithub'
 import { TaskRow } from './TaskListView'
 import { isOpen, stateOf, TasksGlyph } from './taskUi'
 import { Button, Card, EmptyState, Field, Input, ModalFooter, SearchIcon, SectionLabel } from '../../ui'
@@ -88,7 +89,18 @@ export function TasksHome() {
             </section>
             <section>
               <SectionLabel as="h2" size="xs" className="mb-3">Projects</SectionLabel>
-              {active.length === 0 ? <TasksEmpty message="No projects yet." action={() => setCreating(true)} /> : <div className="space-y-2">{active.map((p) => <Card key={p.id} as="button" interactive onClick={() => navigate(`/t/${p.key.toLowerCase()}`)} className="flex w-full items-center gap-2.5"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-accent-soft)] text-lg text-[var(--color-accent-hover)]">{p.icon || '🎯'}</span><div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{p.name}</div><div className="font-mono text-2xs text-[var(--color-text-faint)]">{p.key}</div></div><span className="shrink-0 text-xs text-[var(--color-text-faint)]">{p.open_count} open</span></Card>)}</div>}
+              {active.length === 0 ? <TasksEmpty message="No projects yet." action={() => setCreating(true)} /> : <div className="space-y-2">{active.map((p) => (
+                // The repo pill is its own control, so the card body is a button
+                // rather than the Card itself (no nested buttons).
+                <Card key={p.id} className="space-y-2">
+                  <button onClick={() => navigate(`/t/${p.key.toLowerCase()}`)} className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg text-left transition-colors hover:text-[var(--color-accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-accent-soft)] text-lg text-[var(--color-accent-hover)]">{p.icon || '🎯'}</span>
+                    <div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{p.name}</div><div className="font-mono text-2xs text-[var(--color-text-faint)]">{p.key}</div></div>
+                    <span className="shrink-0 text-xs text-[var(--color-text-faint)]">{p.open_count} open</span>
+                  </button>
+                  <ProjectGithubButton project={p} compact />
+                </Card>
+              ))}</div>}
             </section>
           </div>
         </div>

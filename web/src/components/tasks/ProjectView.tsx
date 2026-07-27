@@ -7,6 +7,7 @@ import { registerShortcut } from '../../lib/shortcuts'
 import { KEY_PREFIXES, readLocal, scopedKey, writeLocal } from '../../lib/localPrefs'
 import type { Task, TaskPriority } from '../../lib/types'
 import { NewTaskModal } from './NewTaskModal'
+import { ProjectGithubButton } from './ProjectGithub'
 import { TaskBoardView } from './TaskBoardView'
 import { TaskListView } from './TaskListView'
 import { TaskPeek } from './TaskPeek'
@@ -118,6 +119,7 @@ export function ProjectView() {
           <IconButton size="xl" label="Back to Tasks" onClick={() => navigate('/tasks')} className="md:hidden"><ChevronLeftIcon size={18} /></IconButton>
           <div className="min-w-0 flex flex-1 items-center gap-2"><Button variant="ghost" size="sm" onClick={() => navigate('/tasks')} className="max-md:hidden min-h-11 font-normal text-text-faint">‹ Tasks</Button><span className="max-md:hidden text-[var(--color-text-faint)]">/</span><span className="shrink-0 text-lg">{project.icon || '🎯'}</span><span className="min-w-0 truncate font-semibold">{project.name}</span><span className="hidden font-mono text-xs text-[var(--color-text-faint)] sm:inline">{project.key}</span></div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
+            <div className="max-sm:hidden"><ProjectGithubButton project={project} compact /></div>
             <div className="flex overflow-hidden rounded-lg border border-[var(--color-border)]">
               <ViewToggle active={view === 'list'} onClick={() => switchView('list')} title="List view"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M4 6h16M4 12h16M4 18h16" /></svg></ViewToggle>
               <ViewToggle active={view === 'board'} onClick={() => switchView('board')} title="Board view"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="4" y="4" width="4" height="16" rx="1" /><rect x="10" y="4" width="4" height="11" rx="1" /><rect x="16" y="4" width="4" height="7" rx="1" /></svg></ViewToggle>

@@ -264,6 +264,10 @@ export const MessageItem = memo(function MessageItem({
   const taskModalEl = taskModal ? (
     <CreateTaskFromMessage message={message} onClose={() => setTaskModal(false)} />
   ) : null
+  // Lifts the row's `content-visibility` containment (see .message-row in
+  // index.css) so the floating toolbar and reaction palette aren't clipped when
+  // the row is open without the pointer resting on it.
+  const rowOpen = actioned || confirmDelete || taskModal || editing || undefined
 
   useEffect(() => {
     if (editing) {
@@ -391,6 +395,7 @@ export const MessageItem = memo(function MessageItem({
           isMine ? 'justify-end' : 'justify-start'
         }`}
         data-message-mine={isMine || undefined}
+        data-message-open={rowOpen}
         onMouseEnter={onMessagePointerEnter}
         onMouseLeave={onMessagePointerLeave}
         onClick={onMessageTap}
@@ -541,6 +546,7 @@ export const MessageItem = memo(function MessageItem({
             : 'hover:bg-[var(--color-panel)]/50'
       } ${grouped ? 'py-(--density-row-y)' : 'pt-(--density-msg-y) pb-0.5 mt-1'}`}
       data-message-mine={isMine || undefined}
+      data-message-open={rowOpen}
       onMouseEnter={onMessagePointerEnter}
       onMouseLeave={onMessagePointerLeave}
       onClick={onMessageTap}
