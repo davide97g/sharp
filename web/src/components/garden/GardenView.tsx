@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { GardenRoom } from '../../lib/types'
+import { chordFor, formatChord, registerShortcut } from '../../lib/shortcuts'
 import { useStore } from '../../store'
-import { Button, Card, CloseIcon, IconButton, LockIcon, Modal } from '../../ui'
+import { Button, Card, CloseIcon, IconButton, Kbd, LockIcon, Modal } from '../../ui'
 import { GardenGame } from './GardenGame'
 
 function GardenMark({ size = 20 }: { size?: number }) {
@@ -72,6 +73,36 @@ export function GardenView() {
     void enterGarden()
     return () => leaveGarden()
   }, [enterGarden, leaveGarden])
+
+  useEffect(() => {
+    const off = [
+      registerShortcut('garden.enter-room', (event) => {
+        if (
+          space !== 'hub' ||
+          !nearby ||
+          roomsOpen ||
+          document.querySelector('[role="dialog"]')
+        ) {
+          return
+        }
+        event.preventDefault()
+        void enterRoom(nearby.channel_id)
+      }),
+      registerShortcut('garden.exit-room', (event) => {
+        if (document.querySelector('[role="dialog"]')) return
+        if (roomsOpen) {
+          event.preventDefault()
+          setRoomsOpen(false)
+          return
+        }
+        // Let the consent modal own Escape while it is open.
+        if (space !== 'room' || audioMode === 'ask') return
+        event.preventDefault()
+        exitRoom()
+      }),
+    ]
+    return () => off.forEach((unregister) => unregister())
+  }, [audioMode, enterRoom, exitRoom, nearby, roomsOpen, space])
 
   const currentRoom = useMemo(
     () => map?.rooms.find((room) => room.channel_id === channelId) ?? null,
@@ -229,6 +260,7 @@ export function GardenView() {
             onClick={exitRoom}
           >
             Leave room
+            <Kbd>{formatChord(chordFor('garden.exit-room'))}</Kbd>
           </Button>
         ) : nearby ? (
           <div className="pointer-events-auto flex max-w-full items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-2 pl-3 shadow-2xl">
@@ -236,6 +268,8 @@ export function GardenView() {
               <p className="truncate text-sm font-semibold text-[var(--color-text)]">{nearby.name}</p>
               <p className="text-xs text-[var(--color-text-faint)]">
                 {nearby.is_member ? 'Enter room' : 'Public group · join and enter'}
+                {' · '}
+                <Kbd>{formatChord(chordFor('garden.enter-room'))}</Kbd>
               </p>
             </div>
             <Button size="sm" onClick={() => void enterRoom(nearby.channel_id)}>

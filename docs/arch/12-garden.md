@@ -105,8 +105,9 @@ returns everyone to the hub. No Garden movement or visit history is persisted.
 ## Calls and UX
 
 - Garden is a `/garden` route, desktop rail destination, and primary mobile-web tab.
-- The map is an anti-aliased Phaser canvas loaded only with the Garden route. React owns chrome,
-  consent, room browsing, and accessible controls; Phaser owns high-frequency world rendering.
+- The map is an anti-aliased, device-pixel-aware Phaser canvas loaded only with the Garden route.
+  React owns chrome, consent, room browsing, and accessible controls; Phaser owns high-frequency
+  world rendering.
 - The world is a top-down spatial floor, not a pixel-art game. Its ground, paths, pavilions,
   labels, borders, and presence states resolve from Sharp's active theme tokens, so every
   appearance preset carries into Garden.
@@ -115,7 +116,9 @@ returns everyone to the hub. No Garden movement or visit history is persisted.
   SVG language and the accessible room list remains the non-canvas interaction path. Emoji can
   later be replaced with authored assets without changing world coordinates or the wire format.
 - Arrow keys and WASD move; pointer/touch chooses a destination. The room list can guide the
-  avatar to a doorway without requiring canvas precision.
+  avatar to a doorway without requiring canvas precision. `Enter` enters a nearby room and
+  `Escape` exits the current room; both are declared in the shared shortcut registry and may be
+  rebound.
 - First room entry asks whether Garden may manage room audio. The answer is device-local
   (`sharp.gardenAudio`). Camera remains off. If another call is active, Garden preserves it and
   shows a conflict message.

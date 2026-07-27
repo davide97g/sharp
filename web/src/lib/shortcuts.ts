@@ -183,6 +183,20 @@ export const SHORTCUTS: ShortcutDef[] = [
     defaultChord: 'c',
     scope: 'pane',
   },
+  {
+    id: 'garden.enter-room',
+    label: 'Enter nearby room',
+    group: 'Garden',
+    defaultChord: 'enter',
+    scope: 'pane',
+  },
+  {
+    id: 'garden.exit-room',
+    label: 'Exit current room',
+    group: 'Garden',
+    defaultChord: 'escape',
+    scope: 'pane',
+  },
 ]
 
 const BY_ID = new Map(SHORTCUTS.map((s) => [s.id, s]))
@@ -211,7 +225,17 @@ export function formatChord(input: string): string {
     else if (p === 'ctrl') out.push(isMacPlatform ? '⌃' : 'Ctrl')
   }
   const key = parts[parts.length - 1]
-  out.push(key === '\\' ? '\\' : key === '?' ? '?' : key.toUpperCase())
+  out.push(
+    key === '\\'
+      ? '\\'
+      : key === '?'
+        ? '?'
+        : key === 'escape'
+          ? 'Esc'
+          : key === 'enter'
+            ? 'Enter'
+            : key.toUpperCase(),
+  )
   return out.join(isMacPlatform ? '' : '+')
 }
 

@@ -64,6 +64,8 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
     let disposed = false
     let game: import('phaser').Game | null = null
     let unsubscribe: (() => void) | null = null
+    let resizeObserver: ResizeObserver | null = null
+    const renderScale = Math.min(window.devicePixelRatio || 1, 2)
 
     void (async () => {
       const Phaser = await import('phaser')
@@ -149,7 +151,7 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
             this.cameras.main.startFollow(this.player.node, true, 0.1, 0.1)
           }
           const setZoom = () => {
-            const width = this.scale.width
+            const logicalWidth = this.scale.width / renderScale
             if (space === 'room') {
               const fit = Math.min(
                 this.scale.width / this.worldWidth,
@@ -159,7 +161,8 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
               this.cameras.main.centerOn(this.worldWidth / 2, this.worldHeight / 2)
               return
             }
-            this.cameras.main.setZoom(width < 620 ? 1 : width < 1000 ? 0.9 : 0.78)
+            const zoom = logicalWidth < 620 ? 1 : logicalWidth < 1000 ? 0.9 : 0.78
+            this.cameras.main.setZoom(zoom * renderScale)
           }
           this.scale.on('resize', setZoom)
           setZoom()
@@ -318,6 +321,7 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
             .text(0, -13, self ? '🧑‍💻' : personFor(name), {
               fontFamily: EMOJI_FONT,
               fontSize: self ? '31px' : '29px',
+              resolution: renderScale,
             })
             .setOrigin(0.5, 0.65)
           const presence = this.add.circle(13, -2, 4, palette.success).setStrokeStyle(2, palette.panel)
@@ -329,6 +333,7 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
               color: textCss,
               backgroundColor: panelCss,
               padding: { x: 7, y: 4 },
+              resolution: renderScale,
             })
             .setOrigin(0.5)
           const node = this.add.container(x, y, [shadow, halo, person, presence, label])
@@ -429,6 +434,7 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
               fontSize: '14px',
               fontStyle: '600',
               color: textCss,
+              resolution: renderScale,
             })
             .setOrigin(0.5)
             .setDepth(y + 12)
@@ -437,6 +443,7 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
               fontFamily: UI_FONT,
               fontSize: '11px',
               color: textDimCss,
+              resolution: renderScale,
             })
             .setOrigin(0.5)
             .setDepth(y + 12)
@@ -470,6 +477,7 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
               fontSize: '13px',
               fontStyle: '600',
               color: textCss,
+              resolution: renderScale,
             })
             .setOrigin(0.5)
             .setDepth(y)
@@ -487,6 +495,7 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
                 fontSize: '10px',
                 fontStyle: '500',
                 color: room.occupancy > 0 ? accentCss : textDimCss,
+                resolution: renderScale,
               },
             )
             .setOrigin(0.5)
@@ -501,6 +510,7 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
                 fontSize: '10px',
                 fontStyle: '700',
                 color: inkCss,
+                resolution: renderScale,
               })
               .setOrigin(0.5)
               .setDepth(y + 3)
@@ -590,6 +600,7 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
               fontSize: '18px',
               fontStyle: '600',
               color: textCss,
+              resolution: renderScale,
             })
             .setOrigin(0, 0.5)
           this.add
@@ -597,6 +608,7 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
               fontFamily: UI_FONT,
               fontSize: '11px',
               color: textDimCss,
+              resolution: renderScale,
             })
             .setOrigin(0, 0.5)
 
@@ -620,6 +632,7 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
               fontSize: '11px',
               fontStyle: '600',
               color: textDimCss,
+              resolution: renderScale,
             })
             .setOrigin(0.5)
             .setDepth(13 * UNIT)
@@ -630,6 +643,7 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
             .text(x, y, emoji, {
               fontFamily: EMOJI_FONT,
               fontSize: `${size}px`,
+              resolution: renderScale,
             })
             .setOrigin(0.5)
             .setDepth(depth)
@@ -639,22 +653,32 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
       game = new Phaser.Game({
         type: Phaser.AUTO,
         parent: host,
+        canvasStyle: 'display:block;width:100%;height:100%',
         backgroundColor: inkCss,
         antialias: true,
         pixelArt: false,
         roundPixels: false,
         scene: GardenScene,
         scale: {
-          mode: Phaser.Scale.RESIZE,
-          width: '100%',
-          height: '100%',
+          mode: Phaser.Scale.NONE,
+          width: Math.max(1, Math.round(host.clientWidth * renderScale)),
+          height: Math.max(1, Math.round(host.clientHeight * renderScale)),
         },
         render: { antialias: true, pixelArt: false, roundPixels: false },
       })
+      resizeObserver = new ResizeObserver(() => {
+        if (!game) return
+        const width = Math.max(1, Math.round(host.clientWidth * renderScale))
+        const height = Math.max(1, Math.round(host.clientHeight * renderScale))
+        if (game.scale.width === width && game.scale.height === height) return
+        game.scale.resize(width, height)
+      })
+      resizeObserver.observe(host)
     })()
 
     return () => {
       disposed = true
+      resizeObserver?.disconnect()
       unsubscribe?.()
       game?.destroy(true)
       host.replaceChildren()
@@ -666,7 +690,7 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
       ref={hostRef}
       className="h-full w-full bg-ink [&>canvas]:block"
       role="application"
-      aria-label="Garden spatial map. Use arrow keys or WASD to move, or tap a destination."
+      aria-label="Garden spatial map. Use arrow keys or WASD to move, tap a destination, Enter to enter a nearby room, and Escape to exit."
     />
   )
 }
