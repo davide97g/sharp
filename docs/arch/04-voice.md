@@ -35,7 +35,7 @@ proxy to an OpenAI-compatible transcription provider.
 All ids are strings in JSON (UUIDs). A WebSocket connection id is the peer identity.
 
 ```ts
-VoiceParticipant = { conn_id: string, user_id: string, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null, hand_raised: boolean, hand_raised_at: number | null, annotation_color: string, aura_style: string | null, pos_x: number, pos_y: number, joined_at: string }
+VoiceParticipant = { conn_id: string, user_id: string, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null, hand_raised: boolean, hand_raised_at: number | null, annotation_color: string, aura_style: string | null, garden_active: boolean, pos_x: number, pos_y: number, joined_at: string }
 MediaCredentials = { provider: 'livekit', server_url: string, participant_token: string, participant_identity: string }
 VoiceRoomSnapshot = { channel_id: string, participants: VoiceParticipant[], active_meeting_id: string | null, annotations_allowed: boolean, media?: MediaCredentials }
 ```
@@ -46,10 +46,12 @@ The existing envelope remains `{"type": string, "payload": object}` in both dire
 
 Client → server:
 
-- `voice.join` `{channel_id, link_token?, aura_style?}` — `channel_id` is the room UUID for wire
+- `voice.join` `{channel_id, link_token?, aura_style?, garden_active?}` — `channel_id` is the room UUID for wire
   compatibility. Authenticated link visitors send `link_token` as admission proof without
   replacing their account session. `aura_style` seeds the participant's broadcast audio-aura pick
   (see `voice.aura`).
+  `garden_active=true` marks a call entered through Garden; Garden movement then owns the
+  participant's spatial coordinates until that connection leaves the room.
 - `voice.leave` `{channel_id}`
 - `voice.mute` `{channel_id, muted: boolean}`
 - `voice.force_mute` `{channel_id, conn_id}` — mute **someone else's** microphone for the
@@ -85,6 +87,8 @@ Client → server:
   `voice.participant_moved` (not `participant_updated`). A move from a connection that is no
   longer in the room is dropped silently — no `voice.error`, because a leave routinely races
   the last throttled move. Guests may send it.
+  A target participant with `garden_active=true` ignores direct `voice.move`; its coordinates
+  are updated from accepted `garden.move` events instead.
 - `voice.poll_create` `{room_id, question, options, multi, expires_at?}`
 - `voice.poll_vote` `{room_id, poll_id, option_ids}` — an empty option list retracts the vote.
 - `voice.poll_close` `{room_id, poll_id}` — creator only.
@@ -491,4 +495,3 @@ sync + native scheduled meetings — see the Phase 5 section below) → multi-wo
 stays append-only. (File uploads + notifications: see the section below.)
 
 ---
-

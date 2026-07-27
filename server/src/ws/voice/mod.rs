@@ -83,6 +83,9 @@ pub struct VoiceParticipant {
     /// Audio-aura style this participant broadcasts to the room, so every viewer
     /// sees their chosen signature. `None` falls back to the viewer's local style.
     pub aura_style: Option<String>,
+    /// True while the participant is inside a Garden channel room. Garden
+    /// movement owns spatial coordinates in this state.
+    pub garden_active: bool,
     /// Position in the spatial room, normalized to 0..1 on both axes (x = left to
     /// right, y = top to bottom of the floor plan). Assigned a spread-out spawn at
     /// join and moved by `voice.move`. Every client gets it even when the spatial
@@ -626,6 +629,10 @@ async fn handle_join(
                 hand_raised_at: None,
                 annotation_color,
                 aura_style: sanitize_aura_style(payload),
+                garden_active: payload
+                    .get("garden_active")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
                 pos_x,
                 pos_y,
                 joined_at: Utc::now(),
@@ -922,9 +929,13 @@ async fn handle_move(state: &SharedState, conn_id: Uuid, payload: &Value) {
             // The mover must be in the room too, or a stale connection could shove
             // people around a call it already left.
             Some(room) if room.participants.contains_key(&conn_id) => {
-                room.participants.get_mut(&target).map(|participant| {
+                room.participants.get_mut(&target).and_then(|participant| {
+                    if participant.garden_active {
+                        return None;
+                    }
                     participant.pos_x = x;
                     participant.pos_y = y;
+                    Some(())
                 })
             }
             _ => None,
@@ -945,6 +956,49 @@ async fn handle_move(state: &SharedState, conn_id: Uuid, payload: &Value) {
         }),
     );
     state.hub.broadcast(event, targets).await;
+}
+
+/// Garden owns spatial positions while a participant walks inside a channel
+/// room. This keeps regular call participants and Garden participants in the
+/// same LiveKit room without routing high-frequency state through LiveKit.
+pub async fn move_garden_participant(
+    state: &SharedState,
+    channel_id: Uuid,
+    conn_id: Uuid,
+    x: f64,
+    y: f64,
+) {
+    let moved = {
+        let mut guard = state.voice_rooms.lock().unwrap();
+        guard
+            .get_mut(&channel_id)
+            .and_then(|room| room.participants.get_mut(&conn_id))
+            .filter(|participant| participant.garden_active)
+            .map(|participant| {
+                participant.pos_x = clamp_unit(x);
+                participant.pos_y = clamp_unit(y);
+            })
+            .is_some()
+    };
+    if !moved {
+        return;
+    }
+    let targets = voice_targets(state, channel_id, &[]).await;
+    state
+        .hub
+        .broadcast(
+            envelope(
+                "voice.participant_moved",
+                json!({
+                    "channel_id": channel_id.to_string(),
+                    "conn_id": conn_id.to_string(),
+                    "x": clamp_unit(x),
+                    "y": clamp_unit(y),
+                }),
+            ),
+            targets,
+        )
+        .await;
 }
 
 async fn handle_hand(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &WsSender) {
@@ -1318,6 +1372,7 @@ mod tests {
             hand_raised_at: None,
             annotation_color: ANNOTATION_PALETTE[0].to_string(),
             aura_style: None,
+            garden_active: false,
             pos_x: 0.5,
             pos_y: 0.5,
             joined_at: Utc::now(),
@@ -1355,6 +1410,7 @@ mod tests {
             hand_raised_at: None,
             annotation_color: ANNOTATION_PALETTE[0].to_string(),
             aura_style: None,
+            garden_active: false,
             pos_x: 0.5,
             pos_y: 0.5,
             joined_at: Utc::now(),

@@ -41,7 +41,7 @@ function RouteFallback() {
 
 
 // Module jump targets (chord+1…9), in the rail's visual order.
-const MODE_ROUTES = ['/', '/docs', '/canvas', '/board', '/tasks', '/meetings', '/calendar', '/help', '/sharpy']
+const MODE_ROUTES = ['/', '/garden', '/docs', '/canvas', '/board', '/tasks', '/meetings', '/calendar', '/help']
 
 // Browsers reserve ⌘/Ctrl+digit for tab switching, so the chord adapts:
 // desktop app (no browser chrome) gets the native ⌘/Ctrl+digit, Mac browsers
@@ -79,6 +79,7 @@ export function AppShell() {
 
   const docsMode =
     location.pathname.startsWith('/docs') || location.pathname.startsWith('/d/')
+  const gardenMode = location.pathname.startsWith('/garden')
   const canvasMode =
     location.pathname.startsWith('/canvas') || location.pathname.startsWith('/x/')
   const boardMode =
@@ -90,7 +91,7 @@ export function AppShell() {
   const sharpyMode = location.pathname.startsWith('/sharpy')
   const helpMode = location.pathname.startsWith('/help')
   const settingsMode = location.pathname.startsWith('/settings')
-  const mode: 'chat' | 'docs' | 'canvas' | 'board' | 'tasks' | 'meetings' | 'calendar' | 'sharpy' | 'help' =
+  const mode: 'chat' | 'garden' | 'docs' | 'canvas' | 'board' | 'tasks' | 'meetings' | 'calendar' | 'sharpy' | 'help' =
     helpMode
       ? 'help'
       : calendarMode
@@ -107,7 +108,9 @@ export function AppShell() {
                 ? 'canvas'
                 : docsMode
                   ? 'docs'
-                  : 'chat'
+                  : gardenMode
+                    ? 'garden'
+                    : 'chat'
 
   // On mobile, hide the bottom tab bar while a conversation is open (`/c/…`) so
   // the composer + safe area own the bottom edge — WhatsApp/Slack pattern. The
@@ -339,7 +342,7 @@ function ModeRail({
   orientation,
   edge = 'bottom',
 }: {
-  mode: 'chat' | 'docs' | 'canvas' | 'board' | 'tasks' | 'meetings' | 'calendar' | 'sharpy' | 'help'
+  mode: 'chat' | 'garden' | 'docs' | 'canvas' | 'board' | 'tasks' | 'meetings' | 'calendar' | 'sharpy' | 'help'
   orientation: 'vertical' | 'horizontal'
   edge?: 'bottom' | 'top'
 }) {
@@ -399,6 +402,20 @@ function ModeRail({
       <RailButton
         tip={tip}
         shortcut={chord(2)}
+        active={mode === 'garden'}
+        onClick={() => navigate('/garden')}
+        title="Garden"
+        label={
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M12 21V9" />
+            <path d="M12 13c-4.7 0-7-2.3-7-7 4.7 0 7 2.3 7 7Z" />
+            <path d="M12 16c4.7 0 7-2.3 7-7-4.7 0-7 2.3-7 7Z" />
+          </svg>
+        }
+      />
+      <RailButton
+        tip={tip}
+        shortcut={chord(3)}
         active={mode === 'docs'}
         onClick={() => navigate('/docs')}
         title="Docs"
@@ -424,7 +441,7 @@ function ModeRail({
       />
       <RailButton
         tip={tip}
-        shortcut={chord(3)}
+        shortcut={chord(4)}
         active={mode === 'canvas'}
         onClick={() => navigate('/canvas')}
         title="Canvas"
@@ -449,7 +466,7 @@ function ModeRail({
       />
       <RailButton
         tip={tip}
-        shortcut={chord(4)}
+        shortcut={chord(5)}
         active={mode === 'board'}
         onClick={() => navigate('/board')}
         title="Board"
@@ -474,7 +491,7 @@ function ModeRail({
       />
       <RailButton
         tip={tip}
-        shortcut={chord(5)}
+        shortcut={chord(6)}
         active={mode === 'tasks'}
         onClick={() => navigate('/tasks')}
         title="Tasks"
@@ -482,7 +499,7 @@ function ModeRail({
       />
       <RailButton
         tip={tip}
-        shortcut={chord(6)}
+        shortcut={chord(7)}
         active={mode === 'meetings'}
         onClick={() => navigate('/meetings')}
         title="Meetings"
@@ -505,7 +522,7 @@ function ModeRail({
       />
       <RailButton
         tip={tip}
-        shortcut={chord(7)}
+        shortcut={chord(8)}
         active={mode === 'calendar'}
         onClick={() => navigate('/calendar')}
         title="Calendar"
@@ -528,7 +545,7 @@ function ModeRail({
       />
       <RailButton
         tip={tip}
-        shortcut={chord(8)}
+        shortcut={chord(9)}
         active={mode === 'help'}
         onClick={() => navigate('/help')}
         title="Help"
@@ -555,7 +572,6 @@ function ModeRail({
           how to enable it instead of the destination silently vanishing. */}
       <RailButton
           tip={tip}
-        shortcut={chord(9)}
           active={mode === 'sharpy'}
           onClick={() => navigate('/sharpy')}
           title="Sharpy"

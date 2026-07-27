@@ -40,7 +40,7 @@ import {
   setVoiceRecognizer,
   stopVoiceRecognizer,
 } from './lib/store/recognizer'
-import { KEYS, readLocalBool, writeLocalBool } from './lib/localPrefs'
+import { KEYS, readLocal, readLocalBool, writeLocal, writeLocalBool } from './lib/localPrefs'
 import { applyWsEventTo } from './lib/wsEvents'
 import { sortTasks } from './lib/store/taskHelpers'
 import { applyUi } from './lib/store/uiHelpers'
@@ -120,6 +120,8 @@ import type {
   Doc,
   DocMention,
   GifConfig,
+  GardenMap,
+  GardenPeer,
   Message,
   EncryptedAttachment,
   Notification,
@@ -172,6 +174,7 @@ export type VoiceRoom = Record<
     hand_raised: boolean
     hand_raised_at: number | null
     aura_style: string | null
+    garden_active: boolean
     pos_x: number
     pos_y: number
     joined_at: string
@@ -222,6 +225,21 @@ export type VoiceState = {
   // and whether the local pen tool is engaged.
   annotationsAllowed: boolean
   annotating: boolean
+}
+
+export type GardenAudioMode = 'ask' | 'on' | 'off'
+
+export type GardenClientState = {
+  active: boolean
+  status: 'idle' | 'loading' | 'connected' | 'error'
+  map: GardenMap | null
+  self: GardenPeer | null
+  peers: Record<string, GardenPeer>
+  space: 'hub' | 'room'
+  channelId: string | null
+  audioMode: GardenAudioMode
+  managedVoiceChannelId: string | null
+  error: string | null
 }
 
 export type ChannelMessages = {
@@ -388,6 +406,7 @@ export type State = {
   voiceRooms: Record<string, VoiceRoom>
   activeMeetings: Record<string, string>
   voice: VoiceState
+  garden: GardenClientState
 
   // --- calendar (Phase 5) ---
   calendarConnections: CalendarConnection[]
@@ -540,7 +559,7 @@ export type State = {
   // voice actions
   joinVoice: (
     channelId: string,
-    opts?: { stageMode?: VoiceStageMode; linkToken?: string },
+    opts?: { stageMode?: VoiceStageMode; linkToken?: string; gardenActive?: boolean },
   ) => Promise<void>
   connectVoiceMedia: (payload: VoiceStatePayload) => Promise<void>
   leaveVoice: () => void
@@ -570,6 +589,20 @@ export type State = {
   setAnnotationsAllowed: (allowed: boolean) => void
   clearAnnotations: () => void
   sendVoiceReaction: (emoji: string) => void
+
+  // Garden actions
+  loadGarden: () => Promise<void>
+  enterGarden: () => Promise<void>
+  leaveGarden: () => void
+  moveGarden: (
+    seq: number,
+    x: number,
+    y: number,
+    facing: GardenPeer['facing'],
+  ) => void
+  enterGardenRoom: (channelId: string) => Promise<void>
+  exitGardenRoom: () => void
+  setGardenAudio: (mode: Exclude<GardenAudioMode, 'ask'>) => void
 
   // docs actions
   loadChannelDocs: (channelId: string) => Promise<void>
@@ -722,6 +755,26 @@ function storedStreamRevertNicknames(): boolean {
   }
 }
 
+function storedGardenAudio(): GardenAudioMode {
+  const value = readLocal(KEYS.gardenAudio)
+  return value === 'on' || value === 'off' ? value : 'ask'
+}
+
+function emptyGardenState(audioMode = storedGardenAudio()): GardenClientState {
+  return {
+    active: false,
+    status: 'idle',
+    map: null,
+    self: null,
+    peers: {},
+    space: 'hub',
+    channelId: null,
+    audioMode,
+    managedVoiceChannelId: null,
+    error: null,
+  }
+}
+
 
 export const useStore = create<State>((set, get) => ({
   token: null,
@@ -808,6 +861,7 @@ export const useStore = create<State>((set, get) => ({
   voiceRooms: {},
   activeMeetings: {},
   voice: emptyVoiceState(),
+  garden: emptyGardenState(),
   projects: [],
   taskLabels: [],
   tasksByProject: {},
@@ -864,6 +918,10 @@ export const useStore = create<State>((set, get) => ({
         void get().loadMyTasks()
         const activeProject = get().activeProjectId
         if (activeProject) void get().loadProjectTasks(activeProject)
+        if (get().garden.active) {
+          void get().loadGarden()
+          get().ws?.send('garden.enter', {})
+        }
       },
     })
     set({ ws })
@@ -941,6 +999,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   logout() {
+    get().leaveGarden()
     get().leaveVoice()
     const ws = get().ws
     if (ws) ws.close()
@@ -1026,6 +1085,7 @@ export const useStore = create<State>((set, get) => ({
       voiceRooms: {},
       activeMeetings: {},
       voice: emptyVoiceState(),
+      garden: emptyGardenState(),
       ws: null,
     })
   },
@@ -1873,6 +1933,102 @@ export const useStore = create<State>((set, get) => ({
     get().ws?.sendTyping(channelId)
   },
 
+  async loadGarden() {
+    set((s) => ({ garden: { ...s.garden, status: 'loading', error: null } }))
+    try {
+      const map = await api.gardenMap()
+      set((s) => ({
+        garden: {
+          ...s.garden,
+          map,
+          status: s.garden.active ? 'connected' : 'idle',
+          error: null,
+        },
+      }))
+    } catch (error) {
+      set((s) => ({
+        garden: {
+          ...s.garden,
+          status: 'error',
+          error: error instanceof Error ? error.message : 'Could not load Garden.',
+        },
+      }))
+    }
+  },
+
+  async enterGarden() {
+    set((s) => ({
+      garden: { ...s.garden, active: true, status: 'loading', error: null },
+    }))
+    await get().loadGarden()
+    get().ws?.send('garden.enter', {})
+  },
+
+  leaveGarden() {
+    const garden = get().garden
+    get().ws?.send('garden.leave', {})
+    if (
+      garden.managedVoiceChannelId &&
+      get().voice.channelId === garden.managedVoiceChannelId
+    ) {
+      get().leaveVoice()
+    }
+    set({ garden: emptyGardenState(garden.audioMode) })
+  },
+
+  moveGarden(seq, x, y, facing) {
+    if (!get().garden.active) return
+    get().ws?.send('garden.move', { seq, x, y, facing })
+  },
+
+  async enterGardenRoom(channelId) {
+    const room = get().garden.map?.rooms.find((candidate) => candidate.channel_id === channelId)
+    if (!room) return
+    if (!room.is_member) {
+      if (room.kind !== 'public') return
+      await get().joinChannel(channelId)
+      await get().loadGarden()
+    }
+    get().ws?.send('garden.room_enter', { channel_id: channelId })
+  },
+
+  exitGardenRoom() {
+    get().ws?.send('garden.room_exit', {})
+  },
+
+  setGardenAudio(mode) {
+    writeLocal(KEYS.gardenAudio, mode)
+    const current = get()
+    set((s) => ({ garden: { ...s.garden, audioMode: mode, error: null } }))
+    if (mode === 'off') {
+      if (
+        current.garden.managedVoiceChannelId &&
+        current.voice.channelId === current.garden.managedVoiceChannelId
+      ) {
+        current.leaveVoice()
+      }
+      set((s) => ({
+        garden: { ...s.garden, managedVoiceChannelId: null },
+      }))
+      return
+    }
+    const channelId = current.garden.channelId
+    if (!channelId) return
+    if (!current.voice.channelId) {
+      set((s) => ({
+        garden: { ...s.garden, managedVoiceChannelId: channelId },
+      }))
+      void current.joinVoice(channelId, { stageMode: 'mini', gardenActive: true })
+    } else if (current.voice.channelId !== channelId) {
+      set((s) => ({
+        garden: {
+          ...s.garden,
+          error: 'Your current call is still active. Leave it to hear this room.',
+        },
+      }))
+    }
+  },
+
   pruneTyping() {
     const now = Date.now()
     const cur = get().typing
@@ -1933,6 +2089,7 @@ export const useStore = create<State>((set, get) => ({
       ws.send('voice.join', {
         channel_id: channelId,
         aura_style: getAudioAuraStyle(get().me?.id),
+        garden_active: opts?.gardenActive ?? false,
         ...(opts?.linkToken ? { link_token: opts.linkToken } : {}),
       })
     } catch (error) {

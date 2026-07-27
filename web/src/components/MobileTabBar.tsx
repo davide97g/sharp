@@ -5,12 +5,14 @@ import { hasUnseenRelease } from '../lib/whatsNew'
 import { Avatar } from './Avatar'
 import { TasksGlyph } from './tasks/taskUi'
 
-type TabId = 'chat' | 'docs' | 'canvas' | 'more'
+type TabId = 'chat' | 'garden' | 'docs' | 'more'
 
 function tabFromPath(pathname: string): TabId {
   if (pathname.startsWith('/docs') || pathname.startsWith('/d/')) return 'docs'
-  if (pathname.startsWith('/canvas') || pathname.startsWith('/x/')) return 'canvas'
+  if (pathname.startsWith('/garden')) return 'garden'
   if (
+    pathname.startsWith('/canvas') ||
+    pathname.startsWith('/x/') ||
     pathname.startsWith('/board') ||
     pathname.startsWith('/b/') ||
     pathname.startsWith('/tasks') ||
@@ -70,7 +72,7 @@ export function MobileTabBar() {
     setMoreOpen(false)
     if (tab === 'chat') navigate('/')
     else if (tab === 'docs') navigate('/docs')
-    else navigate('/canvas')
+    else navigate('/garden')
   }
 
   return (
@@ -88,6 +90,15 @@ export function MobileTabBar() {
             style={{ paddingBottom: '0.75rem' }}
           >
             <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-[var(--color-border)]" />
+            <MoreLink
+              label="Canvas"
+              icon={<CanvasIcon />}
+              badge={canvasMentions}
+              onClick={() => {
+                setMoreOpen(false)
+                navigate('/canvas')
+              }}
+            />
             <MoreLink
               label="Boards"
               icon={<BoardIcon />}
@@ -154,18 +165,17 @@ export function MobileTabBar() {
           icon={<span className="text-base font-bold leading-none">#</span>}
         />
         <TabButton
+          active={active === 'garden'}
+          label="Garden"
+          onClick={() => go('garden')}
+          icon={<GardenIcon />}
+        />
+        <TabButton
           active={active === 'docs'}
           label="Docs"
           badge={docMentions}
           onClick={() => go('docs')}
           icon={<DocsIcon />}
-        />
-        <TabButton
-          active={active === 'canvas'}
-          label="Canvas"
-          badge={canvasMentions}
-          onClick={() => go('canvas')}
-          icon={<CanvasIcon />}
         />
         <TabButton
           active={active === 'more' || moreOpen}
@@ -262,6 +272,16 @@ function CanvasIcon() {
       <rect x="4" y="4" width="7" height="7" rx="1" />
       <circle cx="16.5" cy="7.5" r="3.5" />
       <path d="M7.5 21 3 14h9z" />
+    </svg>
+  )
+}
+
+function GardenIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 21V9" />
+      <path d="M12 13c-4.7 0-7-2.3-7-7 4.7 0 7 2.3 7 7Z" />
+      <path d="M12 16c4.7 0 7-2.3 7-7-4.7 0-7 2.3-7 7Z" />
     </svg>
   )
 }

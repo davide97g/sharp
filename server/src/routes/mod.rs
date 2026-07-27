@@ -16,6 +16,7 @@ pub mod docs;
 pub mod e2ee;
 pub mod files;
 pub mod gifs;
+pub mod garden;
 pub mod github;
 pub mod meetings;
 pub mod messages;

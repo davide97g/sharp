@@ -28,6 +28,8 @@ pub struct AppState {
     pub hub: Arc<Hub>,
     /// Ephemeral voice rooms, keyed by channel id. Per-replica.
     pub voice_rooms: crate::ws::voice::VoiceRooms,
+    /// Ephemeral Garden presence for connections handled by this replica.
+    pub garden: crate::ws::garden::GardenState,
     /// Live doc-sync rooms, keyed by doc id. Per-replica (see docs/arch/02-docs.md).
     pub doc_rooms: DocRooms,
     /// Object storage for uploads; `None` when S3 is not configured.

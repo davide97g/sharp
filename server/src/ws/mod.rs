@@ -1,3 +1,4 @@
+pub mod garden;
 pub mod session;
 pub mod voice;
 

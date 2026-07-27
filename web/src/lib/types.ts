@@ -333,10 +333,48 @@ export type VoiceParticipant = {
   hand_raised_at: number | null
   // Audio-aura style this participant broadcasts; null falls back to the viewer's local style.
   aura_style: string | null
+  // True when Garden owns this participant's spatial position.
+  garden_active: boolean
   // Spatial-room position, normalized 0..1 (x = left→right, y = top→bottom).
   pos_x: number
   pos_y: number
   joined_at: string
+}
+
+// --- Garden spatial rooms ---
+
+export type GardenRoomVariant = 'meadow' | 'pond' | 'orchard' | 'greenhouse'
+
+export type GardenRoom = {
+  channel_id: string
+  name: string
+  kind: 'public' | 'private'
+  is_member: boolean
+  plot_index: number
+  room_variant: GardenRoomVariant
+  occupancy: number
+  door_x: number
+  door_y: number
+}
+
+export type GardenMap = {
+  version: number
+  tile_size: number
+  spawn: { x: number; y: number }
+  rooms: GardenRoom[]
+}
+
+export type GardenPeer = {
+  conn_id: string
+  user_id: string
+  display_name: string
+  space: 'hub' | 'room'
+  channel_id: string | null
+  x: number
+  y: number
+  facing: 'up' | 'down' | 'left' | 'right'
+  moving: boolean
+  seq: number
 }
 
 export type VoiceRoomSnapshot = {

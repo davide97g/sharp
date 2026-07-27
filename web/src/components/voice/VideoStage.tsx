@@ -96,6 +96,11 @@ const STAGE_SIZE: Record<
 export function VideoStage({ roomName: roomNameOverride }: { roomName?: string } = {}) {
   const { token: currentLinkToken } = useParams<{ token?: string }>()
   const channelId = useStore((s) => s.voice.channelId)
+  const gardenManaged = useStore(
+    (s) =>
+      s.garden.managedVoiceChannelId !== null &&
+      s.garden.managedVoiceChannelId === s.voice.channelId,
+  )
   const voiceStatus = useStore((s) => s.voice.status)
   const stageMode = useStore((s) => s.voice.stageMode)
   const room = useStore((s) => (channelId ? s.voiceRooms[channelId] : undefined))
@@ -345,7 +350,7 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
     : ''
 
   const audioAuraPrompt =
-    me && audioAuraPreference === null ? (
+    me && audioAuraPreference === null && !gardenManaged ? (
       <AudioAuraConsentPrompt
         onAccept={() => setAudioAuraPreference(me.id, true)}
         onDismiss={() => setAudioAuraPreference(me.id, false)}

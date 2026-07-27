@@ -19,6 +19,7 @@ import type {
   GifResult,
   GifSettings,
   GifSuggestResponse,
+  GardenMap,
   VoiceConfigResponse,
   TranscriptionResponse,
   Message,
@@ -290,6 +291,7 @@ async function transcribeAudio(
 }
 
 export const api = {
+  gardenMap: () => request<GardenMap>('/garden/map'),
   tasks: {
     projects: () => request<{ projects: Project[] }>('/projects'),
     createProject: (input: { key: string; name: string; icon?: string; channel_id?: string }) =>

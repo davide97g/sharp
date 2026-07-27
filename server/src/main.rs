@@ -190,6 +190,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config,
         hub,
         voice_rooms: Default::default(),
+        garden: Default::default(),
         doc_rooms: Default::default(),
         storage,
         vapid,
@@ -415,6 +416,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/channels",
             get(routes::channels::list_channels).post(routes::channels::create_channel),
         )
+        .route("/garden/map", get(routes::garden::map))
         // ── Channels, membership, roles, read state — contract: docs/arch/01-core.md ─────────
         .route("/channels/dm", post(routes::channels::create_dm))
         .route(

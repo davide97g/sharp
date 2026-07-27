@@ -51,6 +51,28 @@
   --color-presence-online: #4fbf9f;
   --color-presence-offline: color-mix(in oklab, var(--color-border) 40%, var(--color-text-faint));
 
+  /* Garden's deliberately finite GBA-style art palette. It is separate from
+     app chrome so every canvas color remains named and auditable. */
+  --color-garden-grass: #86ad58;
+  --color-garden-grass-light: #9bc46a;
+  --color-garden-grass-dark: #6f9848;
+  --color-garden-path: #d7c790;
+  --color-garden-path-edge: #b29f69;
+  --color-garden-water: #65a9b7;
+  --color-garden-water-light: #91ced0;
+  --color-garden-ink: #26352d;
+  --color-garden-cream: #f7eed0;
+  --color-garden-roof: #c6604e;
+  --color-garden-roof-dark: #8d443f;
+  --color-garden-timber: #e4bb73;
+  --color-garden-timber-dark: #9b7048;
+  --color-garden-leaf: #3f7a4d;
+  --color-garden-leaf-light: #69a956;
+  --color-garden-flower: #f1a7b7;
+  --color-garden-avatar: #5d62d8;
+  --color-garden-avatar-alt: #f0b55f;
+  --color-garden-shadow: #36583c;
+
   /* Sub-xs type steps — the app's dense-metadata band. Use these instead of
      raw text-[10px]/text-[11px]. */
   --text-2xs: 0.6875rem;

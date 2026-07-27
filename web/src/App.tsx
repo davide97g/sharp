@@ -31,6 +31,9 @@ import { PasskeySetupPrompt } from './components/PasskeySetupPrompt'
 const DocEditor = lazy(() =>
   import('./components/docs/DocEditor').then((m) => ({ default: m.DocEditor })),
 )
+const GardenView = lazy(() =>
+  import('./components/garden/GardenView').then((m) => ({ default: m.GardenView })),
+)
 const BoardEditor = lazy(() =>
   import('./components/board/BoardEditor').then((m) => ({ default: m.BoardEditor })),
 )
@@ -184,6 +187,7 @@ export function App() {
           element={authed ? <AppShell /> : <Navigate to="/login" replace />}
         >
           <Route index element={<Home />} />
+          <Route path="garden" element={<GardenView />} />
           <Route path="c/:channelId" element={<MessagePane />} />
           {/* Slack-style in-channel tabs: docs/canvas galleries that stay in
               chat mode (channel sidebar stays put). */}

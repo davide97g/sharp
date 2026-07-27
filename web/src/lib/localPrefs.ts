@@ -57,6 +57,8 @@ export const KEYS = {
   voiceSpatial: 'sharp.voiceSpatial',
   /** Push-to-talk: mic closed until Space is held. Per-device, like the mic itself. */
   voicePushToTalk: 'sharp.voicePushToTalk',
+  /** Whether entering a Garden room should join its audio call on this device. */
+  gardenAudio: 'sharp.gardenAudio',
   /** Most-recent in-call reaction emoji (newest first), so the quick row self-tunes. */
   callReactionsRecent: 'sharp.callReactionsRecent',
   /** Legacy single-flag video blur, superseded by the scoped videoBackground key. */
