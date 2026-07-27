@@ -41,7 +41,7 @@ OAuth/SSO.
 users(
   id uuid PK default gen_random_uuid(),
   email text UNIQUE NOT NULL,            -- store lowercased
-  password_hash text NOT NULL,           -- argon2id
+  password_hash text,                    -- argon2id; NULL for a social-sign-in-only account
   display_name text NOT NULL,
   avatar_url text,                       -- proxied /api/v1/users/{id}/avatar?v=<token>; null = none
   avatar_content_type text,              -- stored object's content-type (for the proxy)
@@ -111,6 +111,29 @@ voice_triggers(
 )
 -- unique (user_id, phrase) WHERE channel_id IS NULL
 -- unique (channel_id, phrase) WHERE channel_id IS NOT NULL
+
+-- Social sign-in identities. Identity is (provider, provider_user_id) — the
+-- provider's immutable subject id — never the email, which can change or be
+-- re-assigned at the provider. `email` here is display data only.
+oauth_accounts(
+  provider text NOT NULL CHECK (provider IN ('google','github')),
+  provider_user_id text NOT NULL,
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  email text,
+  created_at timestamptz NOT NULL default now(),
+  PRIMARY KEY (provider, provider_user_id)
+)
+-- unique (user_id, provider)  -- at most one account per provider per user
+
+-- One-time handoff codes for the social sign-in callback (see below). SHA-256 of
+-- the raw code, so a DB leak alone is not a live credential; in Postgres rather
+-- than in-process so any replica can complete the exchange.
+auth_handoff_codes(
+  code_hash text PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at timestamptz NOT NULL,       -- 60s TTL
+  created_at timestamptz NOT NULL default now()
+)
 ```
 
 Migrations: `server/migrations/` via `sqlx::migrate!()` (embedded, run on startup).
@@ -161,6 +184,13 @@ ReplyPreview = { id: string, user: { id, display_name, avatar_url }, content: st
 | POST | `/auth/password/reset` | `{token, password}` → `200` — validates the unused/unexpired token, sets the new password hash, burns all of that user's tokens; `400` on invalid/expired token or password < 8. |
 | POST | `/auth/desktop/code` | (authed) → `{code, expires_in}` — mints a one-time, single-use browser-login code (TTL 60s, in-process/per-replica) bound to the caller. Used by the desktop browser-login bridge. |
 | POST | `/auth/desktop/exchange` | `{code}` → `{token, user}` — unauthenticated; consumes the code (single use, must be unexpired) and issues a JWT. The native app calls this after receiving the `sharp://auth?code=&state=` deep link. |
+| GET | `/auth/oauth/config` | → `{google, github}` — which social providers this server has configured. Unauthenticated; the login screen only offers what is true here. |
+| GET | `/auth/oauth/{provider}/start` | **Browser navigation, not fetch.** `?scheme=&state=` (desktop bridge only) → `302` to the provider's consent screen, plus `Set-Cookie: sharp_oauth_state` (HttpOnly, SameSite=Lax, Path=/api/v1/auth/oauth, 10 min). `provider` ∈ `google\|github`. Answers with an HTML notice, not JSON, when the provider is unconfigured. |
+| GET | `/auth/oauth/{provider}/callback` | **The provider's redirect target.** `?code=&state=` (or `?error=`) → `302`. Sign-in: `{APP_URL or request Host}/oauth?code=<handoff>`; desktop: `<scheme>://auth?code=<desktop code>&state=`; linking: an HTML notice. Failures in the sign-in flow redirect to `/login?oauth_error=<message>`. |
+| POST | `/auth/oauth/exchange` | `{code}` → `{token, user}` — unauthenticated; the handoff code is the credential. Single use (deleted on claim), must be unexpired (60s). |
+| GET | `/auth/oauth/accounts` | (authed) → `{has_password, accounts: [{provider, email, created_at}]}` |
+| POST | `/auth/oauth/{provider}/link` | (authed) → `{url}` — consent URL that attaches the provider to the caller. Client opens it in a new tab/system browser. |
+| DELETE | `/auth/oauth/{provider}` | (authed) → `204`; `404` if not connected; `422` if it is the caller's only remaining sign-in method (no password and no other provider). |
 | GET | `/me` | → `User` |
 | PATCH | `/me` | `{display_name?}` → `User` (emits `user.updated`) |
 | POST | `/me/avatar` | multipart `file` (raster image, ≤ MAX_UPLOAD_MB) → `User` (stores to `avatars/{uid}`, bumps `avatar_url?v=`, emits `user.updated`) |
@@ -205,6 +235,50 @@ perform those posting actions. Viewer posting gates return 403.
 Validation: password ≥ 8 chars; channel name `[a-z0-9-]{1,50}`; message content 1–8000 chars.
 Registering the **first user** of an instance is always open; later registrations are open
 too in v1 (env `SHARP_DISABLE_SIGNUP=true` closes them).
+
+### Social sign-in (Google, GitHub)
+
+Native OAuth 2.0 authorization-code flow in the Rust server — protocol in
+`server/src/social_oauth.rs`, policy in `server/src/routes/social_auth.rs`. The result is
+an ordinary sharp JWT, so every other surface (REST guards, WS, desktop, guest tokens) is
+untouched. Web UI: provider buttons on `Login.tsx` + the `/oauth` handoff route
+(`OauthCallback.tsx`) + Settings → Accounts. Desktop: buttons on the server-rendered
+`/desktop-auth` page, which reuses the existing `sharp://auth?code=` bridge.
+
+Four rules, enforced only in `routes/social_auth.rs`:
+
+1. **Identity is `(provider, provider_user_id)`**, the provider's immutable subject id.
+   Emails are display data and are refreshed on each sign-in.
+2. **Linking to an existing sharp account requires a provider-verified email.** An
+   unverified provider address matching a sharp user is refused with instructions to sign
+   in and link from Settings — otherwise any provider that lets you type an arbitrary
+   address is an account-takeover path.
+3. **A first-time provider identity is a signup**, so it obeys `SHARP_DISABLE_SIGNUP`
+   exactly as `POST /auth/register` does, first-user exception included.
+4. **The callback never puts a session JWT in a URL.** It mints a single-use, 60-second
+   handoff code (`auth_handoff_codes`) and the SPA exchanges it at
+   `POST /auth/oauth/exchange`.
+
+The OAuth `state` is a 10-minute HS256 JWT signed with `JWT_SECRET`, pinned to its
+provider, and carrying the flow's context (`link_user_id` for the Settings flow,
+`desktop_scheme`/`desktop_state` for the desktop bridge). Sign-in flows are additionally
+bound to the `sharp_oauth_state` HttpOnly cookie, so a callback replayed into someone
+else's browser is rejected (login CSRF); the linking flow needs no cookie because it is
+already bound to an authenticated user id inside the signed state.
+
+A social-only account has `users.password_hash IS NULL`: password login rejects it as
+invalid credentials, passkey enrolment asks for a password to be set first (via
+"Forgot password?" — the reset flow works for such accounts), and the last remaining
+sign-in method cannot be disconnected. Provider avatars are **not** copied — `avatar_url`
+is an internal authed API path in this app, not an arbitrary URL.
+
+Env (`deploy/.env.example` is canonical): Google reuses `GOOGLE_CLIENT_ID`/
+`GOOGLE_CLIENT_SECRET` (or dedicated `OAUTH_GOOGLE_*` overrides) and turns on only when
+`OAUTH_GOOGLE_REDIRECT_URI` is set, so a Calendar-only Google client never advertises a
+login button whose callback was never registered. GitHub uses
+`GITHUB_OAUTH_CLIENT_ID`/`GITHUB_OAUTH_CLIENT_SECRET` + `OAUTH_GITHUB_REDIRECT_URI`.
+In a split deploy (SPA on another subdomain) `APP_URL` must be set — the callback derives
+the SPA's origin from it, falling back to the request Host, which is the API host.
 
 ## WebSocket — `GET /api/v1/ws?token=<jwt>`
 

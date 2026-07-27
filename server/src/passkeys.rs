@@ -163,7 +163,16 @@ async fn verify_current_password(state: &AppState, user_id: Uuid, password: &str
         .fetch_optional(&state.pool)
         .await?
         .ok_or_else(|| AppError::Unauthorized("invalid credentials".to_string()))?;
-    let hash: String = row.try_get("password_hash")?;
+    // NULL for a social-sign-in account, which has no password to confirm against.
+    // Say so plainly rather than failing as "wrong password" — the fix (set a
+    // password via the reset-by-email flow) is not guessable from a 401.
+    let hash: Option<String> = row.try_get("password_hash")?;
+    let hash = hash.ok_or_else(|| {
+        AppError::Validation(
+            "This account has no password. Set one with \"Forgot password?\" before adding a passkey."
+                .to_string(),
+        )
+    })?;
     if !auth::verify_password(password, &hash) {
         return Err(AppError::Unauthorized("invalid credentials".to_string()));
     }

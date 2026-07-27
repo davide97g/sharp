@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { api, getServerUrl, setServerUrl } from '../lib/api'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { api, getServerUrl, oauthStartUrl, setServerUrl } from '../lib/api'
 import { ApiRequestError } from '../lib/api'
+import type { OAuthConfig } from '../lib/types'
 import { startBrowserLogin } from '../lib/desktopAuth'
 import { useStore } from '../store'
 import { toastError } from '../lib/toast'
@@ -13,6 +14,7 @@ import { isPasskeyCancellation, loginWithPasskey, supportsPasskeys } from '../li
 import { DARK_THEMES } from '../lib/theme'
 import { ThemePicker } from './ThemePicker'
 import { AuthField } from './auth/AuthField'
+import { PROVIDER_LABEL, PROVIDER_ORDER, ProviderMark } from './auth/ProviderMark'
 import { BadgeCard } from './auth/BadgeCard'
 import { SharpnessMeter } from './auth/SharpnessMeter'
 
@@ -58,8 +60,10 @@ export function Login() {
   const [busy, setBusy] = useState(false)
   const [server, setServer] = useState(getServerUrl() ?? '')
   const [passkeysEnabled, setPasskeysEnabled] = useState(false)
+  const [social, setSocial] = useState<OAuthConfig>({ google: false, github: false })
   const init = useStore((s) => s.init)
   const navigate = useNavigate()
+  const [params, setParams] = useSearchParams()
 
   // login
   const [loginEmail, setLoginEmail] = useState('')
@@ -86,8 +90,26 @@ export function Login() {
 
   useEffect(() => {
     api.passwordResetConfig().then((value) => setResetEnabled(value.enabled)).catch(() => {})
-    if (isTauri || !supportsPasskeys()) return
+    // Social sign-in is browser-only: Google refuses OAuth inside an embedded
+    // webview, so the desktop app routes through "Log in with browser" instead
+    // (the server's /desktop-auth page carries the provider buttons).
+    if (isTauri) return
+    api.oauthConfig().then(setSocial).catch(() => {})
+    if (!supportsPasskeys()) return
     api.passkeyConfig().then((value) => setPasskeysEnabled(value.enabled)).catch(() => {})
+  }, [])
+
+  // A failed social sign-in redirects back here with the reason in the query, so
+  // the user reads it where they started. Consume it once, then clean the URL.
+  useEffect(() => {
+    const message = params.get('oauth_error')
+    if (!message) return
+    setMode('login')
+    setLoginView('signin')
+    setLoginError(message)
+    const next = new URLSearchParams(params)
+    next.delete('oauth_error')
+    setParams(next, { replace: true })
   }, [])
 
   // Step 2 has no input to autofocus — land keyboard/SR focus on the heading.
@@ -405,21 +427,20 @@ export function Login() {
                 </Button>
               </form>
 
-              {/* TODO(ds): secondary auth buttons (passkey / browser / register Back)
-                  use a panel+border, hover-border style with no matching Button
-                  variant (outline fills bg on hover). Left as-is to preserve look. */}
+              {/* TODO(ds): secondary auth buttons (passkey / social / browser /
+                  register Back) use a panel+border, hover-border style with no
+                  matching Button variant (outline fills bg on hover). Left as-is
+                  to preserve look — SECONDARY_BUTTON is the shared recipe. */}
+              <SocialButtons social={social} busy={busy} verb="Continue with" />
+
               {passkeysEnabled && (
                 <>
-                  <div className="my-4 flex items-center gap-3 text-xs text-[var(--color-text-faint)]">
-                    <span className="h-px flex-1 bg-[var(--color-border)]" />
-                    or
-                    <span className="h-px flex-1 bg-[var(--color-border)]" />
-                  </div>
+                  <AuthDivider />
                   <button
                     type="button"
                     onClick={() => void passkeyLogin()}
                     disabled={busy}
-                    className="min-h-11 w-full cursor-pointer rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-4 py-2.5 text-base font-semibold text-[var(--color-text)] transition hover:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)] disabled:opacity-60 sm:text-sm"
+                    className={SECONDARY_BUTTON}
                   >
                     Sign in with passkey
                   </button>
@@ -428,16 +449,12 @@ export function Login() {
 
               {isTauri && (
                 <>
-                  <div className="my-4 flex items-center gap-3 text-xs text-[var(--color-text-faint)]">
-                    <span className="h-px flex-1 bg-[var(--color-border)]" />
-                    or
-                    <span className="h-px flex-1 bg-[var(--color-border)]" />
-                  </div>
+                  <AuthDivider />
                   <button
                     type="button"
                     onClick={browserLogin}
                     disabled={busy}
-                    className="min-h-11 w-full cursor-pointer rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-4 py-2.5 text-base font-semibold text-[var(--color-text)] transition hover:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)] disabled:opacity-60 sm:text-sm"
+                    className={SECONDARY_BUTTON}
                   >
                     Log in with browser
                   </button>
@@ -716,12 +733,72 @@ export function Login() {
                 </form>
               </div>
 
+              {/* A provider signs you up and skips the wizard, so it belongs on
+                  the first station — not after you've filled in a password. */}
+              {step === 0 && <SocialButtons social={social} busy={busy} verb="Sign up with" />}
+
               <ModeToggle mode={mode} onSwitch={switchMode} />
             </div>
           )}
         </div>
       </main>
     </div>
+  )
+}
+
+/** Shared recipe for the auth screen's secondary buttons. See the TODO(ds) above. */
+const SECONDARY_BUTTON =
+  'min-h-11 w-full cursor-pointer rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-4 py-2.5 text-base font-semibold text-[var(--color-text)] transition hover:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)] disabled:opacity-60 sm:text-sm'
+
+function AuthDivider() {
+  return (
+    <div className="my-4 flex items-center gap-3 text-xs text-[var(--color-text-faint)]">
+      <span className="h-px flex-1 bg-[var(--color-border)]" />
+      or
+      <span className="h-px flex-1 bg-[var(--color-border)]" />
+    </div>
+  )
+}
+
+/**
+ * Provider sign-in buttons, rendered only for what the server has configured.
+ *
+ * A full-page navigation, not a fetch: the server sets the flow's HttpOnly nonce
+ * cookie and redirects to the provider. Whether this ends as a sign-in or a signup
+ * is the server's decision (see `routes/social_auth.rs`), so both modes point at
+ * the same URL and only the wording differs.
+ */
+function SocialButtons({
+  social,
+  busy,
+  verb,
+}: {
+  social: OAuthConfig
+  busy: boolean
+  verb: string
+}) {
+  const providers = PROVIDER_ORDER.filter((p) => social[p])
+  if (providers.length === 0) return null
+  return (
+    <>
+      <AuthDivider />
+      <div className="flex flex-col gap-2">
+        {providers.map((provider) => (
+          <button
+            key={provider}
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              window.location.href = oauthStartUrl(provider)
+            }}
+            className={`${SECONDARY_BUTTON} flex items-center justify-center gap-2.5`}
+          >
+            <ProviderMark provider={provider} />
+            {verb} {PROVIDER_LABEL[provider]}
+          </button>
+        ))}
+      </div>
+    </>
   )
 }
 

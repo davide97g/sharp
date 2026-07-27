@@ -26,6 +26,9 @@ import type {
   MembersResponse,
   MessagesResponse,
   NotificationsResponse,
+  LinkedAccounts,
+  OAuthConfig,
+  OAuthProvider,
   Prefs,
   PrefsUpdate,
   ChannelNotifyMode,
@@ -118,6 +121,15 @@ export function resolveBaseUrl(): string {
 
 export function apiBase(): string {
   return `${resolveBaseUrl()}/api/v1`
+}
+
+/**
+ * Where to send the browser to begin a social sign-in. Must be a navigation, not
+ * a fetch — the server replies with a Set-Cookie (the flow's CSRF nonce) plus a
+ * 302 to the provider's consent screen.
+ */
+export function oauthStartUrl(provider: 'google' | 'github'): string {
+  return `${apiBase()}/auth/oauth/${provider}/start`
 }
 
 /** Custom error carrying the server's error code + HTTP status. */
@@ -553,6 +565,28 @@ export const api = {
       body: { token, password },
       auth: false,
     })
+  },
+  // ── Social sign-in (Google, GitHub) ─────────────────────────────────────
+  // `start` is a full-page navigation, not a fetch: the server needs to set the
+  // flow's HttpOnly nonce cookie and 302 to the provider. See oauthStartUrl().
+  oauthConfig() {
+    return request<OAuthConfig>('/auth/oauth/config', { auth: false })
+  },
+  oauthExchange(code: string) {
+    return request<AuthResponse>('/auth/oauth/exchange', {
+      method: 'POST',
+      body: { code },
+      auth: false,
+    })
+  },
+  oauthAccounts() {
+    return request<LinkedAccounts>('/auth/oauth/accounts')
+  },
+  oauthLinkUrl(provider: OAuthProvider) {
+    return request<{ url: string }>(`/auth/oauth/${provider}/link`, { method: 'POST' })
+  },
+  oauthUnlink(provider: OAuthProvider) {
+    return request<void>(`/auth/oauth/${provider}`, { method: 'DELETE' })
   },
   me() {
     return request<User>('/me')

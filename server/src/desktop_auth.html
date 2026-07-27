@@ -49,6 +49,13 @@
       }
       .secondary { width: 100%; background: transparent; border: 1px solid var(--border); }
       .secondary:hover { background: var(--panel); }
+      .social {
+        display: block; width: 100%; text-align: center; text-decoration: none;
+        border: 1px solid var(--border); border-radius: 8px; background: transparent;
+        color: var(--text); padding: 10px 16px; font-size: 14px; font-weight: 600;
+        margin-bottom: 8px;
+      }
+      .social:hover { background: var(--panel); }
       .or { display: flex; align-items: center; gap: 10px; margin: 14px 0; color: var(--faint); font-size: 12px; }
       .or:before, .or:after { content: ''; height: 1px; flex: 1; background: var(--border); }
       .hidden { display: none; }
@@ -78,6 +85,16 @@
       <div id="passkeyLogin" class="hidden">
         <div class="or">or</div>
         <button id="passkeyButton" class="secondary" type="button">Sign in with passkey</button>
+      </div>
+
+      <!-- Social sign-in. Unlike the password and passkey paths, these do not
+           come back here: the provider callback mints the desktop code itself and
+           redirects straight to <scheme>://auth, so `state` and `scheme` ride
+           along in the start URL. -->
+      <div id="socialLogin" class="hidden">
+        <div class="or">or</div>
+        <a id="googleButton" class="social hidden" href="#">Continue with Google</a>
+        <a id="githubButton" class="social hidden" href="#">Continue with GitHub</a>
       </div>
 
       <div id="setup" class="hidden">
@@ -199,6 +216,20 @@
 
         api('/auth/passkeys/config').then(function (d) {
           if (d.enabled && window.isSecureContext && window.PublicKeyCredential) passkeyLogin.classList.remove('hidden');
+        }).catch(function () {});
+
+        api('/auth/oauth/config').then(function (d) {
+          if (!state) return; // Without the native app's state there is nowhere to return to.
+          var query = '?scheme=' + encodeURIComponent(scheme) + '&state=' + encodeURIComponent(state);
+          var any = false;
+          [['google', 'googleButton'], ['github', 'githubButton']].forEach(function (pair) {
+            if (!d[pair[0]]) return;
+            var el = document.getElementById(pair[1]);
+            el.href = '/api/v1/auth/oauth/' + pair[0] + '/start' + query;
+            el.classList.remove('hidden');
+            any = true;
+          });
+          if (any) document.getElementById('socialLogin').classList.remove('hidden');
         }).catch(function () {});
 
         passkeyButton.addEventListener('click', function () {

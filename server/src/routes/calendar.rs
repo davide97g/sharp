@@ -15,9 +15,12 @@ use crate::error::{AppError, AppResult};
 use crate::google_oauth;
 use crate::state::SharedState;
 use crate::ws::{channel_member_ids, envelope};
+// The callback status page and 302 helper are shared with `social_auth` — see
+// routes/mod.rs. Don't re-inline them here.
+use super::{callback_page, redirect_302};
 use axum::extract::{Path, Query, State};
-use axum::http::{header, StatusCode};
-use axum::response::{Html, IntoResponse, Response};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -282,29 +285,6 @@ pub struct CallbackQuery {
     pub code: Option<String>,
     pub state: Option<String>,
     pub error: Option<String>,
-}
-
-/// Minimal self-contained HTML page (SPA-independent, like `desktop_auth.html`)
-/// so the callback works even in a split deploy where the SPA lives elsewhere.
-fn callback_page(heading: &str, message: &str) -> Html<String> {
-    Html(format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"/>\
-<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>\
-<title>sharp — calendar</title>\
-<style>body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;\
-background:#0f1115;color:#e6e8eb;font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:24px;}}\
-.card{{max-width:380px;text-align:center;}}h1{{font-size:20px;margin:0 0 8px;}}\
-p{{color:#9aa3af;margin:0;}}</style></head>\
-<body><div class=\"card\"><h1>{heading}</h1><p>{message}</p></div></body></html>"
-    ))
-}
-
-fn redirect_302(location: &str) -> Response {
-    (
-        StatusCode::FOUND,
-        [(header::LOCATION, location.to_string())],
-    )
-        .into_response()
 }
 
 /// GET /calendar/google/callback — unauthenticated; the signed `state` JWT proves

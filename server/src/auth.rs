@@ -292,9 +292,11 @@ pub async fn login(
     .await?;
 
     let row = row.ok_or_else(|| AppError::Unauthorized("invalid credentials".to_string()))?;
-    let password_hash: String = row.try_get("password_hash")?;
+    // NULL for an account created through social sign-in: there is no password to
+    // check, and the response must not distinguish that from a wrong password.
+    let password_hash: Option<String> = row.try_get("password_hash")?;
 
-    if !verify_password(&body.password, &password_hash) {
+    if !password_hash.is_some_and(|hash| verify_password(&body.password, &hash)) {
         return Err(AppError::Unauthorized("invalid credentials".to_string()));
     }
 
@@ -335,12 +337,17 @@ pub async fn password_reset_config(
     })
 }
 
-/// SHA-256 hex of a raw reset token. Only the hash is persisted, so a DB leak
-/// alone can't be used to reset anyone's password.
-fn hash_reset_token(raw: &str) -> String {
+/// SHA-256 hex. The one hashing primitive for single-use, high-entropy tokens
+/// (password reset links, OAuth handoff codes): only the hash is persisted, so a
+/// DB leak alone is not a live credential. Not for passwords — those are argon2.
+pub(crate) fn sha256_hex(raw: &str) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(raw.as_bytes());
     hex_encode(&digest)
+}
+
+fn hash_reset_token(raw: &str) -> String {
+    sha256_hex(raw)
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
@@ -565,25 +572,31 @@ pub async fn desktop_code(
     State(state): State<SharedState>,
     user: AuthUser,
 ) -> AppResult<Json<DesktopCodeResponse>> {
+    Ok(Json(DesktopCodeResponse {
+        code: mint_desktop_code(&state, user.id)?,
+        expires_in: DESKTOP_CODE_TTL.as_secs(),
+    }))
+}
+
+/// Put a fresh one-time desktop-login code in the in-process registry. Shared with
+/// the social sign-in callback, which completes the same `sharp://auth?code=` deep
+/// link after a provider round trip — the native app's exchange path is identical
+/// either way.
+pub(crate) fn mint_desktop_code(state: &SharedState, user_id: Uuid) -> AppResult<String> {
     let mut bytes = [0u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut bytes);
     let code = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
 
     let now = Instant::now();
-    {
-        let mut codes = state
-            .desktop_codes
-            .lock()
-            .map_err(|_| AppError::Internal("desktop_codes lock poisoned".to_string()))?;
-        // Opportunistically drop expired codes so the map can't grow unbounded.
-        codes.retain(|_, (_, exp)| *exp > now);
-        codes.insert(code.clone(), (user.id, now + DESKTOP_CODE_TTL));
-    }
+    let mut codes = state
+        .desktop_codes
+        .lock()
+        .map_err(|_| AppError::Internal("desktop_codes lock poisoned".to_string()))?;
+    // Opportunistically drop expired codes so the map can't grow unbounded.
+    codes.retain(|_, (_, exp)| *exp > now);
+    codes.insert(code.clone(), (user_id, now + DESKTOP_CODE_TTL));
 
-    Ok(Json(DesktopCodeResponse {
-        code,
-        expires_in: DESKTOP_CODE_TTL.as_secs(),
-    }))
+    Ok(code)
 }
 
 #[derive(Deserialize)]

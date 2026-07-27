@@ -8,6 +8,7 @@ import { toastError } from './lib/toast'
 import { useStore } from './store'
 import { Login } from './components/Login'
 import { ResetPassword } from './components/ResetPassword'
+import { OauthCallback } from './components/OauthCallback'
 import { GuestCall } from './components/GuestCall'
 import { AppShell } from './components/AppShell'
 import { Splash } from './components/Splash'
@@ -159,6 +160,8 @@ export function App() {
         />
         {/* Public reset landing — reachable regardless of auth state. */}
         <Route path="/reset-password" element={<ResetPassword />} />
+        {/* Social sign-in handoff: trades the callback's one-time code for a JWT. */}
+        <Route path="/oauth" element={<OauthCallback />} />
         {import.meta.env.DEV && (
           <Route
             path="/aura-lab"

@@ -53,6 +53,9 @@ pub struct Config {
     pub transcribe: Option<TranscribeConfig>,
     /// Google Calendar OAuth. `None` unless client id + secret (+ redirect) are set.
     pub google: Option<GoogleConfig>,
+    /// Social sign-in providers. Each is independently `None` when unconfigured;
+    /// the login screen only offers the ones that resolve here.
+    pub oauth: OAuthLoginConfig,
     /// WebAuthn relying-party configuration. `None` keeps passkeys disabled.
     pub webauthn: Option<WebauthnConfig>,
     /// GitHub task sync. `None` when `GITHUB_WEBHOOK_SECRET` is unset — inert.
@@ -160,6 +163,25 @@ pub struct GoogleConfig {
     pub redirect_uri: String,
 }
 
+/// One social sign-in provider. The redirect URI is part of the group because
+/// providers match it exactly against what is registered on their side — there is
+/// no safe default, and requiring it is also what keeps a Google client that was
+/// configured for Calendar only from silently advertising a login button whose
+/// callback the self-hoster never registered.
+#[derive(Clone)]
+pub struct OAuthProviderConfig {
+    pub client_id: String,
+    pub client_secret: String,
+    /// e.g. `https://<app-domain>/api/v1/auth/oauth/google/callback`.
+    pub redirect_uri: String,
+}
+
+#[derive(Clone, Default)]
+pub struct OAuthLoginConfig {
+    pub google: Option<OAuthProviderConfig>,
+    pub github: Option<OAuthProviderConfig>,
+}
+
 #[derive(Clone)]
 pub struct WebauthnConfig {
     /// Permanent credential scope. Changing this invalidates enrolled passkeys.
@@ -189,6 +211,38 @@ pub struct GithubConfig {
     pub webhook_secret: String,
     /// `owner/name` allowlist; empty = accept any repo that signs correctly.
     pub repos: Vec<String>,
+}
+
+/// Resolve one social sign-in provider, enforcing "all or nothing".
+///
+/// `shared_creds` is true for a provider whose client id/secret are also used by
+/// another feature (Google, shared with Calendar sync): credentials without a
+/// redirect URI then mean "configured for that other feature", not a mistake, so
+/// sign-in is simply off. For a provider with dedicated variables, credentials
+/// without a redirect URI can only be a misconfiguration.
+fn social_provider(
+    label: &str,
+    redirect_var: &str,
+    client_id: Option<String>,
+    client_secret: Option<String>,
+    redirect_uri: Option<String>,
+    shared_creds: bool,
+) -> Result<Option<OAuthProviderConfig>, String> {
+    match (client_id, client_secret, redirect_uri) {
+        (Some(client_id), Some(client_secret), Some(redirect_uri)) => {
+            Ok(Some(OAuthProviderConfig {
+                client_id,
+                client_secret,
+                redirect_uri,
+            }))
+        }
+        (None, None, None) => Ok(None),
+        (Some(_), Some(_), None) if shared_creds => Ok(None),
+        _ => Err(format!(
+            "{label} sign-in is partially configured: client id, client secret and \
+             {redirect_var} must all be set"
+        )),
+    }
 }
 
 fn env_opt(key: &str) -> Option<String> {
@@ -337,6 +391,31 @@ impl Config {
             _ => None,
         };
 
+        // Social sign-in. Google reuses the Calendar client credentials by default
+        // (a self-hoster normally has one Google OAuth client) but takes dedicated
+        // `OAUTH_GOOGLE_*` overrides; GitHub has no other consumer, so it has only
+        // its own. Each provider turns on when its redirect URI is set, which is
+        // the same value that must be registered with the provider — so there is
+        // no separate feature flag to forget.
+        let oauth = OAuthLoginConfig {
+            google: social_provider(
+                "Google",
+                "OAUTH_GOOGLE_REDIRECT_URI",
+                env_opt("OAUTH_GOOGLE_CLIENT_ID").or_else(|| env_opt("GOOGLE_CLIENT_ID")),
+                env_opt("OAUTH_GOOGLE_CLIENT_SECRET").or_else(|| env_opt("GOOGLE_CLIENT_SECRET")),
+                env_opt("OAUTH_GOOGLE_REDIRECT_URI"),
+                true,
+            )?,
+            github: social_provider(
+                "GitHub",
+                "OAUTH_GITHUB_REDIRECT_URI",
+                env_opt("GITHUB_OAUTH_CLIENT_ID"),
+                env_opt("GITHUB_OAUTH_CLIENT_SECRET"),
+                env_opt("OAUTH_GITHUB_REDIRECT_URI"),
+                false,
+            )?,
+        };
+
         let webauthn = match (env_opt("WEBAUTHN_RP_ID"), env_opt("WEBAUTHN_ORIGINS")) {
             (None, None) => None,
             (Some(rp_id), Some(origins)) => {
@@ -454,6 +533,7 @@ impl Config {
             ai,
             transcribe,
             google,
+            oauth,
             webauthn,
             github,
             apns,

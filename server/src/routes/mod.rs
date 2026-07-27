@@ -26,12 +26,15 @@ pub mod prefs;
 pub mod push;
 pub mod search;
 pub mod sharpy;
+pub mod social_auth;
 pub mod tasks;
 pub mod users;
 pub mod voice;
 pub mod voice_triggers;
 
 use crate::error::{AppError, AppResult};
+use axum::http::{header, StatusCode};
+use axum::response::{Html, IntoResponse, Response};
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -210,4 +213,52 @@ pub async fn require_owner(pool: &PgPool, channel_id: Uuid, user_id: Uuid) -> Ap
         return Err(AppError::Forbidden("channel owner required".to_string()));
     }
     Ok(())
+}
+
+// --- Browser-redirect helpers (OAuth callbacks) -------------------------------
+//
+// An OAuth callback lands in a browser tab, not in `fetch`, so it can't answer with
+// the usual JSON error envelope. `calendar` (Google Calendar connect) and
+// `social_auth` (social sign-in) both need the same two shapes, and both are
+// reached by URLs an attacker can craft, so the escaping below is load-bearing.
+
+/// Escape text destined for an HTML text node. Callback messages quote provider
+/// error strings straight out of the query string — never interpolate those raw.
+fn escape_html(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// A self-contained status page for a callback that has no SPA behind it.
+pub fn callback_page(heading: &str, message: &str) -> Html<String> {
+    let heading = escape_html(heading);
+    let message = escape_html(message);
+    Html(format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"/>\
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>\
+<title>sharp</title>\
+<style>body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;\
+background:#0f1115;color:#e6e8eb;font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:24px;}}\
+.card{{max-width:380px;text-align:center;}}h1{{font-size:20px;margin:0 0 8px;}}\
+p{{color:#9aa3af;margin:0;}}</style></head>\
+<body><div class=\"card\"><h1>{heading}</h1><p>{message}</p></div></body></html>"
+    ))
+}
+
+pub fn redirect_302(location: &str) -> Response {
+    (
+        StatusCode::FOUND,
+        [(header::LOCATION, location.to_string())],
+    )
+        .into_response()
 }

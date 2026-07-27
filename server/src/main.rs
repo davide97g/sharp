@@ -19,6 +19,7 @@ mod notify;
 mod passkeys;
 mod privacy;
 mod routes;
+mod social_oauth;
 mod state;
 mod storage;
 mod vapid;
@@ -317,6 +318,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/auth/passkeys/manage/exchange",
             post(passkeys::manage_exchange),
+        )
+        // Social sign-in (Google, GitHub). `start`/`callback` are browser
+        // navigations, so they answer with redirects, not JSON.
+        .route("/auth/oauth/config", get(routes::social_auth::config))
+        .route(
+            "/auth/oauth/accounts",
+            get(routes::social_auth::list_accounts),
+        )
+        .route("/auth/oauth/exchange", post(routes::social_auth::exchange))
+        .route("/auth/oauth/:provider/start", get(routes::social_auth::start))
+        .route(
+            "/auth/oauth/:provider/callback",
+            get(routes::social_auth::callback),
+        )
+        .route(
+            "/auth/oauth/:provider/link",
+            post(routes::social_auth::link_start),
+        )
+        .route(
+            "/auth/oauth/:provider",
+            delete(routes::social_auth::unlink),
         )
         .route(
             "/me",

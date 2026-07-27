@@ -211,6 +211,21 @@ export type E2eeBackup = E2eeBackupInput & { updated_at: string }
 
 export type AuthResponse = { token: string; user: User }
 
+// Social sign-in. `OAuthConfig` says which providers the server has configured;
+// the login screen only offers those.
+export type OAuthProvider = 'google' | 'github'
+export type OAuthConfig = { google: boolean; github: boolean }
+export type LinkedAccount = {
+  provider: OAuthProvider
+  email: string | null
+  created_at: string
+}
+export type LinkedAccounts = {
+  /** False for an account created through a provider and never given a password. */
+  has_password: boolean
+  accounts: LinkedAccount[]
+}
+
 export type PasskeyConfig = { enabled: boolean; rp_name: string | null }
 export type PasskeyRecord = {
   id: string

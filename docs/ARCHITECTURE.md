@@ -46,6 +46,7 @@ These hold across every feature. Breaking one compiles fine and fails in product
 | Surface | Server | Web | Contract |
 |---|---|---|---|
 | Auth, sessions, password reset, passkeys | `auth.rs`, `passkeys.rs`, `mailer.rs`, `desktop_auth.html` | `components/Login.tsx`, `ResetPassword.tsx`, `lib/desktopAuth.ts` | [01-core](arch/01-core.md) |
+| Social sign-in (Google, GitHub) | `social_oauth.rs` (protocol), `routes/social_auth.rs` (policy) | `components/OauthCallback.tsx`, `components/auth/ProviderMark.tsx`, `settings/AccountsTab.tsx` | [01-core](arch/01-core.md) |
 | Channels, members, roles | `routes/channels.rs` | `components/Sidebar.tsx`, `ChannelSettingsModal.tsx` | [01-core](arch/01-core.md) |
 | Messages, threads, reactions, search | `routes/messages.rs`, `routes/search.rs` | `components/MessagePane.tsx`, `MessageItem.tsx`, `Composer.tsx` | [01-core](arch/01-core.md) |
 | Realtime fanout, presence, typing | `ws/mod.rs`, `ws/session.rs` | `lib/ws.ts`, `lib/wsEvents.ts` | [01-core](arch/01-core.md) |
