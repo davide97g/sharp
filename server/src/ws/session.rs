@@ -216,6 +216,7 @@ fn is_client_voice_event(event_type: &str) -> bool {
         "voice.join"
             | "voice.leave"
             | "voice.mute"
+            | "voice.force_mute"
             | "voice.camera"
             | "voice.screen"
             | "voice.transcribe"
@@ -250,6 +251,11 @@ mod tests {
     fn spatial_and_reaction_events_reach_voice_handler() {
         assert!(is_client_voice_event("voice.move"));
         assert!(is_client_voice_event("voice.react"));
+    }
+
+    #[test]
+    fn force_mute_reaches_voice_handler() {
+        assert!(is_client_voice_event("voice.force_mute"));
     }
 
     #[test]

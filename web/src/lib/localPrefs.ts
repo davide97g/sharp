@@ -55,6 +55,8 @@ export const KEYS = {
   voiceWidgetCorner: 'sharp.voiceWidgetCorner',
   /** Spatial call view (floor plan + positional audio): a per-device viewing choice. */
   voiceSpatial: 'sharp.voiceSpatial',
+  /** Push-to-talk: mic closed until Space is held. Per-device, like the mic itself. */
+  voicePushToTalk: 'sharp.voicePushToTalk',
   /** Most-recent in-call reaction emoji (newest first), so the quick row self-tunes. */
   callReactionsRecent: 'sharp.callReactionsRecent',
   /** Legacy single-flag video blur, superseded by the scoped videoBackground key. */

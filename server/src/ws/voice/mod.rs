@@ -326,6 +326,9 @@ pub async fn handle_voice_event(
         }
         "voice.leave" => handle_leave(state, user_id, conn_id, &payload, tx).await,
         "voice.mute" => handle_mute(state, conn_id, &payload, tx).await,
+        "voice.force_mute" => {
+            handle_force_mute(state, user_id, conn_id, display_name, &payload, tx).await
+        }
         "voice.transcribe" => handle_transcribe(state, conn_id, &payload, tx).await,
         "voice.aura" => handle_aura(state, conn_id, &payload, tx).await,
         "voice.move" => handle_move(state, conn_id, &payload).await,
@@ -788,6 +791,79 @@ async fn handle_mute(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &W
     };
 
     broadcast_participant_updated(state, channel_id, participant).await;
+}
+
+/// Mute someone else's microphone for the whole room — the fix for an open mic
+/// whose owner is away from the keyboard.
+///
+/// Two rules make this safe to hand to everyone:
+///   - **Muting only.** There is no force-*unmute*: a payload can silence a mic but
+///     never open one, so nobody can turn a stranger's microphone into a listening
+///     device. The target unmutes themselves through `voice.mute`.
+///   - **No host role**, same reasoning as `voice.move`: any participant may act on
+///     any other. A room where only a nominated host can end a screech is a room
+///     that stays unusable.
+///
+/// Idempotent: force-muting an already-muted participant changes nothing and
+/// broadcasts nothing. A raised hand survives (only *unmuting* lowers a hand).
+async fn handle_force_mute(
+    state: &SharedState,
+    user_id: Uuid,
+    conn_id: Uuid,
+    display_name: &str,
+    payload: &Value,
+    tx: &WsSender,
+) {
+    let Some(channel_id) = channel_id(payload) else {
+        return;
+    };
+    let Some(target) = uuid_field(payload, "conn_id") else {
+        return;
+    };
+    // Outer Option: was this a legal request (both ends in the room)? Inner: did it
+    // actually change anything?
+    let outcome: Option<Option<VoiceParticipant>> = {
+        let mut guard = state.voice_rooms.lock().unwrap();
+        match guard.get_mut(&channel_id) {
+            // The muter must be in the room too, or a stale connection could keep
+            // silencing a call it already left.
+            Some(room) if room.participants.contains_key(&conn_id) => {
+                match room.participants.get_mut(&target) {
+                    Some(participant) if !participant.muted => {
+                        participant.muted = true;
+                        Some(Some(participant.clone()))
+                    }
+                    Some(_) => Some(None),
+                    None => None,
+                }
+            }
+            _ => None,
+        }
+    };
+    let Some(changed) = outcome else {
+        send_error(tx, channel_id, "not_in_room");
+        return;
+    };
+    let Some(participant) = changed else {
+        return;
+    };
+
+    let target_user = participant.user_id;
+    broadcast_participant_updated(state, channel_id, participant).await;
+    // The roster update above is what actually mutes the target's client; this
+    // carries the *who*, so the target sees who did it instead of a mic that
+    // silently closed.
+    let targets = voice_targets(state, channel_id, &[target_user]).await;
+    let event = envelope(
+        "voice.force_muted",
+        json!({
+            "channel_id": channel_id.to_string(),
+            "conn_id": target.to_string(),
+            "by_user_id": user_id.to_string(),
+            "by_name": display_name,
+        }),
+    );
+    state.hub.broadcast(event, targets).await;
 }
 
 async fn handle_aura(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &WsSender) {

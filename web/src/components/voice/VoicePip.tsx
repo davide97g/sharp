@@ -225,6 +225,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
   const room = useStore((s) => (channelId ? s.voiceRooms[channelId] : undefined))
   const speaking = useStore((s) => s.voice.speaking)
   const muted = useStore((s) => s.voice.muted)
+  const pushToTalk = useStore((s) => s.voice.pushToTalk)
   const handRaised = useStore((s) => s.voice.handRaised)
   const cameraStatus = useStore((s) => s.voice.cameraStatus)
   const videoBackground = useStore((s) => s.voice.videoBackground)
@@ -419,7 +420,13 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
 
       <footer className="flex shrink-0 items-center justify-center gap-2 border-t border-[var(--color-border)] px-2 py-1.5">
         <PipControl
-          label={muted ? 'Unmute microphone' : 'Mute microphone'}
+          label={
+            pushToTalk
+              ? 'Push to talk: hold Space in the main window. Click to leave push to talk'
+              : muted
+                ? 'Unmute microphone'
+                : 'Mute microphone'
+          }
           active={!muted}
           onClick={toggleVoiceMute}
         >

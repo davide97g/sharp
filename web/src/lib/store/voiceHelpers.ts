@@ -121,6 +121,16 @@ export function storedVoiceSpatial(): boolean {
   return readLocalBool(KEYS.voiceSpatial, false)
 }
 
+// Push to talk belongs to the microphone, which belongs to the device: the laptop you
+// take to a shared office wants it on, the one in your study does not. Off by default.
+export function saveVoicePushToTalk(enabled: boolean) {
+  writeLocalBool(KEYS.voicePushToTalk, enabled)
+}
+
+export function storedVoicePushToTalk(): boolean {
+  return readLocalBool(KEYS.voicePushToTalk, false)
+}
+
 /** The idle voice slice — also the reset applied on every leave/kick/error path. */
 export function emptyVoiceState(): VoiceState {
   const videoBackground = loadVideoBackground()
@@ -128,6 +138,9 @@ export function emptyVoiceState(): VoiceState {
     channelId: null,
     status: 'idle',
     muted: false,
+    pushToTalk: storedVoicePushToTalk(),
+    pushToTalkHeld: false,
+    locallyMutedUsers: new Set(),
     noiseSuppression: storedNoiseSuppression(),
     noiseSuppressionAvailable: true,
     videoBackground,

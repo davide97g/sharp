@@ -20,7 +20,8 @@ import { SPATIAL_ZONE_RADII } from '../../lib/spatial'
 import { useStore } from '../../store'
 import { Badge, Kbd } from '../../ui'
 import { AudioAuraAvatar } from './AudioAuraAvatar'
-import { HandIcon, MicIcon, ScreenBadgeIcon } from './callIcons'
+import { HandIcon, MicIcon, ScreenBadgeIcon, SpeakerIcon } from './callIcons'
+import { ParticipantMenu, ParticipantMenuDots } from './ParticipantMenu'
 
 /** Keyboard step per press, and the larger step while Shift is held. */
 const STEP = 0.035
@@ -119,6 +120,9 @@ export function SpatialStage({
 
   const onFloorPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || !self) return
+    // Controls sitting on the floor (a participant menu) keep their clicks: without
+    // this, every press would be read as "walk here" and the button never fires.
+    if ((event.target as HTMLElement).closest('button')) return
     // Grabbing an avatar carries that person; grabbing bare floor walks you there.
     // One handler for both, so the pointer capture and the drag state have a single
     // owner no matter what was under the finger.
@@ -257,6 +261,7 @@ function FloorAvatar({
   stream: MediaStream | null
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const locallyMuted = useStore((s) => s.voice.locallyMutedUsers.has(person.userId))
 
   useEffect(() => {
     const video = videoRef.current
@@ -323,12 +328,14 @@ function FloorAvatar({
             <HandIcon compact />
           </span>
         )}
-        {person.muted && (
+        {(person.muted || locallyMuted) && (
           <span
-            className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full border-2 border-[var(--color-panel)] bg-[var(--color-panel-2)] text-[var(--color-text-dim)]"
-            title="Muted"
+            className={`absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full border-2 border-[var(--color-panel)] bg-[var(--color-panel-2)] ${
+              locallyMuted ? 'text-[var(--color-warning-fg)]' : 'text-[var(--color-text-dim)]'
+            }`}
+            title={locallyMuted ? 'Muted for you' : 'Muted'}
           >
-            <MicIcon off />
+            {locallyMuted ? <SpeakerIcon off size={12} /> : <MicIcon off />}
           </span>
         )}
         {person.sharing && (
@@ -349,6 +356,27 @@ function FloorAvatar({
           <Badge tone="neutral" variant="outline">
             Guest
           </Badge>
+        )}
+        {!person.local && (
+          <ParticipantMenu
+            userId={person.userId}
+            name={person.name}
+            connIds={[person.connId]}
+            muted={person.muted}
+            side="top"
+            trigger={({ open, toggle }) => (
+              <button
+                type="button"
+                aria-label={`Options for ${person.name}`}
+                aria-haspopup="menu"
+                aria-expanded={open}
+                onClick={toggle}
+                className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-[var(--color-text-faint)] outline-none hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] [@media(hover:none)]:h-9 [@media(hover:none)]:w-9"
+              >
+                <ParticipantMenuDots size={13} />
+              </button>
+            )}
+          />
         )}
       </span>
     </div>

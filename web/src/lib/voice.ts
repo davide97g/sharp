@@ -128,6 +128,10 @@ export class VoiceClient {
   private spatial = false
   private spatialPositions = new Map<string, { x: number; y: number }>()
   private listenerPosition = { x: 0.5, y: 0.5 }
+  // Peers this device has silenced for itself ("Mute for me"). Kept by conn id
+  // because that is what the media maps are keyed by; the store maps a person to
+  // their connections. Both playback paths honour it — see setPeerLocalMuted.
+  private locallyMuted = new Set<string>()
   private speakingDetectors = new Map<string, SpeakingDetector>()
   private speakingFrame: number | null = null
   private spectrumSamples: Uint8Array<ArrayBuffer> | null = null
@@ -277,10 +281,14 @@ export class VoiceClient {
       document.body.appendChild(element)
       media.audioElements.set(publication.trackSid, element)
       // Screen-share audio is not a person standing somewhere; only mics are placed.
+      // Only mics are locally mutable either — "Mute for me" silences a person, not
+      // the tab they are sharing.
       if (!screen) {
         media.audioTracks.set(publication.trackSid, track.mediaStreamTrack)
         if (this.spatial) {
           this.wireSpatialTrack(participant.identity, publication.trackSid, media)
+        } else if (this.locallyMuted.has(participant.identity)) {
+          element.volume = 0
         }
       }
       return
@@ -299,7 +307,7 @@ export class VoiceClient {
   ) => {
     const media = this.remoteMedia.get(participant.identity)
     if (!media) return
-    this.unwireSpatialTrack(publication.trackSid, media)
+    this.unwireSpatialTrack(participant.identity, publication.trackSid, media)
     media.audioTracks.delete(publication.trackSid)
     const element = media.audioElements.get(publication.trackSid)
     if (element) {
@@ -582,7 +590,7 @@ export class VoiceClient {
         }
       } else {
         for (const trackSid of [...media.spatialNodes.keys()]) {
-          this.unwireSpatialTrack(trackSid, media)
+          this.unwireSpatialTrack(connId, trackSid, media)
         }
       }
     }
@@ -642,7 +650,7 @@ export class VoiceClient {
     if (element) element.volume = 0
   }
 
-  private unwireSpatialTrack(trackSid: string, media: RemoteMedia) {
+  private unwireSpatialTrack(connId: string, trackSid: string, media: RemoteMedia) {
     const node = media.spatialNodes.get(trackSid)
     if (!node) return
     media.spatialNodes.delete(trackSid)
@@ -650,7 +658,30 @@ export class VoiceClient {
     node.panner.disconnect()
     node.gain.disconnect()
     const element = media.audioElements.get(trackSid)
-    if (element) element.volume = 1
+    // Handing playback back to the element must not undo a local mute.
+    if (element) element.volume = this.locallyMuted.has(connId) ? 0 : 1
+  }
+
+  /**
+   * Silence one peer for this listener only ("Mute for me"). Nothing is sent: the
+   * peer keeps publishing and the rest of the room keeps hearing them.
+   *
+   * Both playback paths have to be covered. With positional audio off a mic plays
+   * out of its `<audio>` element, so the element's volume is the switch; with it on
+   * the element already sits at volume 0 and the audio graph does the playing, so
+   * the peer's gain node is. Setting only one leaks audio the moment the listener
+   * toggles the spatial view.
+   */
+  setPeerLocalMuted(connId: string, muted: boolean) {
+    if (muted) this.locallyMuted.add(connId)
+    else this.locallyMuted.delete(connId)
+    const media = this.remoteMedia.get(connId)
+    if (!media) return
+    for (const trackSid of media.audioTracks.keys()) {
+      const element = media.audioElements.get(trackSid)
+      if (element) element.volume = muted || media.spatialNodes.has(trackSid) ? 0 : 1
+    }
+    for (const node of media.spatialNodes.values()) this.applySpatialNode(node, connId)
   }
 
   /** Re-aim one peer's nodes, or everyone's when the listener itself moved. */
@@ -684,7 +715,9 @@ export class VoiceClient {
       // Safari still only has the deprecated setter.
       node.panner.setPosition(x, 0, z)
     }
-    node.gain.gain.setTargetAtTime(spatialGain(Math.hypot(dx, dy)), now, SPATIAL_GLIDE)
+    // A locally muted peer is silent at every distance: the mute wins over the curve.
+    const gain = this.locallyMuted.has(connId) ? 0 : spatialGain(Math.hypot(dx, dy))
+    node.gain.gain.setTargetAtTime(gain, now, SPATIAL_GLIDE)
   }
 
   async setVideoInput(deviceId: string) {
@@ -913,8 +946,9 @@ export class VoiceClient {
     if (!media) return
     this.remoteMedia.delete(connId)
     this.spatialPositions.delete(connId)
+    this.locallyMuted.delete(connId)
     for (const trackSid of [...media.spatialNodes.keys()]) {
-      this.unwireSpatialTrack(trackSid, media)
+      this.unwireSpatialTrack(connId, trackSid, media)
     }
     media.audioTracks.clear()
     for (const element of media.audioElements.values()) element.remove()

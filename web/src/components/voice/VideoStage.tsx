@@ -25,9 +25,11 @@ import { CallPollOverlay } from '../CallPollOverlay'
 import { CreatePollModal } from '../CreatePollModal'
 import { useAudioAuraPreference, setAudioAuraPreference } from '../../lib/meetingEffects'
 import { AudioAuraAvatar, AudioAuraPreview } from './AudioAuraAvatar'
-import { HandIcon, MicIcon, ScreenBadgeIcon } from './callIcons'
+import { HandIcon, MicIcon, ScreenBadgeIcon, SpeakerIcon } from './callIcons'
 import { SpatialStage, useSpatialAudio } from './SpatialStage'
-import { useDismiss } from '../../ui'
+import { ParticipantMenu, ParticipantMenuDots } from './ParticipantMenu'
+import { IconButton, Kbd, useDismiss } from '../../ui'
+import { isEditableTarget, registerShortcut } from '../../lib/shortcuts'
 
 type StageParticipant = {
   userId: string
@@ -119,6 +121,9 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
   const setVoiceStageMode = useStore((s) => s.setVoiceStageMode)
   const spatial = useStore((s) => s.voice.spatial)
   const setVoiceSpatial = useStore((s) => s.setVoiceSpatial)
+  const pushToTalk = useStore((s) => s.voice.pushToTalk)
+  const setPushToTalkHeld = useStore((s) => s.setPushToTalkHeld)
+  const toggleVoiceMute = useStore((s) => s.toggleVoiceMute)
   const isMobile = useIsMobile()
   const [mics, setMics] = useState<MediaDeviceOption[]>([])
   const [cameras, setCameras] = useState<MediaDeviceOption[]>([])
@@ -205,6 +210,41 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [stageMode, setVoiceStageMode])
+
+  // Mic keys. The plain toggle is a registry binding like every other shortcut; the
+  // push-to-talk key cannot be, because a hold is a keydown/keyup *pair* and a chord
+  // describes one press. Hence the raw listener below — the documented exception, and
+  // the reason it also releases on blur and tab-hide: a hot mic must never outlive the
+  // key event that opened it.
+  useEffect(() => registerShortcut('call.mute', () => toggleVoiceMute()), [toggleVoiceMute])
+
+  useEffect(() => {
+    if (!pushToTalk) return
+    function onDown(event: KeyboardEvent) {
+      if (event.code !== 'Space' || event.repeat || isEditableTarget(event.target)) return
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      event.preventDefault()
+      setPushToTalkHeld(true)
+    }
+    function onUp(event: KeyboardEvent) {
+      if (event.code !== 'Space') return
+      setPushToTalkHeld(false)
+    }
+    function release() {
+      setPushToTalkHeld(false)
+    }
+    window.addEventListener('keydown', onDown)
+    window.addEventListener('keyup', onUp)
+    window.addEventListener('blur', release)
+    document.addEventListener('visibilitychange', release)
+    return () => {
+      window.removeEventListener('keydown', onDown)
+      window.removeEventListener('keyup', onUp)
+      window.removeEventListener('blur', release)
+      document.removeEventListener('visibilitychange', release)
+      release()
+    }
+  }, [pushToTalk, setPushToTalkHeld])
 
   useEffect(() => {
     function onResize() {
@@ -1046,6 +1086,7 @@ function AudioTile({
   audioAuraEnabled: boolean
   size: number
 }) {
+  const locallyMuted = useStore((s) => s.voice.locallyMutedUsers.has(userId))
   return (
     <li className="flex w-24 flex-col items-center gap-2 text-center sm:w-28">
       <div
@@ -1071,12 +1112,16 @@ function AudioTile({
             <HandIcon compact />
           </span>
         )}
-        {muted && (
+        {/* One badge, two meanings, told apart by glyph and tone: a crossed mic is
+            their microphone being off, a crossed speaker is you having silenced them. */}
+        {(muted || locallyMuted) && (
           <span
-            className="absolute -bottom-0.5 -right-0.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-[var(--color-ink)] bg-[var(--color-panel-2)] text-[var(--color-text-dim)]"
-            title="Muted"
+            className={`absolute -bottom-0.5 -right-0.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-[var(--color-ink)] bg-[var(--color-panel-2)] ${
+              locallyMuted ? 'text-[var(--color-warning-fg)]' : 'text-[var(--color-text-dim)]'
+            }`}
+            title={locallyMuted ? 'Muted for you' : 'Muted'}
           >
-            <MicIcon off />
+            {locallyMuted ? <SpeakerIcon off size={14} /> : <MicIcon off />}
           </span>
         )}
         {transcribing && (
@@ -1098,13 +1143,41 @@ function AudioTile({
           </span>
         )}
       </div>
-      <span className="flex w-full items-center justify-center gap-1 truncate text-xs font-medium text-[var(--color-text)]">
-        <span className="truncate">
-          {name}
-          {local ? ' (you)' : ''}
+      {/* Only other people get a menu — muting yourself is the controls bar's job. The
+          whole name row is the trigger, so the tap target is the tile's full width
+          instead of a 16px glyph squeezed next to a truncated name. */}
+      {local ? (
+        <span className="flex w-full items-center justify-center gap-1 truncate text-xs font-medium text-[var(--color-text)]">
+          <span className="truncate">{name} (you)</span>
+          {guest && <GuestBadge />}
         </span>
-        {guest && <GuestBadge />}
-      </span>
+      ) : (
+        // The wrapper carries the width: Popover's own container sizes to its content,
+        // and without a full-width block above it the name would refuse to truncate.
+        <div className="w-full min-w-0">
+          <ParticipantMenu
+            userId={userId}
+            name={name}
+            connIds={connIds}
+            muted={muted}
+            align="start"
+            trigger={({ open, toggle }) => (
+              <button
+                type="button"
+                aria-label={`Options for ${name}`}
+                aria-haspopup="menu"
+                aria-expanded={open}
+                onClick={toggle}
+                className="flex w-full cursor-pointer items-center justify-center gap-1 truncate rounded-lg px-1 py-0.5 text-xs font-medium text-[var(--color-text)] outline-none hover:bg-[var(--color-panel-2)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] [@media(hover:none)]:min-h-11"
+              >
+                <span className="truncate">{name}</span>
+                {guest && <GuestBadge />}
+                <ParticipantMenuDots size={13} />
+              </button>
+            )}
+          />
+        </div>
+      )}
     </li>
   )
 }
@@ -1140,6 +1213,7 @@ function VideoTile({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const hasVideo = Boolean(stream?.getVideoTracks().length)
+  const locallyMuted = useStore((s) => s.voice.locallyMutedUsers.has(userId))
 
   useEffect(() => {
     const video = videoRef.current
@@ -1150,7 +1224,7 @@ function VideoTile({
 
   return (
     <article
-      className={`relative flex aspect-video w-full overflow-hidden rounded-2xl border bg-[var(--color-panel)] ${
+      className={`group relative flex aspect-video w-full overflow-hidden rounded-2xl border bg-[var(--color-panel)] ${
         speaking ? 'border-success ring-2 ring-success/30' : 'border-[var(--color-border)]'
       }`}
     >
@@ -1176,13 +1250,42 @@ function VideoTile({
           />
         </div>
       )}
+      {/* Hover/focus on pointer devices, always visible on touch — a control that only
+          exists under a mouse does not exist on a tablet. */}
+      {!local && (
+        <div className="absolute right-2 top-2">
+          <ParticipantMenu
+            userId={userId}
+            name={name}
+            connIds={connIds}
+            muted={muted}
+            trigger={({ open, toggle }) => (
+              <IconButton
+                label={`Options for ${name}`}
+                size="lg"
+                shape="circle"
+                aria-haspopup="menu"
+                aria-expanded={open}
+                onClick={toggle}
+                className={`bg-black/45 text-white backdrop-blur-sm hover:bg-black/65 hover:text-white [@media(hover:none)]:h-11 [@media(hover:none)]:w-11 ${
+                  open
+                    ? ''
+                    : 'opacity-0 focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100'
+                }`}
+              >
+                <ParticipantMenuDots />
+              </IconButton>
+            )}
+          />
+        </div>
+      )}
       <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/75 to-transparent px-3 pb-2.5 pt-6 text-sm font-medium text-white">
         <span className="truncate">
           {name}
           {local ? ' (you)' : ''}
         </span>
         {guest && <GuestBadge onDark />}
-        {(handRaised || transcribing || muted || sharing) && (
+        {(handRaised || transcribing || muted || locallyMuted || sharing) && (
           <span className="ml-auto flex items-center gap-1">
             {sharing && (
               <span className="rounded-full bg-share p-1 text-white" title="Sharing their screen">
@@ -1205,6 +1308,14 @@ function VideoTile({
                 <CaptionsIcon compact />
               </span>
             )}
+            {locallyMuted ? (
+              <span
+                className="rounded-full bg-black/45 p-1 text-[var(--color-warning-fg)]"
+                title="Muted for you"
+              >
+                <SpeakerIcon off />
+              </span>
+            ) : null}
             {muted && (
               <span className="rounded-full bg-black/45 p-1" title="Muted">
                 <MicIcon off />
@@ -1545,6 +1656,8 @@ function StageControlsBar({
   const isMobile = useIsMobile()
   const [moreOpen, setMoreOpen] = useState(false)
   const muted = useStore((s) => s.voice.muted)
+  const pushToTalk = useStore((s) => s.voice.pushToTalk)
+  const pushToTalkHeld = useStore((s) => s.voice.pushToTalkHeld)
   const noiseSuppression = useStore((s) => s.voice.noiseSuppression)
   const noiseSuppressionAvailable = useStore((s) => s.voice.noiseSuppressionAvailable)
   const handRaised = useStore((s) => s.voice.handRaised)
@@ -1563,8 +1676,17 @@ function StageControlsBar({
   const setVoiceVideoDevice = useStore((s) => s.setVoiceVideoDevice)
   const leaveVoice = useStore((s) => s.leaveVoice)
 
+  // What the mic button says depends on the mode: in push-to-talk it is the key that
+  // opens the mic, so the button explains the key and offers the way out of the mode.
+  const micLabel = pushToTalk
+    ? 'Push to talk: hold Space. Click to leave push to talk'
+    : muted
+      ? 'Unmute microphone'
+      : 'Mute microphone'
+
   const secondaryActive =
     (noiseSuppression && noiseSuppressionAvailable) ||
+    pushToTalk ||
     handRaised ||
     transcribing ||
     videoBackground.id !== 'none' ||
@@ -1573,12 +1695,7 @@ function StageControlsBar({
   if (isMobile) {
     return (
       <>
-        <CallControl
-          label={muted ? 'Unmute microphone' : 'Mute microphone'}
-          active={!muted}
-          size="lg"
-          onClick={toggleVoiceMute}
-        >
+        <CallControl label={micLabel} active={!muted} size="lg" onClick={toggleVoiceMute}>
           <MicActivityIcon muted={muted} />
         </CallControl>
         <CallControl
@@ -1619,8 +1736,26 @@ function StageControlsBar({
 
   return (
     <>
+      {pushToTalk && (
+        <span
+          aria-live="polite"
+          className={`mr-0.5 hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-2xs font-medium sm:flex ${
+            pushToTalkHeld
+              ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]'
+              : 'bg-[var(--color-panel-2)] text-[var(--color-text-dim)]'
+          }`}
+        >
+          {pushToTalkHeld ? (
+            'Talking'
+          ) : (
+            <>
+              Hold <Kbd>Space</Kbd>
+            </>
+          )}
+        </span>
+      )}
       <DeviceControl
-        label={muted ? 'Unmute microphone' : 'Mute microphone'}
+        label={micLabel}
         menuLabel="Choose microphone"
         active={!muted}
         onClick={toggleVoiceMute}
@@ -1702,11 +1837,13 @@ function CallMoreMenu({
   )
   const toggleNoiseSuppression = useStore((s) => s.toggleNoiseSuppression)
   const toggleTranscription = useStore((s) => s.toggleTranscription)
+  const pushToTalk = useStore((s) => s.voice.pushToTalk)
+  const setPushToTalk = useStore((s) => s.setPushToTalk)
 
   const connected = voiceStatus === 'connected'
   const noiseOn = noiseSuppression && noiseSuppressionAvailable
   const notesAvailable = transcriptionAvailable && isTranscriptionSupported()
-  const hasSetting = noiseOn || transcribing || background.id !== 'none'
+  const hasSetting = noiseOn || pushToTalk || transcribing || background.id !== 'none'
 
   function close() {
     setOpen(false)
@@ -1753,6 +1890,14 @@ function CallMoreMenu({
           ) : (
             <>
               <MenuSectionLabel>Audio</MenuSectionLabel>
+              <MoreMenuRow
+                icon={<MicIcon off={false} />}
+                label="Push to talk"
+                hint="Mic stays closed until you hold Space"
+                state={pushToTalk ? 'on' : 'off'}
+                disabled={!connected}
+                onClick={() => setPushToTalk(!pushToTalk)}
+              />
               <MoreMenuRow
                 icon={<NoiseSuppressionIcon off={!noiseOn} />}
                 label="Noise suppression"

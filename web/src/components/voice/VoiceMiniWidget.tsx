@@ -56,6 +56,7 @@ export function VoiceMiniWidget() {
   const room = useStore((s) => (channelId ? s.voiceRooms[channelId] : undefined))
   const speaking = useStore((s) => s.voice.speaking)
   const muted = useStore((s) => s.voice.muted)
+  const pushToTalk = useStore((s) => s.voice.pushToTalk)
   const localScreenStream = useStore((s) => s.voice.localScreenStream)
   const remoteScreenStreams = useStore((s) => s.voice.remoteScreenStreams)
   const myConnId = useStore((s) => s.myConnId)
@@ -194,6 +195,13 @@ export function VoiceMiniWidget() {
 
   const visibleParticipants = participants.length > 3 ? participants.slice(0, 2) : participants
   const hiddenCount = participants.length > 3 ? participants.length - 2 : 0
+  // Same wording as the full stage: in push-to-talk the button is the way out of the
+  // mode, not a toggle.
+  const micLabel = pushToTalk
+    ? 'Push to talk: hold Space. Click to leave push to talk'
+    : muted
+      ? 'Unmute microphone'
+      : 'Mute microphone'
 
   return (
     <div
@@ -286,8 +294,8 @@ export function VoiceMiniWidget() {
       <div className="flex items-center gap-1 rounded-full bg-[var(--color-panel-2)] p-1">
         <button
           type="button"
-          aria-label={muted ? 'Unmute microphone' : 'Mute microphone'}
-          title={muted ? 'Unmute microphone' : 'Mute microphone'}
+          aria-label={micLabel}
+          title={micLabel}
           aria-pressed={muted}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => {

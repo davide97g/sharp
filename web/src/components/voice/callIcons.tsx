@@ -44,6 +44,30 @@ export function ScreenBadgeIcon() {
   )
 }
 
+/** Playback, not capture: this is "can I hear them", never "is their mic open". */
+export function SpeakerIcon({ off, size = 16 }: { off: boolean; size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+      {off ? (
+        <path d="m16 9 5 6M21 9l-5 6" />
+      ) : (
+        <path d="M16 8.5a4.5 4.5 0 0 1 0 7M19 6a8 8 0 0 1 0 12" />
+      )}
+    </svg>
+  )
+}
+
 export function MicIcon({ off }: { off: boolean }) {
   return (
     <svg

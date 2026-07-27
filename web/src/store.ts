@@ -47,6 +47,7 @@ import { applyUi } from './lib/store/uiHelpers'
 import {
   emptyVoiceState,
   saveNoiseSuppression,
+  saveVoicePushToTalk,
   saveVoiceSpatial,
 } from './lib/store/voiceHelpers'
 
@@ -187,6 +188,14 @@ export type VoiceState = {
   channelId: string | null
   status: 'idle' | 'connecting' | 'connected' | 'reconnecting'
   muted: boolean
+  // Push to talk: the mic stays closed and Space opens it. The mode is device-local
+  // (see storedVoicePushToTalk); `pushToTalkHeld` is the live hold, never persisted.
+  pushToTalk: boolean
+  pushToTalkHeld: boolean
+  // People this device has silenced for itself ("Mute for me"). Keyed by user id, so a
+  // person is muted across all their connections, and dropped on leave — "I can't hear
+  // Ana" is a choice about this call, not a setting.
+  locallyMutedUsers: Set<string>
   noiseSuppression: boolean
   noiseSuppressionAvailable: boolean
   videoBackground: VideoBackground
@@ -536,6 +545,14 @@ export type State = {
   connectVoiceMedia: (payload: VoiceStatePayload) => Promise<void>
   leaveVoice: () => void
   toggleVoiceMute: () => void
+  /** The one writer of `voice.muted`: mic button, M, push-to-talk, and the server echo. */
+  setVoiceMuted: (muted: boolean, opts?: { silent?: boolean; fromServer?: boolean }) => void
+  setPushToTalk: (enabled: boolean) => void
+  setPushToTalkHeld: (held: boolean) => void
+  /** Silence one person for this device only. Sends nothing to the room. */
+  togglePeerLocalMute: (userId: string) => void
+  /** Mute someone else's mic for the whole room (`voice.force_mute`). */
+  forceMuteParticipant: (connId: string) => void
   toggleNoiseSuppression: () => Promise<void>
   setVoiceVideoBackground: (background: VideoBackground) => Promise<void>
   toggleVoiceHand: () => void
@@ -2084,6 +2101,9 @@ export const useStore = create<State>((set, get) => ({
       // Positional audio is remembered per device; tracks subscribed later pick it
       // up on their own (handleTrackSubscribed checks the flag).
       if (active.spatial) client.setSpatialAudio(true)
+      // Push to talk is remembered too, and it must hold on the way in: joining a call
+      // with a hot mic is exactly what the mode exists to prevent.
+      if (active.pushToTalk) get().setVoiceMuted(true, { silent: true })
       playVoiceJoinSound()
     } catch (error) {
       client.stop()
@@ -2112,24 +2132,87 @@ export const useStore = create<State>((set, get) => ({
     if (channelId && status === 'connected') playVoiceLeaveSound()
   },
 
+  // The mic button and M. In push-to-talk mode there is nothing to toggle — the key
+  // does that — so this leaves the mode instead, which is the only way back to an open
+  // mic that does not require finding a menu.
   toggleVoiceMute() {
-    const { channelId, client, muted, handRaised } = get().voice
+    const { channelId, client, muted, pushToTalk } = get().voice
     if (!channelId || !client) return
-    const nextMuted = !muted
-    client.setMuted(nextMuted)
-    if (nextMuted) sound.micMute()
-    else sound.micUnmute()
+    if (pushToTalk) {
+      get().setPushToTalk(false)
+      return
+    }
+    get().setVoiceMuted(!muted)
+  },
+
+  // Every path that changes the mic goes through here: the toggle above, the
+  // push-to-talk key, and the server echo when someone force-mutes you. `silent`
+  // skips the click for the key, which would otherwise chirp on every syllable.
+  setVoiceMuted(muted, opts) {
+    const { channelId, client, handRaised } = get().voice
+    if (!channelId || !client) return
+    if (get().voice.muted === muted) return
+    client.setMuted(muted)
+    if (!opts?.silent) {
+      if (muted) sound.micMute()
+      else sound.micUnmute()
+    }
     // Unmuting optimistically lowers a raised hand; the server confirms via the
     // participant_updated echo it broadcasts for the mute change.
-    const lowerHand = !nextMuted && handRaised
+    const lowerHand = !muted && handRaised
     set((s) => ({
-      voice: { ...s.voice, muted: nextMuted, handRaised: lowerHand ? false : s.voice.handRaised },
+      voice: {
+        ...s.voice,
+        muted,
+        handRaised: lowerHand ? false : s.voice.handRaised,
+        // A mute that came from the room (someone force-muted you) ends the hold, so
+        // releasing the key later cannot re-open a mic you were asked to close.
+        pushToTalkHeld: muted ? false : s.voice.pushToTalkHeld,
+      },
     }))
     if (get().voice.transcribing) {
-      if (nextMuted) currentVoiceRecognizer()?.pause()
+      if (muted) currentVoiceRecognizer()?.pause()
       else currentVoiceRecognizer()?.resume()
     }
-    get().ws?.send('voice.mute', { channel_id: channelId, muted: nextMuted })
+    // The server already knows when it is the one that told us.
+    if (!opts?.fromServer) get().ws?.send('voice.mute', { channel_id: channelId, muted })
+  },
+
+  // Turning push-to-talk on closes the mic immediately: the promise of the mode is
+  // that nothing goes out unless a key is down.
+  setPushToTalk(enabled) {
+    saveVoicePushToTalk(enabled)
+    set((s) => ({ voice: { ...s.voice, pushToTalk: enabled, pushToTalkHeld: false } }))
+    get().setVoiceMuted(enabled)
+  },
+
+  setPushToTalkHeld(held) {
+    if (!get().voice.pushToTalk || get().voice.pushToTalkHeld === held) return
+    set((s) => ({ voice: { ...s.voice, pushToTalkHeld: held } }))
+    get().setVoiceMuted(!held, { silent: true })
+  },
+
+  // Local only, and deliberately not persisted: silencing someone is about this call.
+  // Applied to every connection they have, so a second device is not a way around it.
+  togglePeerLocalMute(userId) {
+    const { channelId, client } = get().voice
+    if (!channelId || !client) return
+    const next = new Set(get().voice.locallyMutedUsers)
+    const muted = !next.has(userId)
+    if (muted) next.add(userId)
+    else next.delete(userId)
+    for (const [connId, entry] of Object.entries(get().voiceRooms[channelId] ?? {})) {
+      if (entry.user_id === userId) client.setPeerLocalMuted(connId, muted)
+    }
+    set((s) => ({ voice: { ...s.voice, locallyMutedUsers: next } }))
+  },
+
+  // Room-wide, and server-authoritative: the mute lands when the echoed roster says
+  // so, exactly like a self-mute. Muting only — nobody can force a mic open.
+  forceMuteParticipant(connId) {
+    const { channelId, status } = get().voice
+    if (!channelId || status !== 'connected') return
+    get().ws?.send('voice.force_mute', { channel_id: channelId, conn_id: connId })
   },
 
   // Purely local mic denoising — no WS event; peers only hear the cleaned track.

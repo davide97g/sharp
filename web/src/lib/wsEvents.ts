@@ -102,6 +102,7 @@ import type {
   VoiceAnnotatePayload,
   VoiceAnnotateStatePayload,
   VoiceErrorPayload,
+  VoiceForceMutedPayload,
   VoiceParticipantJoinedPayload,
   VoiceParticipantLeftPayload,
   VoiceParticipantMovedPayload,
@@ -239,6 +240,11 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
         const active = get().voice
         if (active.channelId === p.channel_id) {
           active.client?.ensurePeer(p.participant.conn_id, p.participant.user_id)
+          // "Mute for me" follows the person, not the connection: a second device (or a
+          // rejoin) arrives silenced too.
+          if (active.locallyMutedUsers.has(p.participant.user_id)) {
+            active.client?.setPeerLocalMuted(p.participant.conn_id, true)
+          }
           if (p.participant.conn_id !== get().myConnId && p.participant.screen_on) {
             active.client?.updateRemoteScreen(
               p.participant.conn_id,
@@ -354,6 +360,13 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
           toastInfo(`${name} raised their hand`)
         }
         if (p.participant.conn_id === get().myConnId) {
+          // The room is authoritative for our own mic: this is what makes a
+          // force-mute actually close the microphone, and it also re-syncs after a
+          // reconnect. Muting only — a roster that says `muted: false` never opens
+          // a mic we chose to keep shut.
+          if (p.participant.muted && !active.muted) {
+            get().setVoiceMuted(true, { fromServer: true })
+          }
           // camera
           if (p.participant.camera_on && active.cameraStatus === 'starting' && active.client) {
             const client = active.client
@@ -470,6 +483,16 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
           name: p.display_name,
           emoji: p.emoji,
         })
+        break
+      }
+      case 'voice.force_muted': {
+        const p = env.payload as VoiceForceMutedPayload
+        // The mute itself already landed with the participant_updated that preceded
+        // this; all that is left is telling the person who closed their mic. Everyone
+        // else has no use for the event.
+        if (p.conn_id !== get().myConnId) break
+        const who = get().users[p.by_user_id]?.display_name ?? p.by_name
+        toastInfo(`${who} muted you`)
         break
       }
       case 'voice.error': {

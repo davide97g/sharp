@@ -160,6 +160,23 @@ export const SHORTCUTS: ShortcutDef[] = [
     scope: 'pane',
   },
   {
+    id: 'call.mute',
+    label: 'Mute / unmute your microphone',
+    group: 'Call',
+    defaultChord: 'm',
+    scope: 'global',
+  },
+  {
+    id: 'call.ptt',
+    label: 'Push to talk (while the mode is on)',
+    group: 'Call',
+    defaultChord: '',
+    scope: 'global',
+    // A hold is a keydown/keyup pair, which no chord describes. VideoStage owns the
+    // listener; this entry exists so the key is still documented and discoverable.
+    displayOnly: 'Hold Space',
+  },
+  {
     id: 'task.create',
     label: 'New task',
     group: 'Tasks',

@@ -92,7 +92,7 @@ Shared web helpers:
 | [01-core.md](arch/01-core.md) | Auth, users, channels, messages, threads, reactions, search, the main WS socket, and the server / web / desktop / landing / deploy shape |
 | [02-docs.md](arch/02-docs.md) | Collaborative docs: schema, role resolution, the binary Yjs sync socket, content bridging |
 | [03-canvas-board.md](arch/03-canvas-board.md) | Canvas and Board doc kinds — deltas from 02 only |
-| [04-voice.md](arch/04-voice.md) | LiveKit rooms, camera/screen slots, limits, spatial floor + positional audio, guest call links, meeting lifecycle |
+| [04-voice.md](arch/04-voice.md) | LiveKit rooms, camera/screen slots, limits, spatial floor + positional audio, mic control (push-to-talk, force-mute, per-peer local mute), guest call links, meeting lifecycle |
 | [05-files-notifications.md](arch/05-files-notifications.md) | Uploads, notification inbox and semantics, push transports, appearance + privacy prefs |
 | [06-gifs.md](arch/06-gifs.md) | GIF providers and budget, duck roast flow, durable meeting notes |
 | [07-calendar.md](arch/07-calendar.md) | Scheduled meetings, Google Calendar sync, reminder loops |

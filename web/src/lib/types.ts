@@ -529,6 +529,14 @@ export type VoiceParticipantMovedPayload = {
   x: number
   y: number
 }
+// Someone force-muted someone else. The mute itself rides the participant_updated
+// broadcast that precedes this; the payload exists so the target can name who did it.
+export type VoiceForceMutedPayload = {
+  channel_id: string
+  conn_id: string
+  by_user_id: string
+  by_name: string
+}
 export type VoiceErrorPayload = { channel_id: string; code: string }
 // Screen-share annotation relays (server -> client).
 export type VoiceAnnotatePayload = {

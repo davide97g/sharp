@@ -52,6 +52,13 @@ Client → server:
   (see `voice.aura`).
 - `voice.leave` `{channel_id}`
 - `voice.mute` `{channel_id, muted: boolean}`
+- `voice.force_mute` `{channel_id, conn_id}` — mute **someone else's** microphone for the
+  whole room. Muting only: there is no force-unmute, so a payload can silence a mic but never
+  open one, and the target unmutes themselves with `voice.mute`. Like `voice.move`, **any
+  participant may force-mute any other** (both ends must be in the room) — a room where only a
+  nominated host can close an unattended open mic stays unusable. Idempotent: an already-muted
+  target changes nothing and broadcasts nothing. A raised hand survives (only unmuting lowers a
+  hand). Sender not in the room gets `voice.error {code:"not_in_room"}`. Guests may send it.
 - `voice.transcribe` `{channel_id, enabled: boolean}` — opt in or out of sending
   locally transcribed phrases for the participant's active room connection.
 - `voice.phrase` `{channel_id, text: string}` — accepted only from an active
@@ -155,6 +162,11 @@ Server → client:
   `user_id`, and the **server-known** `display_name` (never a client-supplied name).
   Clients ignore events whose `conn_id` matches their own — the sender's own reaction is
   echoed locally the moment it is tapped. Nothing is persisted; late joiners see nothing.
+- `voice.force_muted` `{channel_id, conn_id, by_user_id, by_name}` — announces an accepted
+  `voice.force_mute` to the room audience. The mute itself travels in the
+  `voice.participant_updated` broadcast that precedes it; this event only carries *who* did it,
+  so the target can say "muted by Ana" instead of showing a mic that closed on its own. Clients
+  other than the target ignore it.
 - `voice.error`
   `{channel_id, code: "room_full"|"camera_full"|"screen_taken"|"media_unavailable"|"not_member"|"not_in_room"|"link_revoked"|"annotate_denied"}`
   — sent only to the offending connection. `camera_full` and `screen_taken` do not end the
@@ -194,6 +206,12 @@ Server → client:
   the change is an unmute (`muted=false`) and the participant's hand is raised, also clear
   `hand_raised`/`hand_raised_at` in the same participant snapshot so a single
   `voice.participant_updated` carries both changes.
+- `voice.force_mute`: require the *sender* to be in the room (same reasoning as `voice.move`),
+  then set the target's `muted=true` and broadcast `voice.participant_updated` followed by
+  `voice.force_muted`. A target that is already muted, or absent, is a silent no-op. The
+  target's client mutes its own microphone off the roster update — force-mute needs no
+  dedicated client command, and the same reconciliation covers a `voice.state` snapshot after a
+  reconnect.
 - `voice.hand`: require an active room participant; set `hand_raised` to the requested
   `raised` value (stamping `hand_raised_at` with the current Unix epoch ms when raising,
   clearing it to `null` when lowering) and broadcast the complete participant through
@@ -334,9 +352,10 @@ Meet-style ephemeral emoji, wired through `voice.react` / `voice.reaction` above
   `voice.move`), so everyone sees the same layout. Whether you *hear* the room spatially is a
   device-local preference (`sharp.voiceSpatial`), toggled from the call header.
 - Web: `web/src/components/voice/SpatialStage.tsx` draws the floor and moves you (drag, click the
-  floor, or WASD/arrows; Shift for a larger step). Only your own avatar is movable — the store's
-  `moveVoiceSelf` is the sole writer, optimistic locally and throttled to one `voice.move` every
-  70 ms with a trailing send so the resting position always lands.
+  floor, or WASD/arrows; Shift for a larger step), and can drag anyone else the same way. The
+  store's `moveVoiceParticipant` (`moveVoiceSelf` targets your own conn) is the sole writer,
+  optimistic locally and throttled to one `voice.move` every 70 ms with a trailing send so the
+  resting position always lands.
 - Audio: `web/src/lib/voice.ts` (`setSpatialAudio` / `setSpatialPosition`) routes each remote mic
   through `source → PannerNode → GainNode → destination` instead of straight out of its
   `<audio>` element. The element stays attached at `volume = 0` — Chrome only feeds a WebRTC
@@ -355,6 +374,27 @@ Meet-style ephemeral emoji, wired through `voice.react` / `voice.reaction` above
   positional mix alive. A live screen share takes the stage back; the audio stays spatial.
 - If the AudioContext or panner cannot be built, that peer falls back to plain element playback
   rather than going silent.
+
+## Mic control: push-to-talk and per-peer local mute (client-only)
+
+Two separate ideas, deliberately kept apart from `voice.force_mute` above: neither of these
+touches room state, so neither has a wire event.
+
+- **Push to talk** (`sharp.voicePushToTalk`, device-local): while on, the mic is muted and
+  holding **Space** opens it. Implemented in `web/src/store.ts` (`setPushToTalk` /
+  `setPushToTalkHeld`) over the same `setVoiceMuted` path the mic button uses, so the room still
+  sees an ordinary `voice.mute`. Hold state is transient (`voice.pushToTalkHeld`), and the
+  key listener releases on `keyup`, window blur, and tab hide — a hot mic must never survive
+  losing the key event. The mic control turns PTT off and unmutes when clicked, so there is
+  always a way back to an open mic without opening a menu. The hold key is a *keydown+keyup
+  pair*, which the chord registry cannot express, so `VideoStage` owns a raw listener for it
+  (documented as such); the plain mute toggle is a normal registry binding (`voice.mute`, `M`).
+- **Per-peer local mute** ("Mute for me"): silences one person for you only. Lives in
+  `web/src/lib/voice.ts` (`setPeerLocalMuted`) and applies to both playback paths — the
+  `<audio>` element's volume when playing plainly, and the peer's spatial `GainNode` when
+  positional audio is on, since either one alone would leak audio in the other mode. The set
+  is keyed by **user id** (a person, not a connection, so a second device is muted too) and
+  lives in the voice slice, cleared on leave: "I can't hear Ana" must not survive a call.
 
 ## REST API addition — base `/api/v1`
 
@@ -394,7 +434,7 @@ receives a limited guest JWT bound to that room — no chat, no other REST.
   `guest: true` (401). `/voice/config`, `/voice/transcriptions`, and voice-trigger management use
   `VoiceConfigAuth` to distinguish both token kinds; config/transcription succeed for guests
   while trigger management returns 403. On the main WS, a guest may only send `ping`
-  plus `voice.join`, `voice.leave`, `voice.mute`, `voice.camera`, `voice.screen`,
+  plus `voice.join`, `voice.leave`, `voice.mute`, `voice.force_mute`, `voice.camera`, `voice.screen`,
   `voice.hand`, `voice.aura`, `voice.move`, `voice.react`, `voice.transcribe`, and
   `voice.phrase`, and only when the event's
   `channel_id` matches its bound channel. Remaining guest permissions are enforced by the
