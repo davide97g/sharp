@@ -43,11 +43,29 @@ function SoundMark({ on }: { on: boolean }) {
   )
 }
 
-function roomPlaceholder(variant: GardenRoom['room_variant']) {
-  if (variant === 'greenhouse') return '🏡'
-  if (variant === 'orchard') return '🏠'
-  if (variant === 'pond') return '🛖'
-  return '🏘️'
+function RoomPreview({ variant }: { variant: GardenRoom['room_variant'] }) {
+  const largeHouse = variant === 'greenhouse' || variant === 'pond'
+  return (
+    <span
+      className="relative block h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-border bg-[#9dbc40]"
+      aria-hidden
+    >
+      <img
+        src="/assets/garden/ninja-adventure/tileset_village.png"
+        alt=""
+        draggable={false}
+        className="pointer-events-none absolute max-w-none select-none"
+        style={{
+          imageRendering: 'pixelated',
+          width: 160,
+          height: 96,
+          left: largeHouse ? -88 : -128,
+          top: -48,
+          transform: variant === 'orchard' ? 'scaleX(-1)' : undefined,
+        }}
+      />
+    </span>
+  )
 }
 
 export function GardenView() {
@@ -221,12 +239,7 @@ export function GardenView() {
                 }}
                 className="flex min-h-14 w-full items-center gap-3 rounded-lg px-3 py-2 text-left outline-none transition-colors hover:bg-[var(--color-panel-2)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
               >
-                <span
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-panel-2 text-xl"
-                  aria-hidden
-                >
-                  {roomPlaceholder(room.room_variant)}
-                </span>
+                <RoomPreview variant={room.room_variant} />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5 truncate text-sm font-medium text-[var(--color-text)]">
                     {room.name}

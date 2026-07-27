@@ -193,6 +193,20 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+      # Social sign-in — optional, per provider. Each turns on only when its redirect
+      # URI is set, and that URI must point at the *API* subdomain in this split
+      # deploy (the login button lives on the web subdomain, the callback does not):
+      #   https://<api-domain>/api/v1/auth/oauth/google/callback
+      #   https://<api-domain>/api/v1/auth/oauth/github/callback
+      # Google reuses the credentials above unless OAUTH_GOOGLE_CLIENT_ID/SECRET name
+      # a separate OAuth client. APP_URL (set above) is what sends the user back to
+      # the web subdomain after the callback — required here, not optional.
+      OAUTH_GOOGLE_CLIENT_ID: ${OAUTH_GOOGLE_CLIENT_ID:-}
+      OAUTH_GOOGLE_CLIENT_SECRET: ${OAUTH_GOOGLE_CLIENT_SECRET:-}
+      OAUTH_GOOGLE_REDIRECT_URI: ${OAUTH_GOOGLE_REDIRECT_URI:-}
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
+      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
+      OAUTH_GITHUB_REDIRECT_URI: ${OAUTH_GITHUB_REDIRECT_URI:-}
     expose:
       - "3000"
     depends_on:

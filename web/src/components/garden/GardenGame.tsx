@@ -2,12 +2,18 @@ import { useEffect, useRef, useState } from 'react'
 import type { GardenMap, GardenPeer, GardenRoom } from '../../lib/types'
 import { useStore } from '../../store'
 
-const UNIT = 18
+const TILE = 16
 const SPEED = 7
 const SEND_EVERY_MS = 100
-const EMOJI_FONT = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif'
 const UI_FONT = 'Inter, ui-sans-serif, system-ui, sans-serif'
-const PEOPLE = ['🧑‍💻', '👩‍💻', '🧑‍🎨', '👨‍🚀', '🧑‍🔬', '👩‍🚀', '🧑‍🚀']
+const ASSET_ROOT = '/assets/garden/ninja-adventure'
+const AVATAR_TEXTURES = ['garden-avatar-blue', 'garden-avatar-green', 'garden-avatar-ninja']
+const DIRECTION_COLUMN: Record<GardenPeer['facing'], number> = {
+  down: 0,
+  up: 1,
+  left: 2,
+  right: 3,
+}
 
 type Props = {
   map: GardenMap
@@ -28,17 +34,6 @@ function hashName(name: string) {
     value = (value * 31 + name.charCodeAt(index)) >>> 0
   }
   return value
-}
-
-function personFor(name: string) {
-  return PEOPLE[hashName(name) % PEOPLE.length]
-}
-
-function roomEmoji(variant: GardenRoom['room_variant']) {
-  if (variant === 'greenhouse') return '🏡'
-  if (variant === 'orchard') return '🏠'
-  if (variant === 'pond') return '🛖'
-  return '🏘️'
 }
 
 export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
@@ -70,35 +65,39 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
     void (async () => {
       const Phaser = await import('phaser')
       if (disposed || !hostRef.current) return
+
       const styles = getComputedStyle(document.documentElement)
       const css = (token: string) => styles.getPropertyValue(token).trim()
       const numeric = (token: string) => Number.parseInt(css(token).replace('#', ''), 16)
       const palette = {
         ink: numeric('--color-ink'),
         panel: numeric('--color-panel'),
-        panel2: numeric('--color-panel-2'),
         border: numeric('--color-border'),
-        borderSoft: numeric('--color-border-soft'),
         accent: numeric('--color-accent'),
-        accentHover: numeric('--color-accent-hover'),
         accentSoft: numeric('--color-accent-soft'),
         text: numeric('--color-text'),
-        textDim: numeric('--color-text-dim'),
-        textFaint: numeric('--color-text-faint'),
         success: numeric('--color-presence-online'),
       }
       const inkCss = css('--color-ink')
       const panelCss = css('--color-panel')
       const textCss = css('--color-text')
       const textDimCss = css('--color-text-dim')
-      const accentCss = css('--color-accent')
 
       type Avatar = {
         node: import('phaser').GameObjects.Container
-        person: import('phaser').GameObjects.Text
+        sprite: import('phaser').GameObjects.Sprite
         targetX: number
         targetY: number
         moving: boolean
+        facing: GardenPeer['facing']
+        idlePhase: number
+      }
+
+      type AtlasCrop = {
+        x: number
+        y: number
+        width: number
+        height: number
       }
 
       class GardenScene extends Phaser.Scene {
@@ -106,7 +105,9 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
         private remotes = new Map<string, Avatar>()
         private cursors!: import('phaser').Types.Input.Keyboard.CursorKeys
         private wasd!: Record<'W' | 'A' | 'S' | 'D', import('phaser').Input.Keyboard.Key>
+        private blockers!: import('phaser').Physics.Arcade.StaticGroup
         private target: Point | null = null
+        private waypoints: Point[] = []
         private seq = useStore.getState().garden.self?.seq ?? 0
         private lastSent = 0
         private wasMoving = false
@@ -120,88 +121,147 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
           super('garden')
         }
 
+        preload() {
+          this.load.image('garden-floor-source', `${ASSET_ROOT}/tileset_floor.png`)
+          this.load.image(
+            'garden-interior-source',
+            `${ASSET_ROOT}/tileset_interior_floor.png`,
+          )
+          this.load.image('garden-village', `${ASSET_ROOT}/tileset_village.png`)
+          this.load.image('garden-shadow', `${ASSET_ROOT}/avatar_shadow.png`)
+          this.load.image('garden-crate', `${ASSET_ROOT}/crate.png`)
+          this.load.image('garden-pot', `${ASSET_ROOT}/pot.png`)
+          this.load.spritesheet('garden-flower', `${ASSET_ROOT}/flower_dance.png`, {
+            frameWidth: 16,
+            frameHeight: 16,
+          })
+          this.load.spritesheet('garden-avatar-blue', `${ASSET_ROOT}/avatar_blue.png`, {
+            frameWidth: 16,
+            frameHeight: 16,
+          })
+          this.load.spritesheet('garden-avatar-green', `${ASSET_ROOT}/avatar_green.png`, {
+            frameWidth: 16,
+            frameHeight: 16,
+          })
+          this.load.spritesheet('garden-avatar-ninja', `${ASSET_ROOT}/avatar_ninja.png`, {
+            frameWidth: 16,
+            frameHeight: 16,
+          })
+        }
+
         create() {
+          this.makeCuratedTiles()
+          this.createAnimations()
+          this.blockers = this.physics.add.staticGroup()
           this.drawWorld()
+
           const self = useStore.getState().garden.self
-          const startX = (self?.x ?? map.spawn.x) * UNIT
-          const startY = (self?.y ?? map.spawn.y) * UNIT
+          const startX = (self?.x ?? map.spawn.x) * TILE
+          const startY = (self?.y ?? map.spawn.y) * TILE
           this.player = this.makeAvatar(
             startX,
             startY,
             useStore.getState().me?.display_name ?? 'You',
             true,
           )
+          this.physics.add.existing(this.player.node)
+          const body = this.player.node.body as import('phaser').Physics.Arcade.Body
+          body.setSize(11, 8)
+          body.setOffset(-5.5, -2)
+          body.setCollideWorldBounds(true)
+          this.physics.add.collider(this.player.node, this.blockers)
+          this.physics.world.setBounds(
+            TILE,
+            TILE,
+            this.worldWidth - TILE * 2,
+            this.worldHeight - TILE * 2,
+          )
 
           this.cursors = this.input.keyboard!.createCursorKeys()
           this.wasd = this.input.keyboard!.addKeys('W,A,S,D') as typeof this.wasd
           this.input.on('pointerdown', (pointer: import('phaser').Input.Pointer) => {
+            this.waypoints = []
             this.target = { x: pointer.worldX, y: pointer.worldY }
           })
           const walkToRoom = (event: Event) => {
             const room = (event as CustomEvent<GardenRoom>).detail
-            this.target = { x: room.door_x * UNIT, y: room.door_y * UNIT }
+            const plaza = { x: 52 * TILE, y: 64 * TILE }
+            const elbow = { x: room.door_x * TILE, y: plaza.y }
+            // Houses face south. For plots below the plaza, stop on the north
+            // threshold, still inside the server's 4.5-tile entry radius.
+            const approachY = room.door_y > 64 ? room.door_y - 4 : room.door_y
+            const door = { x: room.door_x * TILE, y: approachY * TILE }
+            this.waypoints = [plaza, elbow, door].filter(
+              (point, index, points) =>
+                index === 0 ||
+                point.x !== points[index - 1].x ||
+                point.y !== points[index - 1].y,
+            )
+            this.target = this.waypoints.shift() ?? null
           }
           window.addEventListener('sharp:garden-walk-to', walkToRoom)
           this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
             window.removeEventListener('sharp:garden-walk-to', walkToRoom)
           })
 
-          if (space === 'hub') {
-            this.cameras.main.setBounds(0, 0, this.worldWidth, this.worldHeight)
-            this.cameras.main.startFollow(this.player.node, true, 0.1, 0.1)
-          }
+          this.cameras.main.setBounds(0, 0, this.worldWidth, this.worldHeight)
+          this.cameras.main.startFollow(this.player.node, true, 0.12, 0.12)
           const setZoom = () => {
             const logicalWidth = this.scale.width / renderScale
-            if (space === 'room') {
-              const fit = Math.min(
-                this.scale.width / this.worldWidth,
-                this.scale.height / this.worldHeight,
-              )
-              this.cameras.main.setZoom(fit * 0.92)
-              this.cameras.main.centerOn(this.worldWidth / 2, this.worldHeight / 2)
-              return
-            }
-            const zoom = logicalWidth < 620 ? 1 : logicalWidth < 1000 ? 0.9 : 0.78
-            this.cameras.main.setZoom(zoom * renderScale)
+            const logicalZoom = logicalWidth < 620 ? 1 : 2
+            this.cameras.main.setZoom(logicalZoom * renderScale)
           }
           this.scale.on('resize', setZoom)
           setZoom()
 
           let lastPeers: ReturnType<typeof useStore.getState>['garden']['peers'] | null = null
-          let lastSelf: GardenPeer | null = null
           const sync = (state: ReturnType<typeof useStore.getState>) => {
-            if (!state.garden.active) return
-            if (state.garden.peers === lastPeers && state.garden.self === lastSelf) return
-            lastPeers = state.garden.peers
-            lastSelf = state.garden.self
-            const present = new Set(Object.keys(state.garden.peers))
-            for (const [connId, peer] of Object.entries(state.garden.peers)) {
-              let avatar = this.remotes.get(connId)
-              if (!avatar) {
-                avatar = this.makeAvatar(
-                  peer.x * UNIT,
-                  peer.y * UNIT,
-                  peer.display_name,
-                  false,
-                )
-                this.remotes.set(connId, avatar)
+            if (state.garden.peers !== lastPeers) {
+              lastPeers = state.garden.peers
+              const present = new Set<string>()
+              for (const [connId, peer] of Object.entries(state.garden.peers)) {
+                if (
+                  peer.space !== space ||
+                  (space === 'room' && peer.channel_id !== channelId)
+                ) {
+                  continue
+                }
+                present.add(connId)
+                let avatar = this.remotes.get(connId)
+                if (!avatar) {
+                  avatar = this.makeAvatar(
+                    peer.x * TILE,
+                    peer.y * TILE,
+                    peer.display_name,
+                    false,
+                  )
+                  this.remotes.set(connId, avatar)
+                }
+                avatar.targetX = peer.x * TILE
+                avatar.targetY = peer.y * TILE
+                avatar.moving = peer.moving
+                this.faceAvatar(avatar, peer.facing)
               }
-              avatar.targetX = peer.x * UNIT
-              avatar.targetY = peer.y * UNIT
-              avatar.moving = peer.moving
-              this.faceAvatar(avatar, peer.facing)
+              for (const [connId, avatar] of this.remotes) {
+                if (present.has(connId)) continue
+                avatar.node.destroy(true)
+                this.remotes.delete(connId)
+              }
             }
-            for (const [connId, avatar] of this.remotes) {
-              if (present.has(connId)) continue
-              avatar.node.destroy(true)
-              this.remotes.delete(connId)
-            }
+
             const authoritative = state.garden.self
             if (authoritative && this.player) {
-              const dx = authoritative.x * UNIT - this.player.node.x
-              const dy = authoritative.y * UNIT - this.player.node.y
-              if (Math.hypot(dx, dy) > UNIT * 2.25) {
-                this.player.node.setPosition(authoritative.x * UNIT, authoritative.y * UNIT)
+              const dx = authoritative.x * TILE - this.player.node.x
+              const dy = authoritative.y * TILE - this.player.node.y
+              if (Math.hypot(dx, dy) > TILE * 2.25) {
+                this.player.node.setPosition(
+                  authoritative.x * TILE,
+                  authoritative.y * TILE,
+                )
+                const playerBody = this.player.node.body as import(
+                  'phaser'
+                ).Physics.Arcade.Body
+                playerBody.reset(authoritative.x * TILE, authoritative.y * TILE)
                 this.target = null
               }
               this.seq = Math.max(this.seq, authoritative.seq)
@@ -226,34 +286,50 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
             if (this.cursors.up.isDown || this.wasd.W.isDown) dy -= 1
             if (this.cursors.down.isDown || this.wasd.S.isDown) dy += 1
           }
-          if (dx || dy) this.target = null
+          if (dx || dy) {
+            this.target = null
+            this.waypoints = []
+          }
           if (!dx && !dy && this.target) {
             const tx = this.target.x - this.player.node.x
             const ty = this.target.y - this.player.node.y
-            if (Math.hypot(tx, ty) < 5) this.target = null
+            if (Math.hypot(tx, ty) < 5) {
+              this.target = this.waypoints.shift() ?? null
+            }
             else {
               dx = tx
               dy = ty
             }
           }
 
-          let facing: GardenPeer['facing'] =
-            useStore.getState().garden.self?.facing ?? 'down'
+          let facing = this.player.facing
           const moving = dx !== 0 || dy !== 0
+          const body = this.player.node.body as import('phaser').Physics.Arcade.Body
           if (moving) {
             const length = Math.hypot(dx, dy)
             dx /= length
             dy /= length
-            const distance = SPEED * UNIT * (delta / 1000)
-            const minX = 2 * UNIT
-            const maxX = (space === 'hub' ? 102 : 30) * UNIT
-            const minY = 2 * UNIT
-            const maxY = (space === 'hub' ? this.worldHeight / UNIT - 2 : 22) * UNIT
-            this.player.node.x = Phaser.Math.Clamp(this.player.node.x + dx * distance, minX, maxX)
-            this.player.node.y = Phaser.Math.Clamp(this.player.node.y + dy * distance, minY, maxY)
-            facing = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 'left' : 'right') : dy < 0 ? 'up' : 'down'
+            body.setVelocity(dx * SPEED * TILE, dy * SPEED * TILE)
+            facing =
+              Math.abs(dx) > Math.abs(dy)
+                ? dx < 0
+                  ? 'left'
+                  : 'right'
+                : dy < 0
+                  ? 'up'
+                  : 'down'
             this.faceAvatar(this.player, facing)
+          } else {
+            body.setVelocity(0, 0)
           }
+          if (
+            this.target &&
+            (!body.blocked.none || (!body.touching.none && moving))
+          ) {
+            this.target = null
+            this.waypoints = []
+          }
+
           this.player.moving = moving
           this.animateAvatar(this.player, time)
           this.player.node.setDepth(this.player.node.y + 100)
@@ -269,8 +345,8 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
               .getState()
               .moveGarden(
                 this.seq,
-                this.player.node.x / UNIT,
-                this.player.node.y / UNIT,
+                this.player.node.x / TILE,
+                this.player.node.y / TILE,
                 facing,
               )
           }
@@ -287,6 +363,116 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
           this.updateNearby()
         }
 
+        private makeCuratedTiles() {
+          this.copyTiles('garden-ground', 'garden-floor-source', [
+            [0, 192],
+            [16, 192],
+            [16, 128],
+            [80, 128],
+          ])
+          this.copyTiles('garden-interior-ground', 'garden-interior-source', [
+            [32, 32],
+            [48, 32],
+            [64, 32],
+            [80, 32],
+          ])
+          this.copyCrop('garden-house-small', 'garden-village', {
+            x: 256,
+            y: 96,
+            width: 64,
+            height: 64,
+          })
+          this.copyCrop('garden-house-large', 'garden-village', {
+            x: 176,
+            y: 96,
+            width: 80,
+            height: 80,
+          })
+          this.copyCrop('garden-tree-wide', 'garden-village', {
+            x: 0,
+            y: 96,
+            width: 64,
+            height: 96,
+          })
+          this.copyCrop('garden-tree-tall', 'garden-village', {
+            x: 64,
+            y: 96,
+            width: 32,
+            height: 80,
+          })
+          this.copyCrop('garden-tree-round', 'garden-village', {
+            x: 272,
+            y: 0,
+            width: 48,
+            height: 48,
+          })
+        }
+
+        private copyTiles(
+          key: string,
+          sourceKey: string,
+          sourceTiles: Array<[number, number]>,
+        ) {
+          if (this.textures.exists(key)) return
+          const texture = this.textures.createCanvas(key, sourceTiles.length * TILE, TILE)
+          if (!texture) return
+          const context = texture.context
+          const source = this.textures.get(sourceKey).getSourceImage() as CanvasImageSource
+          context.imageSmoothingEnabled = false
+          context.clearRect(0, 0, sourceTiles.length * TILE, TILE)
+          sourceTiles.forEach(([sourceX, sourceY], index) => {
+            context.drawImage(
+              source,
+              sourceX,
+              sourceY,
+              TILE,
+              TILE,
+              index * TILE,
+              0,
+              TILE,
+              TILE,
+            )
+          })
+          texture.refresh()
+        }
+
+        private copyCrop(key: string, sourceKey: string, crop: AtlasCrop) {
+          if (this.textures.exists(key)) return
+          const texture = this.textures.createCanvas(key, crop.width, crop.height)
+          if (!texture) return
+          const context = texture.context
+          const source = this.textures.get(sourceKey).getSourceImage() as CanvasImageSource
+          context.imageSmoothingEnabled = false
+          context.clearRect(0, 0, crop.width, crop.height)
+          context.drawImage(
+            source,
+            crop.x,
+            crop.y,
+            crop.width,
+            crop.height,
+            0,
+            0,
+            crop.width,
+            crop.height,
+          )
+          texture.refresh()
+        }
+
+        private createAnimations() {
+          if (!this.anims.exists('garden-flower-dance')) {
+            this.anims.create({
+              key: 'garden-flower-dance',
+              frames: this.anims.generateFrameNumbers('garden-flower', {
+                start: 0,
+                end: 3,
+              }),
+              frameRate: 3.5,
+              repeat: -1,
+              yoyo: true,
+            })
+          }
+        }
+
         private updateNearby() {
           if (space !== 'hub') {
             if (this.nearbyId !== null) {
@@ -297,8 +483,8 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
           }
           let nearest: GardenRoom | null = null
           let distance = Number.POSITIVE_INFINITY
-          const x = this.player.node.x / UNIT
-          const y = this.player.node.y / UNIT
+          const x = this.player.node.x / TILE
+          const y = this.player.node.y / TILE
           for (const room of map.rooms) {
             const current = Math.hypot(x - room.door_x, y - room.door_y)
             if (current < distance && current <= 4.5) {
@@ -313,45 +499,58 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
         }
 
         private makeAvatar(x: number, y: number, name: string, self: boolean): Avatar {
-          const shadow = this.add.ellipse(0, 4, 34, 13, palette.ink, 0.32)
+          const texture = self
+            ? 'garden-avatar-blue'
+            : AVATAR_TEXTURES[hashName(name) % AVATAR_TEXTURES.length]
+          const shadow = this.add.image(0, 1, 'garden-shadow').setAlpha(0.7)
           const halo = this.add
-            .ellipse(0, 2, 43, 28, palette.accent, self ? 0.18 : 0)
-            .setStrokeStyle(self ? 2 : 0, palette.accent, self ? 0.72 : 0)
-          const person = this.add
-            .text(0, -13, self ? '🧑‍💻' : personFor(name), {
-              fontFamily: EMOJI_FONT,
-              fontSize: self ? '31px' : '29px',
-              resolution: renderScale,
-            })
-            .setOrigin(0.5, 0.65)
-          const presence = this.add.circle(13, -2, 4, palette.success).setStrokeStyle(2, palette.panel)
+            .ellipse(0, -1, 28, 17, palette.accent, self ? 0.15 : 0)
+            .setStrokeStyle(self ? 1 : 0, palette.accent, self ? 0.8 : 0)
+          const sprite = this.add.sprite(0, -8, texture, DIRECTION_COLUMN.down)
+          const presence = this.add
+            .circle(11, -6, 3, palette.success)
+            .setStrokeStyle(1, palette.panel)
           const label = this.add
-            .text(0, -43, self ? 'You' : labelFor(name), {
+            .text(0, -35, self ? 'You' : labelFor(name), {
               fontFamily: UI_FONT,
-              fontSize: '11px',
+              fontSize: '8px',
               fontStyle: '600',
               color: textCss,
               backgroundColor: panelCss,
-              padding: { x: 7, y: 4 },
+              padding: { x: 5, y: 3 },
               resolution: renderScale,
             })
             .setOrigin(0.5)
-          const node = this.add.container(x, y, [shadow, halo, person, presence, label])
+          const node = this.add.container(x, y, [halo, shadow, sprite, presence, label])
           node.setDepth(y + 100)
-          return { node, person, targetX: x, targetY: y, moving: false }
+          return {
+            node,
+            sprite,
+            targetX: x,
+            targetY: y,
+            moving: false,
+            facing: 'down',
+            idlePhase: hashName(name) % 1000,
+          }
         }
 
         private faceAvatar(avatar: Avatar, facing: GardenPeer['facing']) {
-          avatar.person.setScale(facing === 'left' ? -1 : 1, 1)
-          avatar.person.setAlpha(facing === 'up' ? 0.82 : 1)
+          avatar.facing = facing
+          if (!avatar.moving) avatar.sprite.setFrame(DIRECTION_COLUMN[facing])
         }
 
         private animateAvatar(avatar: Avatar, time: number) {
-          if (this.reducedMotion || !avatar.moving) {
-            avatar.person.y = -13
+          const column = DIRECTION_COLUMN[avatar.facing]
+          if (avatar.moving) {
+            const row = this.reducedMotion ? 1 : Math.floor(time / 135) % 4
+            avatar.sprite.setFrame(row * 4 + column)
+            avatar.sprite.y = -8
             return
           }
-          avatar.person.y = -13 - Math.abs(Math.sin(time / 115)) * 2
+          avatar.sprite.setFrame(column)
+          avatar.sprite.y = this.reducedMotion
+            ? -8
+            : -8 + Math.round(Math.sin((time + avatar.idlePhase) / 650))
         }
 
         private drawWorld() {
@@ -361,310 +560,388 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
 
         private drawHub() {
           const maxDoorY = Math.max(78, ...map.rooms.map((room) => room.door_y))
-          this.worldWidth = 104 * UNIT
-          this.worldHeight = Math.max(96, maxDoorY + 16) * UNIT
-          const ground = this.add.graphics()
-          ground.fillStyle(palette.ink).fillRect(0, 0, this.worldWidth, this.worldHeight)
-          ground.fillStyle(palette.panel, 0.7).fillRoundedRect(
-            2 * UNIT,
-            2 * UNIT,
-            this.worldWidth - 4 * UNIT,
-            this.worldHeight - 4 * UNIT,
-            34,
-          )
-          ground.lineStyle(1, palette.borderSoft, 0.7)
-          ground.strokeRoundedRect(
-            2 * UNIT,
-            2 * UNIT,
-            this.worldWidth - 4 * UNIT,
-            this.worldHeight - 4 * UNIT,
-            34,
-          )
-          for (let y = 5; y < this.worldHeight / UNIT; y += 6) {
-            for (let x = 4 + ((y / 6) % 2) * 3; x < 103; x += 6) {
-              ground.fillStyle(palette.borderSoft, 0.34)
-              ground.fillCircle(x * UNIT, y * UNIT, 1.5)
-            }
-          }
+          const widthInTiles = 104
+          const heightInTiles = Math.max(96, Math.ceil(maxDoorY + 16))
+          this.worldWidth = widthInTiles * TILE
+          this.worldHeight = heightInTiles * TILE
 
-          const plaza = { x: 52 * UNIT, y: 64 * UNIT }
+          const data = Array.from({ length: heightInTiles }, (_, y) =>
+            Array.from({ length: widthInTiles }, (_, x) =>
+              (x * 13 + y * 7) % 17 === 0 ? 1 : 0,
+            ),
+          )
+          const plaza = { x: 52, y: 64 }
+          this.paintRect(data, plaza.x - 6, plaza.y - 4, 13, 9, 3)
           for (const room of map.rooms) {
-            const door = { x: room.door_x * UNIT, y: room.door_y * UNIT }
-            this.drawPath([
-              door,
-              { x: door.x, y: plaza.y },
-              plaza,
-            ])
+            const doorX = Math.round(room.door_x)
+            const doorY = Math.round(room.door_y)
+            this.paintRect(
+              data,
+              doorX - 1,
+              Math.min(doorY, plaza.y),
+              3,
+              Math.abs(plaza.y - doorY) + 1,
+              2,
+            )
+            this.paintRect(
+              data,
+              Math.min(doorX, plaza.x),
+              plaza.y - 1,
+              Math.abs(plaza.x - doorX) + 1,
+              3,
+              2,
+            )
           }
-          this.drawCourtyard(plaza.x, plaza.y)
-          map.rooms.forEach((room) => this.drawPavilion(room))
-          this.drawOutdoorAssets()
+          this.addTileLayer(data, 'garden-ground')
+
+          map.rooms.forEach((room) => this.drawHouse(room))
+          // Keep the central path clear: the sign sits inside the plaza, above the
+          // horizontal guide lane, so both manual and guided walks can pass it.
+          this.drawCourtyard((plaza.x - 3) * TILE, (plaza.y - 3) * TILE)
+          this.drawGardenEdges(heightInTiles)
+          this.drawFlowerBeds()
         }
 
-        private drawPath(points: Point[]) {
-          const path = this.add.graphics().setDepth(8)
-          const drawLine = (width: number, color: number, alpha: number) => {
-            path.lineStyle(width, color, alpha)
-            path.beginPath()
-            path.moveTo(points[0].x, points[0].y)
-            for (const point of points.slice(1)) path.lineTo(point.x, point.y)
-            path.strokePath()
-            for (const point of points) {
-              path.fillStyle(color, alpha).fillCircle(point.x, point.y, width / 2)
+        private paintRect(
+          data: number[][],
+          left: number,
+          top: number,
+          width: number,
+          height: number,
+          tile: number,
+        ) {
+          for (let y = Math.max(0, top); y < Math.min(data.length, top + height); y += 1) {
+            for (
+              let x = Math.max(0, left);
+              x < Math.min(data[y].length, left + width);
+              x += 1
+            ) {
+              data[y][x] = tile
             }
           }
-          drawLine(58, palette.border, 0.82)
-          drawLine(52, palette.accentSoft, 0.72)
-          path.lineStyle(1, palette.accent, 0.22)
-          path.beginPath()
-          path.moveTo(points[0].x, points[0].y)
-          for (const point of points.slice(1)) path.lineTo(point.x, point.y)
-          path.strokePath()
+        }
+
+        private addTileLayer(data: number[][], textureKey: string) {
+          const tilemap = this.make.tilemap({
+            data,
+            tileWidth: TILE,
+            tileHeight: TILE,
+          })
+          const tiles = tilemap.addTilesetImage(textureKey, textureKey, TILE, TILE)
+          if (!tiles) return
+          tilemap.createLayer(0, tiles, 0, 0).setDepth(0)
         }
 
         private drawCourtyard(x: number, y: number) {
-          const plaza = this.add.graphics().setDepth(12)
-          plaza.fillStyle(palette.panel2, 0.98).fillCircle(x, y, 104)
-          plaza.lineStyle(3, palette.border, 1).strokeCircle(x, y, 104)
-          plaza.lineStyle(1, palette.accent, 0.5).strokeCircle(x, y, 90)
-          this.addEmoji(x, y - 10, '🌱', 40, y + 10)
+          const sign = this.add.graphics().setDepth(y + 3)
+          sign.fillStyle(0x6a3b2b).fillRect(x - 19, y - 19, 38, 22)
+          sign.fillStyle(0xd7a65a).fillRect(x - 17, y - 17, 34, 16)
+          sign.fillStyle(0x4c281f).fillRect(x - 2, y + 3, 4, 18)
+          sign.fillStyle(0x291b18).fillRect(x - 16, y - 16, 32, 2)
           this.add
-            .text(x, y + 38, 'Open courtyard', {
-              fontFamily: UI_FONT,
-              fontSize: '14px',
-              fontStyle: '600',
-              color: textCss,
+            .text(x, y - 9, 'GARDEN', {
+              fontFamily: 'monospace',
+              fontSize: '7px',
+              fontStyle: '700',
+              color: '#3b241a',
               resolution: renderScale,
             })
             .setOrigin(0.5)
-            .setDepth(y + 12)
-          this.add
-            .text(x, y + 59, 'Walk over to a room', {
-              fontFamily: UI_FONT,
-              fontSize: '11px',
-              color: textDimCss,
-              resolution: renderScale,
-            })
-            .setOrigin(0.5)
-            .setDepth(y + 12)
+            .setDepth(y + 4)
+          this.addBlocker(x, y - 5, 34, 20)
         }
 
-        private drawPavilion(room: GardenRoom) {
-          const x = room.door_x * UNIT
-          const y = room.door_y * UNIT
-          const width = 12 * UNIT
-          const height = 8.5 * UNIT
-          const left = x - width / 2
-          const top = y - height
-          const card = this.add.graphics().setDepth(y - 14)
-          card.fillStyle(palette.ink, 0.26).fillRoundedRect(left + 7, top + 9, width, height, 24)
-          card.fillStyle(palette.panel, 0.98).fillRoundedRect(left, top, width, height, 24)
-          card.lineStyle(2, palette.border, 1).strokeRoundedRect(left, top, width, height, 24)
-          card.fillStyle(palette.accentSoft, 0.9).fillRoundedRect(
-            left + 10,
-            top + 10,
-            width - 20,
-            10,
-            5,
-          )
-          card.fillStyle(palette.panel2, 1).fillRoundedRect(x - 28, y - 34, 56, 34, 15)
-          card.lineStyle(2, palette.accent, 0.74).strokeRoundedRect(x - 28, y - 34, 56, 34, 15)
+        private drawHouse(room: GardenRoom) {
+          const x = room.door_x * TILE
+          const y = room.door_y * TILE
+          const crops: Record<GardenRoom['room_variant'], AtlasCrop> = {
+            meadow: { x: 256, y: 96, width: 64, height: 64 },
+            pond: { x: 176, y: 96, width: 80, height: 80 },
+            orchard: { x: 256, y: 96, width: 64, height: 64 },
+            greenhouse: { x: 176, y: 96, width: 80, height: 80 },
+          }
+          const crop = crops[room.room_variant]
+          const texture =
+            crop.width === 80 ? 'garden-house-large' : 'garden-house-small'
+          const house = this.add
+            .image(x, y, texture)
+            .setOrigin(0.5, 1)
+            .setDepth(y - 4)
+          if (room.room_variant === 'orchard') house.setFlipX(true)
+          if (room.room_variant === 'greenhouse') house.setTint(0xcaf1a4)
 
-          this.addEmoji(x, top + 69, roomEmoji(room.room_variant), 48, y - 10)
-          this.add
-            .text(x, top + 114, labelFor(room.name), {
+          const visualWidth = crop.width
+          const visualHeight = crop.height
+          this.addBlocker(
+            x,
+            y - visualHeight / 2 + 4,
+            visualWidth * 0.76,
+            visualHeight - 32,
+          )
+
+          const label = this.add
+            .text(x, y - visualHeight - 13, labelFor(room.name), {
               fontFamily: UI_FONT,
-              fontSize: '13px',
-              fontStyle: '600',
+              fontSize: '8px',
+              fontStyle: '700',
               color: textCss,
+              backgroundColor: panelCss,
+              padding: { x: 7, y: 4 },
               resolution: renderScale,
             })
             .setOrigin(0.5)
-            .setDepth(y)
-          this.add
-            .text(
-              x,
-              top + 134,
-              room.kind === 'private'
-                ? 'Private room'
-                : room.occupancy > 0
-                  ? `${room.occupancy} here now`
-                  : 'Open room',
-              {
-                fontFamily: UI_FONT,
-                fontSize: '10px',
-                fontStyle: '500',
-                color: room.occupancy > 0 ? accentCss : textDimCss,
-                resolution: renderScale,
-              },
-            )
-            .setOrigin(0.5)
-            .setDepth(y)
+            .setDepth(y + 6)
+          if (room.kind === 'private') label.setText(`◆ ${labelFor(room.name)}`)
 
           if (room.occupancy > 0) {
-            const badge = this.add.graphics().setDepth(y + 2)
-            badge.fillStyle(palette.accent, 1).fillCircle(left + width - 18, top + 18, 13)
             this.add
-              .text(left + width - 18, top + 18, String(room.occupancy), {
-                fontFamily: UI_FONT,
-                fontSize: '10px',
-                fontStyle: '700',
-                color: inkCss,
-                resolution: renderScale,
-              })
+              .circle(x + visualWidth * 0.38, y - visualHeight + 4, 8, palette.accent)
+              .setDepth(y + 7)
+            this.add
+              .text(
+                x + visualWidth * 0.38,
+                y - visualHeight + 4,
+                String(room.occupancy),
+                {
+                  fontFamily: UI_FONT,
+                  fontSize: '8px',
+                  fontStyle: '700',
+                  color: inkCss,
+                  resolution: renderScale,
+                },
+              )
               .setOrigin(0.5)
-              .setDepth(y + 3)
+              .setDepth(y + 8)
           }
 
-          this.addEmoji(left - 18, y - 20, '🌳', 43, y - 2)
-          this.addEmoji(left + width + 20, y - 9, room.plot_index % 2 ? '🌿' : '🌷', 24, y - 1)
+          const side = room.plot_index % 2 === 0 ? -1 : 1
+          this.addTree(x + side * (visualWidth / 2 + 31), y + 14, room.plot_index)
+          this.addFlower(x - side * 47, y + 18, room.plot_index * 97)
+          this.addFlower(x - side * 64, y + 12, room.plot_index * 131)
         }
 
-        private drawOutdoorAssets() {
-          const maxY = this.worldHeight / UNIT
-          for (let y = 10; y < maxY; y += 17) {
-            this.addEmoji(4.4 * UNIT, y * UNIT, y % 2 ? '🌳' : '🌲', 52, y * UNIT)
-            this.addEmoji(99.5 * UNIT, (y + 6) * UNIT, y % 2 ? '🌲' : '🌳', 46, (y + 6) * UNIT)
+        private drawGardenEdges(heightInTiles: number) {
+          for (let y = 8; y < heightInTiles - 4; y += 10) {
+            this.addTree(4 * TILE, y * TILE, y)
+            this.addTree(100 * TILE, (y + 4) * TILE, y + 1)
           }
-          const assets: Array<[number, number, string, number]> = [
-            [7, 59, '🌼', 18],
-            [10, 62, '🌷', 24],
-            [94, 47, '🪻', 20],
-            [88, 70, '🪴', 31],
-            [43, 69, '🪑', 29],
-            [61, 70, '🪑', 26],
-            [40, 61, '🧺', 24],
-            [65, 60, '🌻', 28],
+          for (let x = 11; x < 98; x += 13) {
+            this.addTree(x * TILE, 4 * TILE, x)
+            this.addTree((x + 5) * TILE, (heightInTiles - 3) * TILE, x + 1)
+          }
+        }
+
+        private drawFlowerBeds() {
+          const positions: Array<[number, number]> = [
+            [44, 59],
+            [47, 58],
+            [57, 58],
+            [60, 59],
+            [45, 69],
+            [48, 70],
+            [56, 70],
+            [59, 69],
+            [8, 58],
+            [95, 48],
+            [91, 72],
           ]
-          for (const [x, y, emoji, size] of assets) {
-            this.addEmoji(x * UNIT, y * UNIT, emoji, size, y * UNIT)
+          positions.forEach(([x, y], index) => {
+            this.addFlower(x * TILE, y * TILE, index * 173)
+          })
+        }
+
+        private addTree(x: number, y: number, seed: number) {
+          const crops: AtlasCrop[] = [
+            { x: 0, y: 96, width: 64, height: 96 },
+            { x: 64, y: 96, width: 32, height: 80 },
+            { x: 272, y: 0, width: 48, height: 48 },
+          ]
+          const cropIndex = Math.abs(seed) % crops.length
+          const crop = crops[cropIndex]
+          const textures = ['garden-tree-wide', 'garden-tree-tall', 'garden-tree-round']
+          const tree = this.add
+            .image(x, y, textures[cropIndex])
+            .setOrigin(0.5, 1)
+            .setDepth(y)
+          this.addBlocker(x, y - 12, Math.min(crop.width * 1.2, 48), 22)
+          if (!this.reducedMotion) {
+            this.tweens.add({
+              targets: tree,
+              angle: { from: -0.5, to: 0.5 },
+              duration: 1800 + (Math.abs(seed) % 4) * 260,
+              yoyo: true,
+              repeat: -1,
+              ease: 'Sine.inOut',
+            })
           }
+          return tree
+        }
+
+        private addFlower(x: number, y: number, seed: number) {
+          const flower = this.add
+            .sprite(x, y, 'garden-flower', Math.abs(seed) % 4)
+            .setOrigin(0.5, 1)
+            .setDepth(y)
+          if (!this.reducedMotion) {
+            flower.playAfterDelay('garden-flower-dance', Math.abs(seed) % 900)
+            this.tweens.add({
+              targets: flower,
+              angle: { from: -2, to: 2 },
+              duration: 900 + (Math.abs(seed) % 5) * 90,
+              yoyo: true,
+              repeat: -1,
+              ease: 'Sine.inOut',
+            })
+          }
+          return flower
         }
 
         private drawInterior() {
-          this.worldWidth = 32 * UNIT
-          this.worldHeight = 24 * UNIT
+          const widthInTiles = 32
+          const heightInTiles = 24
+          this.worldWidth = widthInTiles * TILE
+          this.worldHeight = heightInTiles * TILE
+          const data = Array.from({ length: heightInTiles }, (_, y) =>
+            Array.from({ length: widthInTiles }, (_, x) =>
+              x === 0 || y === 0 || x === widthInTiles - 1 || y === heightInTiles - 1
+                ? 2
+                : (x + y) % 9 === 0
+                  ? 1
+                  : 0,
+            ),
+          )
+          this.addTileLayer(data, 'garden-interior-ground')
+
+          const border = this.add.graphics().setDepth(4)
+          border.lineStyle(6, 0x486c4d, 1).strokeRect(
+            TILE,
+            TILE,
+            this.worldWidth - TILE * 2,
+            this.worldHeight - TILE * 2,
+          )
+          border.lineStyle(2, 0x243d2a, 1).strokeRect(
+            TILE + 5,
+            TILE + 5,
+            this.worldWidth - TILE * 2 - 10,
+            this.worldHeight - TILE * 2 - 10,
+          )
+
+          this.addBlocker(this.worldWidth / 2, TILE + 3, this.worldWidth - TILE * 2, 8)
+          this.addBlocker(
+            this.worldWidth / 2,
+            this.worldHeight - TILE - 3,
+            this.worldWidth - TILE * 2,
+            8,
+          )
+          this.addBlocker(TILE + 3, this.worldHeight / 2, 8, this.worldHeight - TILE * 2)
+          this.addBlocker(
+            this.worldWidth - TILE - 3,
+            this.worldHeight / 2,
+            8,
+            this.worldHeight - TILE * 2,
+          )
+
           const room = map.rooms.find((candidate) => candidate.channel_id === channelId)
           const roomName = room?.name ?? 'Garden room'
-          const backdrop = this.add.graphics()
-          backdrop.fillStyle(palette.ink).fillRect(0, 0, this.worldWidth, this.worldHeight)
-          backdrop.fillStyle(palette.panel, 1).fillRoundedRect(
-            UNIT,
-            UNIT,
-            30 * UNIT,
-            22 * UNIT,
-            32,
-          )
-          backdrop.lineStyle(2, palette.border, 1).strokeRoundedRect(
-            UNIT,
-            UNIT,
-            30 * UNIT,
-            22 * UNIT,
-            32,
-          )
-          backdrop.fillStyle(palette.panel2, 1).fillRoundedRect(
-            3 * UNIT,
-            3 * UNIT,
-            26 * UNIT,
-            4 * UNIT,
-            22,
-          )
-          backdrop.lineStyle(1, palette.border, 1).strokeRoundedRect(
-            3 * UNIT,
-            3 * UNIT,
-            26 * UNIT,
-            4 * UNIT,
-            22,
-          )
-          backdrop.fillStyle(palette.panel2, 1).fillEllipse(16 * UNIT, 12.5 * UNIT, 12 * UNIT, 5 * UNIT)
-          backdrop.lineStyle(2, palette.border, 1).strokeEllipse(16 * UNIT, 12.5 * UNIT, 12 * UNIT, 5 * UNIT)
-          backdrop.fillStyle(palette.accentSoft, 0.9).fillRoundedRect(
-            13 * UNIT,
-            20.5 * UNIT,
-            6 * UNIT,
-            2.5 * UNIT,
-            20,
-          )
-          backdrop.lineStyle(2, palette.accent, 0.64).strokeRoundedRect(
-            13 * UNIT,
-            20.5 * UNIT,
-            6 * UNIT,
-            2.5 * UNIT,
-            20,
-          )
-
-          this.addEmoji(5.2 * UNIT, 5 * UNIT, roomEmoji(room?.room_variant ?? 'meadow'), 46, 6 * UNIT)
           this.add
-            .text(8.2 * UNIT, 4.4 * UNIT, labelFor(roomName), {
+            .text(3 * TILE, 2.25 * TILE, labelFor(roomName), {
               fontFamily: UI_FONT,
-              fontSize: '18px',
-              fontStyle: '600',
+              fontSize: '15px',
+              fontStyle: '700',
               color: textCss,
+              backgroundColor: panelCss,
+              padding: { x: 8, y: 5 },
               resolution: renderScale,
             })
-            .setOrigin(0, 0.5)
+            .setDepth(60)
           this.add
-            .text(8.2 * UNIT, 5.65 * UNIT, 'Room audio follows where people sit', {
+            .text(3 * TILE, 4.5 * TILE, 'Room audio follows where people gather', {
               fontFamily: UI_FONT,
-              fontSize: '11px',
+              fontSize: '9px',
               color: textDimCss,
+              backgroundColor: panelCss,
+              padding: { x: 6, y: 3 },
               resolution: renderScale,
             })
-            .setOrigin(0, 0.5)
+            .setDepth(60)
 
-          const furniture: Array<[number, number, string, number]> = [
-            [9.5, 10.5, '🪑', 27],
-            [16, 9.3, '🪑', 30],
-            [22.5, 10.5, '🪑', 27],
-            [10.5, 15, '🪑', 25],
-            [21.5, 15, '🪑', 25],
-            [4.2, 18.8, '🪴', 38],
-            [27.8, 18.5, '🌿', 34],
-            [5.2, 9.2, '🛋️', 42],
-            [27, 8.8, '🗄️', 36],
+          this.drawMeetingTable(16 * TILE, 13 * TILE)
+          const crates: Array<[number, number]> = [
+            [5, 8],
+            [6, 8],
+            [26, 7],
+            [27, 7],
           ]
-          for (const [x, y, emoji, size] of furniture) {
-            this.addEmoji(x * UNIT, y * UNIT, emoji, size, y * UNIT)
-          }
-          this.add
-            .text(16 * UNIT, 12.5 * UNIT, 'shared table', {
-              fontFamily: UI_FONT,
-              fontSize: '11px',
-              fontStyle: '600',
-              color: textDimCss,
-              resolution: renderScale,
-            })
-            .setOrigin(0.5)
-            .setDepth(13 * UNIT)
+          crates.forEach(([x, y]) => {
+            this.add.image(x * TILE, y * TILE, 'garden-crate').setDepth(y * TILE)
+            this.addBlocker(x * TILE, y * TILE, 24, 20)
+          })
+          const pots: Array<[number, number]> = [
+            [4, 20],
+            [28, 20],
+          ]
+          pots.forEach(([x, y], index) => {
+            this.add.image(x * TILE, y * TILE, 'garden-pot').setDepth(y * TILE)
+            this.addFlower(x * TILE, y * TILE - 12, 500 + index * 311)
+            this.addBlocker(x * TILE, y * TILE, 18, 15)
+          })
         }
 
-        private addEmoji(x: number, y: number, emoji: string, size: number, depth: number) {
-          return this.add
-            .text(x, y, emoji, {
-              fontFamily: EMOJI_FONT,
-              fontSize: `${size}px`,
-              resolution: renderScale,
-            })
-            .setOrigin(0.5)
-            .setDepth(depth)
+        private drawMeetingTable(x: number, y: number) {
+          const table = this.add.graphics().setDepth(y)
+          table.fillStyle(0x4b2b22).fillRect(x - 74, y - 29, 148, 58)
+          table.fillStyle(0xa8653f).fillRect(x - 70, y - 25, 140, 50)
+          table.fillStyle(0xd28a4d).fillRect(x - 65, y - 20, 130, 5)
+          table.fillStyle(0x34201c).fillRect(x - 56, y + 25, 10, 16)
+          table.fillStyle(0x34201c).fillRect(x + 46, y + 25, 10, 16)
+          this.addBlocker(x, y, 148, 58)
+
+          const chairs: Array<[number, number]> = [
+            [-54, -49],
+            [0, -49],
+            [54, -49],
+            [-54, 49],
+            [0, 49],
+            [54, 49],
+          ]
+          chairs.forEach(([offsetX, offsetY]) => {
+            const chair = this.add.graphics().setDepth(y + offsetY)
+            chair.fillStyle(0x3b251f).fillRect(x + offsetX - 9, y + offsetY - 8, 18, 16)
+            chair.fillStyle(0x7b4932).fillRect(x + offsetX - 7, y + offsetY - 6, 14, 12)
+            this.addBlocker(x + offsetX, y + offsetY, 18, 16)
+          })
+        }
+
+        private addBlocker(x: number, y: number, width: number, height: number) {
+          const blocker = this.add.rectangle(x, y, width, height, 0x000000, 0)
+          this.blockers.add(blocker)
+          return blocker
         }
       }
 
       game = new Phaser.Game({
         type: Phaser.AUTO,
         parent: host,
-        canvasStyle: 'display:block;width:100%;height:100%',
+        canvasStyle:
+          'display:block;width:100%;height:100%;image-rendering:pixelated;image-rendering:crisp-edges',
         backgroundColor: inkCss,
-        antialias: true,
-        pixelArt: false,
-        roundPixels: false,
+        antialias: false,
+        pixelArt: true,
+        roundPixels: true,
         scene: GardenScene,
+        physics: {
+          default: 'arcade',
+          arcade: {
+            gravity: { x: 0, y: 0 },
+            debug: false,
+          },
+        },
         scale: {
           mode: Phaser.Scale.NONE,
           width: Math.max(1, Math.round(host.clientWidth * renderScale)),
           height: Math.max(1, Math.round(host.clientHeight * renderScale)),
         },
-        render: { antialias: true, pixelArt: false, roundPixels: false },
+        render: { antialias: false, pixelArt: true, roundPixels: true },
       })
       resizeObserver = new ResizeObserver(() => {
         if (!game) return
@@ -690,7 +967,7 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
       ref={hostRef}
       className="h-full w-full bg-ink [&>canvas]:block"
       role="application"
-      aria-label="Garden spatial map. Use arrow keys or WASD to move, tap a destination, Enter to enter a nearby room, and Escape to exit."
+      aria-label="Garden spatial map. Use arrow keys or WASD to move through the tile garden, tap a destination, Enter to enter a nearby room, and Escape to exit."
     />
   )
 }

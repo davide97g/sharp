@@ -105,16 +105,19 @@ returns everyone to the hub. No Garden movement or visit history is persisted.
 ## Calls and UX
 
 - Garden is a `/garden` route, desktop rail destination, and primary mobile-web tab.
-- The map is an anti-aliased, device-pixel-aware Phaser canvas loaded only with the Garden route.
+- The map is a nearest-neighbor, device-pixel-aware Phaser canvas loaded only with the Garden route.
   React owns chrome, consent, room browsing, and accessible controls; Phaser owns high-frequency
   world rendering.
-- The world is a top-down spatial floor, not a pixel-art game. Its ground, paths, pavilions,
-  labels, borders, and presence states resolve from Sharp's active theme tokens, so every
-  appearance preset carries into Garden.
-- Emoji of varied sizes are temporary scene-asset placeholders for people, trees, flowers,
-  buildings, and furniture. They are visual only: Garden controls keep the shared monochrome
-  SVG language and the accessible room list remains the non-canvas interaction path. Emoji can
-  later be replaced with authored assets without changing world coordinates or the wire format.
+- The world is a 16-bit top-down garden inspired by the saturated greens, strong silhouettes,
+  tiled paths, and readable four-direction movement of handheld-era JRPGs. Sharp's product
+  chrome remains token-driven and visually separate from the game world.
+- The tilemap, houses, trees, props, animated flowers, shadows, and four-direction character
+  sheets come from Pixel-Boy and AAA's CC0 Ninja Adventure Asset Pack. Provenance and the
+  upstream revision live beside the assets under `web/public/assets/garden/ninja-adventure/`.
+  Garden contains no Pokémon or Nintendo artwork, maps, code, names, or extracted game data.
+- Phaser Arcade bodies prevent the local player from crossing buildings, mature trees, room
+  walls, the shared table, chairs, crates, and planters. The server remains authoritative for
+  movement speed and scene bounds.
 - Arrow keys and WASD move; pointer/touch chooses a destination. The room list can guide the
   avatar to a doorway without requiring canvas precision. `Enter` enters a nearby room and
   `Escape` exits the current room; both are declared in the shared shortcut registry and may be
@@ -128,5 +131,6 @@ returns everyone to the hub. No Garden movement or visit history is persisted.
 - The existing collapsible/resizable `VideoStage` remains the call UI, so chat, docs, canvas,
   and Garden stay usable beneath it.
 
-The runtime draws an original procedural scene and depends only on open-source Phaser. It does
-not copy WorkAdventure or Pokémon code, maps, characters, names, or other game assets.
+The runtime generates an original Sharp map from the durable room coordinates and renders it
+with open-source Phaser plus the attributed CC0 asset subset. It does not copy WorkAdventure or
+Pokémon code, maps, characters, names, or other game assets.
