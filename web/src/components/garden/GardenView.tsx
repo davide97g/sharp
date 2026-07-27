@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { GardenRoom } from '../../lib/types'
 import { useStore } from '../../store'
-import { Button, IconButton, Modal } from '../../ui'
+import { Button, Card, CloseIcon, IconButton, LockIcon, Modal } from '../../ui'
 import { GardenGame } from './GardenGame'
 
 function GardenMark({ size = 20 }: { size?: number }) {
@@ -42,6 +42,13 @@ function SoundMark({ on }: { on: boolean }) {
   )
 }
 
+function roomPlaceholder(variant: GardenRoom['room_variant']) {
+  if (variant === 'greenhouse') return '🏡'
+  if (variant === 'orchard') return '🏠'
+  if (variant === 'pond') return '🛖'
+  return '🏘️'
+}
+
 export function GardenView() {
   // Do not subscribe React chrome to 10 Hz peer movement. Phaser reads the
   // high-frequency slice directly; these selectors change only on UI-level events.
@@ -79,10 +86,10 @@ export function GardenView() {
 
   if (!map && status !== 'error') {
     return (
-      <main className="flex min-h-0 flex-1 items-center justify-center bg-[var(--color-ink)] text-[var(--color-text-dim)]">
+      <main className="flex min-h-0 flex-1 items-center justify-center bg-ink text-text-dim">
         <div className="flex items-center gap-3 text-sm">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-accent)]" />
-          Planting the paths…
+          <span className="h-2 w-2 animate-pulse rounded-full bg-accent motion-reduce:animate-none" />
+          Opening Garden…
         </div>
       </main>
     )
@@ -104,7 +111,7 @@ export function GardenView() {
   }
 
   return (
-    <main className="relative min-h-0 flex-1 overflow-hidden bg-[var(--color-ink)]">
+    <main className="relative min-h-0 flex-1 overflow-hidden bg-ink">
       <GardenGame
         map={map}
         space={space}
@@ -116,26 +123,25 @@ export function GardenView() {
       />
 
       <header className="pointer-events-none absolute inset-x-0 top-0 z-(--z-dropdown) flex items-start justify-between gap-3 p-3 sm:p-4">
-        <div className="pointer-events-auto flex min-w-0 items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[color-mix(in_srgb,var(--color-ink)_88%,transparent)] px-3 py-2 text-white shadow-lg backdrop-blur-md">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-accent)] text-white">
+        <Card padding="sm" className="pointer-events-auto flex min-w-0 items-center gap-3 shadow-xl">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-ink">
             <GardenMark size={18} />
           </span>
           <div className="min-w-0">
-            <h1 className="truncate text-sm font-semibold">
+            <h1 className="truncate text-sm font-semibold text-text">
               {currentRoom?.name ?? 'Garden'}
             </h1>
-            <p className="truncate text-2xs text-white/65">
+            <p className="truncate text-2xs text-text-faint">
               {space === 'room'
                 ? `${peerCount + 1} here · camera off`
-                : `${map.rooms.length} paths · arrows, WASD, or tap`}
+                : `${map.rooms.length} connected rooms · arrows, WASD, or tap`}
             </p>
           </div>
-        </div>
-        <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[color-mix(in_srgb,var(--color-ink)_88%,transparent)] p-1.5 shadow-lg backdrop-blur-md">
+        </Card>
+        <Card padding="none" className="pointer-events-auto flex items-center gap-1 p-1.5 shadow-xl">
           <IconButton
             label={audioMode === 'on' ? 'Turn Garden audio off' : 'Turn Garden audio on'}
             shape="circle"
-            className="text-white/75 hover:bg-white/10 hover:text-white"
             onClick={() => setAudio(audioMode === 'on' ? 'off' : 'on')}
           >
             <SoundMark on={audioMode === 'on'} />
@@ -143,12 +149,11 @@ export function GardenView() {
           <IconButton
             label="Browse Garden rooms"
             shape="circle"
-            className="text-white/75 hover:bg-white/10 hover:text-white"
             onClick={() => setRoomsOpen((open) => !open)}
           >
             <RoomsMark />
           </IconButton>
-        </div>
+        </Card>
       </header>
 
       {error && (
@@ -168,7 +173,7 @@ export function GardenView() {
               <p className="text-xs text-[var(--color-text-faint)]">Private rooms appear only to members.</p>
             </div>
             <IconButton label="Close room list" onClick={() => setRoomsOpen(false)}>
-              <span aria-hidden>×</span>
+              <CloseIcon />
             </IconButton>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-2">
@@ -185,13 +190,21 @@ export function GardenView() {
                 }}
                 className="flex min-h-14 w-full items-center gap-3 rounded-lg px-3 py-2 text-left outline-none transition-colors hover:bg-[var(--color-panel-2)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
               >
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[var(--color-accent-soft)] text-xs font-bold uppercase text-[var(--color-accent-hover)]">
-                  {room.room_variant.slice(0, 2)}
+                <span
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-panel-2 text-xl"
+                  aria-hidden
+                >
+                  {roomPlaceholder(room.room_variant)}
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5 truncate text-sm font-medium text-[var(--color-text)]">
                     {room.name}
-                    {room.kind === 'private' && <span aria-label="Private">· locked</span>}
+                    {room.kind === 'private' && (
+                      <span className="inline-flex items-center gap-1 text-text-faint">
+                        <LockIcon />
+                        <span className="sr-only">Private</span>
+                      </span>
+                    )}
                   </span>
                   <span className="text-xs text-[var(--color-text-faint)]">
                     {room.occupancy > 0 ? `${room.occupancy} inside` : 'Quiet now'}
@@ -212,7 +225,7 @@ export function GardenView() {
           <Button
             variant="outline"
             size="lg"
-            className="pointer-events-auto border-white/25 bg-[color-mix(in_srgb,var(--color-ink)_90%,transparent)] text-white hover:bg-[var(--color-ink)] hover:text-white"
+            className="pointer-events-auto bg-panel shadow-xl"
             onClick={exitRoom}
           >
             Leave room
@@ -230,9 +243,9 @@ export function GardenView() {
             </Button>
           </div>
         ) : (
-          <div className="rounded-lg bg-[color-mix(in_srgb,var(--color-ink)_82%,transparent)] px-3 py-2 text-xs text-white/70 backdrop-blur-sm">
-            Follow a path to a doorway
-          </div>
+          <Card padding="sm" className="text-xs text-text-dim shadow-xl">
+            Follow a path to a room
+          </Card>
         )}
       </div>
 

@@ -105,11 +105,15 @@ returns everyone to the hub. No Garden movement or visit history is persisted.
 ## Calls and UX
 
 - Garden is a `/garden` route, desktop rail destination, and primary mobile-web tab.
-- The map is a Phaser canvas loaded only with the Garden route. React owns chrome, consent,
-  room browsing, and accessible controls; Phaser owns high-frequency world rendering.
-- Art uses a small named palette, integer coordinates, nearest-neighbor scaling, and top-down
-  16 px tiles. UI text stays in Sharp's readable sans-serif system; pixel styling is confined
-  to the world.
+- The map is an anti-aliased Phaser canvas loaded only with the Garden route. React owns chrome,
+  consent, room browsing, and accessible controls; Phaser owns high-frequency world rendering.
+- The world is a top-down spatial floor, not a pixel-art game. Its ground, paths, pavilions,
+  labels, borders, and presence states resolve from Sharp's active theme tokens, so every
+  appearance preset carries into Garden.
+- Emoji of varied sizes are temporary scene-asset placeholders for people, trees, flowers,
+  buildings, and furniture. They are visual only: Garden controls keep the shared monochrome
+  SVG language and the accessible room list remains the non-canvas interaction path. Emoji can
+  later be replaced with authored assets without changing world coordinates or the wire format.
 - Arrow keys and WASD move; pointer/touch chooses a destination. The room list can guide the
   avatar to a doorway without requiring canvas precision.
 - First room entry asks whether Garden may manage room audio. The answer is device-local
@@ -121,5 +125,5 @@ returns everyone to the hub. No Garden movement or visit history is persisted.
 - The existing collapsible/resizable `VideoStage` remains the call UI, so chat, docs, canvas,
   and Garden stay usable beneath it.
 
-The runtime draws original procedural pixel art and depends only on open-source Phaser. It does
-not copy WorkAdventure or Pokémon code, maps, tiles, characters, names, or other game assets.
+The runtime draws an original procedural scene and depends only on open-source Phaser. It does
+not copy WorkAdventure or Pokémon code, maps, characters, names, or other game assets.
