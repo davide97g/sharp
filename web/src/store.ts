@@ -601,7 +601,9 @@ export type State = {
     facing: GardenPeer['facing'],
   ) => void
   enterGardenRoom: (channelId: string) => Promise<void>
+  teleportGardenRoom: (channelId: string) => Promise<void>
   exitGardenRoom: () => void
+  setGardenZen: (enabled: boolean) => void
   setGardenAudio: (mode: Exclude<GardenAudioMode, 'ask'>) => void
 
   // docs actions
@@ -1992,8 +1994,23 @@ export const useStore = create<State>((set, get) => ({
     get().ws?.send('garden.room_enter', { channel_id: channelId })
   },
 
+  async teleportGardenRoom(channelId) {
+    const room = get().garden.map?.rooms.find((candidate) => candidate.channel_id === channelId)
+    if (!room) return
+    if (!room.is_member) {
+      if (room.kind !== 'public') return
+      await get().joinChannel(channelId)
+      await get().loadGarden()
+    }
+    get().ws?.send('garden.room_teleport', { channel_id: channelId })
+  },
+
   exitGardenRoom() {
     get().ws?.send('garden.room_exit', {})
+  },
+
+  setGardenZen(enabled) {
+    get().ws?.send('garden.zen', { enabled })
   },
 
   setGardenAudio(mode) {

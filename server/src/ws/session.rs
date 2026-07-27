@@ -228,7 +228,9 @@ fn is_client_garden_event(event_type: &str) -> bool {
             | "garden.leave"
             | "garden.move"
             | "garden.room_enter"
+            | "garden.room_teleport"
             | "garden.room_exit"
+            | "garden.zen"
     )
 }
 
@@ -293,6 +295,8 @@ mod tests {
     fn garden_events_are_explicitly_allowlisted() {
         assert!(is_client_garden_event("garden.enter"));
         assert!(is_client_garden_event("garden.room_enter"));
+        assert!(is_client_garden_event("garden.room_teleport"));
+        assert!(is_client_garden_event("garden.zen"));
         assert!(!is_client_garden_event("garden.teleport"));
     }
 }

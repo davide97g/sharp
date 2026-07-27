@@ -1,7 +1,7 @@
 use crate::auth::AuthUser;
 use crate::error::AppResult;
 use crate::state::SharedState;
-use crate::ws::garden::{plot_door, HUB_SPAWN_X, HUB_SPAWN_Y};
+use crate::ws::garden::{plot_door, HUB_SPAWN_X, HUB_SPAWN_Y, TEMPLE_X, TEMPLE_Y};
 use axum::extract::State;
 use axum::Json;
 use serde::Serialize;
@@ -26,6 +26,7 @@ pub struct GardenMap {
     version: i32,
     tile_size: i32,
     spawn: GardenPoint,
+    temple: GardenPoint,
     rooms: Vec<GardenRoom>,
 }
 
@@ -68,11 +69,15 @@ pub async fn map(State(state): State<SharedState>, auth: AuthUser) -> AppResult<
         });
     }
     Ok(Json(GardenMap {
-        version: 1,
+        version: 2,
         tile_size: 16,
         spawn: GardenPoint {
             x: HUB_SPAWN_X,
             y: HUB_SPAWN_Y,
+        },
+        temple: GardenPoint {
+            x: TEMPLE_X,
+            y: TEMPLE_Y,
         },
         rooms,
     }))

@@ -15,6 +15,27 @@ export const version = "0.3.0";
 export const updated = "2026-07-26";
 export const updatedLabel = "July 26, 2026";
 
+/**
+ * Legal pages (`/privacy`, `/terms`) carry their own effective date: the policy
+ * text changes on a different cadence from the product, so bumping `version`
+ * above must NOT silently re-date a legal document.
+ */
+export const legalUpdated = "2026-07-27";
+export const legalUpdatedLabel = "July 27, 2026";
+
+/** The operator named in both legal documents, and how to reach them. */
+export const operator = "Davide Ghiotto";
+export const operatorSite = "https://davideghiotto.it";
+export const privacyEmail = "privacy@sharp.davideghiotto.it";
+export const legalEmail = "legal@sharp.davideghiotto.it";
+
+/**
+ * The one instance the operator runs. The legal pages cover this host and this
+ * site only — every other deployment is somebody else's, and that distinction
+ * is the whole point of the scope section in `/privacy`.
+ */
+export const appUrl = "https://app.sharp.davideghiotto.it";
+
 /** Trailing-slash-free origin, e.g. https://sharp.davideghiotto.it */
 export const origin = (site: URL | undefined) =>
   (site?.href ?? "https://sharp.davideghiotto.it").replace(/\/$/, "");

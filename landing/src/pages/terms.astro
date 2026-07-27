@@ -1,0 +1,264 @@
+---
+/**
+ * Public terms of service. Two audiences, deliberately separated:
+ *   - people using the services we run (this site, the hosted instance);
+ *   - people using the software, whose relationship is with the AGPL-3.0
+ *     licence in the repository, not with this page.
+ *
+ * Nothing here may narrow the licence: if these terms and the AGPL ever
+ * disagree about the software, the AGPL wins. Section 10 says so explicitly.
+ */
+import Legal from "../layouts/Legal.astro";
+import { appUrl, legalEmail, operator, operatorSite, repo } from "../site";
+
+const license = `${repo}/blob/main/LICENSE`;
+---
+
+<Legal
+  heading="Terms of Service"
+  description="The terms for using the sharp website and the hosted instance we run — acceptable use, no-warranty, liability, and how they relate to the AGPL-3.0 licence."
+  path="/terms"
+>
+  <div class="legal-note">
+    <p>
+      <strong>Read this first — scope.</strong> These terms govern the two services we
+      operate: this website (<code>sharp.davideghiotto.it</code>) and the hosted instance at
+      <code>app.sharp.davideghiotto.it</code>. They do <strong>not</strong> govern the sharp
+      software itself — that is licensed to you under
+      <a href={license} rel="noopener">AGPL-3.0</a>, and nothing on this page adds a condition
+      to it (<a href="#software">section 10</a>). If you use sharp on someone else's server,
+      your terms are with whoever runs it.
+    </p>
+  </div>
+
+  <div class="legal-toc">
+    <strong>On this page</strong>
+    <ol>
+      <li><a href="#agreement">The agreement</a></li>
+      <li><a href="#accounts">Accounts</a></li>
+      <li><a href="#use">Acceptable use</a></li>
+      <li><a href="#content">Your content</a></li>
+      <li><a href="#service">The hosted instance: what you can expect</a></li>
+      <li><a href="#ai">The AI assistant</a></li>
+      <li><a href="#calls">Calls and guest links</a></li>
+      <li><a href="#thirdparty">Third-party integrations</a></li>
+      <li><a href="#termination">Suspension and termination</a></li>
+      <li><a href="#software">The software and the licence</a></li>
+      <li><a href="#warranty">No warranty</a></li>
+      <li><a href="#liability">Limitation of liability</a></li>
+      <li><a href="#law">Governing law and disputes</a></li>
+      <li><a href="#changes">Changes to these terms</a></li>
+    </ol>
+  </div>
+
+  <h2 id="agreement">1. The agreement</h2>
+  <p>
+    These terms are a contract between you and <strong>{operator}</strong>, an individual
+    based in Italy operating the sharp project ("we", "us"). By visiting this website or using
+    the hosted instance you accept them. If you do not, do not use the services — the software
+    is still yours to run under its licence.
+  </p>
+  <p>
+    You must be at least 16 years old to hold an account. If you are using the services for an
+    organisation, you confirm you are allowed to accept these terms on its behalf.
+  </p>
+
+  <h2 id="accounts">2. Accounts</h2>
+  <ul>
+    <li>Give a real, working email address; we need it for password resets and for service
+      notices.</li>
+    <li>You are responsible for what happens under your account, so keep your password or
+      passkey to yourself and do not share credentials. Tell us at
+      <a href={`mailto:${legalEmail}`}>{legalEmail}</a> if you think it has been compromised.</li>
+    <li>One person, one account. Do not impersonate anyone, and do not register on behalf of
+      someone who has been removed.</li>
+    <li>The hosted instance is a single shared workspace. Anything you post in a public channel
+      is visible to every member of that workspace — treat it accordingly.</li>
+  </ul>
+
+  <h2 id="use">3. Acceptable use</h2>
+  <p>Do not use the services to:</p>
+  <ul>
+    <li>break the law, or post content that is illegal where you or we are — in particular
+      child sexual abuse material, terrorist content, or non-consensual intimate images, all of
+      which we report to the competent authorities;</li>
+    <li>harass, threaten, defame or stalk anyone, or post hateful content targeting people for
+      who they are;</li>
+    <li>infringe someone's copyright, trademark, trade secret or privacy;</li>
+    <li>distribute malware, phishing pages, or content designed to deceive;</li>
+    <li>send unsolicited bulk messages, or use the workspace for advertising;</li>
+    <li>attack the service — probing, brute-forcing, denial of service, exploiting a
+      vulnerability instead of reporting it, or bypassing rate limits and quotas;</li>
+    <li>circumvent the authorisation model to read channels, documents or tasks you were not
+      given access to, including by prompting the AI assistant to do it for you;</li>
+    <li>scrape the instance, or resell access to it;</li>
+    <li>use it as generic file storage, a media-distribution host, or a crypto-mining or
+      compute-relay endpoint;</li>
+    <li>consume shared resources — storage, call capacity, AI credits — in a way that degrades
+      the service for everyone else.</li>
+  </ul>
+  <p>
+    Security research is welcome and we would rather hear from you than not: report findings
+    privately to <a href={`mailto:${legalEmail}`}>{legalEmail}</a> and give us reasonable time
+    to fix them. Do not test against other people's accounts or data.
+  </p>
+
+  <h2 id="content">4. Your content</h2>
+  <p>
+    <strong>You keep every right you have in what you post.</strong> We claim no ownership of
+    your messages, files, documents, canvases or tasks. You grant us only the narrow,
+    non-exclusive, royalty-free licence needed to actually run the service — to store,
+    transmit, index, back up and display your content to the people you shared it with, and to
+    generate the derived forms the features need (thumbnails, search indexes, embeddings for
+    the assistant). That licence ends when the content is deleted, subject to the backup
+    window in the <a href="/privacy#retention">privacy policy</a>.
+  </p>
+  <p>
+    You are responsible for having the rights to what you upload. We do not review content
+    proactively, but we may remove anything that breaks section 3 or the law once we know
+    about it. Report content to <a href={`mailto:${legalEmail}`}>{legalEmail}</a>.
+  </p>
+
+  <h2 id="service">5. The hosted instance: what you can expect</h2>
+  <p>
+    Be clear-eyed about this one. <code>app.sharp.davideghiotto.it</code> is offered
+    <strong>free of charge, best-effort, and with no service level agreement</strong>. It is
+    run by one person, largely as a live deployment of an open-source project. Concretely:
+  </p>
+  <ul>
+    <li>there is <strong>no uptime guarantee</strong>, no support commitment and no response
+      time;</li>
+    <li>features may change, be reduced or be removed, and the instance may be taken down for
+      maintenance without notice;</li>
+    <li>quotas — storage, upload size, call participants and duration, AI usage — may be
+      introduced or lowered at any time;</li>
+    <li>we may <strong>wipe or reset</strong> the instance, or shut it down entirely. Where it
+      is practicable we will give at least 30 days' notice in the workspace so you can export
+      your data;</li>
+    <li>keep your own copy of anything you cannot afford to lose. The reliable way to depend on
+      sharp is to <a href={repo} rel="noopener">run it yourself</a>.</li>
+  </ul>
+  <p>
+    None of the above limits your statutory rights as a consumer under Italian or EU law where
+    those apply.
+  </p>
+
+  <h2 id="ai">6. The AI assistant</h2>
+  <p>
+    If enabled, the assistant answers from your workspace content using a third-party language
+    model. Its answers are <strong>generated, not verified</strong>: they can be wrong,
+    incomplete or out of date, and they are not professional advice of any kind. Check anything
+    that matters before relying on it. Your question and the excerpts retrieved to answer it
+    are sent to the model provider — see the
+    <a href="/privacy#processors">privacy policy</a>. Do not use the assistant to try to reach
+    content you are not authorised to see; retrieval enforces the same permissions as the rest
+    of the app, and attempting to defeat that breaches section 3.
+  </p>
+
+  <h2 id="calls">7. Calls and guest links</h2>
+  <p>
+    Calls are relayed live and not recorded by us. Transcription and meeting notes exist only
+    when a participant switches them on. <strong>Recording or transcribing other people can
+    require their consent</strong> — in Italy and much of the EU it does — and getting that
+    consent is your responsibility, not ours. Tell the room before you start.
+  </p>
+  <p>
+    A call link admits whoever holds it, including people without an account, under a
+    room-bound guest session. Treat a link as a key: share it only with people you mean to
+    invite, and do not post it publicly.
+  </p>
+
+  <h2 id="thirdparty">8. Third-party integrations</h2>
+  <p>
+    Connecting Google Calendar, GitHub, a GIF provider or anything else is your choice, and
+    your use of those services stays governed by their own terms and privacy policies. We are
+    not responsible for what they do, for outages on their side, or for data you ask us to send
+    them. Disconnect an integration and the flow stops.
+  </p>
+
+  <h2 id="termination">9. Suspension and termination</h2>
+  <p>
+    You can stop at any time and ask us to delete your account (<a href="/privacy#rights">how</a>).
+    We may suspend or terminate an account that breaches these terms, that creates legal risk
+    for us or other users, or that is being used to attack the service. Where the breach is not
+    serious we will warn you first and give you a chance to fix it; where it is serious —
+    illegal content, an active attack — we may act immediately. On termination your right to
+    use the services ends and your data is deleted according to the retention schedule in the
+    privacy policy. Sections 4, 11, 12 and 13 survive.
+  </p>
+
+  <h2 id="software">10. The software and the licence</h2>
+  <p>
+    sharp the software is licensed under the <a href={license} rel="noopener">GNU Affero
+    General Public License, version 3</a>. Run it, study it, modify it, redistribute it, host
+    it commercially — the licence tells you what you may do and the one condition attached
+    (publish your modifications under the same licence if you offer it over a network). There
+    is no separate commercial edition, no contributor licence agreement, and no paid tier.
+  </p>
+  <p>
+    <strong>These terms do not restrict the licence, and if they ever appear to conflict with
+    it in respect of the software, the licence prevails.</strong> Downloads and source access
+    happen on GitHub under GitHub's terms.
+  </p>
+  <p>
+    Two things the licence does not give you: the project's name and marks, and our
+    infrastructure. Do not present a modified build as official sharp, or imply we endorse or
+    support your deployment. Content on this website — copy, images, the design — is
+    © {operator} and is not covered by the software licence.
+  </p>
+
+  <h2 id="warranty">11. No warranty</h2>
+  <p>
+    The website and the hosted instance are provided <strong>"as is" and "as available"</strong>,
+    with no warranty of any kind, express or implied, including fitness for a particular
+    purpose, merchantability, non-infringement, uninterrupted or error-free operation, or that
+    data will not be lost. The software carries the separate disclaimer stated in the AGPL. If
+    you are a consumer, mandatory warranties under applicable law are unaffected by this
+    paragraph.
+  </p>
+
+  <h2 id="liability">12. Limitation of liability</h2>
+  <p>
+    To the maximum extent the law allows, we are not liable for indirect, incidental, special
+    or consequential damages, nor for lost profits, lost business, lost goodwill, or lost or
+    corrupted data arising from your use of the services. Because the services are provided
+    free of charge, our total aggregate liability for any claim is limited to
+    <strong>€100</strong>.
+  </p>
+  <p>
+    Nothing here excludes liability we cannot exclude by law — including liability for
+    intentional misconduct or gross negligence, for death or personal injury, and any
+    mandatory consumer liability under Italian and EU law.
+  </p>
+  <p>
+    You agree to indemnify us against third-party claims arising from content you posted or
+    from your use of the services in breach of these terms.
+  </p>
+
+  <h2 id="law">13. Governing law and disputes</h2>
+  <p>
+    These terms are governed by the laws of <strong>Italy</strong>, excluding its conflict-of-law
+    rules and the UN Convention on Contracts for the International Sale of Goods. Disputes go
+    to the courts of Italy. <strong>If you are a consumer</strong>, this does not deprive you
+    of the protection of the mandatory law of your country of residence, and you may bring
+    proceedings in the courts where you are domiciled.
+  </p>
+  <p>
+    Talk to us first: most problems are faster to fix by email than by filing anything.
+  </p>
+
+  <h2 id="changes">14. Changes to these terms</h2>
+  <p>
+    We may update these terms. The effective date at the top moves, and material changes are
+    announced in the workspace at least 30 days before they take effect where practicable.
+    Continuing to use the services after that means you accept the new version; if you do not,
+    stop using them and ask us to delete your account. Every revision is visible as a diff in
+    the public repository.
+  </p>
+  <p>
+    Contact: <a href={`mailto:${legalEmail}`}>{legalEmail}</a> · Privacy:
+    <a href="/privacy">Privacy Policy</a> · The instance:
+    <a href={appUrl} rel="noopener">{appUrl.replace("https://", "")}</a> · Operator:
+    <a href={operatorSite} rel="noopener author">{operatorSite.replace("https://", "")}</a>
+  </p>
+</Legal>

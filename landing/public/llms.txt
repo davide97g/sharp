@@ -50,6 +50,13 @@ Key facts:
 - [Full page content](https://sharp.davideghiotto.it/llms-full.txt): the landing page as plain markdown
 - [Downloads](https://github.com/davide97g/sharp/releases/latest): macOS, Windows and Linux desktop builds
 
+## Legal
+
+- [Privacy policy](https://sharp.davideghiotto.it/privacy): covers this website and the one
+  hosted instance the operator runs; self-hosted deployments send nothing to anyone
+- [Terms of service](https://sharp.davideghiotto.it/terms): governs those two services only —
+  the software itself is governed by AGPL-3.0, which these terms cannot narrow
+
 ## Source
 
 - [GitHub repository](https://github.com/davide97g/sharp)

@@ -286,6 +286,31 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
         })
         break
       }
+      case 'garden.peer_zen': {
+        const p = env.payload as { conn_id: string; zen_mode: boolean }
+        set((s) => {
+          if (p.conn_id === s.myConnId && s.garden.self) {
+            return {
+              garden: {
+                ...s.garden,
+                self: { ...s.garden.self, zen_mode: p.zen_mode },
+              },
+            }
+          }
+          const peer = s.garden.peers[p.conn_id]
+          if (!peer) return {}
+          return {
+            garden: {
+              ...s.garden,
+              peers: {
+                ...s.garden.peers,
+                [p.conn_id]: { ...peer, zen_mode: p.zen_mode },
+              },
+            },
+          }
+        })
+        break
+      }
       case 'garden.peer_left': {
         const { conn_id } = env.payload as { conn_id: string }
         set((s) => {
@@ -337,6 +362,8 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
             ? 'Join this group before entering its room.'
             : p.code === 'not_at_door'
               ? 'Walk closer to the doorway first.'
+              : p.code === 'not_at_temple'
+                ? 'Walk through the temple gate before entering Zen mode.'
               : 'Garden could not complete that move.'
         set((s) => ({ garden: { ...s.garden, error: message } }))
         break

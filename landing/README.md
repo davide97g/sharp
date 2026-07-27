@@ -20,6 +20,14 @@ bun run preview
   `sitemap.xml`: repo owner, version, last-updated date. **Bump `version` and
   `updated` when you ship** — freshness and version signals are weighted by both
   search and AI answer engines.
+- `src/pages/privacy.astro`, `src/pages/terms.astro` — the two public legal pages, both
+  wrapped in `src/layouts/Legal.astro` (head, nav, footer and the prose styles the
+  marketing page never needed). They are dated by `legalUpdated` in `src/site.ts`, **not**
+  by `updated` — a release must not silently re-date a policy. Both open by stating that
+  they cover only this site and `app.sharp.davideghiotto.it`; every other deployment
+  belongs to whoever runs it. **If a data flow changes in the server — a new outbound
+  integration, a new stored field — update `privacy.astro` and `legalUpdated` in the same
+  commit.** The app links here outwards (`web/src/lib/legal.ts`), so these URLs are load-bearing.
 - `src/pages/index.astro` — the whole page. Two arrays drive most of it:
   - `features` → the feature grid **and** the `schema.org` `featureList`
   - `faqs` → the visible `<details>` list **and** the `FAQPage` JSON-LD.

@@ -1,0 +1,307 @@
+---
+/**
+ * Shell for the two legal pages (`/privacy`, `/terms`).
+ *
+ * The landing page is deliberately one self-contained file, so this layout
+ * exists only for the pages that are *not* it: same head/nav/footer facts,
+ * plus the prose styles the marketing page never needed. Styles are
+ * `is:global` on purpose — Astro's scoped styles do not reach `<slot />`
+ * content, which is where the whole document lives.
+ */
+import "@fontsource-variable/inter";
+import "../styles/global.css";
+import {
+  docsUrl as docs,
+  legalUpdated,
+  legalUpdatedLabel,
+  operator,
+  operatorSite,
+  origin,
+  repo,
+  version,
+} from "../site";
+
+interface Props {
+  /** Document title, without the " — sharp" suffix. */
+  heading: string;
+  /** ≤ 155 chars: it is the meta description verbatim. */
+  description: string;
+  /** Path with a leading slash, e.g. "/privacy". */
+  path: string;
+}
+
+const { heading, description, path } = Astro.props;
+
+const siteUrl = origin(Astro.site);
+const canonical = `${siteUrl}${path}`;
+const ogImage = `${siteUrl}/og.png`;
+const title = `${heading} — sharp`;
+
+/* A WebPage node, not an Article: these are policies, not posts. Naming the
+   publisher ties them to the same Person node the landing page declares. */
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  "@id": `${canonical}#page`,
+  url: canonical,
+  name: title,
+  description,
+  inLanguage: "en",
+  dateModified: legalUpdated,
+  isPartOf: { "@type": "WebSite", "@id": `${siteUrl}/#website` },
+  publisher: { "@type": "Person", "@id": `${siteUrl}/#author` },
+};
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="canonical" href={canonical} />
+    <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
+    <meta name="theme-color" content="#0e0e11" />
+    <meta name="robots" content="index, follow, max-snippet:-1" />
+    <meta name="author" content={operator} />
+    <meta name="generator" content={`sharp ${version}`} />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:site_name" content="sharp" />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} is:inline />
+  </head>
+  <body>
+    <div class="gradient-orb orb-1" aria-hidden="true"></div>
+    <div class="gradient-orb orb-2" aria-hidden="true"></div>
+
+    <a class="skip-link" href="#doc">Skip to content</a>
+
+    <nav class="nav scrolled" aria-label="Primary">
+      <div class="container nav-inner">
+        <a class="brand" href="/">
+          <span class="hash">#</span> sharp
+        </a>
+        <div class="nav-links">
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+          <a class="gh" href={repo} rel="noopener">GitHub</a>
+        </div>
+      </div>
+    </nav>
+
+    <main class="legal container" id="doc">
+      <p class="legal-back"><a href="/">← Back to sharp</a></p>
+      <h1>{heading}</h1>
+      <p class="legal-meta">
+        Effective <time datetime={legalUpdated}>{legalUpdatedLabel}</time> · operated by
+        <a href={operatorSite} rel="noopener author">{operator}</a>
+      </p>
+      <slot />
+      <p class="legal-meta legal-foot">
+        This page is versioned in the open — its history lives in
+        <a href={`${repo}/commits/main/landing/src/pages`} rel="noopener">the repository</a>.
+      </p>
+    </main>
+
+    <footer>
+      <div class="container footer-inner">
+        <a class="brand" href="/"><span class="hash" style="color:var(--accent)">#</span> sharp</a>
+        <div class="footer-links">
+          <a href={repo} rel="noopener">GitHub</a>
+          <a href={docs} rel="noopener">Docs</a>
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+        </div>
+        <div>
+          v{version} · built in the open by
+          <a href={operatorSite} rel="noopener author">{operator}</a>
+        </div>
+      </div>
+    </footer>
+
+    <style is:global>
+      /* ── Legal prose ──
+         Long-form reading, so: one measure, generous leading, and headings that
+         are scannable without the marketing page's display sizes. */
+      .legal {
+        max-width: 780px;
+        padding: 130px 22px 90px;
+      }
+
+      .legal-back {
+        margin-bottom: 26px;
+        font-size: 0.9rem;
+      }
+
+      .legal-back a,
+      .legal a {
+        color: var(--accent-2);
+        text-decoration: none;
+        border-bottom: 1px solid rgba(169, 156, 255, 0.3);
+      }
+
+      .legal a:hover {
+        border-bottom-color: var(--accent-2);
+      }
+
+      .legal h1 {
+        font-size: clamp(2rem, 5vw, 2.7rem);
+        line-height: 1.15;
+        letter-spacing: -0.02em;
+      }
+
+      .legal-meta {
+        margin-top: 14px;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      .legal-foot {
+        margin-top: 60px;
+        padding-top: 22px;
+        border-top: 1px solid var(--border);
+        font-size: 0.86rem;
+        color: var(--faint);
+      }
+
+      .legal h2 {
+        margin-top: 52px;
+        margin-bottom: 14px;
+        padding-top: 26px;
+        border-top: 1px solid var(--border);
+        font-size: 1.3rem;
+        letter-spacing: -0.01em;
+      }
+
+      .legal h3 {
+        margin-top: 30px;
+        margin-bottom: 10px;
+        font-size: 1.02rem;
+        color: var(--text);
+      }
+
+      .legal p,
+      .legal li {
+        color: var(--muted);
+        font-size: 0.98rem;
+        line-height: 1.75;
+      }
+
+      .legal p {
+        margin-top: 14px;
+      }
+
+      .legal ul,
+      .legal ol {
+        margin: 14px 0 0 1.2em;
+      }
+
+      .legal li {
+        margin-top: 8px;
+      }
+
+      .legal strong {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .legal code {
+        font-family: var(--mono);
+        font-size: 0.86em;
+        padding: 2px 6px;
+        border-radius: 6px;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        color: var(--accent-2);
+      }
+
+      /* Callout for the scope warning that both documents open with — the one
+         paragraph a self-hoster must not skim past. */
+      .legal-note {
+        margin-top: 28px;
+        padding: 18px 20px;
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--accent);
+        border-radius: 12px;
+        background: var(--bg-soft);
+      }
+
+      .legal-note p:first-child {
+        margin-top: 0;
+      }
+
+      /* Tables get their own scroll container so a phone never scrolls the page
+         sideways. */
+      .legal-table {
+        overflow-x: auto;
+        margin-top: 20px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+      }
+
+      .legal-table table {
+        width: 100%;
+        min-width: 560px;
+        border-collapse: collapse;
+        font-size: 0.9rem;
+      }
+
+      .legal-table th,
+      .legal-table td {
+        padding: 11px 14px;
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 1px solid var(--border);
+        color: var(--muted);
+      }
+
+      .legal-table th {
+        background: var(--panel);
+        color: var(--text);
+        font-weight: 600;
+        white-space: nowrap;
+      }
+
+      .legal-table tr:last-child td {
+        border-bottom: none;
+      }
+
+      .legal-toc {
+        margin-top: 30px;
+        padding: 18px 20px 20px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--bg-soft);
+      }
+
+      .legal-toc ol {
+        margin: 10px 0 0 1.1em;
+      }
+
+      .legal-toc li {
+        margin-top: 6px;
+        font-size: 0.92rem;
+      }
+
+      @media (max-width: 640px) {
+        .legal {
+          padding: 110px 18px 70px;
+        }
+      }
+    </style>
+  </body>
+</html>

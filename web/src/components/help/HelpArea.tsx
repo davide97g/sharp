@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import remarkGfm from 'remark-gfm'
 import { releases } from '../../lib/changelog'
 import { faq, howTos, transparency } from '../../lib/help'
+import { PRIVACY_URL, TERMS_URL } from '../../lib/legal'
 import { setLastSeenVersion } from '../../lib/whatsNew'
 
 type HelpTab = 'whats-new' | 'faq' | 'how-to' | 'privacy'
@@ -88,6 +89,7 @@ export function HelpArea() {
                   {transparency}
                 </ReactMarkdown>
               </div>
+              <PolicyLinks />
             </section>
           )}
         </div>
@@ -97,6 +99,52 @@ export function HelpArea() {
         Build {__APP_VERSION__}
       </footer>
     </main>
+  )
+}
+
+/**
+ * The published policies live on the project site, not in this bundle — the page
+ * above is about *your* server, these two are about the operator's own services.
+ * `lib/legal.ts` explains why they are links rather than shipped text.
+ */
+function PolicyLinks() {
+  return (
+    <div className="mt-5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-panel)] p-5 sm:p-7">
+      <h2 className="text-sm font-bold text-[var(--color-text)]">The sharp project's policies</h2>
+      <p className="mt-2 max-w-2xl text-sm text-[var(--color-text-dim)]">
+        Published on the project website. They cover the site and the instance its operator
+        runs — <strong>not this server</strong>. If someone else hosts this workspace, their
+        terms govern it and they are the ones holding your data.
+      </p>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <a
+          href={PRIVACY_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-ink)] px-3 py-1.5 text-sm font-semibold text-[var(--color-text)] transition hover:border-[var(--color-accent)]"
+        >
+          Privacy Policy
+          <ExternalMark />
+        </a>
+        <a
+          href={TERMS_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-ink)] px-3 py-1.5 text-sm font-semibold text-[var(--color-text)] transition hover:border-[var(--color-accent)]"
+        >
+          Terms of Service
+          <ExternalMark />
+        </a>
+      </div>
+    </div>
+  )
+}
+
+function ExternalMark() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--color-text-faint)]" aria-hidden>
+      <path d="M7 17 17 7M9 7h8v8" />
+    </svg>
   )
 }
 

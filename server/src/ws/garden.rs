@@ -8,6 +8,7 @@ use crate::routes::{channel_kind, is_member};
 use crate::state::SharedState;
 use crate::ws::{channel_member_ids, envelope, WsSender};
 use axum::extract::ws::Message;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -17,6 +18,8 @@ use uuid::Uuid;
 
 pub const HUB_SPAWN_X: f64 = 52.0;
 pub const HUB_SPAWN_Y: f64 = 64.0;
+pub const TEMPLE_X: f64 = 52.0;
+pub const TEMPLE_Y: f64 = 84.0;
 const HUB_MIN_X: f64 = 2.0;
 const HUB_MAX_X: f64 = 102.0;
 const HUB_MIN_Y: f64 = 2.0;
@@ -49,6 +52,7 @@ pub struct GardenPeer {
     pub y: f64,
     pub facing: String,
     pub moving: bool,
+    pub zen_mode: bool,
     pub seq: u64,
     #[serde(skip)]
     pub last_move_at: Instant,
@@ -66,6 +70,7 @@ impl GardenPeer {
             y: HUB_SPAWN_Y,
             facing: "down".to_string(),
             moving: false,
+            zen_mode: false,
             seq: 0,
             last_move_at: Instant::now(),
         }
@@ -91,6 +96,7 @@ impl GardenPeer {
         self.x = x;
         self.y = y;
         self.moving = false;
+        self.zen_mode = false;
         self.last_move_at = Instant::now();
     }
 }
@@ -186,7 +192,9 @@ pub async fn handle_event(
         "garden.leave" => cleanup_conn(state, conn_id).await,
         "garden.move" => handle_move(state, conn_id, &payload, tx).await,
         "garden.room_enter" => handle_room_enter(state, user_id, conn_id, &payload, tx).await,
+        "garden.room_teleport" => handle_room_teleport(state, user_id, conn_id, &payload, tx).await,
         "garden.room_exit" => handle_room_exit(state, conn_id, tx).await,
+        "garden.zen" => handle_zen(state, conn_id, &payload, tx).await,
         _ => {}
     }
 }
@@ -417,6 +425,108 @@ async fn handle_room_exit(state: &SharedState, conn_id: Uuid, tx: &WsSender) {
         json!({ "space": "hub", "peer": peer }),
     );
     broadcast_joined(state, &peer).await;
+}
+
+async fn handle_room_teleport(
+    state: &SharedState,
+    user_id: Uuid,
+    conn_id: Uuid,
+    payload: &Value,
+    tx: &WsSender,
+) {
+    let Some(channel_id) = payload
+        .get("channel_id")
+        .and_then(Value::as_str)
+        .and_then(|value| Uuid::parse_str(value).ok())
+    else {
+        return;
+    };
+    let kind = channel_kind(&state.pool, channel_id).await.ok().flatten();
+    if !matches!(kind.as_deref(), Some("public" | "private"))
+        || !is_member(&state.pool, channel_id, user_id)
+            .await
+            .unwrap_or(false)
+    {
+        send(
+            tx,
+            "garden.error",
+            json!({ "code": "not_member", "channel_id": channel_id }),
+        );
+        return;
+    }
+    let old_peer = {
+        let guard = state.garden.peers.lock().unwrap();
+        guard.get(&conn_id).cloned()
+    };
+    let Some(old_peer) = old_peer else {
+        return;
+    };
+    let old_space = old_peer.garden_space();
+    broadcast_left(state, &old_peer, &old_space).await;
+
+    // Keep arrivals away from the wall and shared table. A server-selected spot
+    // prevents clients from teleporting through scene bounds or onto furniture.
+    let (arrival_x, arrival_y) = {
+        let mut rng = rand::thread_rng();
+        (rng.gen_range(5.0..=27.0), rng.gen_range(6.0..=20.0))
+    };
+    let peer = {
+        let mut guard = state.garden.peers.lock().unwrap();
+        let Some(peer) = guard.get_mut(&conn_id) else {
+            return;
+        };
+        peer.set_space(GardenSpace::Room(channel_id), arrival_x, arrival_y);
+        peer.clone()
+    };
+    send(
+        tx,
+        "garden.space_changed",
+        json!({ "space": "room", "channel_id": channel_id, "peer": peer }),
+    );
+    broadcast_joined(state, &peer).await;
+}
+
+async fn handle_zen(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &WsSender) {
+    let Some(enabled) = payload.get("enabled").and_then(Value::as_bool) else {
+        return;
+    };
+    let result = {
+        let mut guard = state.garden.peers.lock().unwrap();
+        let Some(peer) = guard.get_mut(&conn_id) else {
+            return;
+        };
+        if enabled
+            && (peer.channel_id.is_some()
+                || ((peer.x - TEMPLE_X).powi(2) + (peer.y - TEMPLE_Y).powi(2)).sqrt() > 4.5)
+        {
+            Err(())
+        } else {
+            peer.zen_mode = enabled;
+            peer.moving = false;
+            Ok((peer.clone(), peer.garden_space()))
+        }
+    };
+    let (peer, space) = match result {
+        Ok(value) => value,
+        Err(()) => {
+            send(tx, "garden.error", json!({ "code": "not_at_temple" }));
+            return;
+        }
+    };
+    let targets = targets_for_space(state, &space).await;
+    state
+        .hub
+        .broadcast(
+            envelope(
+                "garden.peer_zen",
+                json!({
+                    "conn_id": peer.conn_id.to_string(),
+                    "zen_mode": peer.zen_mode,
+                }),
+            ),
+            targets,
+        )
+        .await;
 }
 
 pub async fn cleanup_conn(state: &SharedState, conn_id: Uuid) {

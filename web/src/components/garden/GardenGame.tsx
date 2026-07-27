@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { GardenMap, GardenPeer, GardenRoom } from '../../lib/types'
+import { sound } from '../../lib/sound'
 import { useStore } from '../../store'
 
 const TILE = 16
@@ -7,6 +8,7 @@ const SPEED = 7
 const SEND_EVERY_MS = 100
 const UI_FONT = 'Inter, ui-sans-serif, system-ui, sans-serif'
 const ASSET_ROOT = '/assets/garden/ninja-adventure'
+const TEMPLE_ASSET_ROOT = '/assets/garden/feudal-japan'
 const AVATAR_TEXTURES = ['garden-avatar-blue', 'garden-avatar-green', 'garden-avatar-ninja']
 const DIRECTION_COLUMN: Record<GardenPeer['facing'], number> = {
   down: 0,
@@ -19,10 +21,14 @@ type Props = {
   map: GardenMap
   space: 'hub' | 'room'
   channelId: string | null
+  zenMode: boolean
   onNearbyRoom: (room: GardenRoom | null) => void
+  onNearbyTemple: (nearby: boolean) => void
 }
 
 type Point = { x: number; y: number }
+
+let pendingTeleportRoomId: string | null = null
 
 function labelFor(name: string) {
   return name.length > 20 ? `${name.slice(0, 19)}…` : name
@@ -36,11 +42,20 @@ function hashName(name: string) {
   return value
 }
 
-export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
+export function GardenGame({
+  map,
+  space,
+  channelId,
+  zenMode,
+  onNearbyRoom,
+  onNearbyTemple,
+}: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const nearbyRef = useRef(onNearbyRoom)
+  const nearbyTempleRef = useRef(onNearbyTemple)
   const [themeRevision, setThemeRevision] = useState(0)
   nearbyRef.current = onNearbyRoom
+  nearbyTempleRef.current = onNearbyTemple
 
   useEffect(() => {
     const observer = new MutationObserver(() => {
@@ -86,11 +101,21 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
       type Avatar = {
         node: import('phaser').GameObjects.Container
         sprite: import('phaser').GameObjects.Sprite
+        shadow: import('phaser').GameObjects.Image
+        halo: import('phaser').GameObjects.Ellipse
+        presence: import('phaser').GameObjects.Arc
+        label: import('phaser').GameObjects.Text
+        name: string
         targetX: number
         targetY: number
         moving: boolean
         facing: GardenPeer['facing']
         idlePhase: number
+        jumpHeight: number
+        airOffset: number
+        jumping: boolean
+        teleporting: boolean
+        zen: boolean
       }
 
       type AtlasCrop = {
@@ -105,6 +130,7 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
         private remotes = new Map<string, Avatar>()
         private cursors!: import('phaser').Types.Input.Keyboard.CursorKeys
         private wasd!: Record<'W' | 'A' | 'S' | 'D', import('phaser').Input.Keyboard.Key>
+        private jumpKey!: import('phaser').Input.Keyboard.Key
         private blockers!: import('phaser').Physics.Arcade.StaticGroup
         private target: Point | null = null
         private waypoints: Point[] = []
@@ -113,8 +139,11 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
         private wasMoving = false
         private lastFacing: GardenPeer['facing'] = 'down'
         private nearbyId: string | null = null
+        private templeNearby = false
         private worldWidth = 0
         private worldHeight = 0
+        private lastStep = 0
+        private lastBump = 0
         private reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
         constructor() {
@@ -131,6 +160,10 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
           this.load.image('garden-shadow', `${ASSET_ROOT}/avatar_shadow.png`)
           this.load.image('garden-crate', `${ASSET_ROOT}/crate.png`)
           this.load.image('garden-pot', `${ASSET_ROOT}/pot.png`)
+          this.load.image('garden-temple-gate', `${TEMPLE_ASSET_ROOT}/wooden_gate.png`)
+          this.load.image('garden-temple-steps', `${TEMPLE_ASSET_ROOT}/stone_steps.png`)
+          this.load.image('garden-temple-pillar', `${TEMPLE_ASSET_ROOT}/temple_pillar.png`)
+          this.load.image('garden-shrine-wall', `${TEMPLE_ASSET_ROOT}/shrine_wall.png`)
           this.load.spritesheet('garden-flower', `${ASSET_ROOT}/flower_dance.png`, {
             frameWidth: 16,
             frameHeight: 16,
@@ -156,13 +189,14 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
           this.drawWorld()
 
           const self = useStore.getState().garden.self
-          const startX = (self?.x ?? map.spawn.x) * TILE
-          const startY = (self?.y ?? map.spawn.y) * TILE
+          const startX = zenMode ? 16 * TILE : (self?.x ?? map.spawn.x) * TILE
+          const startY = zenMode ? 19 * TILE : (self?.y ?? map.spawn.y) * TILE
           this.player = this.makeAvatar(
             startX,
             startY,
             useStore.getState().me?.display_name ?? 'You',
             true,
+            zenMode,
           )
           this.physics.add.existing(this.player.node)
           const body = this.player.node.body as import('phaser').Physics.Arcade.Body
@@ -179,11 +213,15 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
 
           this.cursors = this.input.keyboard!.createCursorKeys()
           this.wasd = this.input.keyboard!.addKeys('W,A,S,D') as typeof this.wasd
+          this.jumpKey = this.input.keyboard!.addKey(
+            Phaser.Input.Keyboard.KeyCodes.SPACE,
+          )
           this.input.on('pointerdown', (pointer: import('phaser').Input.Pointer) => {
             this.waypoints = []
             this.target = { x: pointer.worldX, y: pointer.worldY }
           })
           const walkToRoom = (event: Event) => {
+            if (zenMode || space !== 'hub') return
             const room = (event as CustomEvent<GardenRoom>).detail
             const plaza = { x: 52 * TILE, y: 64 * TILE }
             const elbow = { x: room.door_x * TILE, y: plaza.y }
@@ -199,9 +237,15 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
             )
             this.target = this.waypoints.shift() ?? null
           }
+          const teleportToRoom = (event: Event) => {
+            const room = (event as CustomEvent<GardenRoom>).detail
+            this.startTeleport(room)
+          }
           window.addEventListener('sharp:garden-walk-to', walkToRoom)
+          window.addEventListener('sharp:garden-teleport', teleportToRoom)
           this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
             window.removeEventListener('sharp:garden-walk-to', walkToRoom)
+            window.removeEventListener('sharp:garden-teleport', teleportToRoom)
           })
 
           this.cameras.main.setBounds(0, 0, this.worldWidth, this.worldHeight)
@@ -213,6 +257,14 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
           }
           this.scale.on('resize', setZoom)
           setZoom()
+          if (
+            pendingTeleportRoomId &&
+            space === 'room' &&
+            channelId === pendingTeleportRoomId
+          ) {
+            pendingTeleportRoomId = null
+            this.playTeleportArrival()
+          }
 
           let lastPeers: ReturnType<typeof useStore.getState>['garden']['peers'] | null = null
           const sync = (state: ReturnType<typeof useStore.getState>) => {
@@ -234,6 +286,7 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
                     peer.y * TILE,
                     peer.display_name,
                     false,
+                    peer.zen_mode,
                   )
                   this.remotes.set(connId, avatar)
                 }
@@ -241,6 +294,7 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
                 avatar.targetY = peer.y * TILE
                 avatar.moving = peer.moving
                 this.faceAvatar(avatar, peer.facing)
+                this.setAvatarZen(avatar, peer.zen_mode)
               }
               for (const [connId, avatar] of this.remotes) {
                 if (present.has(connId)) continue
@@ -250,7 +304,7 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
             }
 
             const authoritative = state.garden.self
-            if (authoritative && this.player) {
+            if (authoritative && this.player && !zenMode) {
               const dx = authoritative.x * TILE - this.player.node.x
               const dy = authoritative.y * TILE - this.player.node.y
               if (Math.hypot(dx, dy) > TILE * 2.25) {
@@ -280,7 +334,14 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
             activeElement?.getAttribute('contenteditable') === 'true'
           let dx = 0
           let dy = 0
-          if (!typing) {
+          if (
+            !typing &&
+            !this.player.teleporting &&
+            Phaser.Input.Keyboard.JustDown(this.jumpKey)
+          ) {
+            this.startJump(this.player)
+          }
+          if (!typing && !this.player.teleporting) {
             if (this.cursors.left.isDown || this.wasd.A.isDown) dx -= 1
             if (this.cursors.right.isDown || this.wasd.D.isDown) dx += 1
             if (this.cursors.up.isDown || this.wasd.W.isDown) dy -= 1
@@ -305,7 +366,7 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
           let facing = this.player.facing
           const moving = dx !== 0 || dy !== 0
           const body = this.player.node.body as import('phaser').Physics.Arcade.Body
-          if (moving) {
+          if (moving && !this.player.teleporting) {
             const length = Math.hypot(dx, dy)
             dx /= length
             dy /= length
@@ -322,6 +383,15 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
           } else {
             body.setVelocity(0, 0)
           }
+          const colliding =
+            moving && (!body.blocked.none || !body.touching.none)
+          if (colliding && time - this.lastBump > 320) {
+            this.lastBump = time
+            sound.garden.bump()
+          } else if (moving && time - this.lastStep > 215) {
+            this.lastStep = time
+            sound.garden.step()
+          }
           if (
             this.target &&
             (!body.blocked.none || (!body.touching.none && moving))
@@ -330,12 +400,13 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
             this.waypoints = []
           }
 
-          this.player.moving = moving
+          this.player.moving = moving && !this.player.teleporting
           this.animateAvatar(this.player, time)
           this.player.node.setDepth(this.player.node.y + 100)
 
           const now = performance.now()
           if (
+            !zenMode &&
             now - this.lastSent >= SEND_EVERY_MS &&
             (moving || this.wasMoving || facing !== this.lastFacing)
           ) {
@@ -361,6 +432,150 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
             avatar.node.setDepth(avatar.node.y + 100)
           }
           this.updateNearby()
+        }
+
+        private startJump(avatar: Avatar) {
+          if (avatar.jumping || avatar.teleporting) return
+          avatar.jumping = true
+          sound.garden.jump()
+          if (this.reducedMotion) {
+            avatar.jumpHeight = 4
+            this.time.delayedCall(90, () => {
+              avatar.jumpHeight = 0
+              avatar.jumping = false
+              sound.garden.land()
+            })
+            return
+          }
+          this.tweens.add({
+            targets: avatar,
+            jumpHeight: 19,
+            duration: 220,
+            ease: 'Sine.out',
+            yoyo: true,
+            onComplete: () => {
+              avatar.jumpHeight = 0
+              avatar.jumping = false
+              avatar.sprite.setScale(1)
+              sound.garden.land()
+              this.addLandingDust(avatar.node.x, avatar.node.y)
+            },
+          })
+          this.tweens.add({
+            targets: avatar.sprite,
+            scaleX: { from: 1.08, to: 0.92 },
+            scaleY: { from: 0.9, to: 1.08 },
+            duration: 220,
+            ease: 'Sine.inOut',
+            yoyo: true,
+          })
+        }
+
+        private addLandingDust(x: number, y: number) {
+          if (this.reducedMotion) return
+          for (const direction of [-1, 1]) {
+            const dust = this.add
+              .circle(x + direction * 5, y - 1, 2, 0xe5d28b, 0.75)
+              .setDepth(y + 99)
+            this.tweens.add({
+              targets: dust,
+              x: x + direction * 15,
+              y: y - 5,
+              alpha: 0,
+              scale: 0.25,
+              duration: 260,
+              ease: 'Quad.out',
+              onComplete: () => dust.destroy(),
+            })
+          }
+        }
+
+        private startTeleport(room: GardenRoom) {
+          if (this.player.teleporting) return
+          this.player.teleporting = true
+          this.target = null
+          this.waypoints = []
+          const body = this.player.node.body as import('phaser').Physics.Arcade.Body
+          body.setVelocity(0, 0)
+          sound.garden.teleport()
+
+          const commit = () => {
+            pendingTeleportRoomId = room.channel_id
+            void useStore
+              .getState()
+              .teleportGardenRoom(room.channel_id)
+              .catch(() => {
+                pendingTeleportRoomId = null
+                this.player.teleporting = false
+                this.player.airOffset = 0
+                this.player.sprite.setAngle(0)
+                this.cameras.main.fadeIn(180, 0, 0, 0)
+              })
+          }
+          if (this.reducedMotion) {
+            this.cameras.main.fadeOut(120, 0, 0, 0)
+            this.time.delayedCall(120, commit)
+            return
+          }
+          this.tweens.add({
+            targets: this.player,
+            airOffset: 84,
+            duration: 520,
+            ease: 'Cubic.in',
+          })
+          this.tweens.add({
+            targets: this.player.sprite,
+            angle: 720,
+            duration: 520,
+            ease: 'Cubic.in',
+          })
+          this.tweens.add({
+            targets: this.player.shadow,
+            alpha: 0,
+            scale: 0.08,
+            duration: 500,
+            ease: 'Cubic.in',
+          })
+          this.time.delayedCall(260, () => this.cameras.main.fadeOut(280, 0, 0, 0))
+          this.time.delayedCall(545, commit)
+        }
+
+        private playTeleportArrival() {
+          this.player.teleporting = true
+          this.cameras.main.fadeIn(this.reducedMotion ? 120 : 420, 0, 0, 0)
+          sound.garden.teleport()
+          if (this.reducedMotion) {
+            this.player.teleporting = false
+            return
+          }
+          this.player.airOffset = 84
+          this.player.sprite.setAngle(-720)
+          this.player.shadow.setAlpha(0).setScale(0.08)
+          this.tweens.add({
+            targets: this.player,
+            airOffset: 0,
+            duration: 640,
+            ease: 'Cubic.out',
+            onComplete: () => {
+              this.player.teleporting = false
+              this.player.sprite.setAngle(0)
+              sound.garden.land()
+              this.addLandingDust(this.player.node.x, this.player.node.y)
+            },
+          })
+          this.tweens.add({
+            targets: this.player.sprite,
+            angle: 0,
+            duration: 640,
+            ease: 'Cubic.out',
+          })
+          this.tweens.add({
+            targets: this.player.shadow,
+            alpha: 0.7,
+            scale: 1,
+            duration: 600,
+            ease: 'Cubic.out',
+          })
         }
 
         private makeCuratedTiles() {
@@ -474,10 +689,14 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
         }
 
         private updateNearby() {
-          if (space !== 'hub') {
+          if (space !== 'hub' || zenMode) {
             if (this.nearbyId !== null) {
               this.nearbyId = null
               nearbyRef.current(null)
+            }
+            if (this.templeNearby) {
+              this.templeNearby = false
+              nearbyTempleRef.current(false)
             }
             return
           }
@@ -493,12 +712,26 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
             }
           }
           const nextId = nearest?.channel_id ?? null
-          if (nextId === this.nearbyId) return
-          this.nearbyId = nextId
-          nearbyRef.current(nearest)
+          if (nextId !== this.nearbyId) {
+            this.nearbyId = nextId
+            nearbyRef.current(nearest)
+          }
+
+          const atTemple =
+            Math.hypot(x - map.temple.x, y - map.temple.y) <= 4.5
+          if (atTemple !== this.templeNearby) {
+            this.templeNearby = atTemple
+            nearbyTempleRef.current(atTemple)
+          }
         }
 
-        private makeAvatar(x: number, y: number, name: string, self: boolean): Avatar {
+        private makeAvatar(
+          x: number,
+          y: number,
+          name: string,
+          self: boolean,
+          zen = false,
+        ): Avatar {
           const texture = self
             ? 'garden-avatar-blue'
             : AVATAR_TEXTURES[hashName(name) % AVATAR_TEXTURES.length]
@@ -523,15 +756,36 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
             .setOrigin(0.5)
           const node = this.add.container(x, y, [halo, shadow, sprite, presence, label])
           node.setDepth(y + 100)
-          return {
+          const avatar: Avatar = {
             node,
             sprite,
+            shadow,
+            halo,
+            presence,
+            label,
+            name: self ? 'You' : labelFor(name),
             targetX: x,
             targetY: y,
             moving: false,
             facing: 'down',
             idlePhase: hashName(name) % 1000,
+            jumpHeight: 0,
+            airOffset: 0,
+            jumping: false,
+            teleporting: false,
+            zen,
           }
+          this.setAvatarZen(avatar, zen)
+          return avatar
+        }
+
+        private setAvatarZen(avatar: Avatar, zen: boolean) {
+          if (avatar.zen === zen && avatar.label.text.startsWith('ZEN') === zen) return
+          avatar.zen = zen
+          avatar.label.setText(zen ? `ZEN · ${avatar.name}` : avatar.name)
+          avatar.halo
+            .setFillStyle(zen ? 0x9fca78 : palette.accent, zen ? 0.22 : 0.15)
+            .setStrokeStyle(1, zen ? 0xd7efb5 : palette.accent, 0.85)
         }
 
         private faceAvatar(avatar: Avatar, facing: GardenPeer['facing']) {
@@ -541,25 +795,37 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
 
         private animateAvatar(avatar: Avatar, time: number) {
           const column = DIRECTION_COLUMN[avatar.facing]
+          const lift = avatar.jumpHeight + avatar.airOffset
+          avatar.shadow
+            .setScale(Math.max(0.2, 1 - lift / 110))
+            .setAlpha(Math.max(0.08, 0.7 - lift / 150))
+          avatar.label.y = -35 - lift
+          avatar.presence.y = -6 - lift
+          avatar.halo.y = -1
           if (avatar.moving) {
             const row = this.reducedMotion ? 1 : Math.floor(time / 135) % 4
             avatar.sprite.setFrame(row * 4 + column)
-            avatar.sprite.y = -8
+            avatar.sprite.y = -8 - lift
             return
           }
           avatar.sprite.setFrame(column)
           avatar.sprite.y = this.reducedMotion
-            ? -8
-            : -8 + Math.round(Math.sin((time + avatar.idlePhase) / 650))
+            ? -8 - lift
+            : -8 - lift + Math.round(Math.sin((time + avatar.idlePhase) / 650))
         }
 
         private drawWorld() {
-          if (space === 'room') this.drawInterior()
+          if (zenMode) this.drawZenInterior()
+          else if (space === 'room') this.drawInterior()
           else this.drawHub()
         }
 
         private drawHub() {
-          const maxDoorY = Math.max(78, ...map.rooms.map((room) => room.door_y))
+          const maxDoorY = Math.max(
+            map.temple.y + 12,
+            78,
+            ...map.rooms.map((room) => room.door_y),
+          )
           const widthInTiles = 104
           const heightInTiles = Math.max(96, Math.ceil(maxDoorY + 16))
           this.worldWidth = widthInTiles * TILE
@@ -572,6 +838,14 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
           )
           const plaza = { x: 52, y: 64 }
           this.paintRect(data, plaza.x - 6, plaza.y - 4, 13, 9, 3)
+          this.paintRect(
+            data,
+            Math.round(map.temple.x) - 1,
+            plaza.y,
+            3,
+            Math.round(map.temple.y) - plaza.y + 9,
+            2,
+          )
           for (const room of map.rooms) {
             const doorX = Math.round(room.door_x)
             const doorY = Math.round(room.door_y)
@@ -595,11 +869,63 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
           this.addTileLayer(data, 'garden-ground')
 
           map.rooms.forEach((room) => this.drawHouse(room))
+          this.drawTemple()
           // Keep the central path clear: the sign sits inside the plaza, above the
           // horizontal guide lane, so both manual and guided walks can pass it.
           this.drawCourtyard((plaza.x - 3) * TILE, (plaza.y - 3) * TILE)
           this.drawGardenEdges(heightInTiles)
           this.drawFlowerBeds()
+        }
+
+        private drawTemple() {
+          const x = map.temple.x * TILE
+          const gateY = map.temple.y * TILE
+          const houseY = gateY + 8 * TILE
+
+          this.add
+            .image(x, houseY, 'garden-house-large')
+            .setOrigin(0.5, 1)
+            .setTint(0xc3d99a)
+            .setDepth(houseY - 5)
+          this.addBlocker(x, houseY - 36, 61, 48)
+
+          this.add
+            .image(x, gateY + 2 * TILE, 'garden-temple-steps')
+            .setOrigin(0.5)
+            .setDepth(gateY + 31)
+          this.add
+            .image(x, gateY, 'garden-temple-gate')
+            .setOrigin(0.5, 1)
+            .setDepth(gateY + 8)
+          this.addBlocker(x - 12, gateY - 8, 8, 24)
+          this.addBlocker(x + 12, gateY - 8, 8, 24)
+
+          for (const side of [-1, 1]) {
+            this.add
+              .image(x + side * 45, gateY + 28, 'garden-temple-pillar')
+              .setOrigin(0.5, 1)
+              .setDepth(gateY + 28)
+            this.add
+              .image(x + side * 42, gateY + 51, 'garden-shrine-wall')
+              .setOrigin(0.5)
+              .setDepth(gateY + 50)
+            this.addBlocker(x + side * 44, gateY + 14, 22, 36)
+          }
+
+          this.add
+            .text(x, gateY - 47, 'ZEN TEMPLE', {
+              fontFamily: UI_FONT,
+              fontSize: '8px',
+              fontStyle: '700',
+              color: '#f3f5ec',
+              backgroundColor: '#171914',
+              padding: { x: 7, y: 4 },
+              resolution: renderScale,
+            })
+            .setOrigin(0.5)
+            .setDepth(gateY + 60)
+          this.addFlower(x - 62, gateY + 38, 818)
+          this.addFlower(x + 62, gateY + 38, 919)
         }
 
         private paintRect(
@@ -796,6 +1122,117 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
           return flower
         }
 
+        private drawZenInterior() {
+          const widthInTiles = 32
+          const heightInTiles = 24
+          this.worldWidth = widthInTiles * TILE
+          this.worldHeight = heightInTiles * TILE
+          const data = Array.from({ length: heightInTiles }, (_, y) =>
+            Array.from({ length: widthInTiles }, (_, x) =>
+              x <= 1 ||
+              y <= 1 ||
+              x >= widthInTiles - 2 ||
+              y >= heightInTiles - 2
+                ? 1
+                : (x * 5 + y * 3) % 19 === 0
+                  ? 1
+                  : 0,
+            ),
+          )
+          this.addTileLayer(data, 'garden-ground')
+
+          const veil = this.add
+            .rectangle(
+              this.worldWidth / 2,
+              this.worldHeight / 2,
+              this.worldWidth,
+              this.worldHeight,
+              0x213b2b,
+              0.22,
+            )
+            .setDepth(2)
+          veil.setBlendMode(Phaser.BlendModes.MULTIPLY)
+
+          const border = this.add.graphics().setDepth(5)
+          border.lineStyle(6, 0x283f2d, 1).strokeRect(
+            TILE,
+            TILE,
+            this.worldWidth - TILE * 2,
+            this.worldHeight - TILE * 2,
+          )
+          border.lineStyle(2, 0xa4c683, 0.9).strokeRect(
+            TILE + 6,
+            TILE + 6,
+            this.worldWidth - TILE * 2 - 12,
+            this.worldHeight - TILE * 2 - 12,
+          )
+
+          this.addBlocker(this.worldWidth / 2, TILE + 3, this.worldWidth - TILE * 2, 8)
+          this.addBlocker(
+            this.worldWidth / 2,
+            this.worldHeight - TILE - 3,
+            this.worldWidth - TILE * 2,
+            8,
+          )
+          this.addBlocker(TILE + 3, this.worldHeight / 2, 8, this.worldHeight - TILE * 2)
+          this.addBlocker(
+            this.worldWidth - TILE - 3,
+            this.worldHeight / 2,
+            8,
+            this.worldHeight - TILE * 2,
+          )
+
+          const altarX = this.worldWidth / 2
+          const altarY = 7 * TILE
+          this.add
+            .image(altarX, altarY, 'garden-temple-gate')
+            .setScale(1.5)
+            .setOrigin(0.5, 1)
+            .setDepth(altarY)
+          this.add
+            .image(altarX, altarY + 20, 'garden-temple-steps')
+            .setOrigin(0.5)
+            .setDepth(altarY + 20)
+          this.addBlocker(altarX, altarY - 10, 54, 30)
+
+          for (const side of [-1, 1]) {
+            this.add
+              .image(altarX + side * 74, altarY + 22, 'garden-temple-pillar')
+              .setOrigin(0.5, 1)
+              .setDepth(altarY + 22)
+            this.addFlower(altarX + side * 55, altarY + 34, 1200 + side * 37)
+            this.addBlocker(altarX + side * 74, altarY + 7, 22, 28)
+          }
+
+          const pool = this.add.graphics().setDepth(6)
+          pool.fillStyle(0x355c58, 0.92).fillEllipse(altarX, 13 * TILE, 112, 55)
+          pool.lineStyle(3, 0x9fc3a4, 0.75).strokeEllipse(altarX, 13 * TILE, 112, 55)
+          pool.lineStyle(1, 0xd3e7c1, 0.55).strokeEllipse(altarX, 13 * TILE, 64, 25)
+          this.addBlocker(altarX, 13 * TILE, 106, 48)
+
+          this.add
+            .text(3 * TILE, 2.5 * TILE, 'ZEN MODE', {
+              fontFamily: UI_FONT,
+              fontSize: '15px',
+              fontStyle: '700',
+              color: '#f4f6ef',
+              backgroundColor: '#171914',
+              padding: { x: 8, y: 5 },
+              resolution: renderScale,
+            })
+            .setDepth(70)
+          this.add
+            .text(3 * TILE, 4.7 * TILE, 'Notifications are paused while you are here', {
+              fontFamily: UI_FONT,
+              fontSize: '8px',
+              color: '#d7dfd0',
+              backgroundColor: '#171914',
+              padding: { x: 6, y: 3 },
+              resolution: renderScale,
+            })
+            .setDepth(70)
+        }
+
         private drawInterior() {
           const widthInTiles = 32
           const heightInTiles = 24
@@ -955,19 +1392,21 @@ export function GardenGame({ map, space, channelId, onNearbyRoom }: Props) {
 
     return () => {
       disposed = true
+      nearbyRef.current(null)
+      nearbyTempleRef.current(false)
       resizeObserver?.disconnect()
       unsubscribe?.()
       game?.destroy(true)
       host.replaceChildren()
     }
-  }, [channelId, map, space, themeRevision])
+  }, [channelId, map, space, themeRevision, zenMode])
 
   return (
     <div
       ref={hostRef}
       className="h-full w-full bg-ink [&>canvas]:block"
       role="application"
-      aria-label="Garden spatial map. Use arrow keys or WASD to move through the tile garden, tap a destination, Enter to enter a nearby room, and Escape to exit."
+      aria-label="Garden spatial map. Use arrow keys or WASD to move, Space to jump, tap a destination, Enter to interact, R to create a room, and Escape to exit."
     />
   )
 }

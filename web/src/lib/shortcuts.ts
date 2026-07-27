@@ -197,6 +197,13 @@ export const SHORTCUTS: ShortcutDef[] = [
     defaultChord: 'escape',
     scope: 'pane',
   },
+  {
+    id: 'garden.create-room',
+    label: 'Create Garden room',
+    group: 'Garden',
+    defaultChord: 'r',
+    scope: 'pane',
+  },
 ]
 
 const BY_ID = new Map(SHORTCUTS.map((s) => [s.id, s]))

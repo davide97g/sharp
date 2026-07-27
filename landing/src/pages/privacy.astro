@@ -1,0 +1,369 @@
+---
+/**
+ * Public privacy policy. Covers exactly two things — this website and the one
+ * instance the operator runs — and says so loudly, because sharp is software
+ * other people deploy for themselves and *their* deployment is not ours.
+ *
+ * Every factual claim here is meant to be checkable against the source. If a
+ * data flow changes in the server (a new outbound integration, a new stored
+ * field), this page changes in the same commit, and `legalUpdated` in
+ * `src/site.ts` moves with it.
+ */
+import Legal from "../layouts/Legal.astro";
+import { appUrl, legalEmail, operator, privacyEmail, repo } from "../site";
+
+const transparency = `${repo}/blob/main/web/src/content/transparency.md`;
+---
+
+<Legal
+  heading="Privacy Policy"
+  description="How sharp handles personal data: what the website stores (nothing), what the hosted instance stores, who processes it, and your GDPR rights."
+  path="/privacy"
+>
+  <div class="legal-note">
+    <p>
+      <strong>Read this first — scope.</strong> sharp is self-hosted software. This policy
+      covers only the two services we operate: this website
+      (<code>sharp.davideghiotto.it</code>) and the hosted instance at
+      <code>app.sharp.davideghiotto.it</code>. If you use sharp on a server run by your
+      employer, your community or yourself, <strong>we are not involved and we hold none of
+      your data</strong> — that operator is the data controller, and their policy applies.
+      See <a href="#selfhosted">self-hosted deployments</a>.
+    </p>
+  </div>
+
+  <div class="legal-toc">
+    <strong>On this page</strong>
+    <ol>
+      <li><a href="#controller">Who is responsible</a></li>
+      <li><a href="#website">The website</a></li>
+      <li><a href="#instance">The hosted instance</a></li>
+      <li><a href="#bases">Why we are allowed to process it</a></li>
+      <li><a href="#processors">Third parties that may see data</a></li>
+      <li><a href="#transfers">Transfers outside the EEA</a></li>
+      <li><a href="#retention">How long we keep it</a></li>
+      <li><a href="#security">Security</a></li>
+      <li><a href="#storage">Cookies and local storage</a></li>
+      <li><a href="#rights">Your rights</a></li>
+      <li><a href="#children">Children</a></li>
+      <li><a href="#selfhosted">Self-hosted deployments</a></li>
+      <li><a href="#changes">Changes to this policy</a></li>
+    </ol>
+  </div>
+
+  <h2 id="controller">1. Who is responsible</h2>
+  <p>
+    The data controller for both services is <strong>{operator}</strong>, an individual
+    based in Italy, acting as the operator of the sharp project. Contact for any privacy
+    matter — including the rights listed in section 10:
+    <a href={`mailto:${privacyEmail}`}>{privacyEmail}</a>.
+  </p>
+  <p>
+    No Data Protection Officer is appointed: the processing here is small-scale and none of
+    the criteria in Article 37 GDPR apply. Requests go to the address above and are handled
+    by the operator personally.
+  </p>
+
+  <h2 id="website">2. The website</h2>
+  <p>
+    <code>sharp.davideghiotto.it</code> is a static site. It sets <strong>no cookies</strong>,
+    runs <strong>no analytics</strong>, embeds <strong>no third-party scripts, fonts, pixels
+    or iframes</strong>, and loads nothing from a CDN — the typeface ships with the page. We
+    build no profile of you and we cannot: there is nothing collecting.
+  </p>
+  <p>
+    What does exist is ordinary web-server logging by our hosting provider, needed to serve
+    the page and to keep the machine reachable: your IP address, the requested URL, the
+    referrer, the user agent, and a timestamp. Those logs are retained for a short period
+    (currently up to 30 days) and are used only for delivery, error diagnosis, and abuse or
+    attack mitigation. They are not combined with anything else and never used for
+    advertising.
+  </p>
+
+  <h2 id="instance">3. The hosted instance</h2>
+  <p>
+    <code>app.sharp.davideghiotto.it</code> is a sharp workspace we run. It is provided free
+    of charge, best-effort, and without any service guarantee (see the
+    <a href="/terms">Terms of Service</a>). If you hold an account there, the following data
+    exists on our server.
+  </p>
+
+  <div class="legal-table">
+    <table>
+      <thead>
+        <tr><th>Category</th><th>What it is</th><th>Where it comes from</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Account</td>
+          <td>Email address, display name, avatar, an Argon2 hash of your password (never the
+            password), passkey public keys, and — if you signed in with Google or GitHub — the
+            provider name plus the opaque user id that provider assigns you</td>
+          <td>You, at registration; or the provider you chose to sign in with</td>
+        </tr>
+        <tr>
+          <td>Workspace content</td>
+          <td>Messages, thread replies, reactions, uploaded files and images, collaborative
+            docs, canvases, boards, tasks and comments, polls, calendar events, and the
+            channel memberships that scope them</td>
+          <td>You and the people you work with</td>
+        </tr>
+        <tr>
+          <td>Encrypted DMs</td>
+          <td>If you enable end-to-end encryption, we hold opaque ciphertext and your device
+            public keys. The server performs no cryptography and cannot read those messages</td>
+          <td>Your devices</td>
+        </tr>
+        <tr>
+          <td>Operational state</td>
+          <td>Presence and last-seen, read markers, notification records, notification
+            preferences and quiet hours, your interface preferences</td>
+          <td>Generated as you use the app</td>
+        </tr>
+        <tr>
+          <td>Push tokens</td>
+          <td>Web-push subscription endpoints and Apple push tokens, per device, if you turn
+            notifications on</td>
+          <td>Your browser or desktop app, with your permission</td>
+        </tr>
+        <tr>
+          <td>Calls</td>
+          <td>Who is in a room and when, plus mute/camera/screen-share state. Audio and video
+            are relayed live and <strong>not recorded</strong>. Transcripts and meeting notes
+            exist only if someone in the call turns them on</td>
+          <td>Generated during a call</td>
+        </tr>
+        <tr>
+          <td>Search and AI index</td>
+          <td>Vector embeddings of messages, docs and tasks, used by the assistant. Every
+            retrieval re-checks your channel membership and doc role, so the assistant cannot
+            surface anything you could not already open. Encrypted DMs are never indexed</td>
+          <td>Derived from workspace content, only when the assistant is configured</td>
+        </tr>
+        <tr>
+          <td>Security records</td>
+          <td>Login-related tokens (short-lived, hashed), and server logs as described in
+            section 2</td>
+          <td>Generated on sign-in</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    <strong>What we do not do, on either service:</strong> no advertising, no ad or social
+    tracking, no selling or renting of personal data, no sharing for anyone else's marketing,
+    no automated decision-making or profiling with legal effect, and no product telemetry —
+    the sharp application ships with none, which is
+    <a href={transparency} rel="noopener">documented and auditable in the source</a>.
+  </p>
+
+  <h2 id="bases">4. Why we are allowed to process it</h2>
+  <ul>
+    <li>
+      <strong>Performance of a contract</strong> (Art. 6(1)(b) GDPR) — your account and your
+      workspace content. You cannot have a chat service that does not store your messages.
+    </li>
+    <li>
+      <strong>Legitimate interests</strong> (Art. 6(1)(f)) — server logs, rate limiting and
+      abuse prevention, keeping the instance secure and available. Our interest is running a
+      service that is not knocked over or abused; the data involved is minimal and short-lived.
+    </li>
+    <li>
+      <strong>Consent</strong> (Art. 6(1)(a)) — optional features you switch on yourself:
+      push notifications, Google Calendar sync, GIF search, the AI assistant, transcription.
+      Each is off until you act, and withdrawing consent is turning it back off.
+    </li>
+    <li>
+      <strong>Legal obligation</strong> (Art. 6(1)(c)) — only where the law requires us to
+      retain or disclose something. This has not happened to date.
+    </li>
+  </ul>
+
+  <h2 id="processors">5. Third parties that may see data</h2>
+  <p>
+    We use as few as possible, and most of them are optional features that stay completely
+    inert until enabled. Nobody in this list receives data for their own purposes.
+  </p>
+
+  <div class="legal-table">
+    <table>
+      <thead>
+        <tr><th>Recipient</th><th>What reaches them</th><th>When</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Our hosting provider</td>
+          <td>Everything, as the infrastructure the server and its Postgres database run on,
+            plus request logs</td>
+          <td>Always — it is where the service lives</td>
+        </tr>
+        <tr>
+          <td>Resend (email delivery)</td>
+          <td>Your email address and the message body, for transactional mail only — password
+            resets. No newsletters</td>
+          <td>When such an email is sent</td>
+        </tr>
+        <tr>
+          <td>AI provider (OpenAI-compatible endpoint)</td>
+          <td>The question you ask the assistant plus the workspace excerpts retrieved to
+            answer it; and, for transcription, the call audio chunks</td>
+          <td>Only when you use the assistant or turn transcription on</td>
+        </tr>
+        <tr>
+          <td>Google</td>
+          <td>Sign-in: the OAuth exchange, from which we keep your provider id and verified
+            email. Calendar sync: your events, in both directions</td>
+          <td>If you sign in with Google, or connect your calendar</td>
+        </tr>
+        <tr>
+          <td>GitHub</td>
+          <td>Sign-in: as above. Repository sync: task identifiers and state changes for the
+            repositories a project is linked to</td>
+          <td>If you sign in with GitHub, or link a repository</td>
+        </tr>
+        <tr>
+          <td>GIPHY</td>
+          <td>Your search term and the request metadata that comes with any HTTP call</td>
+          <td>Only while the GIF picker is open</td>
+        </tr>
+        <tr>
+          <td>Media relay (LiveKit)</td>
+          <td>Live audio, video and screen-share streams, and the network addresses needed to
+            connect peers</td>
+          <td>Only during a call. Our LiveKit runs on our own infrastructure and stores no media</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Each of these acts as a processor on our instructions, under a data processing agreement
+    where the GDPR requires one. We may also disclose data if compelled by a valid legal
+    order, or to protect the rights and safety of users — and we will tell you unless we are
+    legally barred from doing so.
+  </p>
+
+  <h2 id="transfers">6. Transfers outside the EEA</h2>
+  <p>
+    Some processors above operate from outside the European Economic Area, principally the
+    United States. Those transfers rely on the European Commission's Standard Contractual
+    Clauses, on an adequacy decision where one covers the recipient, or on your explicit
+    consent for the optional features involved. You can ask us which mechanism applies to a
+    given recipient at <a href={`mailto:${privacyEmail}`}>{privacyEmail}</a>.
+  </p>
+
+  <h2 id="retention">7. How long we keep it</h2>
+  <ul>
+    <li><strong>Workspace content</strong> — until it is deleted. Deleting a message blanks its
+      content and marks it deleted; channels with disappearing messages drop content on their
+      own timer.</li>
+    <li><strong>Your account</strong> — until you ask us to delete it, after which the account
+      and its personal data are removed. Content you posted in shared channels may be retained
+      in de-identified form where removing it would destroy other people's conversations; say
+      so in your request if you want it purged too.</li>
+    <li><strong>Backups</strong> — rolling, and overwritten within 30 days, so a deletion may
+      persist in a backup for that window before it ages out.</li>
+    <li><strong>Server logs</strong> — up to 30 days.</li>
+    <li><strong>Password-reset tokens</strong> — one hour, stored only as a SHA-256 hash, and
+      invalidated the moment they are used.</li>
+    <li><strong>Sign-in handoff codes</strong> — 60 seconds, single use.</li>
+    <li><strong>Push tokens</strong> — until you disable notifications or the device stops
+      accepting them, at which point they are pruned automatically.</li>
+    <li><strong>Call metadata</strong> — for the lifetime of the room; rooms are ephemeral and
+      vanish when the last participant leaves.</li>
+  </ul>
+
+  <h2 id="security">8. Security</h2>
+  <p>
+    Traffic is TLS-encrypted end to end at the transport layer. Passwords are hashed with
+    Argon2 and are not recoverable — nobody, including us, can read them or reset them to a
+    value we know. Sessions are signed tokens with a fixed expiry. Access to workspace
+    content is authorised per channel and per document on every request, including for the AI
+    assistant. Optional end-to-end encrypted DMs use per-device X25519 and Ed25519 keys, so
+    the server holds only ciphertext.
+  </p>
+  <p>
+    No system is perfectly secure. If we become aware of a breach affecting your personal
+    data we will notify the Italian supervisory authority within 72 hours where the GDPR
+    requires it, and notify you directly where the risk to you is high. To report a
+    vulnerability, email <a href={`mailto:${legalEmail}`}>{legalEmail}</a> rather than opening
+    a public issue.
+  </p>
+
+  <h2 id="storage">9. Cookies and local storage</h2>
+  <p>
+    The website sets nothing at all. The app is not cookie-based either: your session token
+    and your interface preferences live in your browser's local storage under
+    <code>sharp.*</code> keys, and clearing site data signs you out and resets them. The only
+    cookie the app uses is a short-lived, HttpOnly one set during a social sign-in to protect
+    that flow against cross-site request forgery. Both are strictly necessary, so neither
+    needs a consent banner — which is why you are not seeing one.
+  </p>
+
+  <h2 id="rights">10. Your rights</h2>
+  <p>Under the GDPR you may, at any time:</p>
+  <ul>
+    <li>ask what we hold about you and get a copy (<strong>access</strong>, Art. 15);</li>
+    <li>have inaccurate data corrected (<strong>rectification</strong>, Art. 16);</li>
+    <li>have your data deleted (<strong>erasure</strong>, Art. 17);</li>
+    <li>have processing limited while a dispute is resolved (<strong>restriction</strong>, Art. 18);</li>
+    <li>receive your data in a portable, machine-readable form (<strong>portability</strong>, Art. 20);</li>
+    <li><strong>object</strong> to processing based on legitimate interests (Art. 21);</li>
+    <li>withdraw any consent you gave, without affecting what was lawful before (Art. 7(3)).</li>
+  </ul>
+  <p>
+    Write to <a href={`mailto:${privacyEmail}`}>{privacyEmail}</a>. We reply within 30 days,
+    free of charge, and we may ask you to confirm control of the account's email address
+    before acting — not as an obstacle, but so we do not hand your data to someone else.
+  </p>
+  <p>
+    If you are unhappy with how we handled it you can complain to your local data protection
+    authority. In Italy that is the <em>Garante per la protezione dei dati personali</em>
+    (<a href="https://www.garanteprivacy.it" rel="noopener">garanteprivacy.it</a>).
+  </p>
+
+  <h2 id="children">11. Children</h2>
+  <p>
+    The services are not intended for anyone under 16, and we do not knowingly create accounts
+    for children. If you believe a child has registered on our instance, write to
+    <a href={`mailto:${privacyEmail}`}>{privacyEmail}</a> and we will delete the account and
+    its data.
+  </p>
+
+  <h2 id="selfhosted">12. Self-hosted deployments</h2>
+  <p>
+    This is the part most people are actually here for. When you run sharp yourself:
+  </p>
+  <ul>
+    <li>the software contains no analytics, no telemetry and no error reporting, and makes no
+      outbound request of its own accord;</li>
+    <li>every integration — email, AI, calendar, GitHub, GIFs, push, object storage — stays
+      inert until you set its environment variable, and the feature is hidden from the UI
+      until then;</li>
+    <li>we receive nothing: no ping, no licence check, no usage count. We cannot tell that your
+      instance exists;</li>
+    <li>you are the data controller for your users' data, and writing their privacy notice is
+      your job, not ours.</li>
+  </ul>
+  <p>
+    The claim above is verifiable rather than promised — the network-destination inventory
+    ships with the app and is
+    <a href={transparency} rel="noopener">kept in the repository</a>. Downloading a release
+    from GitHub is a request to GitHub, governed by their privacy policy, not ours.
+  </p>
+
+  <h2 id="changes">13. Changes to this policy</h2>
+  <p>
+    If the data flows change, this page changes with them, and the effective date at the top
+    moves. Material changes affecting the hosted instance are announced in the workspace
+    before they take effect. Because this site is open source, you can also read the exact
+    diff of any revision. Continuing to use the services after a change means you accept the
+    updated policy.
+  </p>
+  <p>
+    Questions: <a href={`mailto:${privacyEmail}`}>{privacyEmail}</a> · Terms:
+    <a href="/terms">Terms of Service</a> · The instance:
+    <a href={appUrl} rel="noopener">{appUrl.replace("https://", "")}</a>
+  </p>
+</Legal>

@@ -376,6 +376,7 @@ export type GardenMap = {
   version: number
   tile_size: number
   spawn: { x: number; y: number }
+  temple: { x: number; y: number }
   rooms: GardenRoom[]
 }
 
@@ -389,6 +390,7 @@ export type GardenPeer = {
   y: number
   facing: 'up' | 'down' | 'left' | 'right'
   moving: boolean
+  zen_mode: boolean
   seq: number
 }
 

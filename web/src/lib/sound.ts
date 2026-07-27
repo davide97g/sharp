@@ -621,6 +621,118 @@ function previewTick() {
   })
 }
 
+// ── Garden ─────────────────────────────────────────────────────────────────
+// Short, Game Boy-adjacent cues. They still pass through the shared limiter and
+// global sound preferences, so Garden never becomes a second competing mixer.
+
+function gardenStep() {
+  play('garden.step', 145, (context, t0, out) => {
+    const lowpass = context.createBiquadFilter()
+    lowpass.type = 'lowpass'
+    lowpass.frequency.value = 340
+    lowpass.connect(out)
+    tone(context, lowpass, t0, {
+      freq: 118,
+      freqEnd: 82,
+      type: 'triangle',
+      attack: 0.002,
+      decay: 0.045,
+      peak: 0.055,
+    })
+  })
+}
+
+function gardenBump() {
+  play('garden.bump', 190, (context, t0, out) => {
+    tone(context, out, t0, {
+      freq: 132,
+      freqEnd: 72,
+      type: 'square',
+      attack: 0.002,
+      decay: 0.075,
+      peak: 0.06,
+    })
+  })
+}
+
+function gardenJump() {
+  play('garden.jump', 180, (context, t0, out) => {
+    tone(context, out, t0, {
+      freq: 260,
+      freqEnd: 710,
+      type: 'square',
+      attack: 0.003,
+      decay: 0.13,
+      peak: 0.055,
+    })
+  })
+}
+
+function gardenLand() {
+  play('garden.land', 180, (context, t0, out) => {
+    tone(context, out, t0, {
+      freq: 145,
+      freqEnd: 72,
+      type: 'triangle',
+      attack: 0.002,
+      decay: 0.11,
+      peak: 0.08,
+    })
+  })
+}
+
+function gardenInteract() {
+  playNotes(
+    'garden.interact',
+    120,
+    [
+      { freq: 659.25, at: 0 },
+      { freq: 987.77, at: 0.055 },
+    ],
+    { volume: 0.07, decay: 0.13, wave: 'square' },
+  )
+}
+
+function gardenRoomCreate() {
+  playNotes(
+    'garden.create',
+    250,
+    [
+      { freq: 523.25, at: 0 },
+      { freq: 659.25, at: 0.07 },
+      { freq: 783.99, at: 0.14 },
+    ],
+    { volume: 0.075, decay: 0.18, wave: 'triangle' },
+  )
+}
+
+function gardenTeleport() {
+  play('garden.teleport', 500, (context, t0, out) => {
+    for (let index = 0; index < 7; index += 1) {
+      tone(context, out, t0 + index * 0.045, {
+        freq: 410 + index * 105,
+        type: 'square',
+        attack: 0.002,
+        decay: 0.1,
+        peak: 0.04,
+      })
+    }
+  })
+}
+
+function gardenZen() {
+  playNotes(
+    'garden.zen',
+    500,
+    [
+      { freq: 261.63, at: 0 },
+      { freq: 392, at: 0.12 },
+      { freq: 523.25, at: 0.28 },
+    ],
+    { volume: 0.065, decay: 0.5, wave: 'sine' },
+  )
+}
+
 // ── Existing notification-family sounds (character preserved) ──────────────
 
 /** A cute two-note chime for an incoming notification (E6 → B6). */
@@ -689,6 +801,17 @@ export const sound = {
   toastError,
   // settings preview
   previewTick,
+  // garden
+  garden: {
+    step: gardenStep,
+    bump: gardenBump,
+    jump: gardenJump,
+    land: gardenLand,
+    interact: gardenInteract,
+    roomCreate: gardenRoomCreate,
+    teleport: gardenTeleport,
+    zen: gardenZen,
+  },
   // notification family
   notify: playNotifySound,
   voiceJoin: playVoiceJoinSound,

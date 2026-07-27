@@ -4,6 +4,7 @@ import { api, getServerUrl, oauthStartUrl, setServerUrl } from '../lib/api'
 import { ApiRequestError } from '../lib/api'
 import type { OAuthConfig } from '../lib/types'
 import { startBrowserLogin } from '../lib/desktopAuth'
+import { PRIVACY_URL, TERMS_URL } from '../lib/legal'
 import { useStore } from '../store'
 import { toastError } from '../lib/toast'
 import { SESSION_KEYS, writeSession } from '../lib/localPrefs'
@@ -741,8 +742,42 @@ export function Login() {
             </div>
           )}
         </div>
+
+        <LegalFooter />
       </main>
     </div>
+  )
+}
+
+/**
+ * Outward links to the project's public policies.
+ *
+ * Deliberately worded as *the sharp project's* documents: this build may be
+ * signing you in to somebody else's server, and those policies cover the
+ * operator's own services only (see `lib/legal.ts`).
+ */
+function LegalFooter() {
+  return (
+    <footer className="relative mt-8 shrink-0 text-center text-xs text-[var(--color-text-faint)]">
+      sharp project ·{' '}
+      <a
+        href={PRIVACY_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="transition-colors hover:text-[var(--color-accent-hover)] hover:underline"
+      >
+        Privacy
+      </a>{' '}
+      ·{' '}
+      <a
+        href={TERMS_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="transition-colors hover:text-[var(--color-accent-hover)] hover:underline"
+      >
+        Terms
+      </a>
+    </footer>
   )
 }
 
