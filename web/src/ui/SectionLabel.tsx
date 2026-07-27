@@ -21,6 +21,9 @@ export interface SectionLabelProps {
   as?: ElementType
   className?: string
   children: ReactNode
+  // Pass-through (`id`, `aria-*`) so a label can name the section it heads.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [key: string]: any
 }
 
 export function SectionLabel({
@@ -29,10 +32,14 @@ export function SectionLabel({
   as = 'h3',
   className,
   children,
+  ...rest
 }: SectionLabelProps) {
   return createElement(
     as,
-    { className: cn('font-semibold uppercase tracking-wider', tones[tone], sizes[size], className) },
+    {
+      className: cn('font-semibold uppercase tracking-wider', tones[tone], sizes[size], className),
+      ...rest,
+    },
     children,
   )
 }

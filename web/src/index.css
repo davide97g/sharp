@@ -483,7 +483,7 @@ body {
 
 .home-identity h1 {
   margin: 0;
-  color: rgb(230 230 234 / 90%);
+  color: color-mix(in srgb, var(--color-text) 90%, transparent);
   font-size: clamp(2.75rem, 5vw, 4rem);
   font-weight: 720;
   line-height: 0.95;
@@ -567,7 +567,7 @@ body {
   border: 1px solid var(--color-border);
   border-bottom-color: var(--color-kbd-edge);
   border-radius: 0.3rem;
-  background: rgb(28 28 34 / 74%);
+  background: color-mix(in srgb, var(--color-panel-2) 74%, transparent);
   color: var(--color-text-faint);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.62rem;
@@ -591,7 +591,7 @@ body {
   position: relative;
   border: 1px solid color-mix(in srgb, var(--color-accent-hover) 18%, transparent);
   border-radius: 0.85rem;
-  background: rgb(23 23 28 / 72%);
+  background: color-mix(in srgb, var(--color-panel) 72%, transparent);
   padding: 0.75rem;
   box-shadow:
     0 1.5rem 4rem rgb(0 0 0 / 18%),
@@ -721,6 +721,114 @@ body {
   padding: 0.23rem 0.4rem;
 }
 
+/* Console mode — the same screen once you have history in the workspace. The
+   hero shrinks to a header, the ambient field steps back so the board (which is
+   all real, clickable content) owns the contrast, and the column widens to hold
+   three lanes. */
+.home-welcome-console {
+  background:
+    radial-gradient(
+      circle at 50% 0%,
+      color-mix(in srgb, var(--color-accent) 7%, transparent),
+      transparent 26rem
+    ),
+    var(--color-ink);
+}
+
+.home-welcome-console .home-grid {
+  opacity: 0.5;
+}
+
+.home-welcome-console .home-signals {
+  opacity: 0.4;
+}
+
+.home-welcome-console .home-welcome-content {
+  width: min(66rem, calc(100% - 3rem));
+  padding: 2rem 0 2.5rem;
+}
+
+.home-console-header {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 0.9rem;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.home-console-header h1 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 1.3rem;
+  font-weight: 720;
+  letter-spacing: -0.06em;
+  line-height: 1;
+}
+
+/* Tabular figures: the counts change every visit and must not shift the line. */
+.home-console-status {
+  margin: 0 0 0 auto;
+  color: var(--color-text-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Two-class selectors on purpose: the short-viewport block below also resizes
+   `.home-mark`, and the header mark must stay header-sized there too. */
+.home-console-header .home-mark {
+  width: 2.35rem;
+  height: 2.35rem;
+  margin: 0;
+}
+
+.home-console-header .home-mark::before {
+  inset: 14%;
+  border-radius: 0.5rem;
+  box-shadow: 0 0 1.25rem color-mix(in srgb, var(--color-accent) 16%, transparent);
+}
+
+.home-console-header .home-mark-glyph {
+  font-size: 1.6rem;
+  opacity: 0.5;
+  text-shadow: 0 0 0.75rem color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+
+.home-console-header .home-mark-orbit-outer {
+  inset: -0.15rem;
+}
+
+.home-strip {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.35rem;
+  margin-top: 0.9rem;
+}
+
+.home-board {
+  margin-top: 1.9rem;
+  text-align: left;
+}
+
+/* The only live element on the board: something on the calendar is imminent. */
+.home-pulse {
+  display: block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--color-accent-hover);
+  animation: home-pulse 2.6s ease-out infinite;
+}
+
+@keyframes home-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 55%, transparent); }
+  70% { box-shadow: 0 0 0 0.5rem transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
 @keyframes home-orbit {
   to { transform: rotate(360deg); }
 }
@@ -734,6 +842,10 @@ body {
 @media (max-width: 1040px) {
   .home-welcome-content {
     width: min(36rem, calc(100% - 2rem));
+  }
+
+  .home-welcome-console .home-welcome-content {
+    width: calc(100% - 2rem);
   }
 
   .home-quick-grid {
@@ -767,7 +879,8 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .home-mark-orbit,
-  .home-signal {
+  .home-signal,
+  .home-pulse {
     animation: none;
   }
 

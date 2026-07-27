@@ -49,6 +49,7 @@ These hold across every feature. Breaking one compiles fine and fails in product
 | Social sign-in (Google, GitHub) | `social_oauth.rs` (protocol), `routes/social_auth.rs` (policy) | `components/OauthCallback.tsx`, `components/auth/ProviderMark.tsx`, `settings/AccountsTab.tsx` | [01-core](arch/01-core.md) |
 | Channels, members, roles | `routes/channels.rs` | `components/Sidebar.tsx`, `ChannelSettingsModal.tsx` | [01-core](arch/01-core.md) |
 | Messages, threads, reactions, search | `routes/messages.rs`, `routes/search.rs` | `components/MessagePane.tsx`, `MessageItem.tsx`, `Composer.tsx` | [01-core](arch/01-core.md) |
+| Home screen: resume rail + "what moved" board | — (reads `/docs/recent`, `/calendar/events`; everything else is already-loaded store state) | `components/Home.tsx`, `components/home/`, `lib/recents.ts` | [01-core](arch/01-core.md) |
 | Realtime fanout, presence, typing | `ws/mod.rs`, `ws/session.rs` | `lib/ws.ts`, `lib/wsEvents.ts` | [01-core](arch/01-core.md) |
 | Docs (BlockNote/Yjs) | `routes/docs.rs`, `docs_sync.rs` | `components/docs/`, `lib/docSync.ts` | [02-docs](arch/02-docs.md) |
 | Canvas, Boards | same as docs (`kind` column) | `components/canvas/`, `components/board/`, `lib/tldrawYjs.ts`, `lib/boardDoc.ts` | [03-canvas-board](arch/03-canvas-board.md) |

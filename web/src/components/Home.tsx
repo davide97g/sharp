@@ -1,14 +1,24 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Kbd } from '../ui'
+import { Button, Kbd } from '../ui'
 import { useIsMobile } from '../lib/useMediaQuery'
+import { chordFor, formatChord } from '../lib/shortcuts'
 import { useStore } from '../store'
 import { Sidebar } from './Sidebar'
+import { HomeBoard, UpNextBanner } from './home/HomeBoard'
+import { useActiveConversations, useMyOpenTasks, useResume } from './home/homeData'
 
 const SIGNALS = Array.from({ length: 12 })
 
 export function Home() {
   const isMobile = useIsMobile()
+  // Mobile home is the channel list itself; the board below is a desktop
+  // surface, so it never mounts (and never fetches) on phones.
+  if (isMobile) return <Sidebar variant="mobile" />
+  return <HomeDesktop />
+}
+
+function HomeDesktop() {
   const navigate = useNavigate()
   const setQuickSwitcher = useStore((state) => state.setQuickSwitcher)
   const setSearchOpen = useStore((state) => state.setSearchOpen)
@@ -18,9 +28,12 @@ export function Home() {
   const [question, setQuestion] = useState('')
   const [previewMessage, setPreviewMessage] = useState('')
 
-  if (isMobile) {
-    return <Sidebar variant="mobile" />
-  }
+  // The screen has two states, and which one you get is a fact about you rather
+  // than a setting: an empty workspace gets the full welcome, a workspace you
+  // have history in gets the board and a header-sized identity.
+  const resume = useResume()
+  const conversations = useActiveConversations()
+  const returning = resume.length > 0 || conversations.length > 0
 
   function submitSharpy(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -36,7 +49,7 @@ export function Home() {
   }
 
   return (
-    <div className="home-welcome">
+    <div className={`home-welcome ${returning ? 'home-welcome-console' : ''}`}>
       <div className="home-grid" aria-hidden="true" />
       <div className="home-signals" aria-hidden="true">
         {SIGNALS.map((_, index) => (
@@ -45,50 +58,43 @@ export function Home() {
       </div>
 
       <main className="home-welcome-content">
-        <section className="home-identity" aria-labelledby="home-title">
-          <div className="home-mark" aria-hidden="true">
-            <span className="home-mark-orbit home-mark-orbit-outer" />
-            <span className="home-mark-orbit home-mark-orbit-inner" />
-            <span className="home-mark-glyph">#</span>
+        {returning ? <ConsoleHeader /> : <WelcomeIdentity />}
+
+        {returning && <UpNextBanner />}
+
+        {!returning && (
+          <div className="home-quick-grid">
+            <section aria-labelledby="home-start-title">
+              <h2 id="home-start-title">Start</h2>
+              <WelcomeAction
+                icon={<MessageIcon />}
+                label="Jump to a conversation"
+                shortcut={formatChord(chordFor('palette.open'))}
+                onClick={() => setQuickSwitcher(true)}
+              />
+              <WelcomeAction
+                icon={<SearchIcon />}
+                label="Search every message"
+                shortcut={formatChord(chordFor('search.open'))}
+                onClick={() => setSearchOpen(true)}
+              />
+            </section>
+
+            <section aria-labelledby="home-explore-title">
+              <h2 id="home-explore-title">Explore</h2>
+              <WelcomeAction
+                icon={<DocumentIcon />}
+                label="Open workspace docs"
+                onClick={() => navigate('/docs')}
+              />
+              <WelcomeAction
+                icon={<CanvasIcon />}
+                label="Open a shared canvas"
+                onClick={() => navigate('/canvas')}
+              />
+            </section>
           </div>
-          <p className="home-kicker">Your workspace is ready</p>
-          <h1 id="home-title">sharp</h1>
-          <p className="home-tagline">
-            Conversations, docs, and ideas. Pick up anywhere.
-          </p>
-        </section>
-
-        <div className="home-quick-grid">
-          <section aria-labelledby="home-start-title">
-            <h2 id="home-start-title">Start</h2>
-            <WelcomeAction
-              icon={<MessageIcon />}
-              label="Jump to a conversation"
-              shortcut="⌘K"
-              onClick={() => setQuickSwitcher(true)}
-            />
-            <WelcomeAction
-              icon={<SearchIcon />}
-              label="Search every message"
-              shortcut="⌘F"
-              onClick={() => setSearchOpen(true)}
-            />
-          </section>
-
-          <section aria-labelledby="home-explore-title">
-            <h2 id="home-explore-title">Explore</h2>
-            <WelcomeAction
-              icon={<DocumentIcon />}
-              label="Open workspace docs"
-              onClick={() => navigate('/docs')}
-            />
-            <WelcomeAction
-              icon={<CanvasIcon />}
-              label="Open a shared canvas"
-              onClick={() => navigate('/canvas')}
-            />
-          </section>
-        </div>
+        )}
 
         <form className="ask-sharpy" onSubmit={submitSharpy}>
           <label htmlFor="ask-sharpy-input" className="ask-sharpy-label">
@@ -118,12 +124,91 @@ export function Home() {
           </p>
         </form>
 
+        {returning && (
+          <>
+            <div className="home-strip">
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => setQuickSwitcher(true)}
+                iconRight={<Kbd>{formatChord(chordFor('palette.open'))}</Kbd>}
+              >
+                Jump to…
+              </Button>
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => setSearchOpen(true)}
+                iconRight={<Kbd>{formatChord(chordFor('search.open'))}</Kbd>}
+              >
+                Search
+              </Button>
+              <Button variant="ghost" size="xs" onClick={() => navigate('/docs')}>
+                Docs
+              </Button>
+              <Button variant="ghost" size="xs" onClick={() => navigate('/canvas')}>
+                Canvas
+              </Button>
+            </div>
+            <HomeBoard />
+          </>
+        )}
+
         <p className="home-sidebar-hint">
-          <Kbd>\</Kbd>
+          <Kbd>{formatChord(chordFor('sidebar.toggle'))}</Kbd>
           <span>Toggle sidebar</span>
         </p>
       </main>
     </div>
+  )
+}
+
+/** First-run identity: the mark at full size, because there is nothing else yet. */
+function WelcomeIdentity() {
+  return (
+    <section className="home-identity" aria-labelledby="home-title">
+      <div className="home-mark" aria-hidden="true">
+        <span className="home-mark-orbit home-mark-orbit-outer" />
+        <span className="home-mark-orbit home-mark-orbit-inner" />
+        <span className="home-mark-glyph">#</span>
+      </div>
+      <p className="home-kicker">Your workspace is ready</p>
+      <h1 id="home-title">sharp</h1>
+      <p className="home-tagline">Conversations, docs, and ideas. Pick up anywhere.</p>
+    </section>
+  )
+}
+
+/**
+ * Returning identity: the same mark, shrunk to a header, with a status line of
+ * the counts that decide what you do next. Zero counts drop out rather than
+ * reading "0 unread" — an empty segment is noise.
+ */
+function ConsoleHeader() {
+  const channels = useStore((state) => state.channels)
+  const tasks = useMyOpenTasks()
+  const unread = channels.reduce((n, channel) => n + (channel.unread_count ? 1 : 0), 0)
+
+  const today = new Date().toLocaleDateString(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  })
+  const status = [
+    today,
+    unread ? `${unread} unread` : null,
+    tasks.length ? `${tasks.length} open ${tasks.length === 1 ? 'task' : 'tasks'}` : null,
+  ].filter(Boolean)
+
+  return (
+    <header className="home-console-header">
+      <div className="home-mark" aria-hidden="true">
+        <span className="home-mark-orbit home-mark-orbit-outer" />
+        <span className="home-mark-glyph">#</span>
+      </div>
+      <h1>sharp</h1>
+      <p className="home-console-status">{status.join(' · ')}</p>
+    </header>
   )
 }
 

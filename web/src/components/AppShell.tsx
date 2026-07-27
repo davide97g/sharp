@@ -27,6 +27,7 @@ import { CountBadge, Skeleton } from '../ui'
 
 import { registerShortcut } from '../lib/shortcuts'
 import { byFrecency } from '../lib/frecency'
+import { useRecentTracker } from '../lib/recents'
 import { ShortcutsModal } from './ShortcutsModal'
 
 function RouteFallback() {
@@ -76,6 +77,9 @@ export function AppShell() {
     () => readLocal(KEYS.sidebarOpen) !== 'false',
   )
   const [onboarding, setOnboarding] = useState(() => !isOnboardingDone())
+
+  // Logs what you opened for the home "Pick up where you left off" rail.
+  useRecentTracker(location.pathname)
 
   const docsMode =
     location.pathname.startsWith('/docs') || location.pathname.startsWith('/d/')

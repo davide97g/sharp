@@ -40,6 +40,10 @@ export const KEYS = {
   onboarding: 'sharp.onboarding.v1',
   /** Quick-switcher frecency table — high-churn, deliberately not synced. */
   frecency: 'sharp.frecency',
+  /** Ordered trail of what this device opened, for the home "Pick up" rail.
+   *  Same reasoning as `frecency`: high-churn, device-scoped, and a snapshot of
+   *  labels rather than data the server owns. */
+  recents: 'sharp.recents.v1',
   /** Mic denoising: depends on the physical mic, so device-local. */
   noiseSuppression: 'sharp.noiseSuppression',
   /** Streaming (privacy shield) manual toggle and its nickname-revert option. */
