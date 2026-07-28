@@ -499,7 +499,11 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
               if (s.voice.client !== activeBeforeLeave.client) return {}
               const remoteScreenStreams = { ...s.voice.remoteScreenStreams }
               delete remoteScreenStreams[p.conn_id]
-              return { voice: { ...s.voice, remoteScreenStreams } }
+              // Drop this listener's floor override too: a conn id never comes back,
+              // so keeping it would only leak into the next reset layout.
+              const spatialPositions = { ...s.voice.spatialPositions }
+              delete spatialPositions[p.conn_id]
+              return { voice: { ...s.voice, remoteScreenStreams, spatialPositions } }
             })
           }
         }

@@ -111,9 +111,11 @@ export function storedNoiseSuppression(): boolean {
   return readLocalBool(KEYS.noiseSuppression, true)
 }
 
-// Spatial view is a per-device viewing choice (it changes what YOU hear, not what the
-// room broadcasts), so it lives next to the other device-local call prefs. Off by
-// default — plain stereo is what people expect when they join a call.
+// Spatial view is a per-device choice through and through: the floor plan, the panning,
+// and (since positions became local overrides) the layout itself. It lives next to the
+// other device-local call prefs. Off by default — plain stereo is what people expect
+// when they join a call. The positions themselves are not persisted: an arrangement
+// belongs to the call you built it in.
 export function saveVoiceSpatial(enabled: boolean) {
   writeLocalBool(KEYS.voiceSpatial, enabled)
 }
@@ -154,6 +156,8 @@ export function emptyVoiceState(): VoiceState {
     screenStatus: 'off',
     stageMode: 'expanded',
     spatial: storedVoiceSpatial(),
+    spatialPositions: {},
+    spatialOverShare: false,
     audioDeviceId: null,
     videoDeviceId: null,
     localStream: null,

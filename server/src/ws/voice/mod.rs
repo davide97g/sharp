@@ -334,7 +334,6 @@ pub async fn handle_voice_event(
         }
         "voice.transcribe" => handle_transcribe(state, conn_id, &payload, tx).await,
         "voice.aura" => handle_aura(state, conn_id, &payload, tx).await,
-        "voice.move" => handle_move(state, conn_id, &payload).await,
         "voice.phrase" => handle_phrase(state, conn_id, &payload, tx).await,
         "voice.camera" => handle_camera(state, conn_id, &payload, tx).await,
         "voice.screen" => handle_screen(state, conn_id, &payload, tx).await,
@@ -896,66 +895,6 @@ async fn handle_aura(state: &SharedState, conn_id: Uuid, payload: &Value, tx: &W
     };
 
     broadcast_participant_updated(state, channel_id, participant).await;
-}
-
-/// Spatial-room movement. Deliberately quiet and light: coordinates arrive at
-/// pointer/keyboard rate, so a move broadcasts a 4-field `voice.participant_moved`
-/// rather than the whole participant, and a move from a connection that already
-/// left is dropped without an error (the client throttles, the leave races it).
-///
-/// Anyone in the room may move anyone else (`conn_id` in the payload, defaulting to
-/// the sender). The floor is a shared object like a whiteboard — pulling someone
-/// into your huddle is the point — so the only check is that both ends are in this
-/// room.
-async fn handle_move(state: &SharedState, conn_id: Uuid, payload: &Value) {
-    let Some(channel_id) = channel_id(payload) else {
-        return;
-    };
-    let (Some(x), Some(y)) = (
-        payload.get("x").and_then(Value::as_f64),
-        payload.get("y").and_then(Value::as_f64),
-    ) else {
-        return;
-    };
-    if !x.is_finite() || !y.is_finite() {
-        return;
-    }
-    let (x, y) = (clamp_unit(x), clamp_unit(y));
-    let target = uuid_field(payload, "conn_id").unwrap_or(conn_id);
-
-    let moved = {
-        let mut guard = state.voice_rooms.lock().unwrap();
-        match guard.get_mut(&channel_id) {
-            // The mover must be in the room too, or a stale connection could shove
-            // people around a call it already left.
-            Some(room) if room.participants.contains_key(&conn_id) => {
-                room.participants.get_mut(&target).and_then(|participant| {
-                    if participant.garden_active {
-                        return None;
-                    }
-                    participant.pos_x = x;
-                    participant.pos_y = y;
-                    Some(())
-                })
-            }
-            _ => None,
-        }
-    };
-    if moved.is_none() {
-        return;
-    }
-
-    let targets = voice_targets(state, channel_id, &[]).await;
-    let event = envelope(
-        "voice.participant_moved",
-        json!({
-            "channel_id": channel_id.to_string(),
-            "conn_id": target.to_string(),
-            "x": x,
-            "y": y,
-        }),
-    );
-    state.hub.broadcast(event, targets).await;
 }
 
 /// Garden owns spatial positions while a participant walks inside a channel

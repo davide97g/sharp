@@ -147,8 +147,10 @@ returns everyone to the hub. No Garden movement or visit history is persisted.
   (`sharp.gardenAudio`). Camera remains off. If another call is active, Garden preserves it and
   shows a conflict message.
 - Garden-owned calls use `voice.join {garden_active:true}`. While this flag is set, Garden
-  movement is the sole writer of that voice participant's normalized spatial coordinates;
-  direct `voice.move` attempts are ignored. Exiting to the hub leaves only a Garden-owned call.
+  movement is the sole writer of that voice participant's normalized spatial coordinates — the
+  only shared floor left, since call-view arrangements are per listener (`docs/arch/04-voice.md`).
+  A listener in the call view may still place a Garden walker somewhere else in their own mix.
+  Exiting to the hub leaves only a Garden-owned call.
 - The existing collapsible/resizable `VideoStage` remains the call UI, so chat, docs, canvas,
   and Garden stay usable beneath it.
 

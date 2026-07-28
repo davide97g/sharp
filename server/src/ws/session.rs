@@ -251,7 +251,6 @@ fn is_client_voice_event(event_type: &str) -> bool {
             | "voice.phrase"
             | "voice.hand"
             | "voice.aura"
-            | "voice.move"
             | "voice.react"
             | "voice.poll_create"
             | "voice.poll_vote"
@@ -276,9 +275,17 @@ mod tests {
     /// Every client-sendable `voice.*` event in docs/arch/04-voice.md must be
     /// listed here or it dies before any voice-level validation runs.
     #[test]
-    fn spatial_and_reaction_events_reach_voice_handler() {
-        assert!(is_client_voice_event("voice.move"));
+    fn reaction_and_aura_events_reach_voice_handler() {
         assert!(is_client_voice_event("voice.react"));
+        assert!(is_client_voice_event("voice.aura"));
+    }
+
+    /// Spatial call positions are a per-listener choice now, so there is no client
+    /// event that moves anyone: Garden owns the only shared floor (`garden.move`).
+    #[test]
+    fn there_is_no_client_move_event() {
+        assert!(!is_client_voice_event("voice.move"));
+        assert!(is_client_garden_event("garden.move"));
     }
 
     #[test]

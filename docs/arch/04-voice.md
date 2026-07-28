@@ -56,7 +56,7 @@ Client → server:
 - `voice.mute` `{channel_id, muted: boolean}`
 - `voice.force_mute` `{channel_id, conn_id}` — mute **someone else's** microphone for the
   whole room. Muting only: there is no force-unmute, so a payload can silence a mic but never
-  open one, and the target unmutes themselves with `voice.mute`. Like `voice.move`, **any
+  open one, and the target unmutes themselves with `voice.mute`. **Any
   participant may force-mute any other** (both ends must be in the room) — a room where only a
   nominated host can close an unattended open mic stays unusable. Idempotent: an already-muted
   target changes nothing and broadcasts nothing. A raised hand survives (only unmuting lowers a
@@ -79,16 +79,9 @@ Client → server:
   `helios|mercury|voiceprint|kinetic-type|eclipse`; an absent/unknown value clears the broadcast
   (`aura_style=null`, viewers fall back to their own local style). Also sent as `aura_style` on
   `voice.join`. Broadcasts `voice.participant_updated`.
-- `voice.move` `{channel_id, x: number, y: number, conn_id?: string}` — set a position on the
-  spatial floor. Coordinates are normalized (`x` left→right, `y` top→bottom), non-finite values
-  are rejected and everything else is clamped to `[0,1]`. `conn_id` defaults to the sender;
-  **any participant may move any other participant** in the same room (both ends must currently
-  be in it), because the floor is shared furniture. Broadcasts the light
-  `voice.participant_moved` (not `participant_updated`). A move from a connection that is no
-  longer in the room is dropped silently — no `voice.error`, because a leave routinely races
-  the last throttled move. Guests may send it.
-  A target participant with `garden_active=true` ignores direct `voice.move`; its coordinates
-  are updated from accepted `garden.move` events instead.
+- **There is no `voice.move`.** Positions on the spatial call floor are a per-listener choice
+  that never leaves the device (see "Spatial view and positional audio"), so no client event
+  moves anyone. The only shared floor is Garden's, written by `garden.move`.
 - `voice.poll_create` `{room_id, question, options, multi, expires_at?}`
 - `voice.poll_vote` `{room_id, poll_id, option_ids}` — an empty option list retracts the vote.
 - `voice.poll_close` `{room_id, poll_id}` — creator only.
@@ -126,7 +119,9 @@ Server → client:
   their pick; `null` falls back to the viewer's own local style. One of
   `helios|mercury|voiceprint|kinetic-type|eclipse` (validated server-side; unknown values become `null`).
   `hand_raised_at` is Unix epoch milliseconds set when the hand was raised and `null` while lowered.
-  `pos_x`/`pos_y` are the participant's normalized position on the spatial floor.
+  `pos_x`/`pos_y` are the participant's normalized position on the spatial floor: the spawn
+  position every listener starts them at, and — for `garden_active` participants — where Garden
+  has walked them. Each client may override it locally without telling anyone.
   `display_name` is filled server-side for everyone (users from the `users` table,
   guests from their token) so clients can render names without `/users` access; `guest`
   marks public voice-link joiners.
@@ -141,7 +136,9 @@ Server → client:
   the room audience after mute, transcription, camera, screen-share, or raise-hand state
   changes.
 - `voice.participant_moved` `{channel_id, conn_id, x, y}` — broadcast to the room audience after
-  a `voice.move`. Deliberately smaller than `participant_updated`: it travels at pointer rate.
+  an accepted `garden.move` changed a Garden-owned participant's coordinates. Deliberately
+  smaller than `participant_updated`: it travels at walking rate. Garden is now its only
+  source; call-floor arrangements are local and broadcast nothing.
 - `voice.roast_armed` `{channel_id, armed: boolean}` — broadcast to the room audience when
   three phrases with gaps of at most 20 seconds arm a voice roast, and with `armed=false`
   after a successful voice GIF suggestion consumes it.
@@ -193,11 +190,9 @@ Server → client:
   from the centre that skips any point within 0.11 of someone already standing there, so
   arrivals never stack. No RNG — the spawn is a pure function of who is already in the room. Demoting a registered participant to channel viewer removes all of that
   user's connections from the room immediately.
-- `voice.move`: require the *sender* to be in the room (else a stale connection could shove
-  people around a call it already left), clamp and store on the target conn, broadcast
-  `voice.participant_moved`. Positions are room state
-  and therefore always broadcast, whether or not any client is currently in the spatial view —
-  the server has no notion of who is looking at the floor plan.
+- Positions: the server only ever *spawns* a participant (`spawn_position`) and lets Garden walk
+  them (`garden.move` → `set_garden_position` → `voice.participant_moved`). Nothing else writes
+  `pos_x`/`pos_y`, and there is no client event that moves someone in another listener's mix.
 - **Broadcast targeting**: every voice broadcast (`participant_joined`/`left`/`updated`/`moved` and
   `voice.roast_armed`)
   targets the **union** of the channel's member ids and the user-ids currently in the room's
@@ -210,7 +205,8 @@ Server → client:
   the change is an unmute (`muted=false`) and the participant's hand is raised, also clear
   `hand_raised`/`hand_raised_at` in the same participant snapshot so a single
   `voice.participant_updated` carries both changes.
-- `voice.force_mute`: require the *sender* to be in the room (same reasoning as `voice.move`),
+- `voice.force_mute`: require the *sender* to be in the room (else a stale connection could
+  silence people in a call it already left),
   then set the target's `muted=true` and broadcast `voice.participant_updated` followed by
   `voice.force_muted`. A target that is already muted, or absent, is a silent no-op. The
   target's client mutes its own microphone off the roster update — force-mute needs no
@@ -352,14 +348,23 @@ Meet-style ephemeral emoji, wired through `voice.react` / `voice.reaction` above
 
 ## Spatial view and positional audio
 
-- **The floor plan is shared; the panning is not.** Positions live in the room (`pos_x`/`pos_y`,
-  `voice.move`), so everyone sees the same layout. Whether you *hear* the room spatially is a
-  device-local preference (`sharp.voiceSpatial`), toggled from the call header.
+- **The whole arrangement is per listener.** Dragging someone re-aims their voice in *your* mix
+  and nothing else: the same call can be laid out differently on every device, and no event is
+  sent. Two layers resolve a position — this device's override
+  (`voice.spatialPositions`, conn id → `{x, y}`, never persisted) falling back to the room's
+  `pos_x`/`pos_y`, which is the server's spawn position plus whatever Garden has walked. Whether
+  you *hear* the room spatially is the same device-local preference (`sharp.voiceSpatial`),
+  toggled from the call header.
 - Web: `web/src/components/voice/SpatialStage.tsx` draws the floor and moves you (drag, click the
   floor, or WASD/arrows; Shift for a larger step), and can drag anyone else the same way. The
-  store's `moveVoiceParticipant` (`moveVoiceSelf` targets your own conn) is the sole writer,
-  optimistic locally and throttled to one `voice.move` every 70 ms with a trailing send so the
-  resting position always lands.
+  store's `moveVoiceParticipant` (`moveVoiceSelf` targets your own conn) is the sole writer; it
+  records the override and pushes it straight into the audio engine, so a dragged avatar and its
+  panner track the pointer together. An override is dropped when that conn leaves, and the whole
+  map dies with the call.
+- **Reset positions** (`resetVoiceSpatial`, button above the floor) replaces every override at
+  once: you at the centre of the floor, everyone else evenly spaced on a ring inside zone 1
+  (`spatialZoneOneLayout` in `web/src/lib/spatial.ts`). It is the way back from an arrangement
+  you can no longer hear — every voice returns to near-full volume with the stereo image intact.
 - Audio: `web/src/lib/voice.ts` (`setSpatialAudio` / `setSpatialPosition`) routes each remote mic
   through `source → PannerNode → GainNode → destination` instead of straight out of its
   `<audio>` element. The element stays attached at `volume = 0` — Chrome only feeds a WebRTC
@@ -375,7 +380,13 @@ Meet-style ephemeral emoji, wired through `voice.react` / `voice.reaction` above
   (`SPATIAL_ZONE_RADII`) are a legend for that curve, not thresholds in it.
 - The positions are pushed into the audio engine by `useSpatialAudio`, mounted by `VideoStage`
   rather than the floor plan, so minimizing the call or going picture-in-picture keeps the
-  positional mix alive. A live screen share takes the stage back; the audio stays spatial.
+  positional mix alive.
+- **Spatial view vs a live screen share: three states, one button.** A share owns the stage by
+  default, so the header toggle walks *spatial off → spatial on, share still in front → floor in
+  front* (`voice.spatialOverShare`, transient). While the floor is in front the share is only
+  hidden: "Back to share" (or the share ending) hands the stage straight back, and because
+  panning never depended on what is on screen, arranging the room mid-share costs nothing in
+  either direction.
 - If the AudioContext or panner cannot be built, that peer falls back to plain element playback
   rather than going silent.
 
@@ -439,7 +450,7 @@ receives a limited guest JWT bound to that room — no chat, no other REST.
   `VoiceConfigAuth` to distinguish both token kinds; config/transcription succeed for guests
   while trigger management returns 403. On the main WS, a guest may only send `ping`
   plus `voice.join`, `voice.leave`, `voice.mute`, `voice.force_mute`, `voice.camera`, `voice.screen`,
-  `voice.hand`, `voice.aura`, `voice.move`, `voice.react`, `voice.transcribe`, and
+  `voice.hand`, `voice.aura`, `voice.react`, `voice.transcribe`, and
   `voice.phrase`, and only when the event's
   `channel_id` matches its bound channel. Remaining guest permissions are enforced by the
   voice handlers. Guest

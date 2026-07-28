@@ -126,6 +126,8 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
   const setVoiceStageMode = useStore((s) => s.setVoiceStageMode)
   const spatial = useStore((s) => s.voice.spatial)
   const setVoiceSpatial = useStore((s) => s.setVoiceSpatial)
+  const spatialOverShare = useStore((s) => s.voice.spatialOverShare)
+  const setSpatialOverShare = useStore((s) => s.setSpatialOverShare)
   const pushToTalk = useStore((s) => s.voice.pushToTalk)
   const setPushToTalkHeld = useStore((s) => s.setPushToTalkHeld)
   const toggleVoiceMute = useStore((s) => s.toggleVoiceMute)
@@ -343,6 +345,13 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
     })
 
   const activeScreen = screenShares[0] ?? null
+
+  // Holding the floor in front of a share is a decision about *that* share. Let it go
+  // when the share does, so the next one is not hidden by a stale choice.
+  useEffect(() => {
+    if (!activeScreen && spatialOverShare) setSpatialOverShare(false)
+  }, [activeScreen, spatialOverShare, setSpatialOverShare])
+
   const otherSharer = screenShares.find((share) => !share.local)
   const someoneElseSharing = Boolean(otherSharer)
   const otherSharerName = otherSharer
@@ -419,20 +428,58 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
   const headerBtnClass =
     'flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-dim)] outline-none hover:bg-[var(--color-panel)] hover:text-[var(--color-text)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]'
 
+  // Three states, not two, because a live screen share owns the stage by default:
+  // spatial off · spatial on with the share still in front · floor in front. Pressing
+  // the button walks that way, so arranging the room during a share is one click and
+  // never costs you the share.
+  const floorBehindShare = spatial && Boolean(activeScreen) && !spatialOverShare
+  const floorShown = spatial && !floorBehindShare
   const spatialToggle = (
     <button
       type="button"
-      aria-label={spatial ? 'Switch to grid view' : 'Switch to spatial view'}
-      title={spatial ? 'Grid view' : 'Spatial view — hear people from where they stand'}
-      aria-pressed={spatial}
-      onClick={() => setVoiceSpatial(!spatial)}
-      className={`${headerBtnClass} ${spatial ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]' : ''}`}
+      aria-label={
+        floorShown
+          ? 'Switch to grid view'
+          : floorBehindShare
+            ? 'Show the spatial floor over the screen share'
+            : 'Switch to spatial view'
+      }
+      title={
+        floorShown
+          ? 'Grid view'
+          : floorBehindShare
+            ? 'Arrange the room — the share comes back when you dismiss the floor'
+            : 'Spatial view — hear people from where they stand'
+      }
+      aria-pressed={floorShown}
+      onClick={() => {
+        if (!spatial) {
+          setVoiceSpatial(true)
+          if (activeScreen) setSpatialOverShare(true)
+        } else if (floorBehindShare) {
+          setSpatialOverShare(true)
+        } else {
+          setVoiceSpatial(false)
+        }
+      }}
+      className={`${headerBtnClass} ${floorShown ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]' : spatial ? 'text-[var(--color-accent-hover)]' : ''}`}
     >
       <SpatialIcon />
     </button>
   )
 
-  const stageBody = activeScreen ? (
+  const stageBody = floorShown ? (
+    // Wins over a live share only while the listener is actually arranging the floor
+    // (`spatialOverShare`); dismissing it hands the stage back. Positional audio is
+    // independent of which one is on screen, so neither move costs anything.
+    <SpatialStage
+      resolveName={resolveName}
+      audioAuraEnabled={audioAuraEnabled}
+      compact={stageMode === 'compact'}
+      shareActive={Boolean(activeScreen)}
+      onReturnToShare={() => setSpatialOverShare(false)}
+    />
+  ) : activeScreen ? (
     <div className="flex h-full min-h-0 flex-col gap-2">
       <div className="min-h-0 flex-1">
         <ScreenTile
@@ -496,14 +543,6 @@ export function VideoStage({ roomName: roomNameOverride }: { roomName?: string }
         </ul>
       )}
     </div>
-  ) : spatial ? (
-    // A live screen share outranks the floor plan (above); positional audio keeps
-    // running either way, so switching back loses nothing.
-    <SpatialStage
-      resolveName={resolveName}
-      audioAuraEnabled={audioAuraEnabled}
-      compact={stageMode === 'compact'}
-    />
   ) : isMobile && anyCamera && mobileFocus ? (
     <div className="flex h-full min-h-0 flex-col gap-2">
       <div className="min-h-0 flex-1">

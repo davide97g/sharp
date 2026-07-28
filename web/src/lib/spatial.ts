@@ -26,6 +26,29 @@ export function spatialGain(distance: number): number {
   return MIN_GAIN + (1 - MIN_GAIN) * falloff
 }
 
+/** Middle of the floor — where "reset" parks the listener. */
+export const SPATIAL_FLOOR_CENTER = { x: 0.5, y: 0.5 } as const
+
+/** Ring radius used when gathering everyone into zone 1, comfortably inside it. */
+const ZONE_ONE_RING = 0.12
+
+/**
+ * Everyone gathered in zone 1: the listener in the middle of the floor and `count` peers
+ * evenly spaced on a ring inside the innermost zone, starting straight ahead and going
+ * clockwise. Every voice comes back to near-full volume while the left/right image stays
+ * intact, which is what "reset" is for — a way out of an arrangement you can no longer hear.
+ */
+export function spatialZoneOneLayout(count: number): { x: number; y: number }[] {
+  if (count <= 0) return []
+  return Array.from({ length: count }, (_, index) => {
+    const angle = -Math.PI / 2 + (index * 2 * Math.PI) / count
+    return {
+      x: SPATIAL_FLOOR_CENTER.x + Math.cos(angle) * ZONE_ONE_RING,
+      y: SPATIAL_FLOOR_CENTER.y + Math.sin(angle) * ZONE_ONE_RING,
+    }
+  })
+}
+
 /**
  * Direction from the listener to a peer, as a unit vector in Web Audio's world axes
  * (x right, z forward-negative). Distance is deliberately NOT encoded here: panners sit

@@ -575,9 +575,10 @@ export class VoiceClient {
   }
 
   // ── Spatial audio ─────────────────────────────────────────────────────────
-  // Positions are the same normalized 0..1 floor-plan coordinates the server
-  // broadcasts (`voice.move`). Everything below is per-listener: turning it on
-  // changes what you hear, never what you send.
+  // Positions are normalized 0..1 floor-plan coordinates, resolved by the caller from
+  // this listener's own arrangement (`voice.spatialPositions`) falling back to the
+  // server's spawn position. Everything below is per-listener: turning it on or moving
+  // someone changes what you hear, never what you send.
 
   /** Route remote mics through per-peer panners, or unwind back to plain playback. */
   setSpatialAudio(enabled: boolean) {

@@ -1,15 +1,21 @@
 // Spatial call view: a floor plan of the room where everyone stands somewhere and
 // you hear them from that direction and distance.
 //
-// Contract: docs/arch/04-voice.md (`voice.move` / `voice.participant_moved`).
+// Contract: docs/arch/04-voice.md ("Spatial view and positional audio").
 //
-// Two halves that must not be confused:
-//   - Positions are ROOM state. They come from the server and are shared by everyone;
-//     anyone may drag anyone (store action `moveVoiceParticipant`), the way you would
-//     shuffle chairs around a table.
-//   - Panning is a LISTENER concern. It lives entirely in lib/voice.ts and is driven
-//     from `useSpatialAudio`, which is mounted by the stage shell rather than this
-//     component — minimizing the call must not silence the positional audio.
+// **The whole thing is one listener's business.** Dragging someone re-aims their voice
+// in your mix only; the same call can be arranged differently on every device, and
+// nothing about the layout is sent. Two layers:
+//   - The server's spawn position (`pos_x`/`pos_y` on the room entry) is the baseline
+//     for anyone you have not moved, so a fresh call still starts spread out. Garden
+//     movement keeps writing it, which is why it is read live rather than snapshotted.
+//   - `voice.spatialPositions` holds this device's overrides (store action
+//     `moveVoiceParticipant`), and `resetVoiceSpatial` replaces them with everyone
+//     gathered into zone 1.
+// Panning itself lives in lib/voice.ts, driven from `useSpatialAudio`, which is mounted
+// by the stage shell rather than this component — minimizing the call, going
+// picture-in-picture, or handing the stage back to a screen share must not silence the
+// positional mix.
 //
 // Coordinates are the same normalized 0..1 pair everywhere (x = left→right,
 // y = top→bottom). The floor is drawn to whatever aspect the panel has; only the
@@ -18,7 +24,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { SPATIAL_ZONE_RADII } from '../../lib/spatial'
 import { useStore } from '../../store'
-import { Badge, Kbd } from '../../ui'
+import { Badge, Button, Kbd } from '../../ui'
 import { AudioAuraAvatar } from './AudioAuraAvatar'
 import { HandIcon, MicIcon, ScreenBadgeIcon, SpeakerIcon } from './callIcons'
 import { ParticipantMenu, ParticipantMenuDots } from './ParticipantMenu'
@@ -43,41 +49,51 @@ type SpatialPerson = {
 }
 
 /**
- * Push every participant's floor position into the audio engine while the spatial
- * view is on. Mount this once per call from a component that stays mounted in all
- * stage modes (VideoStage does) — not from the floor plan, which unmounts.
+ * Push every participant's effective floor position into the audio engine while the
+ * spatial view is on: this listener's override where there is one, the server's spawn
+ * position otherwise. Mount this once per call from a component that stays mounted in
+ * all stage modes (VideoStage does) — not from the floor plan, which unmounts.
  */
 export function useSpatialAudio() {
   const channelId = useStore((s) => s.voice.channelId)
   const spatial = useStore((s) => s.voice.spatial)
   const client = useStore((s) => s.voice.client)
+  const overrides = useStore((s) => s.voice.spatialPositions)
   const room = useStore((s) => (channelId ? s.voiceRooms[channelId] : undefined))
 
   useEffect(() => {
     if (!client || !spatial || !room) return
     for (const [connId, entry] of Object.entries(room)) {
-      client.setSpatialPosition(connId, entry.pos_x, entry.pos_y)
+      const mine = overrides[connId]
+      client.setSpatialPosition(connId, mine?.x ?? entry.pos_x, mine?.y ?? entry.pos_y)
     }
-  }, [client, spatial, room])
+  }, [client, spatial, room, overrides])
 }
 
 export function SpatialStage({
   resolveName,
   audioAuraEnabled,
   compact = false,
+  shareActive = false,
+  onReturnToShare,
 }: {
   resolveName: (userId: string, roomName?: string) => string
   audioAuraEnabled: boolean
   compact?: boolean
+  /** A screen share is live and currently hidden behind this floor. */
+  shareActive?: boolean
+  onReturnToShare?: () => void
 }) {
   const channelId = useStore((s) => s.voice.channelId)
   const room = useStore((s) => (channelId ? s.voiceRooms[channelId] : undefined))
+  const overrides = useStore((s) => s.voice.spatialPositions)
   const speaking = useStore((s) => s.voice.speaking)
   const myConnId = useStore((s) => s.myConnId)
   const localStream = useStore((s) => s.voice.localStream)
   const remoteStreams = useStore((s) => s.voice.remoteStreams)
   const moveVoiceSelf = useStore((s) => s.moveVoiceSelf)
   const moveVoiceParticipant = useStore((s) => s.moveVoiceParticipant)
+  const resetVoiceSpatial = useStore((s) => s.resetVoiceSpatial)
   const floorRef = useRef<HTMLDivElement>(null)
   // Which avatar the current gesture is carrying — anyone's, not just your own.
   const [draggingConnId, setDraggingConnId] = useState<string | null>(null)
@@ -85,6 +101,10 @@ export function SpatialStage({
   const people = useMemo<SpatialPerson[]>(() => {
     return Object.entries(room ?? {}).map(([connId, entry]) => ({
       connId,
+      // Same resolution the audio engine uses: my override, else where the server
+      // spawned (or Garden walked) them.
+      x: overrides[connId]?.x ?? entry.pos_x,
+      y: overrides[connId]?.y ?? entry.pos_y,
       userId: entry.user_id,
       name: resolveName(entry.user_id, entry.display_name),
       guest: entry.guest,
@@ -93,11 +113,9 @@ export function SpatialStage({
       speaking: Boolean(speaking[connId]),
       cameraOn: entry.camera_on,
       sharing: entry.screen_on,
-      x: entry.pos_x,
-      y: entry.pos_y,
       local: connId === myConnId,
     }))
-  }, [room, resolveName, speaking, myConnId])
+  }, [room, overrides, resolveName, speaking, myConnId])
 
   const self = people.find((person) => person.local) ?? null
   const avatarSize = compact ? 40 : 64
@@ -181,6 +199,34 @@ export function SpatialStage({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
+      <div className="flex shrink-0 items-center justify-between gap-2">
+        {!compact && (
+          <p className="truncate text-2xs text-[var(--color-text-faint)]">
+            Your arrangement only — nobody else hears it
+          </p>
+        )}
+        <div className="ml-auto flex items-center gap-1.5">
+          {shareActive && onReturnToShare && (
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={onReturnToShare}
+              iconLeft={<ScreenBadgeIcon />}
+              title="Show the screen share again — positional audio keeps running"
+            >
+              Back to share
+            </Button>
+          )}
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={resetVoiceSpatial}
+            title="Gather everyone into zone 1 around you"
+          >
+            Reset positions
+          </Button>
+        </div>
+      </div>
       <div
         ref={floorRef}
         role="application"
@@ -237,8 +283,9 @@ export function SpatialStage({
       </div>
       {!compact && (
         <p className="shrink-0 text-center text-2xs text-[var(--color-text-faint)]">
-          Drag anyone, or click the floor to walk · <Kbd>W</Kbd> <Kbd>A</Kbd> <Kbd>S</Kbd>{' '}
-          <Kbd>D</Kbd> to step · rings 1–3 mark how far voices have faded
+          Drag anyone to move them in your mix, or click the floor to walk · <Kbd>W</Kbd>{' '}
+          <Kbd>A</Kbd> <Kbd>S</Kbd> <Kbd>D</Kbd> to step · rings 1–3 mark how far voices
+          have faded
         </p>
       )}
     </div>

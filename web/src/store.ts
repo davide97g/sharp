@@ -20,6 +20,7 @@ import {
 } from './lib/uiPrefs'
 import { packPreview, setPackPreview } from './lib/seasonal'
 import type { VoiceClient } from './lib/voice'
+import { SPATIAL_FLOOR_CENTER, spatialZoneOneLayout } from './lib/spatial'
 import { annotations } from './lib/annotations'
 import { allowLocalReaction, callReactions, rememberReaction } from './lib/callReactions'
 import {
@@ -211,9 +212,17 @@ export type VoiceState = {
   screenStatus: 'off' | 'starting' | 'on'
   stageMode: VoiceStageMode
   // Spatial view: floor plan instead of the grid, and remote audio panned by where
-  // people stand. Device-local (see storedVoiceSpatial) — your positions are shared,
-  // your way of listening to them is not.
+  // people stand. Device-local (see storedVoiceSpatial).
   spatial: boolean
+  // Your private arrangement of the floor: conn id → normalized position, overriding
+  // the server's spawn position for this device only. Dragging someone changes what
+  // YOU hear and nothing else, so two people in the same call can sit everyone
+  // differently. Dropped with the call.
+  spatialPositions: Record<string, { x: number; y: number }>
+  // Floor plan held in front of a live screen share, for the person arranging their
+  // layout. Transient: dismissing it hands the stage back to the share with the
+  // positional mix untouched.
+  spatialOverShare: boolean
   audioDeviceId: string | null
   videoDeviceId: string | null
   localStream: MediaStream | null
@@ -583,8 +592,10 @@ export type State = {
   setVoiceVideoDevice: (deviceId: string) => Promise<void>
   setVoiceStageMode: (mode: VoiceStageMode) => void
   setVoiceSpatial: (enabled: boolean) => void
+  setSpatialOverShare: (open: boolean) => void
   moveVoiceSelf: (x: number, y: number) => void
   moveVoiceParticipant: (connId: string, x: number, y: number) => void
+  resetVoiceSpatial: () => void
   toggleAnnotating: () => void
   setAnnotationsAllowed: (allowed: boolean) => void
   clearAnnotations: () => void
@@ -716,15 +727,6 @@ function emptyChannelMessages(): ChannelMessages {
 
 
 /** Local mirror of the appearance blob, replaced by the server copy on login. */
-// Spatial moves are produced at pointer/animation rate but only need to travel often
-// enough to sound continuous. Send at most every MOVE_SEND_MS per moved participant,
-// always with a trailing send so the final resting position is the one everyone else
-// ends up with. Keyed by conn id because you can drag other people too.
-const MOVE_SEND_MS = 70
-const moveThrottles = new Map<
-  string,
-  { lastSentAt: number; timer: ReturnType<typeof setTimeout> | null }
->()
 
 const initialUi = readLocalUiPrefs()
 // Sounds can fire before the first `applyUi` (splash, login), so seed the pack
@@ -2584,8 +2586,15 @@ export const useStore = create<State>((set, get) => ({
 
   setVoiceSpatial(enabled) {
     saveVoiceSpatial(enabled)
-    set((s) => ({ voice: { ...s.voice, spatial: enabled } }))
+    set((s) => ({
+      voice: { ...s.voice, spatial: enabled, spatialOverShare: enabled && s.voice.spatialOverShare },
+    }))
     get().voice.client?.setSpatialAudio(enabled)
+  },
+
+  setSpatialOverShare(open) {
+    if (!get().voice.channelId) return
+    set((s) => ({ voice: { ...s.voice, spatialOverShare: open } }))
   },
 
   moveVoiceSelf(x, y) {
@@ -2593,49 +2602,43 @@ export const useStore = create<State>((set, get) => ({
     if (myConnId) get().moveVoiceParticipant(myConnId, x, y)
   },
 
-  // Optimistic on purpose, unlike the rest of the voice slice: a dragged avatar must
-  // track the pointer with no round trip. The server clamps and echoes the same value
-  // back through voice.participant_moved, so a rejected move self-corrects. Anyone in
-  // the room may move anyone — the floor is shared furniture.
+  // Nothing leaves the device. The floor is one listener's arrangement of the room:
+  // moving someone re-aims their voice in YOUR mix, and everyone else keeps the layout
+  // they built. The server's spawn position stays the baseline for anyone you have not
+  // moved yourself, so a fresh call still starts spread out.
+  //
+  // The audio engine is written straight through rather than left to `useSpatialAudio`:
+  // a dragged avatar has to track the pointer, and the panners with it.
   moveVoiceParticipant(connId, x, y) {
-    const { voice, ws } = get()
-    const channelId = voice.channelId
-    if (!channelId || voice.status !== 'connected') return
-    const clamped = { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) }
-    set((s) => {
-      const room = s.voiceRooms[channelId]
-      const entry = room?.[connId]
-      if (!entry) return {}
-      return {
-        voiceRooms: {
-          ...s.voiceRooms,
-          [channelId]: { ...room, [connId]: { ...entry, pos_x: clamped.x, pos_y: clamped.y } },
-        },
-      }
-    })
-    if (!ws) return
+    const { voice } = get()
+    if (!voice.channelId || voice.status !== 'connected') return
+    const position = { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) }
+    set((s) => ({
+      voice: {
+        ...s.voice,
+        spatialPositions: { ...s.voice.spatialPositions, [connId]: position },
+      },
+    }))
+    voice.client?.setSpatialPosition(connId, position.x, position.y)
+  },
 
-    const throttle = moveThrottles.get(connId) ?? { lastSentAt: 0, timer: null }
-    moveThrottles.set(connId, throttle)
-    const send = () => {
-      throttle.lastSentAt = Date.now()
-      throttle.timer = null
-      const latest = get()
-      const position = latest.voiceRooms[channelId]?.[connId]
-      if (!position || latest.voice.channelId !== channelId) return
-      latest.ws?.send('voice.move', {
-        channel_id: channelId,
-        conn_id: connId,
-        x: position.pos_x,
-        y: position.pos_y,
-      })
-    }
-    const elapsed = Date.now() - throttle.lastSentAt
-    if (elapsed >= MOVE_SEND_MS) {
-      if (throttle.timer) clearTimeout(throttle.timer)
-      send()
-    } else if (!throttle.timer) {
-      throttle.timer = setTimeout(send, MOVE_SEND_MS - elapsed)
+  // The way out of an arrangement you can no longer hear: everyone gathered into
+  // zone 1 around you, at once, in this listener's mix only.
+  resetVoiceSpatial() {
+    const { voice, voiceRooms, myConnId } = get()
+    const channelId = voice.channelId
+    if (!channelId) return
+    const room = voiceRooms[channelId] ?? {}
+    const peers = Object.keys(room).filter((connId) => connId !== myConnId)
+    const ring = spatialZoneOneLayout(peers.length)
+    const positions: Record<string, { x: number; y: number }> = {}
+    if (myConnId && room[myConnId]) positions[myConnId] = { ...SPATIAL_FLOOR_CENTER }
+    peers.forEach((connId, index) => {
+      positions[connId] = ring[index]
+    })
+    set((s) => ({ voice: { ...s.voice, spatialPositions: positions } }))
+    for (const [connId, position] of Object.entries(positions)) {
+      voice.client?.setSpatialPosition(connId, position.x, position.y)
     }
   },
 
