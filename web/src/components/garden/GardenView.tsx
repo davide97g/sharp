@@ -2,11 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { GardenMap, GardenRoom } from '../../lib/types'
 import { sound } from '../../lib/sound'
 import { chordFor, formatChord, registerShortcut } from '../../lib/shortcuts'
+import { KEYS, readLocalBool, writeLocalBool } from '../../lib/localPrefs'
 import { toastError } from '../../lib/toast'
 import { useStore } from '../../store'
 import {
   Button,
   Card,
+  ChevronDownIcon,
   ChoiceCard,
   CloseIcon,
   Field,
@@ -393,6 +395,49 @@ export function GardenView() {
   const zenDndBeforeRef = useRef<boolean | null>(null)
   const zenModeRef = useRef(false)
 
+  // Room rail: collapsed by default so the map is the page. Hovering the header
+  // card peeks the panel; the chevron pins it open. Same three-state shape as the
+  // auto-hide dock in AppShell — a plain boolean cannot express "peeking".
+  const [railPinned, setRailPinned] = useState(() =>
+    readLocalBool(KEYS.gardenRailPinned, false),
+  )
+  const [railPeeking, setRailPeeking] = useState(false)
+  const railHideTimer = useRef<number | null>(null)
+  const railOpen = railPinned || railPeeking
+
+  const showRail = () => {
+    if (railHideTimer.current !== null) {
+      window.clearTimeout(railHideTimer.current)
+      railHideTimer.current = null
+    }
+    setRailPeeking(true)
+  }
+  // Enough slack to cross the gap between the header card and the panel without
+  // the panel collapsing under the cursor.
+  const scheduleHideRail = () => {
+    if (railHideTimer.current !== null) window.clearTimeout(railHideTimer.current)
+    railHideTimer.current = window.setTimeout(() => {
+      railHideTimer.current = null
+      setRailPeeking(false)
+    }, 150)
+  }
+  const toggleRailPin = () => {
+    sound.garden.interact()
+    setRailPinned((pinned) => {
+      const next = !pinned
+      writeLocalBool(KEYS.gardenRailPinned, next)
+      if (!next) setRailPeeking(false)
+      return next
+    })
+  }
+
+  useEffect(
+    () => () => {
+      if (railHideTimer.current !== null) window.clearTimeout(railHideTimer.current)
+    },
+    [],
+  )
+
   useEffect(() => {
     void enterGarden()
     return () => {
@@ -436,6 +481,16 @@ export function GardenView() {
         if (roomsOpen) {
           event.preventDefault()
           setRoomsOpen(false)
+          return
+        }
+        // Collapse the desktop rail before Escape means "leave the room".
+        if (railPinned || railPeeking) {
+          event.preventDefault()
+          setRailPeeking(false)
+          if (railPinned) {
+            setRailPinned(false)
+            writeLocalBool(KEYS.gardenRailPinned, false)
+          }
           return
         }
         // Let the consent modal own Escape while it is open.
@@ -581,11 +636,17 @@ export function GardenView() {
       />
 
       <header className="pointer-events-none absolute inset-x-0 top-0 z-(--z-dropdown) flex items-start justify-between gap-3 p-3 sm:p-4">
-        <Card padding="sm" className="pointer-events-auto flex min-w-0 items-center gap-3 shadow-xl lg:w-72">
+        <Card
+          padding="sm"
+          className="pointer-events-auto flex min-w-0 items-center gap-3 shadow-xl lg:w-72"
+          onMouseEnter={zenMode ? undefined : showRail}
+          onMouseLeave={zenMode ? undefined : scheduleHideRail}
+          onFocusCapture={zenMode ? undefined : showRail}
+        >
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-ink">
             <GardenMark size={18} />
           </span>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h1 className="truncate text-sm font-semibold text-text">
               {zenMode ? 'Zen temple' : (currentRoom?.name ?? 'Garden')}
             </h1>
@@ -597,6 +658,23 @@ export function GardenView() {
                 : `${map.rooms.length} connected rooms · Space to jump`}
             </p>
           </div>
+          {!zenMode && (
+            <span className="hidden lg:block">
+              <IconButton
+                label={railPinned ? 'Unpin room list' : 'Keep room list open'}
+                shape="circle"
+                aria-expanded={railOpen}
+                aria-controls="garden-room-rail"
+                onClick={toggleRailPin}
+              >
+                <ChevronDownIcon
+                  className={`transition-transform motion-reduce:transition-none ${
+                    railOpen ? 'rotate-180' : ''
+                  }`}
+                />
+              </IconButton>
+            </span>
+          )}
         </Card>
         <Card padding="none" className="pointer-events-auto flex items-center gap-1 p-1.5 shadow-xl">
           <IconButton
@@ -636,7 +714,14 @@ export function GardenView() {
       )}
 
       {!zenMode && (
-        <aside className="absolute bottom-4 left-4 top-24 z-(--z-dropdown) hidden w-72 flex-col overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)]/96 shadow-2xl backdrop-blur lg:flex">
+        <aside
+          id="garden-room-rail"
+          data-shown={railOpen}
+          aria-hidden={!railOpen}
+          onMouseEnter={showRail}
+          onMouseLeave={scheduleHideRail}
+          className="garden-rail-float absolute left-3 top-[4.6rem] z-(--z-dropdown) hidden max-h-[min(30rem,calc(100dvh-8rem))] w-72 flex-col overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)]/96 shadow-2xl backdrop-blur sm:left-4 lg:flex"
+        >
           <div className="border-b border-[var(--color-border)] px-4 py-3">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold text-[var(--color-text)]">Garden rooms</h2>

@@ -63,6 +63,12 @@ export const KEYS = {
   voicePushToTalk: 'sharp.voicePushToTalk',
   /** Whether entering a Garden room should join its audio call on this device. */
   gardenAudio: 'sharp.gardenAudio',
+  /** Garden room rail pinned open. Collapsed is the default; a pin is a per-device
+   *  viewport choice (how much canvas you want covered), not a synced preference. */
+  gardenRailPinned: 'sharp.gardenRailPinned',
+  /** Garden avatar picker already offered on this device, so it asks once and
+   *  never nags. The chosen avatar itself is server-side and follows the user. */
+  gardenAvatarPrompted: 'sharp.gardenAvatarPrompted',
   /** Most-recent in-call reaction emoji (newest first), so the quick row self-tunes. */
   callReactionsRecent: 'sharp.callReactionsRecent',
   /** Legacy single-flag video blur, superseded by the scoped videoBackground key. */
