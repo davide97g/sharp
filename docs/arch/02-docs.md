@@ -185,9 +185,11 @@ fills (1024 frames) is evicted from the room.
 
 - **Doc chips in chat**: message content may contain `[[doc:<uuid>|<title>]]`,
   `[[canvas:<uuid>|<title>]]`, or `[[board:<uuid>|<title>]]`. The
-  composer opens a doc picker on typing `[[` (searches `/docs/search`; boards are excluded
-  from this autocomplete in v1); the renderer
-  replaces the token with a clickable chip navigating to `/d/<uuid>` (doc), `/x/<uuid>`
+  composer opens a documents-only picker on typing `/doc`; text after the command filters
+  visible document names through `/docs/search`, while an empty query shows recent docs.
+  Arrow keys move selection; Tab or Enter inserts the token. The renderer replaces doc
+  tokens with a rich preview card and other resource tokens with clickable chips navigating
+  to `/d/<uuid>` (doc), `/x/<uuid>`
   (canvas), or `/b/<uuid>` (board, 🗂️). Plain text
   otherwise — search and the API are unaffected. A "Share to channel" action on a doc
   posts such a message via the normal messages endpoint. `notify.rs` strips these resource
@@ -228,4 +230,3 @@ fills (1024 frames) is evicted from the room.
   frame protocol over WebSocket with reconnect+backoff, exposing a `y-protocols`
   `Awareness` instance for BlockNote's `collaboration.provider`.
 - Cursor colors are derived deterministically from the user id.
-

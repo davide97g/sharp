@@ -8,10 +8,12 @@ import { useStore } from '../store'
 import { ImageLightbox } from './ImageLightbox'
 import { MeetingCard } from './calendar/MeetingCard'
 import { PollCard } from './PollCard'
+import { DocMessageCard } from './DocMessageCard'
 
 // Chat card token for a scheduled meeting: [[meet:<uuid>|<title>|<start_iso>]].
 const MEET_TOKEN = /\[\[meet:([0-9a-f-]{36})\|([^|\]]*)\|([^\]]*)\]\]/g
 const POLL_TOKEN = /\[\[poll:([0-9a-f-]{36})(?:\|([^\]]*))?\]\]/g
+const DOC_CARD_TOKEN = /\[\[doc:([0-9a-f-]{36})\|([^\]]*)\]\]/g
 
 // Resource-chip matcher: [[doc|canvas|board:<uuid>|<title>]] and the task chip
 // [[task:<identifier>|<title>]] (identifier = KEY-123, the stable public id).
@@ -401,12 +403,13 @@ export function Markdown({
     () => makeComponents(names, projectKeys, re),
     [names, projectKeys, re],
   )
-  // Collect card tokens (GIF + meeting) in document order, then slice the text
+  // Collect card tokens in document order, then slice the text
   // between them into markdown runs.
   type Tok =
     | { index: number; length: number; kind: 'gif'; url: string; alt: string; query?: string }
     | { index: number; length: number; kind: 'meet'; id: string; title: string; iso: string }
     | { index: number; length: number; kind: 'poll'; id: string; question: string }
+    | { index: number; length: number; kind: 'doc'; id: string; title: string }
   const toks: Tok[] = []
   let m: RegExpExecArray | null
   GIF_TOKEN.lastIndex = 0
@@ -442,6 +445,16 @@ export function Markdown({
       question: m[2] ?? '',
     })
   }
+  DOC_CARD_TOKEN.lastIndex = 0
+  while ((m = DOC_CARD_TOKEN.exec(content)) !== null) {
+    toks.push({
+      index: m.index,
+      length: m[0].length,
+      kind: 'doc',
+      id: m[1],
+      title: m[2],
+    })
+  }
   toks.sort((a, b) => a.index - b.index)
 
   const parts: Array<
@@ -449,6 +462,7 @@ export function Markdown({
     | { kind: 'gif'; url: string; alt: string; query?: string }
     | { kind: 'meet'; id: string; title: string; iso: string }
     | { kind: 'poll'; id: string; question: string }
+    | { kind: 'doc'; id: string; title: string }
   > = []
   let last = 0
   for (const tok of toks) {
@@ -460,8 +474,10 @@ export function Markdown({
       parts.push({ kind: 'gif', url: tok.url, alt: tok.alt, query: tok.query })
     } else if (tok.kind === 'meet') {
       parts.push({ kind: 'meet', id: tok.id, title: tok.title, iso: tok.iso })
-    } else {
+    } else if (tok.kind === 'poll') {
       parts.push({ kind: 'poll', id: tok.id, question: tok.question })
+    } else {
+      parts.push({ kind: 'doc', id: tok.id, title: tok.title })
     }
     last = tok.index + tok.length
   }
@@ -486,6 +502,8 @@ export function Markdown({
           <MeetingCard key={index} id={part.id} title={part.title} iso={part.iso} />
         ) : part.kind === 'poll' ? (
           <PollCard key={index} id={part.id} fallbackQuestion={part.question} />
+        ) : part.kind === 'doc' ? (
+          <DocMessageCard key={index} id={part.id} fallbackTitle={part.title} />
         ) : (
           <ReactMarkdown
             key={index}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Button, IconButton, SectionLabel, useDismiss } from '../ui'
+import { Button, DocIcon, IconButton, Kbd, SectionLabel, useDismiss } from '../ui'
 import { useStore } from '../store'
 import { effectiveNicknames } from '../lib/displayName'
 import { api } from '../lib/api'
@@ -38,21 +38,28 @@ type Pending = {
   error?: boolean
 }
 
-// A completion candidate: person (@), resource (#), or emoji (:).
+// A completion candidate: person (@), resource (# or /doc), or emoji (:).
 type PickItem =
   | { kind: 'user'; id: string; name: string }
   | { kind: 'all' } // @all — broadcast mention to everyone in the channel
   | { kind: 'doc' | 'canvas' | 'board'; id: string; title: string; channelName?: string }
   | { kind: 'emoji'; id: string; name: string; native: string; shortcode: string }
 
-type Trigger = { type: '@' | '#' | ':'; start: number; query: string }
+type Trigger = { type: '@' | '#' | ':' | '/doc'; start: number; query: string }
 
-// Detect an open `@` (people), `#` (resource), or `:` (emoji) run ending at the
-// caret. The trigger char must sit at a word boundary (start / whitespace / `(`)
-// so it doesn't fire inside emails, URLs (`://`), or words. Emoji queries are
-// Slack-style shortcode chars only (`a-z0-9_+-`).
+// Detect an open `@` (people), `#` (resource), `/doc` (documents only), or `:`
+// (emoji) run ending at the caret. Triggers must sit at a word boundary
+// (start / whitespace / `(`) so they don't fire inside emails, URLs, or words.
 function detectTrigger(value: string, caret: number): Trigger | null {
   const upto = value.slice(0, caret)
+  const doc = /(^|[\s(])\/doc(?:[ \t]+([^\n]*))?$/.exec(upto)
+  if (doc) {
+    return {
+      type: '/doc',
+      start: doc.index + doc[1].length,
+      query: doc[2] ?? '',
+    }
+  }
   const emoji = /(^|[\s(]):([a-zA-Z0-9_+-]*)$/.exec(upto)
   if (emoji) {
     return { type: ':', start: emoji.index + emoji[1].length, query: emoji[2] }
@@ -96,6 +103,7 @@ export function Composer({
   // Draft text is stored per composer so each chat (and each thread) keeps its
   // own in-progress message instead of one input bleeding across chats.
   const draftKey = parentId ? `t:${parentId}` : `c:${channel.id}`
+  const completionListId = `composer-completion-list-${draftKey.replace(/[^a-zA-Z0-9_-]/g, '-')}`
   const value = useStore((s) => s.drafts[draftKey] ?? '')
   const setDraftStore = useStore((s) => s.setDraft)
   const setValue = useCallback(
@@ -129,10 +137,11 @@ export function Composer({
     )
   })
 
-  // --- @ people / # resource / : emoji picker state ---
+  // --- @ people / # resource / /doc document / : emoji picker state ---
   const [trigger, setTrigger] = useState<Trigger | null>(null)
   const [results, setResults] = useState<PickItem[]>([])
   const [sel, setSel] = useState(0)
+  const [pickerLoading, setPickerLoading] = useState(false)
   const caretRef = useRef(0)
   const [manualGifOpen, setManualGifOpen] = useState(false)
   const [dismissedGifCommand, setDismissedGifCommand] = useState<string | null>(null)
@@ -203,10 +212,11 @@ export function Composer({
 
   // Populate the picker. People (@) resolve from the already-loaded directory
   // (channel members first); emoji (:) from the local shortcode index; resources
-  // (#) hit the doc/canvas search.
+  // (#) hit doc/canvas search; /doc searches visible documents only.
   useEffect(() => {
     if (trigger === null) {
       setResults([])
+      setPickerLoading(false)
       return
     }
     const q = trigger.query.trim()
@@ -214,6 +224,7 @@ export function Composer({
 
     // @ — people: synchronous, from the store. Members of this channel rank first.
     if (trigger.type === '@') {
+      setPickerLoading(false)
       const st = useStore.getState()
       const memberIds = new Set((st.members[channel.id] ?? []).map((u) => u.id))
       const label = (u: { id: string; display_name: string }) =>
@@ -246,6 +257,7 @@ export function Composer({
 
     // : — emoji shortcodes: synchronous, ranked local search.
     if (trigger.type === ':') {
+      setPickerLoading(false)
       setResults(
         searchEmojis(q, 8).map((e) => ({
           kind: 'emoji' as const,
@@ -259,8 +271,10 @@ export function Composer({
       return
     }
 
-    // # — resources: docs + canvases (debounced search; recents when empty).
+    // # — all resources. /doc — documents only. Both debounce typed searches.
     let cancelled = false
+    setResults([])
+    setPickerLoading(true)
     const timer = setTimeout(async () => {
       try {
         const toItem = (d: {
@@ -275,7 +289,25 @@ export function Composer({
           title: d.title || 'Untitled',
           channelName: d.channel_name ?? d.channelName,
         })
-        if (q) {
+        if (trigger.type === '/doc') {
+          const docs = q
+            ? (await api.docSearch(q, 100)).results
+                .filter(
+                  (d) =>
+                    d.kind === 'doc' &&
+                    (d.title || 'Untitled').toLowerCase().includes(ql),
+                )
+                .slice(0, 8)
+            : (await api.recentDocs('doc', 8)).docs.map(({ doc, channel_name }) => ({
+                ...doc,
+                channel_name,
+                snippet: '',
+              }))
+          if (!cancelled) {
+            setResults(docs.map((d) => toItem({ ...d, title: d.title })))
+            setSel(0)
+          }
+        } else if (q) {
           const res = await api.docSearch(q, 8)
           if (!cancelled) {
             setResults(res.results.map((d) => toItem({ ...d, title: d.title })))
@@ -303,7 +335,9 @@ export function Composer({
           }
         }
       } catch {
-        /* ignore */
+        if (!cancelled) setResults([])
+      } finally {
+        if (!cancelled) setPickerLoading(false)
       }
     }, 150)
     return () => {
@@ -312,7 +346,8 @@ export function Composer({
     }
   }, [trigger, channel.id])
 
-  const pickerOpen = trigger !== null && results.length > 0
+  const pickerOpen =
+    trigger !== null && (results.length > 0 || trigger.type === '/doc')
 
   function syncTrigger() {
     const el = ref.current
@@ -601,17 +636,22 @@ export function Composer({
     if (pickerOpen) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setSel((s) => Math.min(s + 1, results.length - 1))
+        if (results.length) setSel((s) => Math.min(s + 1, results.length - 1))
         return
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault()
-        setSel((s) => Math.max(s - 1, 0))
+        if (results.length) setSel((s) => Math.max(s - 1, 0))
         return
       }
-      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+      if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
         if (results[sel]) pick(results[sel])
+        return
+      }
+      if (e.key === 'Tab' && results[sel]) {
+        e.preventDefault()
+        pick(results[sel])
         return
       }
       if (e.key === 'Escape') {
@@ -720,7 +760,10 @@ export function Composer({
       )}
       {pickerOpen && !gifOpen && (
         <div
-          className={`composer-picker absolute bottom-full z-20 mb-1 max-h-64 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1.5 shadow-2xl ${
+          id={completionListId}
+          role="listbox"
+          aria-label={trigger?.type === '/doc' ? 'Documents' : 'Suggestions'}
+          className={`composer-picker absolute bottom-full z-(--z-dropdown) mb-1 max-h-64 overflow-y-auto rounded-xl border border-border bg-panel p-1.5 shadow-2xl ${
             compact ? 'left-2 right-2' : 'left-4 right-4'
           }`}
         >
@@ -730,13 +773,36 @@ export function Composer({
                 ? 'People'
                 : trigger?.type === ':'
                   ? 'Emoji'
-                  : 'Docs, canvases & boards'}
+                  : trigger?.type === '/doc'
+                    ? 'Documents'
+                    : 'Docs, canvases & boards'}
             </SectionLabel>
-            <span className="text-3xs text-[var(--color-text-faint)]">↑↓ · ↵/⇥ · esc</span>
+            <span className="flex items-center gap-1 text-3xs text-text-faint">
+              <Kbd>↑↓</Kbd>
+              <Kbd>Enter</Kbd>
+              <Kbd>Tab</Kbd>
+              <span>select</span>
+            </span>
           </div>
+          {trigger?.type === '/doc' && pickerLoading && results.length === 0 ? (
+            <div className="px-2.5 py-3 text-xs text-text-faint" role="status">
+              Finding documents…
+            </div>
+          ) : null}
+          {trigger?.type === '/doc' && !pickerLoading && results.length === 0 ? (
+            <div className="px-2.5 py-3">
+              <div className="text-xs font-medium text-text">No documents found</div>
+              <div className="mt-0.5 text-2xs text-text-faint">
+                Try another document name.
+              </div>
+            </div>
+          ) : null}
           {results.map((r, i) => (
             <button
               key={r.kind === 'all' ? 'all' : `${r.kind}-${r.id}`}
+              id={`${completionListId}-${i}`}
+              role="option"
+              aria-selected={i === sel}
               onMouseEnter={() => setSel(i)}
               onMouseDown={(e) => {
                 e.preventDefault()
@@ -775,7 +841,13 @@ export function Composer({
                 </>
               ) : (
                 <>
-                  <span>{r.kind === 'canvas' ? '🎨' : r.kind === 'board' ? '🗂️' : '📄'}</span>
+                  {r.kind === 'doc' ? (
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border bg-panel-2 text-accent-hover">
+                      <DocIcon size={15} />
+                    </span>
+                  ) : (
+                    <span>{r.kind === 'canvas' ? '🎨' : '🗂️'}</span>
+                  )}
                   <span className="min-w-0 flex-1 truncate">{r.title}</span>
                   {r.channelName && (
                     <span className="shrink-0 text-2xs text-[var(--color-text-faint)]">
@@ -1047,6 +1119,13 @@ export function Composer({
             onKeyUp={syncTrigger}
             onClick={syncTrigger}
             onPaste={onPaste}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={pickerOpen}
+            aria-controls={pickerOpen ? completionListId : undefined}
+            aria-activedescendant={
+              pickerOpen && results[sel] ? `${completionListId}-${sel}` : undefined
+            }
             placeholder={placeholder ?? 'Message'}
             className="composer-textarea min-h-11 max-h-[260px] flex-1 resize-none bg-transparent py-2.5 text-base text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:outline-none md:min-h-0 md:py-1.5 md:text-sm"
           />
