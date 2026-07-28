@@ -216,7 +216,9 @@ export function GardenGame({
             {
               userId: me?.id ?? '',
               name: me?.display_name ?? 'You',
-              avatarId: self?.avatar ?? null,
+              // selfAvatar comes from the map response, so it is known even
+              // before this connection has a Garden peer.
+              avatarId: useStore.getState().garden.selfAvatar ?? self?.avatar ?? null,
               colorIndex: self?.color_index,
             },
             true,
@@ -316,6 +318,15 @@ export function GardenGame({
 
           let lastPeers: ReturnType<typeof useStore.getState>['garden']['peers'] | null = null
           const sync = (state: ReturnType<typeof useStore.getState>) => {
+            // Your own character: the player sprite is built once in create(), so
+            // picking a new one has to retexture it here or it would only appear
+            // after a reload.
+            const myUserId = state.me?.id ?? ''
+            this.setAvatarLook(
+              this.player,
+              state.garden.selfAvatar ?? state.garden.self?.avatar ?? null,
+              myUserId,
+            )
             if (state.garden.peers !== lastPeers) {
               lastPeers = state.garden.peers
               const present = new Set<string>()
