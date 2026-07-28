@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { GardenMap, GardenPeer, GardenRoom } from '../../lib/types'
+import type { GardenMap, GardenObject, GardenPeer, GardenRoom } from '../../lib/types'
 import { gardenColorValue } from '../../lib/gardenColors'
 import {
   blocksMovement,
@@ -18,6 +18,12 @@ import {
   avatarTextureKey,
   resolveAvatarId,
 } from './gardenAvatars'
+import {
+  GARDEN_PROPS,
+  propDef,
+  propSheetKey,
+  propTextureKey,
+} from './gardenProps'
 
 const TILE = 16
 const SPEED = 7
@@ -53,6 +59,12 @@ type Props = {
   zenMode: boolean
   onNearbyRoom: (room: GardenRoom | null) => void
   onNearbyTemple: (nearby: boolean) => void
+  /** Creator mode active. The local player freezes and scenery becomes editable. */
+  editing: boolean
+  /** Catalogue id the palette has armed, or null to select rather than place. */
+  brush: string | null
+  /** Reports the current selection so React can show a delete affordance. */
+  onSelection: (id: string | null) => void
 }
 
 type Point = { x: number; y: number }
@@ -88,10 +100,22 @@ export function GardenGame({
   zenMode,
   onNearbyRoom,
   onNearbyTemple,
+  editing,
+  brush,
+  onSelection,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const nearbyRef = useRef(onNearbyRoom)
   const nearbyTempleRef = useRef(onNearbyTemple)
+  // Mirrored into refs so the Phaser scene always reads current values without
+  // the game being rebuilt when they change — the same convention the nearby
+  // callbacks already use.
+  const editingRef = useRef(editing)
+  const brushRef = useRef(brush)
+  const selectionRef = useRef(onSelection)
+  editingRef.current = editing
+  brushRef.current = brush
+  selectionRef.current = onSelection
   const [themeRevision, setThemeRevision] = useState(0)
   nearbyRef.current = onNearbyRoom
   nearbyTempleRef.current = onNearbyTemple
@@ -188,6 +212,20 @@ export function GardenGame({
         private worldHeight = 0
         /** Generated hub terrain, so scenery placement can avoid water. */
         private terrain: TerrainGrid | null = null
+        /** Placed scenery, keyed by object id, with its collision body. */
+        private placed = new Map<
+          string,
+          {
+            row: GardenObject
+            sprite: import('phaser').GameObjects.Image
+            blocker: import('phaser').GameObjects.Rectangle | null
+          }
+        >()
+        private selectedId: string | null = null
+        /** Last applied editing flag, so entering creator mode re-arms the props. */
+        private lastEditing = false
+        private ghost: import('phaser').GameObjects.Image | null = null
+        private lastLayout: GardenObject[] | null = null
         private lastStep = 0
         private lastBump = 0
         private reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -269,10 +307,90 @@ export function GardenGame({
           this.jumpKey = this.input.keyboard!.addKey(
             Phaser.Input.Keyboard.KeyCodes.SPACE,
           )
-          this.input.on('pointerdown', (pointer: import('phaser').Input.Pointer) => {
-            this.waypoints = []
-            this.target = { x: pointer.worldX, y: pointer.worldY }
+          this.input.on(
+            'pointerdown',
+            (pointer: import('phaser').Input.Pointer) => {
+              // While editing, a click means place or select — never walk. That is
+              // why the player is frozen rather than sharing the gesture.
+              if (editingRef.current) {
+                // Clicking a piece selects it. Hit-tested explicitly against the
+                // sprite bounds rather than through Phaser's interactive system:
+                // the geometry here is a handful of rectangles we already know, and
+                // owning the test keeps selection independent of the input plugin.
+                const hit = this.pickAt(pointer.worldX, pointer.worldY)
+                if (hit) {
+                  this.select(hit)
+                  return
+                }
+                // Empty ground: place the armed brush, else move whatever is
+                // selected there. Click-to-move means moving works on touch and
+                // without a drag gesture at all.
+                if (brushRef.current) this.placeBrush(pointer.worldX, pointer.worldY)
+                else if (this.selectedId) this.moveSelected(pointer.worldX, pointer.worldY)
+                else this.select(null)
+                return
+              }
+              this.waypoints = []
+              this.target = { x: pointer.worldX, y: pointer.worldY }
+            },
+          )
+          this.input.on('pointermove', (pointer: import('phaser').Input.Pointer) => {
+            this.updateGhost(pointer.worldX, pointer.worldY)
           })
+
+          // Phaser owns the hit test and the world/screen projection, so dragging
+          // works unchanged as the camera pans and zooms. A React pointer hook
+          // would have to reimplement both.
+          // Scene-owned, so it dies with the scene and never fires while a modal
+          // or the composer has focus.
+          for (const key of ['keydown-DELETE', 'keydown-BACKSPACE'] as const) {
+            this.input.keyboard?.on(key, () => {
+              if (editingRef.current) this.deleteSelected()
+            })
+          }
+
+          this.input.dragDistanceThreshold = 4
+          this.input.on(
+            'dragstart',
+            (_p: import('phaser').Input.Pointer, object: import('phaser').GameObjects.Image) => {
+              const found = [...this.placed.entries()].find(
+                ([, entry]) => entry.sprite === object,
+              )
+              if (found) this.select(found[0])
+            },
+          )
+          this.input.on(
+            'drag',
+            (
+              _p: import('phaser').Input.Pointer,
+              object: import('phaser').GameObjects.Image,
+              dragX: number,
+              dragY: number,
+            ) => {
+              const at = this.snapToHalfTile(dragX, dragY)
+              object.setPosition(at.x * TILE, at.y * TILE).setDepth(at.y * TILE)
+            },
+          )
+          this.input.on(
+            'dragend',
+            (_p: import('phaser').Input.Pointer, object: import('phaser').GameObjects.Image) => {
+              const found = [...this.placed.entries()].find(
+                ([, entry]) => entry.sprite === object,
+              )
+              if (!found) return
+              const [id, entry] = found
+              const at = this.snapToHalfTile(object.x, object.y)
+              // Commit on drop, not during the drag: one gesture is one request
+              // and one broadcast.
+              if (at.x === entry.row.x && at.y === entry.row.y) {
+                this.positionPlaced(entry.sprite, entry.blocker, entry.row)
+                return
+              }
+              void useStore
+                .getState()
+                .saveGardenLayout([{ op: 'move', id, x: at.x, y: at.y }])
+            },
+          )
           const routeToPlaza = () => {
             const plaza = { x: 52 * TILE, y: 64 * TILE }
             const playerY = this.player.node.y / TILE
@@ -316,15 +434,13 @@ export function GardenGame({
             this.startTeleport(room)
           }
           const teleportToTemple = () => this.startTempleTeleport()
+          // React asks for a delete rather than reaching into the scene, matching
+          // how teleport already crosses the boundary.
+          const deleteSelected = () => this.deleteSelected()
+          window.addEventListener('sharp:garden-delete', deleteSelected)
           window.addEventListener('sharp:garden-walk-to', walkToRoom)
           window.addEventListener('sharp:garden-teleport', teleportToRoom)
           window.addEventListener('sharp:garden-teleport-temple', teleportToTemple)
-          this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-            window.removeEventListener('sharp:garden-walk-to', walkToRoom)
-            window.removeEventListener('sharp:garden-teleport', teleportToRoom)
-            window.removeEventListener('sharp:garden-teleport-temple', teleportToTemple)
-          })
-
           this.cameras.main.setBounds(0, 0, this.worldWidth, this.worldHeight)
           this.cameras.main.startFollow(this.player.node, true, 0.12, 0.12)
           const setZoom = () => {
@@ -334,6 +450,21 @@ export function GardenGame({
           }
           this.scale.on('resize', setZoom)
           setZoom()
+
+          // Every per-scene listener has to come off here, not only in the React
+          // cleanup: a scene restart fires SHUTDOWN without unmounting the
+          // component, so anything torn down only outside would leak a handler
+          // holding destroyed game objects and throw on the next peer update.
+          this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+            window.removeEventListener('sharp:garden-delete', deleteSelected)
+            window.removeEventListener('sharp:garden-walk-to', walkToRoom)
+            window.removeEventListener('sharp:garden-teleport', teleportToRoom)
+            window.removeEventListener('sharp:garden-teleport-temple', teleportToTemple)
+            this.scale.off('resize', setZoom)
+            unsubscribe?.()
+            unsubscribe = null
+          })
+
           if (
             pendingTeleportRoomId &&
             space === 'room' &&
@@ -348,6 +479,10 @@ export function GardenGame({
             // Your own character: the player sprite is built once in create(), so
             // picking a new one has to retexture it here or it would only appear
             // after a reload.
+            // Placed scenery, diffed in place. This is why layout is a sibling of
+            // garden.map rather than nested inside it: nesting would change map's
+            // identity on every edit and restart the whole scene.
+            if (space === 'hub' && !zenMode) this.syncPlaced(state.garden.layout)
             const myUserId = state.me?.id ?? ''
             this.setAvatarLook(
               this.player,
@@ -420,6 +555,30 @@ export function GardenGame({
         }
 
         update(time: number, delta: number) {
+          // Creator mode is React state, not store state, so the scene watches the
+          // ref. Affordances cannot come from syncPlaced alone: that early-returns
+          // when the layout is unchanged, which is exactly the case when the flag
+          // flips, so nothing would ever become interactive.
+          if (editingRef.current !== this.lastEditing) {
+            this.lastEditing = editingRef.current
+            this.applyEditAffordances()
+          }
+          if (editingRef.current) {
+            // Frozen: no input, no velocity, and no garden.move, so peers do not
+            // see the editor jitter in place while an admin works.
+            const body = this.player.node.body as import('phaser').Physics.Arcade.Body
+            body.setVelocity(0, 0)
+            this.target = null
+            this.waypoints = []
+            this.animateAvatar(this.player, time)
+            for (const avatar of this.remotes.values()) {
+              avatar.node.x = Phaser.Math.Linear(avatar.node.x, avatar.targetX, Math.min(1, delta / 95))
+              avatar.node.y = Phaser.Math.Linear(avatar.node.y, avatar.targetY, Math.min(1, delta / 95))
+              avatar.node.setDepth(avatar.node.y + 100)
+              this.animateAvatar(avatar, time)
+            }
+            return
+          }
           if (!this.player) return
           const activeElement = document.activeElement
           const typing =
@@ -802,12 +961,11 @@ export function GardenGame({
             width: 32,
             height: 80,
           })
-          this.copyCrop('garden-tree-round', 'garden-village', {
-            x: 272,
-            y: 0,
-            width: 48,
-            height: 48,
-          })
+          // One texture per catalogue entry, so placed scenery and the palette
+          // both draw from the same crop.
+          for (const prop of GARDEN_PROPS) {
+            this.copyCrop(propTextureKey(prop.id), propSheetKey(prop.sheet), prop.crop)
+          }
         }
 
         /**
@@ -1333,7 +1491,10 @@ export function GardenGame({
           ]
           const cropIndex = Math.abs(seed) % crops.length
           const crop = crops[cropIndex]
-          const textures = ['garden-tree-wide', 'garden-tree-tall', 'garden-tree-round']
+          // Two crops, not three: 'garden-tree-round' was cropping (272,0) of
+          // tileset_village, which is a building fragment rather than a tree, so
+          // roughly a third of the generated tree line was drawing scenery debris.
+          const textures = ['garden-tree-wide', 'garden-tree-tall']
           const tree = this.add
             .image(x, y, textures[cropIndex])
             .setOrigin(0.5, 1)
@@ -1602,6 +1763,192 @@ export function GardenGame({
           const blocker = this.add.rectangle(x, y, width, height, 0x000000, 0)
           this.blockers.add(blocker)
           return blocker
+        }
+
+        // --- Placed scenery + creator mode ---------------------------------
+
+        /**
+         * Diff the store's layout into the scene. Same present-set shape as the
+         * peer diff, so a foreign edit adds, moves or destroys exactly the objects
+         * that changed and never rebuilds the world.
+         */
+        private syncPlaced(layout: GardenObject[]) {
+          if (layout === this.lastLayout) return
+          this.lastLayout = layout
+          const present = new Set<string>()
+          for (const row of layout) {
+            present.add(row.id)
+            const existing = this.placed.get(row.id)
+            if (!existing) {
+              this.spawnPlaced(row)
+              continue
+            }
+            if (
+              existing.row.x !== row.x ||
+              existing.row.y !== row.y ||
+              existing.row.flip !== row.flip
+            ) {
+              existing.row = row
+              this.positionPlaced(existing.sprite, existing.blocker, row)
+            }
+          }
+          for (const [id, entry] of this.placed) {
+            if (present.has(id)) continue
+            entry.sprite.destroy()
+            entry.blocker?.destroy()
+            this.placed.delete(id)
+            if (this.selectedId === id) this.select(null)
+          }
+          this.applyEditAffordances()
+        }
+
+        private positionPlaced(
+          sprite: import('phaser').GameObjects.Image,
+          blocker: import('phaser').GameObjects.Rectangle | null,
+          row: GardenObject,
+        ) {
+          const x = row.x * TILE
+          const y = row.y * TILE
+          // Origin at the feet, so depth sorting against walkers matches the
+          // houses and trees.
+          sprite.setPosition(x, y).setFlipX(row.flip).setDepth(y)
+          if (blocker) {
+            blocker.setPosition(x, y - sprite.height / 2 + 4)
+          }
+        }
+
+        private spawnPlaced(row: GardenObject) {
+          const def = propDef(row.kind)
+          // Unknown kind: the catalogue shrank under an existing row. Skip rather
+          // than crash, and leave the row alone so a rollback restores it.
+          if (!def) return
+          const sprite = this.add.image(0, 0, propTextureKey(row.kind)).setOrigin(0.5, 1)
+          const blocker = def.solid
+            ? this.addBlocker(0, 0, def.crop.width * 0.7, Math.max(8, def.crop.height * 0.4))
+            : null
+          const entry = { row, sprite, blocker }
+          this.placed.set(row.id, entry)
+          this.positionPlaced(sprite, blocker, row)
+        }
+
+        /** Only interactive while editing, so normal play is unaffected. */
+        private applyEditAffordances() {
+          const editing = editingRef.current
+          for (const entry of this.placed.values()) {
+            if (editing) {
+              entry.sprite.setInteractive({ useHandCursor: true })
+              // The explicit call, not the `draggable: true` config shorthand:
+              // this is the documented API and the one that actually registers the
+              // object with the drag manager.
+              this.input.setDraggable(entry.sprite)
+            } else {
+              this.input.setDraggable(entry.sprite, false)
+              entry.sprite.disableInteractive()
+              entry.sprite.clearTint()
+            }
+          }
+          if (!editing) {
+            this.ghost?.destroy()
+            this.ghost = null
+            if (this.selectedId) this.select(null)
+          }
+        }
+
+        private select(id: string | null) {
+          if (this.selectedId === id) return
+          const previous = this.selectedId ? this.placed.get(this.selectedId) : null
+          previous?.sprite.clearTint()
+          this.selectedId = id
+          const next = id ? this.placed.get(id) : null
+          next?.sprite.setTint(0x9fd3ff)
+          selectionRef.current(id)
+        }
+
+        /** Half-tile snap, matching the server's own rounding. */
+        private snapToHalfTile(worldX: number, worldY: number): Point {
+          return {
+            x: Math.round((worldX / TILE) * 2) / 2,
+            y: Math.round((worldY / TILE) * 2) / 2,
+          }
+        }
+
+        private updateGhost(worldX: number, worldY: number) {
+          const kind = brushRef.current
+          if (!editingRef.current || !kind) {
+            this.ghost?.destroy()
+            this.ghost = null
+            return
+          }
+          const key = propTextureKey(kind)
+          if (!this.ghost || this.ghost.texture.key !== key) {
+            this.ghost?.destroy()
+            this.ghost = this.add
+              .image(0, 0, key)
+              .setOrigin(0.5, 1)
+              .setAlpha(0.55)
+              .setDepth(20_000)
+          }
+          const at = this.snapToHalfTile(worldX, worldY)
+          this.ghost.setPosition(at.x * TILE, at.y * TILE)
+        }
+
+        /** Place the armed brush. The id is ours, so the op is idempotent. */
+        private placeBrush(worldX: number, worldY: number) {
+          const kind = brushRef.current
+          if (!kind) return
+          const at = this.snapToHalfTile(worldX, worldY)
+          void useStore.getState().saveGardenLayout([
+            { op: 'add', id: crypto.randomUUID(), kind, x: at.x, y: at.y },
+          ])
+          sound.garden.interact()
+        }
+
+        /**
+         * Topmost placed piece under a world point, or null. Sprites are
+         * bottom-centre anchored, so bounds run upward from the anchor. Iterated
+         * back to front so the visually top piece wins.
+         */
+        private pickAt(worldX: number, worldY: number): string | null {
+          const entries = [...this.placed.entries()].sort(
+            (a, b) => b[1].row.y - a[1].row.y,
+          )
+          for (const [id, entry] of entries) {
+            const width = entry.sprite.width
+            const height = entry.sprite.height
+            const left = entry.sprite.x - width / 2
+            const top = entry.sprite.y - height
+            if (
+              worldX >= left &&
+              worldX <= left + width &&
+              worldY >= top &&
+              worldY <= entry.sprite.y
+            ) {
+              return id
+            }
+          }
+          return null
+        }
+
+        /** Move the selected piece to a point, committing one op. */
+        private moveSelected(worldX: number, worldY: number) {
+          const id = this.selectedId
+          if (!id) return
+          const entry = this.placed.get(id)
+          if (!entry) return
+          const at = this.snapToHalfTile(worldX, worldY)
+          if (at.x === entry.row.x && at.y === entry.row.y) return
+          void useStore
+            .getState()
+            .saveGardenLayout([{ op: 'move', id, x: at.x, y: at.y }])
+          sound.garden.interact()
+        }
+
+        public deleteSelected() {
+          const id = this.selectedId
+          if (!id) return
+          this.select(null)
+          void useStore.getState().saveGardenLayout([{ op: 'remove', id }])
+          sound.garden.interact()
         }
       }
 

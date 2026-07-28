@@ -19,7 +19,9 @@ import type {
   GifResult,
   GifSettings,
   GifSuggestResponse,
+  GardenLayoutOp,
   GardenMap,
+  GardenObject,
   VoiceConfigResponse,
   TranscriptionResponse,
   Message,
@@ -304,6 +306,8 @@ async function transcribeAudio(
 
 export const api = {
   gardenMap: () => request<GardenMap>('/garden/map'),
+  saveGardenLayout: (ops: GardenLayoutOp[]) =>
+    request<{ objects: GardenObject[] }>('/garden/layout', { method: 'POST', body: { ops } }),
   tasks: {
     projects: () => request<{ projects: Project[] }>('/projects'),
     createProject: (input: { key: string; name: string; icon?: string; channel_id?: string }) =>

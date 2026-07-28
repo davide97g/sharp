@@ -19,8 +19,10 @@ import {
   Kbd,
   LockIcon,
   Modal,
+  PencilIcon,
 } from '../../ui'
 import { AvatarPicker } from './AvatarPicker'
+import { CreatorPalette } from './CreatorPalette'
 import { GardenGame } from './GardenGame'
 
 function GardenMark({ size = 20 }: { size?: number }) {
@@ -391,6 +393,8 @@ export function GardenView() {
   const setZenPresence = useStore((state) => state.setGardenZen)
   const setAudio = useStore((state) => state.setGardenAudio)
   const selfAvatar = useStore((state) => state.garden.selfAvatar)
+  const canEdit = useStore((state) => state.garden.canEdit)
+  const layoutCount = useStore((state) => state.garden.layout.length)
   const setGardenAvatar = useStore((state) => state.setGardenAvatar)
   const dnd = useStore((state) => state.dnd)
   const setDnd = useStore((state) => state.setDnd)
@@ -423,6 +427,13 @@ export function GardenView() {
   )
   const [railPeeking, setRailPeeking] = useState(false)
   const [avatarOpen, setAvatarOpen] = useState(false)
+  // Creator mode follows the zenMode pattern in this file: local state plus a ref
+  // mirror for the Phaser side plus broad render gating.
+  const [creatorMode, setCreatorMode] = useState(false)
+  const [brush, setBrush] = useState<string | null>(null)
+  const [selection, setSelection] = useState<string | null>(null)
+  const creatorModeRef = useRef(false)
+  creatorModeRef.current = creatorMode
   const railHideTimer = useRef<number | null>(null)
   const railOpen = railPinned || railPeeking
 
@@ -510,6 +521,13 @@ export function GardenView() {
       }),
       registerShortcut('garden.exit-room', (event) => {
         if (document.querySelector('[role="dialog"]')) return
+        // Creator mode owns Escape before it means "leave the room".
+        if (creatorModeRef.current) {
+          event.preventDefault()
+          setCreatorMode(false)
+          setBrush(null)
+          return
+        }
         if (zenMode) {
           event.preventDefault()
           exitZenMode()
@@ -670,6 +688,9 @@ export function GardenView() {
         zenMode={zenMode}
         onNearbyRoom={setNearby}
         onNearbyTemple={setNearbyTemple}
+        editing={creatorMode}
+        brush={brush}
+        onSelection={setSelection}
       />
 
       <header className="pointer-events-none absolute inset-x-0 top-0 z-(--z-dropdown) flex items-start justify-between gap-3 p-3 sm:p-4">
@@ -724,6 +745,19 @@ export function GardenView() {
           >
             <SoundMark on={audioMode === 'on'} />
           </IconButton>
+          {!zenMode && canEdit && (
+            <IconButton
+              label={creatorMode ? 'Leave creator mode' : 'Edit the Garden'}
+              shape="circle"
+              onClick={() => {
+                sound.garden.interact()
+                setCreatorMode((on) => !on)
+                setBrush(null)
+              }}
+            >
+              <PencilIcon />
+            </IconButton>
+          )}
           {!zenMode && (
             <IconButton
               label="Change your character"
@@ -762,7 +796,7 @@ export function GardenView() {
         </div>
       )}
 
-      {!zenMode && (
+      {!zenMode && !creatorMode && (
         <aside
           id="garden-room-rail"
           data-shown={railOpen}
@@ -942,6 +976,20 @@ export function GardenView() {
           </div>
         )}
       </div>
+
+      {creatorMode && !zenMode && (
+        <CreatorPalette
+          brush={brush}
+          onBrush={setBrush}
+          selection={selection}
+          count={layoutCount}
+          onDelete={() => window.dispatchEvent(new CustomEvent('sharp:garden-delete'))}
+          onExit={() => {
+            setCreatorMode(false)
+            setBrush(null)
+          }}
+        />
+      )}
 
       {createOpen && <CreateGardenRoomModal onClose={() => setCreateOpen(false)} />}
 

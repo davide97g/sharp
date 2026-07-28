@@ -72,6 +72,61 @@ Public non-members may see a building and join the channel at its doorway throug
 Channel create/update/delete/member mutations broadcast `garden.map_changed {version}` to the
 affected audience. The client refetches the map rather than trying to patch ACL-sensitive rows.
 
+## Creator mode
+
+A workspace admin can place, move and delete scenery in the hub. The result is shared by
+everyone and persisted.
+
+`users.is_admin` (migration `0038`) is the gate — the first workspace-level role in the app,
+since `ChannelRole` is channel-scoped and this is the first surface that changes something
+*everyone* sees. It is checked in exactly one helper, `routes::require_workspace_admin`, so
+widening the definition later (a roles table, several admins, an env allowlist) is a
+one-function change. A `BEFORE INSERT` trigger promotes the first account on a fresh install,
+which covers both `auth::register` and the social signup path. The flag reaches clients **only**
+as `can_edit` on the map response; `models::User` is deliberately untouched because it is shared
+with `GET /users`.
+
+`garden_objects` holds one row per placed piece — not a snapshot of the world, so the generated
+default keeps following the village as channels are added and these rows stay the sparse diff on
+top. The **client generates the id**, so an optimistic placement needs no reconciliation and a
+replayed op is idempotent (`ON CONFLICT DO NOTHING`). `created_by` is `ON DELETE SET NULL`: a
+departing admin's work outlives their account.
+
+```text
+id uuid PK (client-generated)
+kind text        -- catalogue id, allowlisted by GARDEN_PROP_IDS in Rust
+x, y double      -- tile coords, snapped to a half tile and clamped to the hub
+flip boolean
+created_by uuid FK users(id) ON DELETE SET NULL
+```
+
+`POST /api/v1/garden/layout` takes `{ops}` (1..=64) of `add` / `move` / `remove` — one gesture is
+one request and one broadcast — and returns the authoritative object list. It runs in a single
+transaction, so an over-cap batch places nothing rather than part of itself. Validation:
+admin gate, `kind` against the allowlist, non-finite coordinates refused, coordinates clamped to
+the same hub bounds movement uses, a 1500-object ceiling, and `placement_is_allowed`, which
+refuses any spot within 1.5 tiles of a doorway or on the plaza core or temple threshold — an
+admin must not be able to wall the workspace out of its own rooms.
+
+Success broadcasts `garden.layout_changed {objects, actor_id}` to every online user. It carries
+the whole list rather than a diff, so a client that missed an earlier event still converges; the
+actor skips its own echo because it already applied optimistically. On the client, `layout` is a
+**sibling** of `garden.map`, not a field inside it: the Phaser scene rebuilds when `map` changes
+identity, so nesting layout there would restart the world on every drag.
+
+Interaction: a click selects the piece under the cursor (hit-tested against sprite bounds, so
+selection does not depend on Phaser's input plugin), a click on open ground places the armed
+brush or moves the selection, `Delete` removes it, and `Escape` leaves creator mode before it
+means "leave the room". The local player is **frozen** while editing — no input, no velocity and
+no `garden.move` — so a click never means two things and peers do not see the editor jitter in
+place. Creator mode is desktop-only; precision on a 16px grid through a finger is not a fight
+worth having in v1. Scenery marked solid also blocks movement, client-side, exactly as the
+houses and trees already do.
+
+There is deliberately no server-side history and no draft/publish: two admins can undo each
+other, and the safety nets are the protected zones, the object cap and the change being visible
+live to everyone.
+
 ## Hub terrain
 
 `web/src/lib/garden/terrain.ts` generates the outdoor world as a pure function of

@@ -78,6 +78,7 @@ import type {
   DocUpdatedPayload,
   DuckStreakPayload,
   E2eeDevicesChangedPayload,
+  GardenObject,
   GardenPeer,
   HelloPayload,
   MeetingEndedPayload,
@@ -259,6 +260,15 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
             peers: { ...s.garden.peers, [peer.conn_id]: peer },
           },
         }))
+        break
+      }
+      case 'garden.layout_changed': {
+        // Carries the authoritative list rather than a diff, so a client that
+        // missed an earlier event still converges. The actor already applied it
+        // optimistically and will be reconciled by its own response.
+        const p = env.payload as { objects: GardenObject[]; actor_id: string }
+        if (p.actor_id === get().me?.id) break
+        set((s) => ({ garden: { ...s.garden, layout: p.objects } }))
         break
       }
       case 'garden.peer_avatar': {

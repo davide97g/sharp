@@ -439,6 +439,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(routes::channels::list_channels).post(routes::channels::create_channel),
         )
         .route("/garden/map", get(routes::garden::map))
+        .route("/garden/layout", post(routes::garden::save_layout))
         // ── Channels, membership, roles, read state — contract: docs/arch/01-core.md ─────────
         .route("/channels/dm", post(routes::channels::create_dm))
         .route(

@@ -7,6 +7,7 @@ import {
   setSessionToken,
   setToken,
 } from './lib/api'
+import { applyLayoutOps } from './lib/store/gardenHelpers'
 import { applyUiPrefs } from './lib/theme'
 import { configureCelebrations } from './lib/celebrate'
 import { normalizeWallpaper, type Wallpaper } from './lib/wallpaper'
@@ -121,7 +122,9 @@ import type {
   Doc,
   DocMention,
   GifConfig,
+  GardenLayoutOp,
   GardenMap,
+  GardenObject,
   GardenPeer,
   Message,
   EncryptedAttachment,
@@ -253,6 +256,16 @@ export type GardenClientState = {
    * means never picked, which is what opens the first-join picker.
    */
   selfAvatar: string | null
+  /**
+   * Placed scenery. Deliberately a sibling of `map` rather than a field inside
+   * it: the Phaser scene rebuilds when `map` changes identity, so nesting layout
+   * there would restart the world on every drag.
+   */
+  layout: GardenObject[]
+  /** Whether this viewer may edit. Straight from the server, never inferred. */
+  canEdit: boolean
+  /** Scenery ids the server will accept. */
+  propIds: string[]
   error: string | null
 }
 
@@ -622,6 +635,7 @@ export type State = {
   exitGardenRoom: () => void
   setGardenZen: (enabled: boolean) => void
   setGardenAvatar: (avatar: string) => void
+  saveGardenLayout: (ops: GardenLayoutOp[]) => Promise<void>
   setGardenAudio: (mode: Exclude<GardenAudioMode, 'ask'>) => void
 
   // docs actions
@@ -783,6 +797,9 @@ function emptyGardenState(audioMode = storedGardenAudio()): GardenClientState {
     audioMode,
     managedVoiceChannelId: null,
     selfAvatar: null,
+    layout: [],
+    canEdit: false,
+    propIds: [],
     error: null,
   }
 }
@@ -1954,6 +1971,9 @@ export const useStore = create<State>((set, get) => ({
           ...s.garden,
           map,
           selfAvatar: map.self_avatar ?? null,
+          layout: map.objects ?? [],
+          canEdit: map.can_edit ?? false,
+          propIds: map.props ?? [],
           status: s.garden.active ? 'connected' : 'idle',
           error: null,
         },
@@ -2026,6 +2046,21 @@ export const useStore = create<State>((set, get) => ({
 
   setGardenZen(enabled) {
     get().ws?.send('garden.zen', { enabled })
+  },
+
+  async saveGardenLayout(ops) {
+    // Optimistic: apply locally, then reconcile with the authoritative list the
+    // server echoes back. On failure the previous layout is restored, so a
+    // rejected placement never lingers on screen.
+    const previous = get().garden.layout
+    set((s) => ({ garden: { ...s.garden, layout: applyLayoutOps(s.garden.layout, ops) } }))
+    try {
+      const { objects } = await api.saveGardenLayout(ops)
+      set((s) => ({ garden: { ...s.garden, layout: objects } }))
+    } catch (error) {
+      set((s) => ({ garden: { ...s.garden, layout: previous } }))
+      toastError(error instanceof Error ? error.message : 'Could not save the Garden.')
+    }
   },
 
   setGardenAvatar(avatar) {

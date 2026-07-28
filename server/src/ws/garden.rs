@@ -22,10 +22,10 @@ pub const HUB_SPAWN_Y: f64 = 64.0;
 pub const TEMPLE_X: f64 = 52.0;
 pub const TEMPLE_Y: f64 = 84.0;
 const HUB_MIN_X: f64 = 2.0;
-const HUB_MAX_X: f64 = 102.0;
+pub const HUB_MAX_X: f64 = 102.0;
 const HUB_MIN_Y: f64 = 2.0;
 // Four plots per row; vertical headroom lets the village grow with channels.
-const HUB_MAX_Y: f64 = 398.0;
+pub const HUB_MAX_Y: f64 = 398.0;
 const ROOM_MIN_X: f64 = 2.0;
 const ROOM_MAX_X: f64 = 30.0;
 const ROOM_MIN_Y: f64 = 2.0;

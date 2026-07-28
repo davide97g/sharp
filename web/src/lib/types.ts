@@ -382,7 +382,31 @@ export type GardenMap = {
   self_avatar?: string | null
   /** Server-side roster allowlist, so the picker cannot offer a rejected id. */
   avatars?: string[]
+  /** Whether this viewer may edit the world. Server-computed, never inferred. */
+  can_edit?: boolean
+  /** Placed scenery, in paint order. */
+  objects?: GardenObject[]
+  /** Server-side scenery allowlist, so the palette cannot offer a rejected id. */
+  props?: string[]
 }
+
+/** A piece of admin-placed Garden scenery. */
+export type GardenObject = {
+  id: string
+  kind: string
+  x: number
+  y: number
+  flip: boolean
+}
+
+/**
+ * A creator-mode edit. The client generates the id on `add`, so an optimistic
+ * placement needs no reconciliation and a replayed op is idempotent.
+ */
+export type GardenLayoutOp =
+  | { op: 'add'; id: string; kind: string; x: number; y: number; flip?: boolean }
+  | { op: 'move'; id: string; x: number; y: number; flip?: boolean }
+  | { op: 'remove'; id: string }
 
 export type GardenPeer = {
   conn_id: string
