@@ -232,6 +232,7 @@ fn is_client_garden_event(event_type: &str) -> bool {
             | "garden.temple_teleport"
             | "garden.room_exit"
             | "garden.zen"
+            | "garden.avatar"
     )
 }
 

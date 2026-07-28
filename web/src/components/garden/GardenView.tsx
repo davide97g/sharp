@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { GardenMap, GardenRoom } from '../../lib/types'
 import { sound } from '../../lib/sound'
+import { gardenColor } from '../../lib/gardenColors'
 import { chordFor, formatChord, registerShortcut } from '../../lib/shortcuts'
 import { KEYS, readLocalBool, writeLocalBool } from '../../lib/localPrefs'
 import { toastError } from '../../lib/toast'
@@ -12,12 +13,14 @@ import {
   ChoiceCard,
   CloseIcon,
   Field,
+  GearIcon,
   IconButton,
   Input,
   Kbd,
   LockIcon,
   Modal,
 } from '../../ui'
+import { AvatarPicker } from './AvatarPicker'
 import { GardenGame } from './GardenGame'
 
 function GardenMark({ size = 20 }: { size?: number }) {
@@ -170,10 +173,25 @@ function GardenMinimap({
       context.lineTo(sx(map.temple.x) + 4, sy(map.temple.y) + 3)
       context.closePath()
       context.fill()
-      context.fillStyle = '#7c6cff'
+      // Other people in the hub, each in their join-order colour — the same
+      // colour as their ring in-world, so the two readings agree.
+      const peers = useStore.getState().garden.peers
+      for (const peer of Object.values(peers)) {
+        if (peer.space !== 'hub') continue
+        context.fillStyle = gardenColor(peer.color_index).hex
+        context.beginPath()
+        context.arc(sx(peer.x), sy(peer.y), 2.5, 0, Math.PI * 2)
+        context.fill()
+      }
+      // Self last so it is never hidden under a peer, and ringed so it reads as
+      // "you" even when someone else holds the same slot.
+      context.fillStyle = gardenColor(self?.color_index).hex
       context.beginPath()
       context.arc(sx(self?.x ?? map.spawn.x), sy(self?.y ?? map.spawn.y), 3.5, 0, Math.PI * 2)
       context.fill()
+      context.strokeStyle = 'rgba(255,255,255,0.9)'
+      context.lineWidth = 1.25
+      context.stroke()
     }
     draw()
     const unsubscribe = useStore.subscribe(draw)
@@ -372,6 +390,8 @@ export function GardenView() {
   const exitRoom = useStore((state) => state.exitGardenRoom)
   const setZenPresence = useStore((state) => state.setGardenZen)
   const setAudio = useStore((state) => state.setGardenAudio)
+  const selfAvatar = useStore((state) => state.garden.selfAvatar)
+  const setGardenAvatar = useStore((state) => state.setGardenAvatar)
   const dnd = useStore((state) => state.dnd)
   const setDnd = useStore((state) => state.setDnd)
   const [nearby, setNearby] = useState<GardenRoom | null>(null)
@@ -402,6 +422,7 @@ export function GardenView() {
     readLocalBool(KEYS.gardenRailPinned, false),
   )
   const [railPeeking, setRailPeeking] = useState(false)
+  const [avatarOpen, setAvatarOpen] = useState(false)
   const railHideTimer = useRef<number | null>(null)
   const railOpen = railPinned || railPeeking
 
@@ -437,6 +458,15 @@ export function GardenView() {
     },
     [],
   )
+
+  // Offer the character picker once per device to someone who has never chosen.
+  // Non-blocking on purpose: skipping keeps the deterministic fallback, which
+  // already looks correct to everyone else.
+  useEffect(() => {
+    if (selfAvatar !== null) return
+    if (readLocalBool(KEYS.gardenAvatarPrompted, false)) return
+    setAvatarOpen(true)
+  }, [selfAvatar])
 
   useEffect(() => {
     void enterGarden()
@@ -688,6 +718,18 @@ export function GardenView() {
             <SoundMark on={audioMode === 'on'} />
           </IconButton>
           {!zenMode && (
+            <IconButton
+              label="Change your character"
+              shape="circle"
+              onClick={() => {
+                sound.garden.interact()
+                setAvatarOpen(true)
+              }}
+            >
+              <GearIcon />
+            </IconButton>
+          )}
+          {!zenMode && (
             <span className="lg:hidden">
               <IconButton
                 label="Browse Garden rooms"
@@ -895,6 +937,23 @@ export function GardenView() {
       </div>
 
       {createOpen && <CreateGardenRoomModal onClose={() => setCreateOpen(false)} />}
+
+      {avatarOpen && (
+        <AvatarPicker
+          value={selfAvatar}
+          allowed={map.avatars}
+          onClose={() => {
+            // Record the offer either way, so a skip is not re-asked next visit.
+            writeLocalBool(KEYS.gardenAvatarPrompted, true)
+            setAvatarOpen(false)
+          }}
+          onChoose={(avatar) => {
+            writeLocalBool(KEYS.gardenAvatarPrompted, true)
+            setGardenAvatar(avatar)
+            setAvatarOpen(false)
+          }}
+        />
+      )}
 
       {audioMode === 'ask' && space === 'room' && (
         <Modal

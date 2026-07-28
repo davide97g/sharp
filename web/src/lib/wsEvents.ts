@@ -261,6 +261,30 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
         }))
         break
       }
+      case 'garden.peer_avatar': {
+        // One event per connection of the changing user, so a change made in one
+        // tab lands for peers watching any of them.
+        const p = env.payload as { conn_id: string; user_id: string; avatar: string }
+        set((s) => {
+          const isSelf = p.conn_id === s.myConnId
+          const peer = s.garden.peers[p.conn_id]
+          if (!isSelf && !peer) return {}
+          return {
+            garden: {
+              ...s.garden,
+              selfAvatar: isSelf ? p.avatar : s.garden.selfAvatar,
+              self:
+                isSelf && s.garden.self
+                  ? { ...s.garden.self, avatar: p.avatar }
+                  : s.garden.self,
+              peers: peer
+                ? { ...s.garden.peers, [p.conn_id]: { ...peer, avatar: p.avatar } }
+                : s.garden.peers,
+            },
+          }
+        })
+        break
+      }
       case 'garden.peer_moved': {
         const p = env.payload as Pick<
           GardenPeer,

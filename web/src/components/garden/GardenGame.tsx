@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { GardenMap, GardenPeer, GardenRoom } from '../../lib/types'
+import { gardenColorValue } from '../../lib/gardenColors'
 import { sound } from '../../lib/sound'
 import { useStore } from '../../store'
 import {
@@ -39,6 +40,8 @@ type AvatarIdentity = {
   name: string
   /** The roster id this person chose, or null if they never picked one. */
   avatarId: string | null
+  /** Join-order highlight slot from the server. */
+  colorIndex: number | undefined
 }
 
 let pendingTeleportRoomId: string | null = null
@@ -118,6 +121,11 @@ export function GardenGame({
         halo: import('phaser').GameObjects.Ellipse
         presence: import('phaser').GameObjects.Arc
         label: import('phaser').GameObjects.Text
+        labelTick: import('phaser').GameObjects.Rectangle
+        /** Resolved roster id currently rendered, so a change can be detected. */
+        avatarId: string
+        /** Join-order ring colour, kept so Zen can restore it on exit. */
+        ringColor: number
         name: string
         targetX: number
         targetY: number
@@ -209,6 +217,7 @@ export function GardenGame({
               userId: me?.id ?? '',
               name: me?.display_name ?? 'You',
               avatarId: self?.avatar ?? null,
+              colorIndex: self?.color_index,
             },
             true,
             zenMode,
@@ -327,6 +336,7 @@ export function GardenGame({
                       userId: peer.user_id,
                       name: peer.display_name,
                       avatarId: peer.avatar ?? null,
+                      colorIndex: peer.color_index,
                     },
                     false,
                     peer.zen_mode,
@@ -338,6 +348,9 @@ export function GardenGame({
                 avatar.moving = peer.moving
                 this.faceAvatar(avatar, peer.facing)
                 this.setAvatarZen(avatar, peer.zen_mode)
+                // Someone changed character: swap the texture in place rather than
+                // rebuilding the avatar, so their position and tweens survive.
+                this.setAvatarLook(avatar, peer.avatar ?? null, peer.user_id)
               }
               for (const [connId, avatar] of this.remotes) {
                 if (present.has(connId)) continue
@@ -854,11 +867,16 @@ export function GardenGame({
           // from the immutable user id. Previously this hashed the *display
           // name* and forced the local player to one sheet, so a rename changed
           // your character and same-named users looked identical.
-          const texture = avatarTextureKey(resolveAvatarId(identity.avatarId, userId))
+          const avatarId = resolveAvatarId(identity.avatarId, userId)
+          const texture = avatarTextureKey(avatarId)
           const shadow = this.add.image(0, 1, 'garden-shadow').setAlpha(0.7)
+          // The ring is now everyone's identity, not just a "this is you" marker:
+          // it carries the join-order colour. Self keeps a heavier stroke so you
+          // can still pick yourself out of a crowd wearing the same palette.
+          const ringColor = gardenColorValue(identity.colorIndex)
           const halo = this.add
-            .ellipse(0, -1, 28, 17, palette.accent, self ? 0.15 : 0)
-            .setStrokeStyle(self ? 1 : 0, palette.accent, self ? 0.8 : 0)
+            .ellipse(0, -1, 28, 17, ringColor, self ? 0.22 : 0.14)
+            .setStrokeStyle(self ? 2 : 1.25, ringColor, self ? 0.95 : 0.8)
           const sprite = this.add.sprite(0, -8, texture, DIRECTION_COLUMN.down)
           const presence = this.add
             .circle(11, -6, 3, palette.success)
@@ -874,7 +892,21 @@ export function GardenGame({
               resolution: renderScale,
             })
             .setOrigin(0.5)
-          const node = this.add.container(x, y, [halo, shadow, sprite, presence, label])
+          // Phaser Text has no border, and a tinted *background* would fight
+          // --color-panel across themes, so the colour reads as a tick down the
+          // label's leading edge. Sized from the label so it tracks the name.
+          const labelTick = this.add
+            .rectangle(0, -35, 2, Math.max(8, label.height - 2), ringColor, 0.95)
+            .setOrigin(0.5)
+          labelTick.x = -label.width / 2
+          const node = this.add.container(x, y, [
+            halo,
+            shadow,
+            sprite,
+            presence,
+            label,
+            labelTick,
+          ])
           node.setDepth(y + 100)
           const avatar: Avatar = {
             node,
@@ -883,6 +915,9 @@ export function GardenGame({
             halo,
             presence,
             label,
+            labelTick,
+            avatarId,
+            ringColor,
             name: self ? 'You' : labelFor(name),
             targetX: x,
             targetY: y,
@@ -905,9 +940,32 @@ export function GardenGame({
           if (avatar.zen === zen && avatar.label.text.startsWith('ZEN') === zen) return
           avatar.zen = zen
           avatar.label.setText(zen ? `ZEN · ${avatar.name}` : avatar.name)
+          // Zen is a state and wins over identity while it lasts, so the ring goes
+          // temple-green; leaving restores the person's own colour.
           avatar.halo
-            .setFillStyle(zen ? 0x9fca78 : palette.accent, zen ? 0.22 : 0.15)
-            .setStrokeStyle(1, zen ? 0xd7efb5 : palette.accent, 0.85)
+            .setFillStyle(zen ? 0x9fca78 : avatar.ringColor, zen ? 0.22 : 0.16)
+            .setStrokeStyle(1.25, zen ? 0xd7efb5 : avatar.ringColor, 0.85)
+          avatar.labelTick.setFillStyle(zen ? 0xd7efb5 : avatar.ringColor, 0.95)
+          // The label text changed width, so the tick has to re-hug its edge.
+          avatar.labelTick.x = -avatar.label.width / 2
+        }
+
+        /**
+         * Retexture an existing avatar when its owner picks a new character.
+         * No-ops when the resolved sheet has not changed, so this is safe to call
+         * on every peer sync.
+         */
+        private setAvatarLook(
+          avatar: Avatar,
+          chosen: string | null,
+          userId: string,
+        ) {
+          const next = resolveAvatarId(chosen, userId)
+          if (avatar.avatarId === next) return
+          avatar.avatarId = next
+          avatar.sprite.setTexture(avatarTextureKey(next))
+          // setTexture resets to frame 0; restore the facing the peer actually has.
+          avatar.sprite.setFrame(DIRECTION_COLUMN[avatar.facing])
         }
 
         private faceAvatar(avatar: Avatar, facing: GardenPeer['facing']) {

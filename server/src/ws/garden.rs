@@ -11,6 +11,7 @@ use axum::extract::ws::Message;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sqlx::Row;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Instant;
@@ -34,6 +35,59 @@ const ROOM_SPAWN_Y: f64 = 19.0;
 const MAX_SPEED_TILES_PER_SECOND: f64 = 8.0;
 const MOVE_SLACK: f64 = 1.5;
 
+/// Character sheets a client may choose. Validated here so an arbitrary string
+/// never reaches another client's texture lookup — the same contract as
+/// `AURA_STYLES` in `ws::voice`. Mirrored by `AVATAR_IDS` in
+/// `web/src/components/garden/gardenAvatars.ts`; keep the two in lockstep.
+pub const GARDEN_AVATARS: [&str; 12] = [
+    "samurai",
+    "scout",
+    "ninja",
+    "monk",
+    "knight",
+    "hunter",
+    "royal",
+    "noble",
+    "explorer",
+    "villager",
+    "florist",
+    "mage",
+];
+
+/// Highlight-colour slots. The client owns the actual colours
+/// (`web/src/lib/gardenColors.ts`); the server only hands out an index, so the
+/// palette stays a single token-backed list in one language.
+pub const GARDEN_COLOR_COUNT: u8 = 10;
+
+pub fn is_garden_avatar(value: &str) -> bool {
+    GARDEN_AVATARS.contains(&value)
+}
+
+/// Highlight colour for a joining peer.
+///
+/// Keyed by `user_id`, not `conn_id`: two tabs are two peers but one person, and
+/// they must not wear different colours. Otherwise take the lowest slot nobody
+/// holds, so a slot freed by someone leaving is reused rather than the palette
+/// drifting upward forever. Past ten concurrent people the slot wraps
+/// deterministically from the user id, so collisions are stable rather than
+/// flickering. Index 0 is the product accent (purple), so the first person in
+/// always looks "default".
+fn assign_color_index(peers: &HashMap<Uuid, GardenPeer>, user_id: Uuid) -> u8 {
+    if let Some(existing) = peers.values().find(|peer| peer.user_id == user_id) {
+        return existing.color_index;
+    }
+    let used: std::collections::HashSet<u8> =
+        peers.values().map(|peer| peer.color_index).collect();
+    if let Some(free) = (0..GARDEN_COLOR_COUNT).find(|slot| !used.contains(slot)) {
+        return free;
+    }
+    let hash = user_id
+        .as_bytes()
+        .iter()
+        .fold(0usize, |acc, byte| acc.wrapping_add(*byte as usize));
+    (hash % GARDEN_COLOR_COUNT as usize) as u8
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GardenSpace {
     Hub,
@@ -54,12 +108,23 @@ pub struct GardenPeer {
     pub moving: bool,
     pub zen_mode: bool,
     pub seq: u64,
+    /// Chosen character, or `None` when this person never picked one — the client
+    /// then falls back deterministically from `user_id`.
+    pub avatar: Option<String>,
+    /// Join-order highlight slot. Ephemeral, like the rest of this struct.
+    pub color_index: u8,
     #[serde(skip)]
     pub last_move_at: Instant,
 }
 
 impl GardenPeer {
-    fn new(conn_id: Uuid, user_id: Uuid, display_name: &str) -> Self {
+    fn new(
+        conn_id: Uuid,
+        user_id: Uuid,
+        display_name: &str,
+        avatar: Option<String>,
+        color_index: u8,
+    ) -> Self {
         Self {
             conn_id,
             user_id,
@@ -72,6 +137,8 @@ impl GardenPeer {
             moving: false,
             zen_mode: false,
             seq: 0,
+            avatar,
+            color_index,
             last_move_at: Instant::now(),
         }
     }
@@ -196,6 +263,7 @@ pub async fn handle_event(
         "garden.temple_teleport" => handle_temple_teleport(state, conn_id, tx).await,
         "garden.room_exit" => handle_room_exit(state, conn_id, tx).await,
         "garden.zen" => handle_zen(state, conn_id, &payload, tx).await,
+        "garden.avatar" => handle_avatar(state, user_id, &payload, tx).await,
         _ => {}
     }
 }
@@ -207,16 +275,106 @@ async fn handle_enter(
     display_name: &str,
     tx: &WsSender,
 ) {
+    // Resolve the stored choice before locking: the mutex must never be held
+    // across an await. One PK lookup, once per Garden entry.
+    let avatar = load_garden_avatar(state, user_id).await;
     let peer = {
         let mut guard = state.garden.peers.lock().unwrap();
-        guard
-            .entry(conn_id)
-            .or_insert_with(|| GardenPeer::new(conn_id, user_id, display_name))
-            .clone()
+        match guard.get(&conn_id) {
+            // Resume: this connection is already in Garden, so keep its position
+            // and its colour.
+            Some(existing) => existing.clone(),
+            None => {
+                let color_index = assign_color_index(&guard, user_id);
+                let peer =
+                    GardenPeer::new(conn_id, user_id, display_name, avatar, color_index);
+                guard.insert(conn_id, peer.clone());
+                peer
+            }
+        }
     };
     let peers = peers_visible_to(state, user_id, &peer.garden_space()).await;
     send(tx, "garden.state", json!({ "self": peer, "peers": peers }));
     broadcast_joined(state, &peer).await;
+}
+
+/// Stored character choice, or `None` when unset or no longer in the roster.
+/// Tolerating an unknown value on read is what lets a sheet be removed without
+/// stranding rows.
+async fn load_garden_avatar(state: &SharedState, user_id: Uuid) -> Option<String> {
+    let row = sqlx::query("SELECT garden_avatar FROM user_prefs WHERE user_id = $1")
+        .bind(user_id)
+        .fetch_optional(&state.pool)
+        .await
+        .ok()??;
+    let stored: Option<String> = row.try_get("garden_avatar").ok()?;
+    stored.filter(|value| is_garden_avatar(value))
+}
+
+#[derive(Deserialize)]
+struct AvatarPayload {
+    avatar: String,
+}
+
+/// Persist and publish a character choice.
+///
+/// Applies to every connection of this user, so a change made in one tab shows
+/// up for peers watching any of them.
+async fn handle_avatar(
+    state: &SharedState,
+    user_id: Uuid,
+    payload: &Value,
+    tx: &WsSender,
+) {
+    let Ok(body) = serde_json::from_value::<AvatarPayload>(payload.clone()) else {
+        send(tx, "garden.error", json!({ "code": "bad_avatar" }));
+        return;
+    };
+    if !is_garden_avatar(&body.avatar) {
+        send(tx, "garden.error", json!({ "code": "bad_avatar" }));
+        return;
+    }
+    let stored = sqlx::query(
+        "INSERT INTO user_prefs (user_id, garden_avatar) VALUES ($1, $2)
+         ON CONFLICT (user_id) DO UPDATE SET garden_avatar = $2",
+    )
+    .bind(user_id)
+    .bind(&body.avatar)
+    .execute(&state.pool)
+    .await;
+    if stored.is_err() {
+        send(tx, "garden.error", json!({ "code": "bad_avatar" }));
+        return;
+    }
+    // Update every live peer for this user, collecting who to announce and where.
+    let affected: Vec<(Uuid, GardenSpace)> = {
+        let mut guard = state.garden.peers.lock().unwrap();
+        guard
+            .values_mut()
+            .filter(|peer| peer.user_id == user_id)
+            .map(|peer| {
+                peer.avatar = Some(body.avatar.clone());
+                (peer.conn_id, peer.garden_space())
+            })
+            .collect()
+    };
+    for (peer_conn_id, space) in affected {
+        let targets = targets_for_space(state, &space).await;
+        state
+            .hub
+            .broadcast(
+                envelope(
+                    "garden.peer_avatar",
+                    json!({
+                        "conn_id": peer_conn_id,
+                        "user_id": user_id,
+                        "avatar": body.avatar,
+                    }),
+                ),
+                targets,
+            )
+            .await;
+    }
 }
 
 #[derive(Deserialize)]
@@ -646,8 +804,72 @@ pub async fn close_room(state: &SharedState, channel_id: Uuid) {
 
 #[cfg(test)]
 mod tests {
-    use super::{clamped_for_space, plot_door, valid_facing, GardenSpace};
+    use super::{
+        assign_color_index, clamped_for_space, is_garden_avatar, plot_door, valid_facing,
+        GardenPeer, GardenSpace, GARDEN_COLOR_COUNT,
+    };
+    use std::collections::HashMap;
     use uuid::Uuid;
+
+    /// Builds a peer map the way `handle_enter` would, one peer per user.
+    fn peers_with(colors: &[(Uuid, u8)]) -> HashMap<Uuid, GardenPeer> {
+        colors
+            .iter()
+            .map(|(user_id, color_index)| {
+                let conn_id = Uuid::new_v4();
+                let mut peer = GardenPeer::new(conn_id, *user_id, "Peer", None, *color_index);
+                peer.color_index = *color_index;
+                (conn_id, peer)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn first_peer_gets_the_accent_slot() {
+        let peers = HashMap::new();
+        assert_eq!(assign_color_index(&peers, Uuid::new_v4()), 0);
+    }
+
+    #[test]
+    fn colors_are_handed_out_in_order() {
+        let peers = peers_with(&[(Uuid::new_v4(), 0), (Uuid::new_v4(), 1)]);
+        assert_eq!(assign_color_index(&peers, Uuid::new_v4()), 2);
+    }
+
+    #[test]
+    fn a_second_tab_reuses_the_same_color() {
+        let user_id = Uuid::new_v4();
+        let peers = peers_with(&[(user_id, 3), (Uuid::new_v4(), 0)]);
+        assert_eq!(assign_color_index(&peers, user_id), 3);
+    }
+
+    #[test]
+    fn a_freed_slot_is_reused_rather_than_drifting_up() {
+        // Slot 1 was vacated by someone leaving; the next arrival takes it back
+        // instead of climbing to 3.
+        let peers = peers_with(&[(Uuid::new_v4(), 0), (Uuid::new_v4(), 2)]);
+        assert_eq!(assign_color_index(&peers, Uuid::new_v4()), 1);
+    }
+
+    #[test]
+    fn the_eleventh_peer_wraps_deterministically() {
+        let taken: Vec<(Uuid, u8)> = (0..GARDEN_COLOR_COUNT)
+            .map(|slot| (Uuid::new_v4(), slot))
+            .collect();
+        let peers = peers_with(&taken);
+        let newcomer = Uuid::new_v4();
+        let first = assign_color_index(&peers, newcomer);
+        assert!(first < GARDEN_COLOR_COUNT);
+        // Same person, same slot: a collision must be stable, not flickering.
+        assert_eq!(first, assign_color_index(&peers, newcomer));
+    }
+
+    #[test]
+    fn avatars_are_allowlisted() {
+        assert!(is_garden_avatar("samurai"));
+        assert!(!is_garden_avatar("../../etc/passwd"));
+        assert!(!is_garden_avatar(""));
+    }
 
     #[test]
     fn plot_doors_are_stable_and_expand_in_rows() {

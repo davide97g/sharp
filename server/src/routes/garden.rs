@@ -1,7 +1,9 @@
 use crate::auth::AuthUser;
 use crate::error::AppResult;
 use crate::state::SharedState;
-use crate::ws::garden::{plot_door, HUB_SPAWN_X, HUB_SPAWN_Y, TEMPLE_X, TEMPLE_Y};
+use crate::ws::garden::{
+    is_garden_avatar, plot_door, GARDEN_AVATARS, HUB_SPAWN_X, HUB_SPAWN_Y, TEMPLE_X, TEMPLE_Y,
+};
 use axum::extract::State;
 use axum::Json;
 use serde::Serialize;
@@ -28,6 +30,13 @@ pub struct GardenMap {
     spawn: GardenPoint,
     temple: GardenPoint,
     rooms: Vec<GardenRoom>,
+    /// The caller's chosen character, or `null` when they have never picked —
+    /// which is what the first-join picker keys off. Viewer-scoped: a peer's
+    /// choice arrives on the peer, never here.
+    self_avatar: Option<String>,
+    /// The server's roster allowlist, so the picker cannot drift out of lockstep
+    /// with what the server will accept.
+    avatars: Vec<&'static str>,
 }
 
 #[derive(Serialize)]
@@ -50,6 +59,14 @@ pub async fn map(State(state): State<SharedState>, auth: AuthUser) -> AppResult<
     .bind(auth.id)
     .fetch_all(&state.pool)
     .await?;
+    let self_avatar: Option<String> =
+        sqlx::query("SELECT garden_avatar FROM user_prefs WHERE user_id = $1")
+            .bind(auth.id)
+            .fetch_optional(&state.pool)
+            .await?
+            .and_then(|row| row.try_get::<Option<String>, _>("garden_avatar").ok())
+            .flatten()
+            .filter(|value| is_garden_avatar(value));
     let occupancy = state.garden.occupancy();
     let mut rooms = Vec::with_capacity(rows.len());
     for row in rows {
@@ -80,5 +97,7 @@ pub async fn map(State(state): State<SharedState>, auth: AuthUser) -> AppResult<
             y: TEMPLE_Y,
         },
         rooms,
+        self_avatar,
+        avatars: GARDEN_AVATARS.to_vec(),
     }))
 }

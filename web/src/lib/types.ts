@@ -378,6 +378,10 @@ export type GardenMap = {
   spawn: { x: number; y: number }
   temple: { x: number; y: number }
   rooms: GardenRoom[]
+  /** This viewer's chosen character; null means they have never picked one. */
+  self_avatar?: string | null
+  /** Server-side roster allowlist, so the picker cannot offer a rejected id. */
+  avatars?: string[]
 }
 
 export type GardenPeer = {

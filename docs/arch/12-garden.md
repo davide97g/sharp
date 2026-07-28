@@ -21,6 +21,20 @@ Migration `0035_garden.sql` backfills existing channels in stable creation order
 `AFTER INSERT` trigger. The trigger takes an advisory transaction lock, allocates the next plot,
 and chooses its variant deterministically from the plot index. DMs never get Garden plots.
 
+`user_prefs.garden_avatar` (migration `0037_garden_avatar.sql`) holds the chosen character.
+
+```text
+garden_avatar text NULL   -- NULL = never picked
+```
+
+It is a real column rather than a key in the `user_prefs.ui` blob because that blob is opaque to
+the server and private to its owner, while this value is rendered on *other* people's screens. It
+sits on `user_prefs` rather than `users` because `models::User` is shared by `GET /me` and
+`GET /users`, so a column there would publish everyone's choice in every user list for no
+benefit — Garden peers already carry it. There is deliberately no `CHECK` list: the value is
+validated against `ws::garden::GARDEN_AVATARS` on write and tolerated-then-ignored on read, so
+adding or removing a character sheet is a code change and never a migration.
+
 ## Map API
 
 `GET /api/v1/garden/map` requires the normal bearer token and returns:
@@ -42,8 +56,13 @@ GardenMap = {
     door_x: number
     door_y: number
   }>
+  self_avatar: string | null      // the caller's chosen character
+  avatars: string[]               // server roster allowlist
 }
 ```
+
+`self_avatar` is viewer-scoped: a peer's choice arrives on the peer, never here. `avatars` is the
+server's own allowlist, so the picker cannot offer an id the server would reject.
 
 The query returns public channels plus private channels of which the requester is a member.
 A private non-member receives no plot, name, occupancy, or indication that the channel exists.
@@ -72,6 +91,8 @@ Client to server:
   the same visual transition as room teleport.
 - `garden.zen {enabled}` — publish Zen presence. Enabling is accepted only within 4.5 tiles of
   the hub temple; disabling is accepted from any Garden space.
+- `garden.avatar {avatar}` — choose a character. Validated against `GARDEN_AVATARS`; an
+  unknown id is rejected with `garden.error {code: "bad_avatar"}` and nothing is persisted.
 
 Server to client:
 
@@ -83,9 +104,12 @@ Server to client:
 - `garden.space_changed {space, channel_id?, peer}`
 - `garden.temple_arrived {peer}`
 - `garden.peer_zen {conn_id, zen_mode}`
+- `garden.peer_avatar {conn_id, user_id, avatar}` — one event per connection of the changing
+  user, each to that peer's own space audience, so a change made in one tab reaches peers
+  watching any of them. Clients retexture in place rather than rebuilding the avatar.
 - `garden.map_changed {version}`
 - `garden.error {code, channel_id?}`, where current codes include `not_member`, `not_at_door`,
-  and `not_at_temple`.
+  `not_at_temple`, and `bad_avatar`.
 
 `GardenPeer` is:
 
@@ -102,8 +126,34 @@ Server to client:
   moving: boolean
   seq: number
   zen_mode: boolean
+  avatar: string | null
+  color_index: number
 }
 ```
+
+## Appearance
+
+`avatar` is the chosen character roster id, or `null` for someone who never picked. Rendering
+falls back to `AVATAR_IDS[hash(user_id) % n]`, keyed on the **immutable user id** — not the
+display name, which would mean a rename silently changed your character and two people sharing a
+name were indistinguishable. The roster lives in
+`web/src/components/garden/gardenAvatars.ts`, is mirrored by hand in `ws::garden::GARDEN_AVATARS`,
+and its provenance is recorded in `web/public/assets/garden/ninja-adventure/README.md`. Every
+sheet must be 64x112 — 4 facing columns x 7 rows of 16px frames.
+
+`color_index` is a highlight slot assigned by **join order within the live session** and never
+persisted; restarting the server reassigns every slot. Assignment is keyed by `user_id`, so a
+person with two tabs wears one colour, and takes the lowest slot nobody holds, so a slot freed by
+someone leaving is reused rather than the palette drifting upward. Past ten concurrent people the
+slot wraps deterministically from the user id, so a collision is stable rather than flickering.
+Slot 0 is the product accent, so the first arrival looks "default". The ten colours themselves
+live client-side in `web/src/lib/gardenColors.ts` — the server only hands out an index. They are
+fixed hex rather than theme tokens because they must stay legible against grass and stone under
+every preset and accent hue, and because Phaser needs a numeric fill.
+
+The colour renders in three places: the ring under the avatar, a tick down the leading edge of the
+name label, and the minimap dot. Zen mode overrides the ring green while it lasts —
+state wins over identity — and leaving Zen restores the person's own colour.
 
 The server owns the last accepted sequence and position. It rejects stale sequences, clamps
 scene bounds, and permits at most 8 tiles/second plus latency slack. The browser sends at 10 Hz
@@ -135,7 +185,18 @@ returns everyone to the hub. No Garden movement or visit history is persisted.
   doorway or the Zen temple without requiring canvas precision. `Enter` enters a nearby room or
   the temple, `Escape` exits, and `R` opens the accessible room-creation dialog. Semantic
   shortcuts are declared in the shared shortcut registry and may be rebound.
-- The persistent desktop room rail and mobile sheet show only ACL-visible rooms. Room teleport
+- The desktop room rail is **collapsed by default** so the map is the page: only the header card
+  shows at rest. Hovering the card peeks the panel, and its chevron pins it open — three states,
+  because a boolean cannot express "peeking". A 150 ms debounced hide is what lets the cursor
+  cross the gap between card and panel. The pin is device-local
+  (`sharp.gardenRailPinned`), Escape collapses before it means "leave the room", and
+  reduced-motion users get no animation. The mobile sheet is unchanged and remains the only
+  affordance below `lg`.
+- The character picker is offered once per device to anyone who has never chosen
+  (`sharp.gardenAvatarPrompted`) and is reopenable from the gear in the header. It is
+  deliberately **not** blocking: skipping keeps the deterministic fallback, which already looks
+  correct and distinct to everyone else.
+- The desktop room rail and mobile sheet show only ACL-visible rooms. Room teleport
   uses an Escape-like spin and lift, a brief black transition, and a randomized spin-down
   arrival. Reduced-motion users receive a short opacity transition instead. The bottom-right
   minimap tracks the hub paths, visible rooms, temple, and current player position.

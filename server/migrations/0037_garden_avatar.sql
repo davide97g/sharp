@@ -1,0 +1,20 @@
+-- Garden character choice.
+--
+-- A real column rather than a key in user_prefs.ui: that blob is opaque to the
+-- server and private to its owner (migration 0029), but this value is rendered
+-- on *other* people's screens, so the server has to read it and publish it on
+-- the Garden peer. Same reasoning as the deliberate real columns in 0031.
+--
+-- It lives on user_prefs rather than users because models::User is shared by
+-- GET /me and GET /users, so a column there would publish everyone's choice in
+-- every user list for no benefit -- Garden peers already carry it.
+--
+-- NULL means "never picked", which is exactly what the first-join picker keys
+-- off. Rendering falls back to a deterministic pick from the user id, so a NULL
+-- still looks correct and distinct to everyone.
+--
+-- No CHECK list on purpose: the value is validated against
+-- ws::garden::GARDEN_AVATARS on write, so adding a character sheet is a code
+-- change and never a migration. Unknown values are also tolerated on read (they
+-- fall back), so removing a sheet cannot break an existing row.
+ALTER TABLE user_prefs ADD COLUMN garden_avatar text;

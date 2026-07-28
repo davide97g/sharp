@@ -248,6 +248,11 @@ export type GardenClientState = {
   channelId: string | null
   audioMode: GardenAudioMode
   managedVoiceChannelId: string | null
+  /**
+   * This viewer's chosen character, mirrored out of the map response. `null`
+   * means never picked, which is what opens the first-join picker.
+   */
+  selfAvatar: string | null
   error: string | null
 }
 
@@ -616,6 +621,7 @@ export type State = {
   teleportGardenTemple: () => void
   exitGardenRoom: () => void
   setGardenZen: (enabled: boolean) => void
+  setGardenAvatar: (avatar: string) => void
   setGardenAudio: (mode: Exclude<GardenAudioMode, 'ask'>) => void
 
   // docs actions
@@ -776,6 +782,7 @@ function emptyGardenState(audioMode = storedGardenAudio()): GardenClientState {
     channelId: null,
     audioMode,
     managedVoiceChannelId: null,
+    selfAvatar: null,
     error: null,
   }
 }
@@ -1946,6 +1953,7 @@ export const useStore = create<State>((set, get) => ({
         garden: {
           ...s.garden,
           map,
+          selfAvatar: map.self_avatar ?? null,
           status: s.garden.active ? 'connected' : 'idle',
           error: null,
         },
@@ -2018,6 +2026,19 @@ export const useStore = create<State>((set, get) => ({
 
   setGardenZen(enabled) {
     get().ws?.send('garden.zen', { enabled })
+  },
+
+  setGardenAvatar(avatar) {
+    // Optimistic: the server validates against its allowlist and echoes
+    // garden.peer_avatar to everyone, including us.
+    set((s) => ({
+      garden: {
+        ...s.garden,
+        selfAvatar: avatar,
+        self: s.garden.self ? { ...s.garden.self, avatar } : s.garden.self,
+      },
+    }))
+    get().ws?.send('garden.avatar', { avatar })
   },
 
   setGardenAudio(mode) {
