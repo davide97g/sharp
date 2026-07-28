@@ -462,11 +462,18 @@ export function GardenView() {
   // Offer the character picker once per device to someone who has never chosen.
   // Non-blocking on purpose: skipping keeps the deterministic fallback, which
   // already looks correct to everyone else.
+  //
+  // The decision reads map.self_avatar, not the store mirror: the mirror starts
+  // as null and is only filled once the map response lands, so keying off it
+  // popped the picker at someone who already had a character.
+  // undefined = the map has not loaded yet, which is NOT the same as "never
+  // picked". Conflating the two is what popped the picker at existing users.
+  const serverAvatar = map ? (map.self_avatar ?? null) : undefined
   useEffect(() => {
-    if (selfAvatar !== null) return
+    if (serverAvatar === undefined || serverAvatar !== null) return
     if (readLocalBool(KEYS.gardenAvatarPrompted, false)) return
     setAvatarOpen(true)
-  }, [selfAvatar])
+  }, [serverAvatar])
 
   useEffect(() => {
     void enterGarden()
@@ -940,7 +947,7 @@ export function GardenView() {
 
       {avatarOpen && (
         <AvatarPicker
-          value={selfAvatar}
+          value={selfAvatar ?? serverAvatar ?? null}
           allowed={map.avatars}
           onClose={() => {
             // Record the offer either way, so a skip is not re-asked next visit.

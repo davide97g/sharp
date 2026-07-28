@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import type { GardenMap, GardenPeer, GardenRoom } from '../../lib/types'
 import { gardenColorValue } from '../../lib/gardenColors'
+import {
+  blocksMovement,
+  generateTerrain,
+  TERRAIN,
+  tileAt,
+  waterMask,
+  WATER_TILE_OFFSETS,
+  type TerrainGrid,
+} from '../../lib/garden/terrain'
 import { sound } from '../../lib/sound'
 import { useStore } from '../../store'
 import {
@@ -16,6 +25,20 @@ const SEND_EVERY_MS = 100
 const UI_FONT = 'Inter, ui-sans-serif, system-ui, sans-serif'
 const ASSET_ROOT = '/assets/garden/ninja-adventure'
 const TEMPLE_ASSET_ROOT = '/assets/garden/feudal-japan'
+// Grass-shore water family in tileset_water.png, in pixels. Its 3x3 ring, its
+// one-tile channels and its isolated tile are laid out exactly as
+// WATER_TILE_OFFSETS describes.
+const WATER_BLOCK_X = 0
+const WATER_BLOCK_Y = 96
+/** Ground-strip index of the first water case; TERRAIN ids 0..3 precede it. */
+const WATER_TILE_BASE = 4
+/**
+ * Hub terrain seed. A shared constant rather than server state: every client
+ * must generate the identical world, and the layout also has to stay stable
+ * across reloads. Change it to reshuffle the ponds for everyone.
+ */
+const HUB_TERRAIN_SEED = 0x5a17c0de
+
 const DIRECTION_COLUMN: Record<GardenPeer['facing'], number> = {
   down: 0,
   up: 1,
@@ -163,6 +186,8 @@ export function GardenGame({
         private templeNearby = false
         private worldWidth = 0
         private worldHeight = 0
+        /** Generated hub terrain, so scenery placement can avoid water. */
+        private terrain: TerrainGrid | null = null
         private lastStep = 0
         private lastBump = 0
         private reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -178,6 +203,8 @@ export function GardenGame({
             `${ASSET_ROOT}/tileset_interior_floor.png`,
           )
           this.load.image('garden-village', `${ASSET_ROOT}/tileset_village.png`)
+          this.load.image('garden-water-source', `${ASSET_ROOT}/tileset_water.png`)
+          this.load.image('garden-nature', `${ASSET_ROOT}/tileset_nature.png`)
           this.load.image('garden-shadow', `${ASSET_ROOT}/avatar_shadow.png`)
           this.load.image('garden-crate', `${ASSET_ROOT}/crate.png`)
           this.load.image('garden-pot', `${ASSET_ROOT}/pot.png`)
@@ -720,17 +747,36 @@ export function GardenGame({
         }
 
         private makeCuratedTiles() {
-          this.copyTiles('garden-ground', 'garden-floor-source', [
-            [0, 192],
-            [16, 192],
-            [16, 128],
-            [80, 128],
+          // Ground strip: TERRAIN ids 0..3 from the floor sheet, then the 16
+          // water shore cases at index WATER_TILE_BASE + mask. Order here IS the
+          // tile index, so it must match lib/garden/terrain.ts.
+          this.copyTiles('garden-ground', [
+            // 0 grass, 1 tufted grass, 2 dirt road, 3 stone plaza
+            ['garden-floor-source', 0, 192],
+            ['garden-floor-source', 16, 192],
+            ['garden-floor-source', 16, 128],
+            // Pale flagstone. The old choice (80,128) was a *transition* tile from
+            // the grass family — the same salmon as the road, with a grass tuft
+            // baked into one corner — so the plaza was invisible against the roads.
+            ['garden-floor-source', 16, 16],
+            // Water, one entry per shore mask. Sourced from the grass-shore
+            // family in tileset_water.png, whose block origin is tile (0, 6) —
+            // its ring tiles already contain grass pixels, which is why water
+            // needs no second layer and no generated masks.
+            ...WATER_TILE_OFFSETS.map(
+              ([tx, ty]) =>
+                ['garden-water-source', WATER_BLOCK_X + tx * TILE, WATER_BLOCK_Y + ty * TILE] as [
+                  string,
+                  number,
+                  number,
+                ],
+            ),
           ])
-          this.copyTiles('garden-interior-ground', 'garden-interior-source', [
-            [32, 32],
-            [48, 32],
-            [64, 32],
-            [80, 32],
+          this.copyTiles('garden-interior-ground', [
+            ['garden-interior-source', 32, 32],
+            ['garden-interior-source', 48, 32],
+            ['garden-interior-source', 64, 32],
+            ['garden-interior-source', 80, 32],
           ])
           this.copyCrop('garden-house-small', 'garden-village', {
             x: 256,
@@ -764,19 +810,21 @@ export function GardenGame({
           })
         }
 
-        private copyTiles(
-          key: string,
-          sourceKey: string,
-          sourceTiles: Array<[number, number]>,
-        ) {
+        /**
+         * Stitch hand-picked 16px tiles into one horizontal strip usable as a
+         * tileset. Each entry carries its own source sheet, so a strip can mix
+         * families — the ground strip pulls grass and roads from the floor sheet
+         * and its water cases from the water sheet.
+         */
+        private copyTiles(key: string, sourceTiles: Array<[string, number, number]>) {
           if (this.textures.exists(key)) return
           const texture = this.textures.createCanvas(key, sourceTiles.length * TILE, TILE)
           if (!texture) return
           const context = texture.context
-          const source = this.textures.get(sourceKey).getSourceImage() as CanvasImageSource
           context.imageSmoothingEnabled = false
           context.clearRect(0, 0, sourceTiles.length * TILE, TILE)
-          sourceTiles.forEach(([sourceX, sourceY], index) => {
+          sourceTiles.forEach(([sourceKey, sourceX, sourceY], index) => {
+            const source = this.textures.get(sourceKey).getSourceImage() as CanvasImageSource
             context.drawImage(
               source,
               sourceX,
@@ -1022,42 +1070,30 @@ export function GardenGame({
           this.worldWidth = widthInTiles * TILE
           this.worldHeight = heightInTiles * TILE
 
-          const data = Array.from({ length: heightInTiles }, (_, y) =>
-            Array.from({ length: widthInTiles }, (_, x) =>
-              (x * 13 + y * 7) % 17 === 0 ? 1 : 0,
-            ),
-          )
           const plaza = { x: 52, y: 64 }
-          this.paintRect(data, plaza.x - 6, plaza.y - 4, 13, 9, 3)
-          this.paintRect(
-            data,
-            Math.round(map.temple.x) - 1,
-            plaza.y,
-            3,
-            Math.round(map.temple.y) - plaza.y + 9,
-            2,
+          // One deterministic generator, shared with the minimap, replaces the old
+          // modulo scatter and the hand-painted plaza/road rects.
+          const terrain = generateTerrain({
+            seed: HUB_TERRAIN_SEED,
+            width: widthInTiles,
+            height: heightInTiles,
+            doors: map.rooms.map((room) => ({ x: room.door_x, y: room.door_y })),
+            temple: map.temple,
+            plaza,
+          })
+          this.terrain = terrain
+
+          // Terrain ids map straight onto strip indices, except water, which picks
+          // its shore case from the neighbourhood.
+          const data = Array.from({ length: heightInTiles }, (_, y) =>
+            Array.from({ length: widthInTiles }, (_, x) => {
+              const id = tileAt(terrain, x, y)
+              if (id !== TERRAIN.WATER) return id
+              return WATER_TILE_BASE + waterMask(terrain, x, y)
+            }),
           )
-          for (const room of map.rooms) {
-            const doorX = Math.round(room.door_x)
-            const doorY = Math.round(room.door_y)
-            this.paintRect(
-              data,
-              doorX - 1,
-              Math.min(doorY, plaza.y),
-              3,
-              Math.abs(plaza.y - doorY) + 1,
-              2,
-            )
-            this.paintRect(
-              data,
-              Math.min(doorX, plaza.x),
-              plaza.y - 1,
-              Math.abs(plaza.x - doorX) + 1,
-              3,
-              2,
-            )
-          }
           this.addTileLayer(data, 'garden-ground')
+          this.addTerrainBlockers(terrain)
 
           map.rooms.forEach((room) => this.drawHouse(room))
           this.drawTemple()
@@ -1066,6 +1102,30 @@ export function GardenGame({
           this.drawCourtyard((plaza.x - 3) * TILE, (plaza.y - 3) * TILE)
           this.drawGardenEdges(heightInTiles)
           this.drawFlowerBeds()
+        }
+
+        /**
+         * Static bodies for impassable terrain, merged into horizontal runs so a
+         * pond costs a handful of bodies rather than one per tile.
+         */
+        private addTerrainBlockers(terrain: TerrainGrid) {
+          for (let y = 0; y < terrain.height; y += 1) {
+            let runStart = -1
+            for (let x = 0; x <= terrain.width; x += 1) {
+              const solid = x < terrain.width && blocksMovement(tileAt(terrain, x, y))
+              if (solid && runStart === -1) runStart = x
+              if (!solid && runStart !== -1) {
+                const runWidth = x - runStart
+                this.addBlocker(
+                  (runStart + runWidth / 2) * TILE,
+                  (y + 0.5) * TILE,
+                  runWidth * TILE,
+                  TILE,
+                )
+                runStart = -1
+              }
+            }
+          }
         }
 
         private drawTemple() {
@@ -1119,24 +1179,6 @@ export function GardenGame({
           this.addFlower(x + 62, gateY + 38, 919)
         }
 
-        private paintRect(
-          data: number[][],
-          left: number,
-          top: number,
-          width: number,
-          height: number,
-          tile: number,
-        ) {
-          for (let y = Math.max(0, top); y < Math.min(data.length, top + height); y += 1) {
-            for (
-              let x = Math.max(0, left);
-              x < Math.min(data[y].length, left + width);
-              x += 1
-            ) {
-              data[y][x] = tile
-            }
-          }
-        }
 
         private addTileLayer(data: number[][], textureKey: string) {
           const tilemap = this.make.tilemap({
@@ -1237,14 +1279,29 @@ export function GardenGame({
           this.addFlower(x - side * 64, y + 12, room.plot_index * 131)
         }
 
+        /**
+         * Whether scenery may stand on this tile. Generated ponds move with the
+         * seed and the room list, so every fixed-coordinate prop has to ask
+         * rather than assume dry land.
+         */
+        private isPlantable(tileX: number, tileY: number): boolean {
+          if (!this.terrain) return true
+          return !blocksMovement(tileAt(this.terrain, Math.round(tileX), Math.round(tileY)))
+        }
+
+        private addTreeIfDry(tileX: number, tileY: number, seed: number) {
+          if (!this.isPlantable(tileX, tileY)) return
+          this.addTree(tileX * TILE, tileY * TILE, seed)
+        }
+
         private drawGardenEdges(heightInTiles: number) {
           for (let y = 8; y < heightInTiles - 4; y += 10) {
-            this.addTree(4 * TILE, y * TILE, y)
-            this.addTree(100 * TILE, (y + 4) * TILE, y + 1)
+            this.addTreeIfDry(4, y, y)
+            this.addTreeIfDry(100, y + 4, y + 1)
           }
           for (let x = 11; x < 98; x += 13) {
-            this.addTree(x * TILE, 4 * TILE, x)
-            this.addTree((x + 5) * TILE, (heightInTiles - 3) * TILE, x + 1)
+            this.addTreeIfDry(x, 4, x)
+            this.addTreeIfDry(x + 5, heightInTiles - 3, x + 1)
           }
         }
 
@@ -1263,6 +1320,7 @@ export function GardenGame({
             [91, 72],
           ]
           positions.forEach(([x, y], index) => {
+            if (!this.isPlantable(x, y)) return
             this.addFlower(x * TILE, y * TILE, index * 173)
           })
         }

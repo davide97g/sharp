@@ -72,6 +72,29 @@ Public non-members may see a building and join the channel at its doorway throug
 Channel create/update/delete/member mutations broadcast `garden.map_changed {version}` to the
 affected audience. The client refetches the map rather than trying to patch ACL-sensitive rows.
 
+## Hub terrain
+
+`web/src/lib/garden/terrain.ts` generates the outdoor world as a pure function of
+`(seed, width, height, doorways, temple, plaza)`. Nothing about it is persisted or sent: every
+client derives the identical grid from a shared constant seed, which is why the map API stays a
+short list of rooms rather than ten thousand tiles. The server remains authoritative for
+movement speed and scene bounds — terrain is cosmetic plus **client-side** collision, the same
+arrangement the houses and trees already had.
+
+Order matters and encodes the safety property: grass and tufted-grass noise, then ponds, then
+the plaza and temple apron, then **roads last**. Because roads are painted over everything, and
+because pond placement additionally refuses any cell reserved by a doorway, its building
+footprint, its spur, the plaza or the temple axis, a generated world can never strand a room
+behind water. Adding a channel re-runs the generator with the new doorway included, so its road
+appears and any pond that would have blocked it is simply never placed.
+
+Terrain ids are `grass`, `grass_alt`, `dirt`, `stone`, `water`. Only `water` blocks movement, as
+merged horizontal runs of static bodies rather than one body per tile. Water renders through a
+16-case shore mask (`waterMask`, `WATER_TILE_OFFSETS`) taken from the grass-shore family in
+`tileset_water.png`; those ring tiles already contain grass pixels, so water composites onto
+grass in a single tilemap layer with no overlay and no generated alpha masks. Fixed-coordinate
+scenery asks `isPlantable` before placing, because ponds move with the seed and the room list.
+
 ## Main WebSocket events
 
 Garden uses the existing `/api/v1/ws` connection and envelope.
