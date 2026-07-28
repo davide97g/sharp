@@ -2,6 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import type { GardenMap, GardenPeer, GardenRoom } from '../../lib/types'
 import { sound } from '../../lib/sound'
 import { useStore } from '../../store'
+import {
+  AVATAR_IDS,
+  avatarSheetUrl,
+  avatarTextureKey,
+  resolveAvatarId,
+} from './gardenAvatars'
 
 const TILE = 16
 const SPEED = 7
@@ -9,7 +15,6 @@ const SEND_EVERY_MS = 100
 const UI_FONT = 'Inter, ui-sans-serif, system-ui, sans-serif'
 const ASSET_ROOT = '/assets/garden/ninja-adventure'
 const TEMPLE_ASSET_ROOT = '/assets/garden/feudal-japan'
-const AVATAR_TEXTURES = ['garden-avatar-blue', 'garden-avatar-green', 'garden-avatar-ninja']
 const DIRECTION_COLUMN: Record<GardenPeer['facing'], number> = {
   down: 0,
   up: 1,
@@ -27,6 +32,14 @@ type Props = {
 }
 
 type Point = { x: number; y: number }
+
+/** What an avatar needs to know about who it represents. */
+type AvatarIdentity = {
+  userId: string
+  name: string
+  /** The roster id this person chose, or null if they never picked one. */
+  avatarId: string | null
+}
 
 let pendingTeleportRoomId: string | null = null
 
@@ -168,18 +181,15 @@ export function GardenGame({
             frameWidth: 16,
             frameHeight: 16,
           })
-          this.load.spritesheet('garden-avatar-blue', `${ASSET_ROOT}/avatar_blue.png`, {
-            frameWidth: 16,
-            frameHeight: 16,
-          })
-          this.load.spritesheet('garden-avatar-green', `${ASSET_ROOT}/avatar_green.png`, {
-            frameWidth: 16,
-            frameHeight: 16,
-          })
-          this.load.spritesheet('garden-avatar-ninja', `${ASSET_ROOT}/avatar_ninja.png`, {
-            frameWidth: 16,
-            frameHeight: 16,
-          })
+          // Every roster sheet is the same 4x7 grid of 16px frames, so the whole
+          // set loads from one list (gardenAvatars.ts). Adding a character never
+          // touches this file.
+          for (const id of AVATAR_IDS) {
+            this.load.spritesheet(avatarTextureKey(id), avatarSheetUrl(id), {
+              frameWidth: 16,
+              frameHeight: 16,
+            })
+          }
         }
 
         create() {
@@ -191,10 +201,15 @@ export function GardenGame({
           const self = useStore.getState().garden.self
           const startX = zenMode ? 16 * TILE : (self?.x ?? map.spawn.x) * TILE
           const startY = zenMode ? 19 * TILE : (self?.y ?? map.spawn.y) * TILE
+          const me = useStore.getState().me
           this.player = this.makeAvatar(
             startX,
             startY,
-            useStore.getState().me?.display_name ?? 'You',
+            {
+              userId: me?.id ?? '',
+              name: me?.display_name ?? 'You',
+              avatarId: self?.avatar ?? null,
+            },
             true,
             zenMode,
           )
@@ -308,7 +323,11 @@ export function GardenGame({
                   avatar = this.makeAvatar(
                     peer.x * TILE,
                     peer.y * TILE,
-                    peer.display_name,
+                    {
+                      userId: peer.user_id,
+                      name: peer.display_name,
+                      avatarId: peer.avatar ?? null,
+                    },
                     false,
                     peer.zen_mode,
                   )
@@ -826,13 +845,16 @@ export function GardenGame({
         private makeAvatar(
           x: number,
           y: number,
-          name: string,
+          identity: AvatarIdentity,
           self: boolean,
           zen = false,
         ): Avatar {
-          const texture = self
-            ? 'garden-avatar-blue'
-            : AVATAR_TEXTURES[hashName(name) % AVATAR_TEXTURES.length]
+          const { name, userId } = identity
+          // Honour the peer's chosen character, else fall back deterministically
+          // from the immutable user id. Previously this hashed the *display
+          // name* and forced the local player to one sheet, so a rename changed
+          // your character and same-named users looked identical.
+          const texture = avatarTextureKey(resolveAvatarId(identity.avatarId, userId))
           const shadow = this.add.image(0, 1, 'garden-shadow').setAlpha(0.7)
           const halo = this.add
             .ellipse(0, -1, 28, 17, palette.accent, self ? 0.15 : 0)
@@ -866,7 +888,9 @@ export function GardenGame({
             targetY: y,
             moving: false,
             facing: 'down',
-            idlePhase: hashName(name) % 1000,
+            // Desync the idle bob per person, keyed on the stable id so a rename
+            // does not visibly re-sync everyone.
+            idlePhase: hashName(userId) % 1000,
             jumpHeight: 0,
             airOffset: 0,
             jumping: false,

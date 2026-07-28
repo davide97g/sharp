@@ -392,6 +392,18 @@ export type GardenPeer = {
   moving: boolean
   zen_mode: boolean
   seq: number
+  /**
+   * Chosen character roster id (see `components/garden/gardenAvatars.ts`), or
+   * null when this person has never picked one — the client then falls back
+   * deterministically from `user_id`. Optional so a client can talk to a server
+   * that predates the roster.
+   */
+  avatar?: string | null
+  /**
+   * Highlight-colour slot, assigned by join order within the live Garden
+   * session and never persisted. Index into `GARDEN_COLOR_KEYS`.
+   */
+  color_index?: number
 }
 
 export type VoiceRoomSnapshot = {
