@@ -254,6 +254,18 @@ pub async fn handle_event(
     payload: Value,
     tx: &WsSender,
 ) {
+    // Everything except entering the Garden needs a registered peer for this
+    // connection. Without one these handlers used to `return` silently, so a lost
+    // `garden.enter` left a client whose map and prompts looked fine but whose
+    // every doorway press did nothing. Answer instead, and let the client
+    // re-announce itself. `garden.move` is excluded: it arrives many times a
+    // second, and re-registering repairs it anyway.
+    if !matches!(event_type, "garden.enter" | "garden.leave" | "garden.move")
+        && !state.garden.peers.lock().unwrap().contains_key(&conn_id)
+    {
+        send(tx, "garden.error", json!({ "code": "no_peer" }));
+        return;
+    }
     match event_type {
         "garden.enter" => handle_enter(state, user_id, conn_id, display_name, tx).await,
         "garden.leave" => cleanup_conn(state, conn_id).await,

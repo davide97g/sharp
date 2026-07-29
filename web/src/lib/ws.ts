@@ -10,6 +10,7 @@ type Handler = (env: WsEnvelope) => void
  * - auto-reconnect with exponential backoff + jitter
  * - dispatches typed envelopes to a single handler
  * - fires onReconnect after a *successful* re-open (not the first open)
+ * - buffers sends made while the socket is still opening (see `send`)
  */
 export class WsClient {
   private ws: WebSocket | null = null
@@ -22,6 +23,8 @@ export class WsClient {
   private pingTimer: ReturnType<typeof setInterval> | null = null
   private hasConnectedOnce = false
   private visibilityListenersAttached = false
+  /** Frames sent while the socket was CONNECTING, flushed in order on open. */
+  private pending: string[] = []
 
   constructor(opts: {
     handler: Handler
@@ -62,6 +65,9 @@ export class WsClient {
 
     ws.onopen = () => {
       this.attempt = 0
+      const queued = this.pending
+      this.pending = []
+      for (const frame of queued) ws.send(frame)
       this.startPing()
       this.sendVisibility()
       this.onOpen()
@@ -85,6 +91,7 @@ export class WsClient {
     ws.onclose = () => {
       this.stopPing()
       this.ws = null
+      this.pending = []
       if (!this.closedByUser) this.scheduleReconnect()
     }
 
@@ -122,9 +129,28 @@ export class WsClient {
     }
   }
 
+  /**
+   * A send on a socket that is still opening is queued, not dropped. The app
+   * bootstraps the socket and its first REST calls in parallel, so a feature
+   * that announces itself right after a fetch (`garden.enter`) used to lose that
+   * frame whenever the handshake was slower than the fetch — true over TLS
+   * behind a proxy, never true on localhost, which is why it only bit in
+   * production. The server then held no Garden peer and silently ignored every
+   * later `garden.room_*`.
+   *
+   * Only the CONNECTING window is buffered, and the queue is dropped on close:
+   * an intent worth replaying seconds later belongs in `onReconnect`, not here.
+   */
   send(type: string, payload: unknown) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type, payload }))
+    if (!this.ws) return
+    const frame = JSON.stringify({ type, payload })
+    if (this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(frame)
+      return
+    }
+    // Bounded so a socket that never opens cannot grow the queue without limit.
+    if (this.ws.readyState === WebSocket.CONNECTING && this.pending.length < 64) {
+      this.pending.push(frame)
     }
   }
 
@@ -159,6 +185,7 @@ export class WsClient {
   close() {
     this.closedByUser = true
     this.stopPing()
+    this.pending = []
     this.detachVisibilityListeners()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)

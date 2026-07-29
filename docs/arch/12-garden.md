@@ -187,7 +187,13 @@ Server to client:
   watching any of them. Clients retexture in place rather than rebuilding the avatar.
 - `garden.map_changed {version}`
 - `garden.error {code, channel_id?}`, where current codes include `not_member`, `not_at_door`,
-  `not_at_temple`, and `bad_avatar`.
+  `not_at_temple`, `bad_avatar`, and `no_peer`.
+- `no_peer` answers any client event other than `garden.enter`/`garden.leave`/`garden.move` that
+  arrives on a connection the peer registry does not know — the registry is per-connection and
+  in-process, so a `garden.enter` that never landed leaves a client whose map and doorway
+  prompts look healthy while every action is ignored. The client re-sends `garden.enter` on this
+  code and is respawned in the hub; silence here was previously indistinguishable from a bug in
+  the keyboard layer.
 
 `GardenPeer` is:
 

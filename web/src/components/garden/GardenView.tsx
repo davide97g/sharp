@@ -499,13 +499,14 @@ export function GardenView() {
   }, [enterGarden, leaveGarden, setDnd, setZenPresence])
 
   useEffect(() => {
+    // A dialog that traps the user owns these keys; a *non-modal* one that merely
+    // carries role="dialog" (the call's aura/notes prompts, the reaction tray, the
+    // call-options popover) must not, or standing in a call silently kills every
+    // Garden key. Hence aria-modal, not the bare role.
+    const modalOpen = () => document.querySelector('[role="dialog"][aria-modal="true"]') !== null
     const off = [
       registerShortcut('garden.enter-room', (event) => {
-        if (
-          roomsOpen ||
-          createOpen ||
-          document.querySelector('[role="dialog"]')
-        ) {
+        if (roomsOpen || createOpen || modalOpen()) {
           return
         }
         if (zenMode) return
@@ -520,7 +521,7 @@ export function GardenView() {
         void enterRoom(nearby.channel_id)
       }),
       registerShortcut('garden.exit-room', (event) => {
-        if (document.querySelector('[role="dialog"]')) return
+        if (modalOpen()) return
         // Creator mode owns Escape before it means "leave the room".
         if (creatorModeRef.current) {
           event.preventDefault()
@@ -538,8 +539,11 @@ export function GardenView() {
           setRoomsOpen(false)
           return
         }
-        // Collapse the desktop rail before Escape means "leave the room".
-        if (railPinned || railPeeking) {
+        // Collapse the desktop rail before Escape means "leave the hub view" —
+        // but never ahead of leaving a room. The rail peeks on hover *and* on
+        // focus of a header button, so letting it win inside a room made Escape
+        // look broken: the press went to a panel the user was not thinking about.
+        if (space !== 'room' && (railPinned || railPeeking)) {
           event.preventDefault()
           setRailPeeking(false)
           if (railPinned) {
@@ -555,12 +559,7 @@ export function GardenView() {
         exitRoom()
       }),
       registerShortcut('garden.create-room', (event) => {
-        if (
-          createOpen ||
-          roomsOpen ||
-          zenMode ||
-          document.querySelector('[role="dialog"]')
-        ) {
+        if (createOpen || roomsOpen || zenMode || modalOpen()) {
           return
         }
         event.preventDefault()

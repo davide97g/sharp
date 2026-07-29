@@ -405,6 +405,19 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
       }
       case 'garden.error': {
         const p = env.payload as { code?: string }
+        // The server holds no peer for this connection, so it ignored the action.
+        // Re-announce ourselves rather than leaving the page in a state where the
+        // map looks alive and every doorway is inert. The server respawns us in
+        // the hub, and `garden.state` puts the client back in step with it.
+        if (p.code === 'no_peer') {
+          if (get().garden.active) {
+            get().ws?.send('garden.enter', {})
+            set((s) => ({
+              garden: { ...s.garden, error: 'Garden reconnected — try that again.' },
+            }))
+          }
+          break
+        }
         const message =
           p.code === 'not_member'
             ? 'Join this group before entering its room.'
