@@ -23,3 +23,21 @@ pub fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(reqwest::Client::new)
 }
+
+/// The one deliberate exception to "one client": a second pool that never
+/// follows redirects.
+///
+/// Link unfurling fetches URLs users typed, so every hop's host has to be
+/// re-resolved and re-checked against the SSRF rules before it is requested —
+/// otherwise a public page could redirect the server at `169.254.169.254`.
+/// Redirect policy is fixed at client-build time in reqwest, so following hops
+/// by hand requires its own client. Nothing else should use this.
+pub fn no_redirect_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}

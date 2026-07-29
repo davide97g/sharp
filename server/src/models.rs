@@ -123,6 +123,32 @@ pub struct Message {
     pub reply_count: i64,
     pub last_reply_at: Option<DateTime<Utc>>,
     pub reply_to: Option<ReplyPreview>,
+    /// Unfurled cards for the links in `content`. Always empty on the immediate
+    /// POST response — unfurling is asynchronous and arrives via `message.previews`.
+    pub link_previews: Vec<LinkPreview>,
+}
+
+/// An unfurled link card. `kind` is `link` | `photo` | `video`; `error` rows exist
+/// in the cache table but are never serialized to a client.
+///
+/// `image_url`/`favicon_url` are remote URLs the *server* fetches on the client's
+/// behalf (`GET /unfurl/image`), never loaded directly by the browser — see
+/// `server/src/unfurl.rs`.
+#[derive(Debug, Clone, Serialize)]
+pub struct LinkPreview {
+    pub url: String,
+    pub kind: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub site_name: Option<String>,
+    pub author: Option<String>,
+    pub image_url: Option<String>,
+    pub image_width: Option<i32>,
+    pub image_height: Option<i32>,
+    pub favicon_url: Option<String>,
+    /// Allowlisted player URL (YouTube/Vimeo only) for click-to-play.
+    pub embed_url: Option<String>,
+    pub color: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

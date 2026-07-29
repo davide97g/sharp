@@ -5,6 +5,7 @@ use crate::models::{Attachment, Message, MessageUser, Reaction, ReplyPreview};
 use crate::notify;
 use crate::routes::{channel_kind, require_can_post, require_member};
 use crate::state::SharedState;
+use crate::unfurl;
 use crate::ws::{channel_member_ids, envelope};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -95,6 +96,7 @@ pub(crate) fn map_message_row(row: &PgRow) -> AppResult<Message> {
         reply_count: row.try_get("reply_count")?,
         last_reply_at: row.try_get("last_reply_at")?,
         reply_to,
+        link_previews: Vec::new(),
     })
 }
 
@@ -172,12 +174,16 @@ async fn assemble(pool: &PgPool, rows: Vec<PgRow>, viewer: Uuid) -> AppResult<Ve
     let ids: Vec<i64> = msgs.iter().map(|m| m.id).collect();
     let mut rmap = fetch_reactions_map(pool, &ids, viewer).await?;
     let mut amap = fetch_attachments_map(pool, &ids).await?;
+    let mut pmap = unfurl::load_previews_map(pool, &ids).await?;
     for m in &mut msgs {
         if let Some(rs) = rmap.remove(&m.id) {
             m.reactions = rs;
         }
         if let Some(atts) = amap.remove(&m.id) {
             m.attachments = atts;
+        }
+        if let Some(previews) = pmap.remove(&m.id) {
+            m.link_previews = previews;
         }
     }
     Ok(msgs)
@@ -361,6 +367,13 @@ async fn publish_message(
         )
         .await;
     });
+
+    // Link previews: unfurl in the background and follow up with
+    // `message.previews`. Encrypted content is ciphertext — there is nothing to
+    // read, and fetching what we could read would leak it to a third party.
+    if !message.encrypted {
+        unfurl::spawn_unfurl(state, message.id, channel_id, message.content.clone());
+    }
 
     // Sharpy: embed the new message immediately (no-op when disabled/encrypted).
     if state.config.ai.is_some() && !message.encrypted {
@@ -645,7 +658,37 @@ pub async fn edit_message(
     let ev = envelope("message.updated", json!({ "message": &message }));
     state.hub.broadcast(ev, targets).await;
 
+    // An edit can add, change or remove links, so the cards are re-derived from
+    // the new text. `message.updated` carries the old set; `message.previews`
+    // corrects it a moment later.
+    if !encrypted {
+        unfurl::spawn_reunfurl(&state, id, meta.channel_id, body.content.clone());
+    }
+
     Ok(Json(message))
+}
+
+/// Author-only: drop this message's link cards and keep them off, including
+/// across later edits. The message text is untouched — the link still reads as a
+/// link, it just stops taking up a card's worth of the channel.
+pub async fn hide_previews(
+    State(state): State<SharedState>,
+    Path(id): Path<i64>,
+    auth: AuthUser,
+) -> AppResult<StatusCode> {
+    let meta = message_meta(&state.pool, id).await?;
+    if meta.user_id != auth.id {
+        return Err(AppError::Forbidden("not the author".to_string()));
+    }
+    require_member(&state.pool, meta.channel_id, auth.id).await?;
+
+    sqlx::query("UPDATE messages SET previews_hidden = true WHERE id = $1")
+        .bind(id)
+        .execute(&state.pool)
+        .await?;
+    unfurl::broadcast_previews(&state, id, meta.channel_id, &[]).await?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn delete_message(

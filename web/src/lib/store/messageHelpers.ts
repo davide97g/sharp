@@ -19,7 +19,7 @@ import { decryptDmMessage } from '../e2ee'
 import { resolveEncryptedAttachments } from '../e2ee/attachments'
 import { indexDecryptedMessage } from '../e2ee/search'
 import type { ChannelMessages, State } from '../../store'
-import type { Message } from '../types'
+import type { LinkPreview, Message } from '../types'
 
 export type Setter = (
   partial:
@@ -261,6 +261,36 @@ export function applyMessageUpdated(set: Setter, message: Message) {
     for (const [cid, cm] of Object.entries(s.byChannel)) {
       byChannel[cid] = { ...cm, list: cm.list.map(transform) }
     }
+    let thread = s.thread
+    if (s.thread.open) {
+      thread = {
+        ...s.thread,
+        parent: s.thread.parent ? transform(s.thread.parent) : null,
+        replies: s.thread.replies.map(transform),
+      }
+    }
+    return { byChannel, thread }
+  })
+}
+
+/**
+ * Attach (or clear) a message's unfurled link cards.
+ *
+ * Deliberately separate from `applyMessageUpdated`: unfurling lands after the
+ * message, and an edit's `message.updated` carries the *old* cards, so previews
+ * are only ever written by this event.
+ */
+export function applyMessagePreviews(
+  set: Setter,
+  p: { message_id: string; channel_id: string; link_previews: LinkPreview[] },
+) {
+  const transform = (m: Message): Message =>
+    m.id === p.message_id ? { ...m, link_previews: p.link_previews } : m
+  set((s) => {
+    const cm = s.byChannel[p.channel_id]
+    const byChannel = cm
+      ? { ...s.byChannel, [p.channel_id]: { ...cm, list: cm.list.map(transform) } }
+      : s.byChannel
     let thread = s.thread
     if (s.thread.open) {
       thread = {

@@ -50,3 +50,5 @@ lettre = { version = "0.11", default-features = false, features = ["builder", "s
 webauthn-rs = { version = "0.5.5", features = ["conditional-ui", "danger-allow-state-serialisation"] }
 # Sharpy AI assistant: pgvector bindings for semantic retrieval (works with sqlx 0.8)
 pgvector = { version = "0.4", features = ["sqlx"] }
+# Link previews: OpenGraph/meta extraction from fetched pages (see src/unfurl.rs)
+scraper = "0.21"

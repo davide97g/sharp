@@ -89,9 +89,31 @@ messages(
   created_at timestamptz NOT NULL default now(),
   edited_at timestamptz,
   deleted_at timestamptz,                     -- soft delete; content blanked on delete
+  previews_hidden boolean NOT NULL default false, -- author dismissed the link cards (0039)
   search tsvector GENERATED ALWAYS AS (to_tsvector('simple', content)) STORED
 )
 -- indexes: (channel_id, id DESC); (parent_id); GIN (search)
+
+-- Link previews (0039). `link_previews` is a workspace-wide cache keyed by the
+-- normalized URL; `message_link_previews` is only the per-message ordering.
+link_previews(
+  url text PK,                                -- normalized: http(s), fragment stripped, ≤2048 chars
+  kind text NOT NULL,                         -- 'link'|'photo'|'video'|'error'
+  title text, description text, site_name text, author text,
+  image_url text, image_width int, image_height int,
+  favicon_url text,
+  embed_url text,                             -- allowlisted player only (YouTube/Vimeo)
+  color text,                                 -- theme-color, validated #rgb/#rrggbb
+  fetched_at timestamptz NOT NULL default now()
+)
+-- TTL is enforced in unfurl.rs, not SQL: 7 days for a good card, 1 hour for 'error'
+
+message_link_previews(
+  message_id bigint REFERENCES messages(id) ON DELETE CASCADE,
+  position int NOT NULL,
+  url text REFERENCES link_previews(url) ON DELETE CASCADE,
+  PRIMARY KEY (message_id, position)
+)
 
 reactions(
   message_id bigint REFERENCES messages(id) ON DELETE CASCADE,
@@ -167,7 +189,18 @@ Message  = {
   created_at: string, edited_at: string|null, deleted_at: string|null,
   reactions: Reaction[],
   reply_count: number, last_reply_at: string|null, // top-level messages only
-  reply_to: ReplyPreview|null                      // WhatsApp-style quote target (not a thread)
+  reply_to: ReplyPreview|null,                     // WhatsApp-style quote target (not a thread)
+  link_previews: LinkPreview[]                     // always [] on the POST response — unfurl is async
+}
+LinkPreview = {
+  url: string, kind: 'link'|'photo'|'video',       // 'error' rows are cached but never serialized
+  title: string|null, description: string|null,
+  site_name: string|null, author: string|null,
+  image_url: string|null,                          // remote — load via GET /unfurl/image, never directly
+  image_width: number|null, image_height: number|null,
+  favicon_url: string|null,
+  embed_url: string|null,                          // allowlisted player (YouTube/Vimeo), click-to-play
+  color: string|null                               // #rgb / #rrggbb theme-color
 }
 // Quote-reply snapshot embedded in a message; content is a truncated single-line preview.
 ReplyPreview = { id: string, user: { id, display_name, avatar_url }, content: string, deleted: boolean }
@@ -219,6 +252,8 @@ ReplyPreview = { id: string, user: { id, display_name, avatar_url }, content: st
 | DELETE | `/messages/{id}` | → `204` (author only, soft) |
 | PUT | `/messages/{id}/reactions/{emoji}` | → `204` |
 | DELETE | `/messages/{id}/reactions/{emoji}` | → `204` |
+| DELETE | `/messages/{id}/previews` | → `204` (author only) — hides this message's link cards for everyone and keeps them hidden across later edits; emits `message.previews` with an empty list. The message text is untouched. |
+| GET | `/unfurl/image?url=<encoded>` | → image bytes. Proxies a card thumbnail/favicon so the linked site never sees a reader's IP. Refuses (404) any URL that is not already an `image_url`/`favicon_url` in `link_previews`, and any response that is not one of png/jpeg/gif/webp/avif/icon. Same SSRF guard and a 5 MB cap. |
 | GET | `/search?q=&limit=20&channel_id=` | → `{results: (Message & {channel_name: string, snippet: string})[]}` (my channels only; optional `channel_id` scopes to one channel; `snippet` is a `ts_headline` with `<<`/`>>` markers around matches) |
 | GET | `/healthz` | → `200 {"status":"ok","version":"<server package version>"}` (no auth) |
 
@@ -235,6 +270,39 @@ perform those posting actions. Viewer posting gates return 403.
 Validation: password ≥ 8 chars; channel name `[a-z0-9-]{1,50}`; message content 1–8000 chars.
 Registering the **first user** of an instance is always open; later registrations are open
 too in v1 (env `SHARP_DISABLE_SIGNUP=true` closes them).
+
+### Link previews
+
+`server/src/unfurl.rs` (fetch + parse + cache), `server/src/routes/unfurl.rs` (image proxy),
+`web/src/components/LinkPreview.tsx` (cards). Env: `UNFURL_ENABLED` (default true),
+`UNFURL_ALLOW_PRIVATE` (default false).
+
+Flow: `publish_message`/`edit_message` spawn the unfurl — **posting is never blocked on a
+third-party site**. Up to 3 URLs per message are extracted, resolved against the cache
+(7-day TTL; 1 hour for failures), stored in `message_link_previews`, and broadcast as
+`message.previews`. Encrypted DMs are never unfurled: the content is ciphertext, and
+fetching what we could read would hand it to a third party.
+
+Extraction skips URLs inside code fences/spans, markdown link and image targets (which
+includes GIF chips), `<https://…>` (the Discord-compatible "no card" form), and links back
+to `APP_URL` (doc/task links already render as their own chips).
+
+The rules that must not be relaxed:
+
+- **SSRF.** `http(s)` only; every hop's host is resolved and every resolved address must be
+  publicly routable — loopback, RFC1918, link-local (incl. `169.254.169.254`), CGNAT and ULA
+  are refused. Redirects are followed manually (≤4) so each hop is re-checked; this is why
+  the module uses `http::no_redirect_client()`. Page reads stop at `</head>` and are
+  hard-capped at 2 MB.
+  `UNFURL_ALLOW_PRIVATE=true` disables these checks — intranet deployments only.
+- **No iframe from page metadata.** `embed_url` comes from the allowlist in `embed_for()`
+  (YouTube → `youtube-nocookie`, Vimeo → `dnt=1`), never from a page's own `og:video`, and
+  the client only mounts the frame after a click.
+- **No hot-linking.** Card art is fetched through `GET /unfurl/image`, so a linked site
+  never learns who read the message or when.
+
+Per-user opt-out is `ui.linkPreviews` in the synced appearance blob (Settings → Chat);
+the cards are still delivered, the client just does not render them.
 
 ### Social sign-in (Google, GitHub)
 
@@ -295,6 +363,10 @@ Server → client:
   non-GIF posts (shared channel burst for the duck bar). Thread replies carry non-null
   `parent_id`.
 - `message.updated` `{message: Message}`
+- `message.previews` `{message_id, channel_id, link_previews: LinkPreview[]}` — the unfurl
+  result, sent after `message.created`/`message.updated` (or immediately, with an empty list,
+  when the author dismisses the cards). Clients write `link_previews` **only** from this event:
+  the `message.updated` that follows an edit still carries the pre-edit cards.
 - `message.deleted` `{message_id, channel_id, parent_id}`
 - `reaction.added` / `reaction.removed` `{message_id, channel_id, emoji, user_id}`
 - `channel.created` `{channel: Channel}` — to members (public: to everyone)

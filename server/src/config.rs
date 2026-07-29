@@ -71,6 +71,19 @@ pub struct Config {
     /// (e.g. `https://chat.example.com`). Falls back to the request Origin/Host
     /// when unset.
     pub app_url: Option<String>,
+    /// Link previews. On by default — unlike the other integrations this one
+    /// needs no credentials, so making it opt-in would just hide it.
+    pub unfurl: UnfurlConfig,
+}
+
+#[derive(Clone)]
+pub struct UnfurlConfig {
+    pub enabled: bool,
+    /// Allow unfurling hosts that resolve to private/loopback addresses. Off by
+    /// default because it turns the server into an SSRF probe for anyone who can
+    /// post a message; worth turning on only for an intranet deployment where
+    /// internal wikis are the links people actually paste.
+    pub allow_private: bool,
 }
 
 /// Which backend sends transactional email.
@@ -515,6 +528,11 @@ impl Config {
 
         let app_url = env_opt("APP_URL").map(|u| u.trim_end_matches('/').to_string());
 
+        let unfurl = UnfurlConfig {
+            enabled: env_bool("UNFURL_ENABLED", true),
+            allow_private: env_bool("UNFURL_ALLOW_PRIVATE", false),
+        };
+
         Ok(Config {
             database_url,
             jwt_secret,
@@ -539,6 +557,7 @@ impl Config {
             apns,
             mail,
             app_url,
+            unfurl,
         })
     }
 }

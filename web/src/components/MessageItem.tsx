@@ -9,6 +9,7 @@ import { Avatar } from './Avatar'
 import { UserChip } from './UserCard'
 import { Markdown } from './Markdown'
 import { AttachmentList } from './Attachments'
+import { LinkPreviewList } from './LinkPreview'
 import { fmtMessageTime, fmtTime, userColor } from '../lib/util'
 import { useDisplayName } from '../lib/displayName'
 import { gifPreviewText } from '../lib/gif'
@@ -440,6 +441,16 @@ export const MessageItem = memo(function MessageItem({
             <AttachmentList attachments={message.attachments} />
           )}
 
+          {/* link previews */}
+          {!isDeleted && !editing && message.link_previews.length > 0 && (
+            <LinkPreviewList
+              previews={message.link_previews}
+              messageId={message.id}
+              canRemove={isMine}
+              align={isMine ? 'end' : 'start'}
+            />
+          )}
+
           {/* reactions */}
           {!isDeleted && message.reactions.length > 0 && (
             <div className={`mt-1 flex flex-wrap gap-1 ${isMine ? 'justify-end' : 'justify-start'}`}>
@@ -677,6 +688,15 @@ export const MessageItem = memo(function MessageItem({
         {!isDeleted && !editing && message.attachments.length > 0 &&
           (!message.encrypted || typeof message.decryptedText === 'string') && (
           <AttachmentList attachments={message.attachments} />
+        )}
+
+        {/* link previews */}
+        {!isDeleted && !editing && message.link_previews.length > 0 && (
+          <LinkPreviewList
+            previews={message.link_previews}
+            messageId={message.id}
+            canRemove={isMine}
+          />
         )}
 
         {/* reactions */}

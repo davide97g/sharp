@@ -51,6 +51,8 @@ export function localSearchResult(
     reply_count: 0,
     last_reply_at: null,
     reply_to: null,
+    // Encrypted messages are never unfurled — the server cannot read them.
+    link_previews: [],
     channel_name: channelName,
     snippet: row.text,
     local: true,

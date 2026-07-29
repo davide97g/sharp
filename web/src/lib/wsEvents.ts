@@ -40,6 +40,7 @@ import {
   applyDuckStreak,
   applyMessageCreated,
   applyMessageDeleted,
+  applyMessagePreviews,
   applyMessageUpdated,
   queueDecryptions,
   type Setter,
@@ -85,6 +86,7 @@ import type {
   MeetingStartedPayload,
   MessageCreatedPayload,
   MessageDeletedPayload,
+  MessagePreviewsPayload,
   MessageUpdatedPayload,
   NotificationCreatedPayload,
   PollCreatedPayload,
@@ -839,6 +841,10 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
         const { message } = env.payload as MessageUpdatedPayload
         applyMessageUpdated(set, message)
         queueDecryptions(set, [message])
+        break
+      }
+      case 'message.previews': {
+        applyMessagePreviews(set, env.payload as MessagePreviewsPayload)
         break
       }
       case 'message.deleted': {

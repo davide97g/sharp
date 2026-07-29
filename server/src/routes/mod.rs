@@ -28,6 +28,7 @@ pub mod search;
 pub mod sharpy;
 pub mod social_auth;
 pub mod tasks;
+pub mod unfurl;
 pub mod users;
 pub mod voice;
 pub mod voice_triggers;

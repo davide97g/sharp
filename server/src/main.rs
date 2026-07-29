@@ -22,6 +22,7 @@ mod routes;
 mod social_oauth;
 mod state;
 mod storage;
+mod unfurl;
 mod vapid;
 mod ws;
 
@@ -513,6 +514,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/messages/:id/reactions/:emoji",
             put(routes::messages::add_reaction).delete(routes::messages::remove_reaction),
         )
+        // ── Link previews — contract: docs/arch/01-core.md ──────────────────────────────
+        .route(
+            "/messages/:id/previews",
+            delete(routes::messages::hide_previews),
+        )
+        .route("/unfurl/image", get(routes::unfurl::image))
         // files
         // ── File uploads (S3-compatible; inert without S3 config) — contract: docs/arch/05-files-notifications.md 
         .route(

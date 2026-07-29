@@ -125,12 +125,18 @@ export function ChatSettings({
         </p>
       </div>
 
-      <div className="mt-3 border-t border-border pt-5">
+      <div className="mt-3 border-t border-border pt-5 flex flex-col gap-4">
         <ToggleRow
           title="Colour author names"
           description="Give everyone a consistent colour, IRC-style."
           checked={ui.nameColors}
           onChange={(nameColors) => patchUi({ nameColors })}
+        />
+        <ToggleRow
+          title="Show link previews"
+          description="Cards under messages that link out. Images load through your server, never from the linked site."
+          checked={ui.linkPreviews}
+          onChange={(linkPreviews) => patchUi({ linkPreviews })}
         />
       </div>
     </div>

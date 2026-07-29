@@ -71,6 +71,8 @@ export type UiPrefs = {
   timestampStyle: TimestampStyle
   /** Tint author names with their deterministic user color (IRC-style). */
   nameColors: boolean
+  /** Render unfurled link cards under messages. Off leaves the bare link. */
+  linkPreviews: boolean
 
   // --- effects ---
   effects: EffectFlags
@@ -107,6 +109,7 @@ export const DEFAULT_UI_PREFS: UiPrefs = {
   groupWindowMin: 5,
   timestampStyle: 'hover',
   nameColors: false,
+  linkPreviews: true,
   effects: { glass: false, grain: false, glow: false, scanlines: false },
   celebrations: true,
   soundPack: 'default',
@@ -196,6 +199,7 @@ export function normalizeUiPrefs(
     groupWindowMin: num(v.groupWindowMin, base.groupWindowMin, 0, 1440),
     timestampStyle: oneOf(v.timestampStyle, TIMESTAMP_STYLES, base.timestampStyle),
     nameColors: bool(v.nameColors, base.nameColors),
+    linkPreviews: bool(v.linkPreviews, base.linkPreviews),
     effects: {
       glass: bool(effects.glass, base.effects.glass),
       grain: bool(effects.grain, base.effects.grain),

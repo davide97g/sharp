@@ -91,6 +91,26 @@ export type Message = {
   reply_count: number
   last_reply_at: string | null
   reply_to: ReplyPreview | null
+  /** Unfurled link cards. Empty on the POST response — they arrive via `message.previews`. */
+  link_previews: LinkPreview[]
+}
+
+/** A server-unfurled link card. `error` rows never reach the client. */
+export type LinkPreview = {
+  url: string
+  kind: 'link' | 'photo' | 'video'
+  title: string | null
+  description: string | null
+  site_name: string | null
+  author: string | null
+  /** Remote URL — load it through `previewImageUrl()`, never as a bare <img src>. */
+  image_url: string | null
+  image_width: number | null
+  image_height: number | null
+  favicon_url: string | null
+  /** Allowlisted player (YouTube/Vimeo) for click-to-play. */
+  embed_url: string | null
+  color: string | null
 }
 
 export type NotificationKind =
@@ -580,6 +600,12 @@ export type DuckStreakPayload = {
   duck_streak: DuckStreakSnapshot
 }
 export type MessageUpdatedPayload = { message: Message }
+/** Unfurl result for a message. An empty list means "drop the cards". */
+export type MessagePreviewsPayload = {
+  message_id: string
+  channel_id: string
+  link_previews: LinkPreview[]
+}
 export type E2eeDevicesChangedPayload = { user_id: string }
 export type MessageDeletedPayload = {
   message_id: string

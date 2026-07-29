@@ -765,6 +765,10 @@ export const api = {
   deleteMessage(messageId: string) {
     return request<void>(`/messages/${messageId}`, { method: 'DELETE' })
   },
+  /** Author-only: drop this message's link cards for everyone, permanently. */
+  hideMessagePreviews(messageId: string) {
+    return request<void>(`/messages/${messageId}/previews`, { method: 'DELETE' })
+  },
   addReaction(messageId: string, emoji: string) {
     return request<void>(
       `/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`,
@@ -1194,6 +1198,17 @@ function frameEndLength(buffer: string, at: number): number {
 /** Absolute URL for a proxied attachment path (handles custom server origins). */
 export function attachmentAbsoluteUrl(url: string): string {
   return url.startsWith('http') ? url : `${resolveBaseUrl()}${url}`
+}
+
+/**
+ * Path to a link-preview image, fetched *through* the server.
+ *
+ * Never point an <img> at `preview.image_url` directly: that hands the linked
+ * site every reader's IP and read-time. The proxy only serves URLs it already
+ * discovered while unfurling, so it is not a general-purpose fetcher.
+ */
+export function previewImageUrl(remoteUrl: string): string {
+  return `/api/v1/unfurl/image?url=${encodeURIComponent(remoteUrl)}`
 }
 
 /** Fetch an attachment as a Blob with the auth header (for <img> / downloads). */
