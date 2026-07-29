@@ -1,6 +1,9 @@
-//! The link-preview image proxy.
+//! The two client-facing link-preview endpoints: the image proxy, and the
+//! on-demand resolve that encrypted DMs need.
 //!
 //! Contract: docs/arch/01-core.md — "Link previews".
+//!
+//! ## The image proxy
 //!
 //! Card thumbnails and favicons are served through here rather than hot-linked
 //! by the browser, for the same reason mail clients proxy images: a message can
@@ -23,6 +26,7 @@ use crate::state::SharedState;
 use crate::unfurl;
 use axum::body::Body;
 use axum::extract::{Query, State};
+use axum::Json;
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::Response;
 use reqwest::Url;
@@ -47,6 +51,35 @@ const ALLOWED: &[&str] = &[
 #[derive(Deserialize)]
 pub struct ImageQuery {
     pub url: String,
+}
+
+#[derive(Deserialize)]
+pub struct ResolveRequest {
+    pub url: String,
+}
+
+/// Unfurl one URL on behalf of a client — the encrypted-DM path.
+///
+/// The server cannot read an E2EE message, so the client decrypts, extracts the
+/// URLs itself and asks for them here. It sends only the URL, and the result is
+/// not attached to any message: these cards are per-viewer, not part of the
+/// conversation. Rate-limited per user so nobody can drive the server as a
+/// crawler; the URL still goes through the same SSRF guards and cache.
+pub async fn resolve(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Json(body): Json<ResolveRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    if !state.config.unfurl.enabled {
+        return Err(AppError::NotFound("link previews are disabled".to_string()));
+    }
+    if !unfurl::allow_resolve(auth.id) {
+        return Err(AppError::RateLimited(
+            "too many link previews, slow down".to_string(),
+        ));
+    }
+    let preview = unfurl::resolve_one(&state, &body.url).await?;
+    Ok(Json(serde_json::json!({ "preview": preview })))
 }
 
 pub async fn image(

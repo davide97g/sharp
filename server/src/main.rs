@@ -520,6 +520,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             delete(routes::messages::hide_previews),
         )
         .route("/unfurl/image", get(routes::unfurl::image))
+        .route("/unfurl/resolve", post(routes::unfurl::resolve))
         // files
         // ── File uploads (S3-compatible; inert without S3 config) — contract: docs/arch/05-files-notifications.md 
         .route(

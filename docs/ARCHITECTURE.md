@@ -49,7 +49,7 @@ These hold across every feature. Breaking one compiles fine and fails in product
 | Social sign-in (Google, GitHub) | `social_oauth.rs` (protocol), `routes/social_auth.rs` (policy) | `components/OauthCallback.tsx`, `components/auth/ProviderMark.tsx`, `settings/AccountsTab.tsx` | [01-core](arch/01-core.md) |
 | Channels, members, roles | `routes/channels.rs` | `components/Sidebar.tsx`, `ChannelSettingsModal.tsx` | [01-core](arch/01-core.md) |
 | Messages, threads, reactions, search | `routes/messages.rs`, `routes/search.rs` | `components/MessagePane.tsx`, `MessageItem.tsx`, `Composer.tsx` | [01-core](arch/01-core.md) |
-| Link previews (unfurls) | `unfurl.rs`, `routes/unfurl.rs` (image proxy) | `components/LinkPreview.tsx` | [01-core](arch/01-core.md) |
+| Link previews (unfurls) | `unfurl.rs`, `routes/unfurl.rs` (image proxy + on-demand resolve) | `components/LinkPreview.tsx`, `lib/linkUrls.ts` | [01-core](arch/01-core.md) |
 | Home screen: resume rail + "what moved" board | — (reads `/docs/recent`, `/calendar/events`; everything else is already-loaded store state) | `components/Home.tsx`, `components/home/`, `lib/recents.ts` | [01-core](arch/01-core.md) |
 | Realtime fanout, presence, typing | `ws/mod.rs`, `ws/session.rs` | `lib/ws.ts`, `lib/wsEvents.ts` | [01-core](arch/01-core.md) |
 | Docs (BlockNote/Yjs) | `routes/docs.rs`, `docs_sync.rs` | `components/docs/`, `lib/docSync.ts` | [02-docs](arch/02-docs.md) |
@@ -77,7 +77,8 @@ Shared server helpers worth reusing before writing new ones:
 - `error.rs` — `AppError` → JSON. Every handler returns `AppResult<T>`.
 - `notify.rs` — `deliver_push` / `insert_and_fanout` own the DND, privacy-preview, and
   per-transport visibility rules. Never call a push backend directly from a route.
-- `http.rs` — the one pooled `reqwest::Client`. No per-module client.
+- `http.rs` — the pooled `reqwest::Client`s (the default one, plus `no_redirect_client()` that
+  link unfurling needs to re-check every hop). No per-module client.
 - `ai.rs` — the OpenAI-compatible chat/embed/transcribe client and its wire structs.
 
 Shared web helpers:

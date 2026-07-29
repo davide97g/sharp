@@ -13,8 +13,9 @@
 //      full of video links still makes zero third-party requests until someone
 //      asks for one.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api, fetchAttachmentBlob, previewImageUrl } from '../lib/api'
+import { extractUrls } from '../lib/linkUrls'
 import { toastError } from '../lib/toast'
 import { useStore } from '../store'
 import type { LinkPreview } from '../lib/types'
@@ -55,6 +56,65 @@ function useProxiedImage(remoteUrl: string | null): string | null {
 /** A card with nothing but a URL in it is noise — the link already renders. */
 function isRenderable(preview: LinkPreview): boolean {
   return Boolean(preview.title || preview.description || preview.image_url)
+}
+
+// ── Encrypted DMs ────────────────────────────────────────────────────────────────────
+//
+// The server stores an E2EE DM as ciphertext, so it cannot unfurl one. Here the
+// client does the extraction on the decrypted text and asks the server to resolve
+// each URL. The result is per-viewer and lives only in this tab: nothing is
+// attached to the message, which is the point — the conversation stays opaque to
+// the server beyond the URL itself.
+
+const resolveCache = new Map<string, Promise<LinkPreview | null>>()
+function resolvePreview(url: string): Promise<LinkPreview | null> {
+  let pending = resolveCache.get(url)
+  if (!pending) {
+    pending = api
+      .resolvePreview(url)
+      .then((r) => r.preview)
+      // A rate-limit or a dead link is a missing card, never an error surface.
+      .catch(() => null)
+    resolveCache.set(url, pending)
+  }
+  return pending
+}
+
+/**
+ * Cards for a decrypted message. Renders nothing until the resolves land, so a
+ * DM never reflows on send — the cards fade in the way the server-side ones do.
+ */
+export function DecryptedLinkPreviews({
+  text,
+  align = 'start',
+}: {
+  text: string
+  align?: 'start' | 'end'
+}) {
+  const enabled = useStore((s) => s.ui.linkPreviews)
+  const [previews, setPreviews] = useState<LinkPreview[]>([])
+  const urls = useMemo(() => (enabled ? extractUrls(text) : []), [enabled, text])
+  const key = urls.join('\n')
+
+  useEffect(() => {
+    if (!key) {
+      setPreviews([])
+      return
+    }
+    let cancelled = false
+    Promise.all(key.split('\n').map(resolvePreview)).then((results) => {
+      if (!cancelled) setPreviews(results.filter((p): p is LinkPreview => p !== null))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [key])
+
+  if (!enabled || previews.length === 0) return null
+  // No ✕: there is nothing stored to remove. Settings → Chat turns them all off.
+  return (
+    <LinkPreviewList previews={previews} messageId="" canRemove={false} align={align} />
+  )
 }
 
 export function LinkPreviewList({

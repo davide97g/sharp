@@ -9,7 +9,7 @@ import { Avatar } from './Avatar'
 import { UserChip } from './UserCard'
 import { Markdown } from './Markdown'
 import { AttachmentList } from './Attachments'
-import { LinkPreviewList } from './LinkPreview'
+import { DecryptedLinkPreviews, LinkPreviewList } from './LinkPreview'
 import { fmtMessageTime, fmtTime, userColor } from '../lib/util'
 import { useDisplayName } from '../lib/displayName'
 import { gifPreviewText } from '../lib/gif'
@@ -441,14 +441,9 @@ export const MessageItem = memo(function MessageItem({
             <AttachmentList attachments={message.attachments} />
           )}
 
-          {/* link previews */}
-          {!isDeleted && !editing && message.link_previews.length > 0 && (
-            <LinkPreviewList
-              previews={message.link_previews}
-              messageId={message.id}
-              canRemove={isMine}
-              align={isMine ? 'end' : 'start'}
-            />
+          {/* link previews — server-unfurled, or client-resolved for an E2EE DM */}
+          {!isDeleted && !editing && (
+            <MessageLinkPreviews message={message} align={isMine ? 'end' : 'start'} canRemove={isMine} />
           )}
 
           {/* reactions */}
@@ -690,14 +685,8 @@ export const MessageItem = memo(function MessageItem({
           <AttachmentList attachments={message.attachments} />
         )}
 
-        {/* link previews */}
-        {!isDeleted && !editing && message.link_previews.length > 0 && (
-          <LinkPreviewList
-            previews={message.link_previews}
-            messageId={message.id}
-            canRemove={isMine}
-          />
-        )}
+        {/* link previews — server-unfurled, or client-resolved for an E2EE DM */}
+        {!isDeleted && !editing && <MessageLinkPreviews message={message} canRemove={isMine} />}
 
         {/* reactions */}
         {!isDeleted && message.reactions.length > 0 && (
@@ -806,6 +795,38 @@ export const MessageItem = memo(function MessageItem({
     </div>
   )
 })
+
+/**
+ * The message's link cards, from whichever source can produce them.
+ *
+ * A plaintext message carries `link_previews` the server unfurled. An encrypted
+ * DM cannot: the server holds ciphertext, so the cards are resolved in the
+ * browser from the decrypted text instead.
+ */
+function MessageLinkPreviews({
+  message,
+  canRemove,
+  align = 'start',
+}: {
+  message: Message
+  canRemove: boolean
+  align?: 'start' | 'end'
+}) {
+  if (message.encrypted) {
+    return typeof message.decryptedText === 'string' ? (
+      <DecryptedLinkPreviews text={message.decryptedText} align={align} />
+    ) : null
+  }
+  if (message.link_previews.length === 0) return null
+  return (
+    <LinkPreviewList
+      previews={message.link_previews}
+      messageId={message.id}
+      canRemove={canRemove}
+      align={align}
+    />
+  )
+}
 
 function RenderedMessageContent({ message, highlight }: { message: Message; highlight?: string }) {
   if (!message.encrypted) {

@@ -815,6 +815,62 @@ pub fn spawn_reunfurl(state: &SharedState, message_id: i64, channel_id: Uuid, co
     });
 }
 
+// ── On-demand resolve (encrypted DMs) ────────────────────────────────────────────────
+//
+// An E2EE DM is ciphertext on the server, so the unfurl above can never run for
+// one. The client decrypts, finds the URLs itself, and asks for each one here.
+// Nothing about the message is sent — only the URL — and nothing is persisted
+// against the message, so the cards are per-viewer and vanish with the session.
+
+const RESOLVE_WINDOW: Duration = Duration::from_secs(60);
+const RESOLVE_LIMIT: usize = 20;
+
+/// Per-user sliding window over `POST /unfurl/resolve`. In-process (per replica),
+/// like the GIPHY counter: this exists to stop one client from turning the server
+/// into a crawler, not to be an exact global quota.
+fn resolve_calls() -> &'static std::sync::Mutex<HashMap<Uuid, std::collections::VecDeque<std::time::Instant>>>
+{
+    static CALLS: std::sync::OnceLock<
+        std::sync::Mutex<HashMap<Uuid, std::collections::VecDeque<std::time::Instant>>>,
+    > = std::sync::OnceLock::new();
+    CALLS.get_or_init(Default::default)
+}
+
+/// Reserve one resolve slot for `user`. False when they are over the limit.
+pub fn allow_resolve(user: Uuid) -> bool {
+    let now = std::time::Instant::now();
+    let mut map = match resolve_calls().lock() {
+        Ok(map) => map,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    // Drop users whose window has fully aged out, so the map cannot grow forever.
+    map.retain(|_, calls| {
+        calls.back().is_some_and(|last| now.duration_since(*last) < RESOLVE_WINDOW)
+    });
+    let calls = map.entry(user).or_default();
+    while calls
+        .front()
+        .is_some_and(|at| now.duration_since(*at) >= RESOLVE_WINDOW)
+    {
+        calls.pop_front();
+    }
+    if calls.len() >= RESOLVE_LIMIT {
+        return false;
+    }
+    calls.push_back(now);
+    true
+}
+
+/// Resolve one URL for a client that holds plaintext the server cannot read.
+/// Shares the cache (and therefore the TTLs) with the message unfurler.
+pub async fn resolve_one(state: &SharedState, raw: &str) -> AppResult<Option<LinkPreview>> {
+    let Some(url) = normalize(raw) else {
+        return Ok(None);
+    };
+    let preview = resolve(state, &url).await?;
+    Ok((preview.kind != "error").then_some(preview))
+}
+
 /// True if this exact URL is already known as a preview asset — the whitelist the
 /// image proxy checks so it can never be used as an open forward proxy.
 pub async fn is_known_asset(pool: &PgPool, url: &str) -> AppResult<bool> {

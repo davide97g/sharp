@@ -24,6 +24,7 @@ import type {
   GardenObject,
   VoiceConfigResponse,
   TranscriptionResponse,
+  LinkPreview,
   Message,
   MembersResponse,
   MessagesResponse,
@@ -768,6 +769,14 @@ export const api = {
   /** Author-only: drop this message's link cards for everyone, permanently. */
   hideMessagePreviews(messageId: string) {
     return request<void>(`/messages/${messageId}/previews`, { method: 'DELETE' })
+  },
+  /** Unfurl one URL on demand — how encrypted DMs get cards (the server can't
+   *  read the message, so the client asks per URL). Rate-limited per user. */
+  resolvePreview(url: string) {
+    return request<{ preview: LinkPreview | null }>('/unfurl/resolve', {
+      method: 'POST',
+      body: { url },
+    })
   },
   addReaction(messageId: string, emoji: string) {
     return request<void>(
