@@ -961,6 +961,17 @@ mod push {
         (title, notif.preview.clone())
     }
 
+    /// Host of a push endpoint, for logs. Never log the full endpoint at warn level —
+    /// the path is the subscription's bearer secret.
+    fn push_host(endpoint: &str) -> &str {
+        endpoint
+            .strip_prefix("https://")
+            .unwrap_or(endpoint)
+            .split('/')
+            .next()
+            .unwrap_or("?")
+    }
+
     /// Collapse-tag for a notification (APNs `thread-id` / web-push `tag`).
     pub fn tag_for(notif: &Notification) -> String {
         match (&notif.task_id, &notif.channel_id) {
@@ -1083,7 +1094,14 @@ mod push {
                         .execute(&state.pool)
                         .await;
                 }
-                Ok(Err(e)) => tracing::warn!("push: send: {}", e),
+                // `Display` for WebPushError throws away the push service's own
+                // explanation (the `BadRequest(Some(..))` body is the only thing that
+                // says *why* a 400 happened), so log `Debug` plus the service host.
+                // Credential rejections (401/403) are left in place deliberately: the
+                // client re-subscribes when its applicationServerKey no longer matches
+                // the server key, and deleting here would wipe every subscription the
+                // moment a VAPID key was misconfigured.
+                Ok(Err(e)) => tracing::warn!("push: send to {}: {:?}", push_host(&endpoint), e),
                 Err(_) => tracing::warn!("push: send timed out for {}", endpoint),
             }
         }

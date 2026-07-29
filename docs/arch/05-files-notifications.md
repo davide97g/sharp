@@ -132,9 +132,22 @@ attachments as blobs with the `Authorization` header.
 - `prefs.updated` `{ui: object}` — emitted by `PATCH /prefs/ui` to the caller's **own**
   user id, i.e. all their other tabs and devices. The payload is the fully merged blob,
   so applying it is idempotent and the originating tab needs no echo suppression.
-- `app.visibility` `{visible: boolean}` — sent on connect, visibility changes, page show,
-  and page hide. Visible connection ids are refreshed in Redis (`sharp:visible:<user_id>`)
-  with an expiry, so every server replica shares the foreground-delivery decision.
+- `app.visibility` `{visible: boolean}` — sent on connect, visibility changes, **focus and
+  blur**, page show, and page hide. Visible connection ids are refreshed in Redis
+  (`sharp:visible:<user_id>`) with an expiry, so every server replica shares the
+  foreground-delivery decision.
+
+  `visible` means **attended**, not rendered: `visibilityState === 'visible' &&
+  document.hasFocus()`. A desktop browser window behind another app stays
+  `visibilityState === 'visible'` and fires no `visibilitychange`, so a visibility-only
+  signal made the server suppress push for a user who could not see anything. The Tauri
+  shell is exempt (it always reports attended-while-visible) because it shows its own
+  local notification off the WS event and would otherwise double up with APNs.
+
+  The client mirrors the same rule in `pushWillNotify()` (`web/src/lib/notify.ts`): while a
+  push subscription exists and the window is unfocused, the service worker owns the banner
+  and the chime, and the page contributes only its in-app toast. That is the single reason
+  the two paths do not double-notify — change one side and you must change the other.
 
 ## Appearance (theme, density, motion)
 
@@ -316,6 +329,15 @@ in sync.
 - **Web push**: `web-push` crate (VAPID / RFC 8291, `hyper-client`). Keys resolve
   env → `app_meta` → auto-generated P-256 (`p256`) and persisted, so push works with zero
   config. Public key served at `/push/vapid`; dead subscriptions (404/410) are pruned.
+  Credential rejections (401/403) are **not** pruned — one misconfigured VAPID key would
+  otherwise wipe every subscription in the workspace. Recovery is the client's job:
+  `initPush` compares `subscription.options.applicationServerKey` against `/push/vapid`
+  and re-subscribes on a mismatch, because a subscription is bound for life to the key it
+  was created with. Send failures log the push service's own reason (`Debug`, not
+  `Display` — `Display` drops the `BadRequest` body) and the endpoint **host** only; the
+  endpoint path is the subscription's bearer secret.
+  Note that **`registerServiceWorker` is a no-op under Vite dev** (a caching SW breaks
+  HMR), so web push cannot be tested with `bun run dev` — use a production build.
 - **Expo push**: `reqwest` sends batched native-device tickets to Expo; invalid-device tickets
   (`DeviceNotRegistered`) are pruned.
 

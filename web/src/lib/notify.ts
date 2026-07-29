@@ -82,6 +82,24 @@ export function isWebNotifyGranted(): boolean {
   return typeof Notification !== 'undefined' && Notification.permission === 'granted'
 }
 
+/** Set once this browser holds a live push subscription (see `initPush`). */
+let pushSubscribed = false
+
+/**
+ * True when the service-worker push is going to surface this event, so the page must
+ * stay quiet or the user gets it twice (two banners, two chimes).
+ *
+ * The server sends web push exactly while the window is unattended (`app.visibility`
+ * in `ws.ts`), so "unfocused + subscribed" is the same condition, resolved on the
+ * client. With no subscription — Vite dev, a denied permission, Tauri — nothing else
+ * is coming and the page handles it itself.
+ */
+export function pushWillNotify(): boolean {
+  if (!pushSubscribed || isTauri) return false
+  if (typeof document === 'undefined') return false
+  return !document.hasFocus()
+}
+
 /** Request OS notification permission (Tauri plugin or Web Notification API). */
 export async function requestNotifyPermission(): Promise<boolean> {
   if (isTauri) {
@@ -127,13 +145,14 @@ export async function showOsNotification(
       /* fall through */
     }
   }
-  // Hidden browser/PWA pages receive the service-worker push. Page-created
-  // notifications here would duplicate it. Keep this path for a visible but
-  // unfocused desktop tab; Tauri already returned above.
+  // Subscribed pages leave every unattended notification to the service-worker push
+  // (see `pushWillNotify`) — a page-created one would duplicate it. This path covers
+  // the focused window, and everything when there is no subscription at all.
   if (
     typeof Notification !== 'undefined' &&
     Notification.permission === 'granted' &&
-    document.visibilityState === 'visible'
+    document.visibilityState === 'visible' &&
+    !pushWillNotify()
   ) {
     try {
       const n = new Notification(title, { body, tag })
@@ -146,6 +165,17 @@ export async function showOsNotification(
       /* ignore */
     }
   }
+}
+
+/** True when an existing subscription was created with exactly `expected`. */
+function sameApplicationServerKey(
+  actual: ArrayBuffer | null | undefined,
+  expected: Uint8Array,
+): boolean {
+  if (!actual) return false
+  const a = new Uint8Array(actual)
+  if (a.length !== expected.length) return false
+  return a.every((byte, i) => byte === expected[i])
 }
 
 function urlBase64ToUint8Array(base64: string): Uint8Array {
@@ -245,11 +275,23 @@ export async function initPush(): Promise<NotificationSetupState> {
     const reg = await registerServiceWorker()
     if (!reg) return 'error'
     await navigator.serviceWorker.ready
+    const key = urlBase64ToUint8Array(public_key)
     let sub = await reg.pushManager.getSubscription()
+    // A subscription is bound to the applicationServerKey it was created with: the push
+    // service rejects every send signed with a different VAPID key, permanently. So a
+    // server whose keys changed — a reset `app_meta`, a newly set VAPID_PRIVATE_KEY, a
+    // different server behind the same origin — leaves behind a subscription that can
+    // never deliver again. Detect that and re-subscribe instead of reusing it.
+    if (sub && !sameApplicationServerKey(sub.options.applicationServerKey, key)) {
+      // Drop the server row first; after unsubscribe() the endpoint is unrecoverable.
+      await api.unsubscribePush(sub.endpoint).catch(() => {})
+      await sub.unsubscribe().catch(() => {})
+      sub = null
+    }
     if (!sub) {
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(public_key) as BufferSource,
+        applicationServerKey: key as BufferSource,
       })
     }
     const json = sub.toJSON() as {
@@ -261,6 +303,7 @@ export async function initPush(): Promise<NotificationSetupState> {
         endpoint: json.endpoint,
         keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
       })
+      pushSubscribed = true
       return 'subscribed'
     }
     return 'error'
@@ -294,6 +337,7 @@ export async function disablePush(tokenOverride?: string | null): Promise<Notifi
     void unregisterApnsIfDesktop()
     return initialNotificationState()
   }
+  pushSubscribed = false
   if (!('serviceWorker' in navigator)) return initialNotificationState()
   try {
     const reg = await navigator.serviceWorker.getRegistration('/sw.js')

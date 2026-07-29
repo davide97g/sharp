@@ -158,8 +158,25 @@ export class WsClient {
     this.send('typing', { channel_id: channelId })
   }
 
+  /**
+   * What `app.visibility` reports: is the user *attending* this window, not merely
+   * whether the tab is rendered. The distinction matters on desktop — a browser
+   * window sitting behind another app keeps `visibilityState === 'visible'` and fires
+   * no `visibilitychange`, so a visibility-only signal told the server "they are
+   * looking at it" and suppressed the push the user was waiting for. Focus is the
+   * signal that actually tracks attention, hence the focus/blur listeners.
+   *
+   * The Tauri shell is exempt: it shows its own local notification whenever the WS
+   * event arrives, so reporting unfocused would double up with APNs.
+   */
+  private isAttended(): boolean {
+    if (document.visibilityState !== 'visible') return false
+    if ('__TAURI_INTERNALS__' in window) return true
+    return document.hasFocus()
+  }
+
   private sendVisibility = () => {
-    this.send('app.visibility', { visible: document.visibilityState === 'visible' })
+    this.send('app.visibility', { visible: this.isAttended() })
   }
 
   private sendHidden = () => {
@@ -169,6 +186,8 @@ export class WsClient {
   private attachVisibilityListeners() {
     if (this.visibilityListenersAttached) return
     document.addEventListener('visibilitychange', this.sendVisibility)
+    window.addEventListener('focus', this.sendVisibility)
+    window.addEventListener('blur', this.sendVisibility)
     window.addEventListener('pageshow', this.sendVisibility)
     window.addEventListener('pagehide', this.sendHidden)
     this.visibilityListenersAttached = true
@@ -177,6 +196,8 @@ export class WsClient {
   private detachVisibilityListeners() {
     if (!this.visibilityListenersAttached) return
     document.removeEventListener('visibilitychange', this.sendVisibility)
+    window.removeEventListener('focus', this.sendVisibility)
+    window.removeEventListener('blur', this.sendVisibility)
     window.removeEventListener('pageshow', this.sendVisibility)
     window.removeEventListener('pagehide', this.sendHidden)
     this.visibilityListenersAttached = false

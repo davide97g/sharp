@@ -26,7 +26,7 @@ import {
   playVoiceLeaveSound,
   sound,
 } from './sound'
-import { navigateToChannel, showOsNotification } from './notify'
+import { navigateToChannel, pushWillNotify, showOsNotification } from './notify'
 import { toastError, toastInfo, toastNotify } from './toast'
 import { invalidateDevices } from './e2ee'
 import { markAllDeviceSetsChanged, markDeviceSetChanged } from './e2ee/trust'
@@ -1015,7 +1015,7 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
             initial: who.trim().charAt(0).toUpperCase() || '?',
             onClick: () => navigateTo(deepLink),
           })
-          playNotifySound()
+          if (!pushWillNotify()) playNotifySound()
           void showOsNotification(`${who} mentioned you`, docTitle, {
             deepLink,
             tag: `sharp-doc-${mention.doc.id}`,
@@ -1085,7 +1085,9 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
             initial: notification.actor.display_name.trim().charAt(0).toUpperCase() || '?',
             onClick: () => navigateTo(path),
           })
-          playNotifySound()
+          // The service-worker push brings its own banner *and* its own OS chime when
+          // the window is unattended, so only the in-app toast is ours there.
+          if (!pushWillNotify()) playNotifySound()
           void showOsNotification(title, preview, {
             deepLink: path,
             tag: notification.task_id
@@ -1264,7 +1266,7 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
           initial: '📅',
           onClick: () => navigateTo(deepLink),
         })
-        playNotifySound()
+        if (!pushWillNotify()) playNotifySound()
         void showOsNotification(title, when, {
           deepLink,
           tag: `sharp-cal-${p.ref_id}`,
