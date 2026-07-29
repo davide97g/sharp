@@ -23,7 +23,7 @@ import type {
   GifSettings,
 } from '../lib/types'
 import { toastError } from '../lib/toast'
-import { Button, Input, Select, SectionLabel, Spinner } from '../ui'
+import { Button, CheckIcon, ChevronDownIcon, Input, Select, SectionLabel, Sheet, Spinner } from '../ui'
 import { Modal } from './Modal'
 import { Avatar } from './Avatar'
 import { AvatarCropper } from './AvatarCropper'
@@ -576,6 +576,9 @@ const SETTINGS_META: Record<Tab, { label: string; description: string; group: st
   about: { label: 'About Sharp', description: 'Version details, updates, and product information.', group: 'Sharp' },
 }
 
+/** Sidebar order on desktop, sheet order on mobile — one list, so both teach the same map. */
+const SETTINGS_GROUPS = ['Personal', 'Account', 'Workspace', 'Sharp']
+
 function SettingsPageShell({
   activeTab,
   children,
@@ -595,13 +598,18 @@ function SettingsPageShell({
 }) {
   const logout = useStore((state) => state.logout)
   const headingRef = useRef<HTMLHeadingElement>(null)
+  const [navOpen, setNavOpen] = useState(false)
+  const activeRowRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     headingRef.current?.focus({ preventScroll: true })
     document.getElementById('settings-content')?.scrollTo({ top: 0 })
   }, [activeTab])
 
-  const groups = ['Personal', 'Account', 'Workspace', 'Sharp']
+  function pickTab(next: Tab) {
+    setNavOpen(false)
+    onSelect(next)
+  }
 
   return (
     <div className="settings-page flex min-h-0 flex-1 overflow-hidden bg-[var(--color-ink)] text-[var(--color-text)]">
@@ -618,11 +626,11 @@ function SettingsPageShell({
           </div>
         </div>
         <nav aria-label="Settings sections" className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
-          {groups.map((group) => (
+          {SETTINGS_GROUPS.map((group) => (
             <div key={group} className="mb-5 last:mb-0">
-              <div className="mb-1.5 px-3 text-3xs font-bold uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
+              <SectionLabel size="3xs" className="mb-1.5 px-3">
                 {group}
-              </div>
+              </SectionLabel>
               {SETTINGS_TABS.filter((item) => SETTINGS_META[item].group === group).map((item) => (
                 <SettingsNavButton
                   key={item}
@@ -663,34 +671,89 @@ function SettingsPageShell({
             </div>
             <Avatar id={userId} name={name} size={34} nicknameCard={false} />
           </div>
-          <label className="block pb-3 pt-2">
-            <span className="sr-only">Settings section</span>
-            <select
-              value={activeTab}
-              onChange={(event) => onSelect(event.target.value as Tab)}
-              className="min-h-11 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 text-base font-medium text-[var(--color-text)] outline-none focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent-soft)]"
+          <div className="pb-3 pt-1">
+            <button
+              type="button"
+              onClick={() => setNavOpen(true)}
+              aria-haspopup="dialog"
+              aria-expanded={navOpen}
+              className="flex min-h-13 w-full cursor-pointer items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel-2)] px-2.5 text-left outline-none transition-colors hover:bg-[var(--color-panel)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
             >
-              {SETTINGS_TABS.map((item) => (
-                <option key={item} value={item}>{SETTINGS_META[item].label}</option>
-              ))}
-            </select>
-          </label>
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]">
+                <SettingsIcon tab={activeTab} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-3xs font-bold uppercase tracking-[0.16em] text-[var(--color-text-faint)]">
+                  {SETTINGS_META[activeTab].group}
+                </span>
+                <span className="block truncate text-sm font-semibold">
+                  {SETTINGS_META[activeTab].label}
+                </span>
+              </span>
+              <ChevronDownIcon />
+            </button>
+          </div>
         </header>
+
+        {navOpen && (
+          <Sheet
+            title="Go to section"
+            onClose={() => setNavOpen(false)}
+            initialFocusRef={activeRowRef}
+            footer={
+              <button
+                type="button"
+                onClick={logout}
+                className="flex min-h-11 w-full cursor-pointer items-center justify-center rounded-xl px-3 text-sm font-medium text-danger-fg outline-none transition-colors hover:bg-danger-soft focus-visible:ring-2 focus-visible:ring-danger-fg"
+              >
+                Sign out
+              </button>
+            }
+          >
+            <nav aria-label="Settings sections" className="pt-1">
+              {SETTINGS_GROUPS.map((group) => (
+                <div key={group} className="mb-4 last:mb-1">
+                  <SectionLabel size="3xs" className="mb-1 px-3">
+                    {group}
+                  </SectionLabel>
+                  {SETTINGS_TABS.filter((item) => SETTINGS_META[item].group === group).map((item) => (
+                    <SettingsNavButton
+                      key={item}
+                      active={activeTab === item}
+                      buttonRef={activeTab === item ? activeRowRef : undefined}
+                      label={SETTINGS_META[item].label}
+                      tab={item}
+                      trailing={activeTab === item ? <CheckIcon /> : undefined}
+                      onClick={() => pickTab(item)}
+                    />
+                  ))}
+                </div>
+              ))}
+            </nav>
+          </Sheet>
+        )}
 
         <main
           id="settings-content"
           className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-[var(--color-ink)] px-[max(1rem,var(--safe-left))] pb-[max(2rem,var(--safe-bottom))] pr-[max(1rem,var(--safe-right))] md:px-10 md:pb-12 lg:px-16"
         >
-          <div className="mx-auto w-full max-w-[48rem] pb-10 pt-7 md:pt-12">
-            <div className="mb-8 flex items-start justify-between gap-6">
+          <div className="mx-auto w-full max-w-[48rem] pb-10 pt-5 md:pt-12">
+            {/* On mobile the section switcher above *is* the title, so the group and the
+                heading only show from md up — the h1 stays in the tree for screen readers
+                and for the focus move on every section change. */}
+            <div className="mb-6 flex items-start justify-between gap-6 md:mb-8">
               <div>
-                <p className="mb-2 text-3xs font-bold uppercase tracking-[0.18em] text-[var(--color-accent-hover)]">
+                <p className="mb-2 hidden text-3xs font-bold uppercase tracking-[0.18em] text-[var(--color-accent-hover)] md:block">
                   {SETTINGS_META[activeTab].group}
                 </p>
-                <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-bold tracking-tight outline-none md:text-3xl">
+                <h1
+                  ref={headingRef}
+                  tabIndex={-1}
+                  className="text-2xl font-bold tracking-tight outline-none max-md:sr-only md:text-3xl"
+                >
                   {SETTINGS_META[activeTab].label}
                 </h1>
-                <p className="mt-2 max-w-xl text-sm leading-6 text-[var(--color-text-dim)]">
+                <p className="max-w-xl text-sm leading-6 text-[var(--color-text-dim)] md:mt-2">
                   {SETTINGS_META[activeTab].description}
                 </p>
               </div>
@@ -714,9 +777,25 @@ function SettingsPageShell({
   )
 }
 
-function SettingsNavButton({ active, label, onClick, tab }: { active: boolean; label: string; onClick: () => void; tab: Tab }) {
+/** One row shape for both navigations: the desktop sidebar and the mobile sheet. */
+function SettingsNavButton({
+  active,
+  buttonRef,
+  label,
+  onClick,
+  tab,
+  trailing,
+}: {
+  active: boolean
+  buttonRef?: React.Ref<HTMLButtonElement>
+  label: string
+  onClick: () => void
+  tab: Tab
+  trailing?: React.ReactNode
+}) {
   return (
     <button
+      ref={buttonRef}
       type="button"
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
@@ -727,7 +806,10 @@ function SettingsNavButton({ active, label, onClick, tab }: { active: boolean; l
       }`}
     >
       <SettingsIcon tab={tab} />
-      <span>{label}</span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {trailing != null && (
+        <span className="shrink-0 text-[var(--color-accent-hover)]">{trailing}</span>
+      )}
     </button>
   )
 }

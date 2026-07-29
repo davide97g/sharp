@@ -28,7 +28,7 @@ import { AudioAuraAvatar, AudioAuraPreview } from './AudioAuraAvatar'
 import { HandIcon, MicIcon, ScreenBadgeIcon, SpeakerIcon } from './callIcons'
 import { SpatialStage, useSpatialAudio } from './SpatialStage'
 import { ParticipantMenu, ParticipantMenuDots } from './ParticipantMenu'
-import { IconButton, Kbd, useDismiss } from '../../ui'
+import { IconButton, Kbd, Popover, useDismiss } from '../../ui'
 import { isEditableTarget, registerShortcut } from '../../lib/shortcuts'
 
 type StageParticipant = {
@@ -1385,9 +1385,6 @@ function CopyLinkControl({
 }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
-
-  useDismiss({ ref: rootRef, onClose: () => setOpen(false), enabled: open })
 
   async function writeLink(token: string) {
     await navigator.clipboard.writeText(`${window.location.origin}/call/${token}`)
@@ -1427,47 +1424,49 @@ function CopyLinkControl({
   }
 
   return (
-    <div ref={rootRef} className="relative flex">
+    <Popover
+      open={open}
+      onClose={() => setOpen(false)}
+      align="end"
+      anchorClassName="relative flex"
+      width="min-w-56"
+      role="menu"
+      aria-label="Call link"
+      trigger={
+        <button
+          type="button"
+          aria-label="Call link"
+          title="Call link"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className={buttonClass}
+        >
+          <LinkIcon />
+        </button>
+      }
+    >
       <button
         type="button"
-        aria-label="Call link"
-        title="Call link"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        className={buttonClass}
+        role="menuitem"
+        disabled={busy}
+        onClick={() => void copyExisting()}
+        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm text-[var(--color-text)] outline-none hover:bg-[var(--color-panel-2)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:opacity-60"
       >
-        <LinkIcon />
+        Copy call link
       </button>
-      {open && (
-        <div
-          role="menu"
-          aria-label="Call link"
-          className="absolute right-0 top-full z-40 mt-1 min-w-56 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1 shadow-2xl"
+      {channelId ? (
+        <button
+          type="button"
+          role="menuitem"
+          disabled={busy}
+          onClick={() => void newLink()}
+          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm text-[var(--color-text)] outline-none hover:bg-[var(--color-panel-2)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:opacity-60"
         >
-          <button
-            type="button"
-            role="menuitem"
-            disabled={busy}
-            onClick={() => void copyExisting()}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm text-[var(--color-text)] outline-none hover:bg-[var(--color-panel-2)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:opacity-60"
-          >
-            Copy call link
-          </button>
-          {channelId ? (
-            <button
-              type="button"
-              role="menuitem"
-              disabled={busy}
-              onClick={() => void newLink()}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm text-[var(--color-text)] outline-none hover:bg-[var(--color-panel-2)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:opacity-60"
-            >
-              New link (revokes old)
-            </button>
-          ) : null}
-        </div>
-      )}
-    </div>
+          New link (revokes old)
+        </button>
+      ) : null}
+    </Popover>
   )
 }
 
@@ -1867,7 +1866,6 @@ function CallMoreMenu({
 }) {
   const [open, setOpen] = useState(false)
   const [view, setView] = useState<'root' | 'effects'>('root')
-  const rootRef = useRef<HTMLDivElement>(null)
 
   const noiseSuppression = useStore((s) => s.voice.noiseSuppression)
   const noiseSuppressionAvailable = useStore((s) => s.voice.noiseSuppressionAvailable)
@@ -1894,31 +1892,35 @@ function CallMoreMenu({
     setView('root')
   }
 
-  useDismiss({ ref: rootRef, onClose: close, enabled: open })
-
   return (
-    <div ref={rootRef} className="relative flex">
-      <CallControl
-        label="More options"
-        active={open}
-        onClick={() => (open ? close() : setOpen(true))}
-      >
-        <MoreCallIcon />
-      </CallControl>
-      {hasSetting && !open && (
-        <span
-          aria-hidden
-          className="pointer-events-none absolute right-0.5 top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--color-accent)] ring-2 ring-[var(--color-ink)]"
-        />
-      )}
-      {open && (
-        <div
-          role="dialog"
-          aria-label="More call options"
-          className={`absolute bottom-full right-0 z-50 mb-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1.5 shadow-2xl ${
-            view === 'effects' ? 'w-[23rem]' : 'w-[17.5rem]'
-          }`}
-        >
+    <Popover
+      open={open}
+      onClose={close}
+      side="top"
+      align="end"
+      anchorClassName="relative flex"
+      width={view === 'effects' ? 'w-[23rem]' : 'w-[17.5rem]'}
+      role="dialog"
+      aria-label="More call options"
+      trigger={
+        <>
+          <CallControl
+            label="More options"
+            active={open}
+            onClick={() => (open ? close() : setOpen(true))}
+          >
+            <MoreCallIcon />
+          </CallControl>
+          {hasSetting && !open && (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute right-0.5 top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--color-accent)] ring-2 ring-[var(--color-ink)]"
+            />
+          )}
+        </>
+      }
+    >
+      <div className="p-0.5">
           {view === 'effects' ? (
             <div className="p-1.5">
               <button
@@ -1990,9 +1992,8 @@ function CallMoreMenu({
               )}
             </>
           )}
-        </div>
-      )}
-    </div>
+      </div>
+    </Popover>
   )
 }
 
@@ -2502,76 +2503,73 @@ function DeviceControl({
   children: React.ReactNode
 }) {
   const [open, setOpen] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
   const hasDevices = devices.length > 0
-
-  useDismiss({ ref: rootRef, onClose: () => setOpen(false), enabled: open })
 
   const shellClass = active
     ? 'bg-[var(--color-accent)] text-white'
     : 'bg-[var(--color-panel-2)] text-[var(--color-text)]'
 
   return (
-    <div ref={rootRef} className="relative flex">
-      <div className={`flex overflow-hidden rounded-full ${shellClass}`}>
-        <button
-          type="button"
-          aria-label={label}
-          title={label}
-          aria-pressed={active}
-          disabled={disabled}
-          onClick={onClick}
-          className="flex h-11 w-11 items-center justify-center outline-none hover:bg-black/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {children}
-        </button>
-        <button
-          type="button"
-          aria-label={menuLabel}
-          title={menuLabel}
-          aria-haspopup="menu"
-          aria-expanded={open}
-          disabled={disabled || !hasDevices}
-          onClick={() => setOpen((value) => !value)}
-          className="flex h-11 w-7 items-center justify-center border-l border-black/15 outline-none hover:bg-black/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <CaretIcon />
-        </button>
-      </div>
-      {open && hasDevices && (
-        <div
-          role="menu"
-          aria-label={menuLabel}
-          className={`absolute right-0 z-40 max-h-56 min-w-52 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1 shadow-2xl ${
-            menuPlacement === 'up' ? 'bottom-full mb-1' : 'top-full mt-1'
-          }`}
-        >
-          {devices.map((device) => {
-            const selected = device.deviceId === selectedDeviceId
-            return (
-              <button
-                key={device.deviceId}
-                type="button"
-                role="menuitemradio"
-                aria-checked={selected}
-                onClick={() => {
-                  setOpen(false)
-                  onSelectDevice(device.deviceId)
-                }}
-                className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm outline-none hover:bg-[var(--color-panel-2)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
-                  selected
-                    ? 'text-[var(--color-accent-hover)]'
-                    : 'text-[var(--color-text)]'
-                }`}
-              >
-                <span className="min-w-0 flex-1 truncate">{device.label}</span>
-                {selected && <CheckIcon />}
-              </button>
-            )
-          })}
+    <Popover
+      open={open && hasDevices}
+      onClose={() => setOpen(false)}
+      side={menuPlacement === 'up' ? 'top' : 'bottom'}
+      align="end"
+      anchorClassName="relative flex"
+      width="min-w-52"
+      className="max-h-56 overflow-y-auto"
+      role="menu"
+      aria-label={menuLabel}
+      trigger={
+        <div className={`flex overflow-hidden rounded-full ${shellClass}`}>
+          <button
+            type="button"
+            aria-label={label}
+            title={label}
+            aria-pressed={active}
+            disabled={disabled}
+            onClick={onClick}
+            className="flex h-11 w-11 items-center justify-center outline-none hover:bg-black/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {children}
+          </button>
+          <button
+            type="button"
+            aria-label={menuLabel}
+            title={menuLabel}
+            aria-haspopup="menu"
+            aria-expanded={open}
+            disabled={disabled || !hasDevices}
+            onClick={() => setOpen((value) => !value)}
+            className="flex h-11 w-7 items-center justify-center border-l border-black/15 outline-none hover:bg-black/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <CaretIcon />
+          </button>
         </div>
-      )}
-    </div>
+      }
+    >
+      {devices.map((device) => {
+        const selected = device.deviceId === selectedDeviceId
+        return (
+          <button
+            key={device.deviceId}
+            type="button"
+            role="menuitemradio"
+            aria-checked={selected}
+            onClick={() => {
+              setOpen(false)
+              onSelectDevice(device.deviceId)
+            }}
+            className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm outline-none hover:bg-[var(--color-panel-2)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+              selected ? 'text-[var(--color-accent-hover)]' : 'text-[var(--color-text)]'
+            }`}
+          >
+            <span className="min-w-0 flex-1 truncate">{device.label}</span>
+            {selected && <CheckIcon />}
+          </button>
+        )
+      })}
+    </Popover>
   )
 }
 

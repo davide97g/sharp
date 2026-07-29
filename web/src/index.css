@@ -1502,6 +1502,27 @@ input[type='range'].range-slider::-moz-range-track {
   animation: sharp-fade-in 120ms ease;
 }
 
+/* ui/Sheet — rises from the bottom edge so the choice list reads as the trigger
+   row lifting into a list. */
+@keyframes sharp-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(14%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.sharp-sheet {
+  animation: sharp-sheet-in var(--motion-smooth) var(--motion-spring);
+}
+@media (prefers-reduced-motion: reduce) {
+  .sharp-sheet {
+    animation: none;
+  }
+}
+
 /* Privacy Shield: inline labels/snippets that must not be readable on a shared
    screen. Blur only — the parent row keeps its click behavior. */
 .stream-blur {

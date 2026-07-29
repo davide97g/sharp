@@ -341,7 +341,7 @@ function WeekPopover({
   return (
     <div
       ref={ref}
-      className="fixed z-40 w-72 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-3 shadow-2xl"
+      className="fixed z-(--z-popover) w-72 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-3 shadow-2xl"
       style={{ top: pos.top, left: pos.left }}
     >
       <EventDetail item={anchor.item} />

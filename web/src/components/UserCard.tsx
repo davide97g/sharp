@@ -1,6 +1,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -11,7 +12,7 @@ import { createPortal } from 'react-dom'
 import { useStore } from '../store'
 import { useDisplayName, effectiveNicknames } from '../lib/displayName'
 import { Avatar } from './Avatar'
-import { Button, Input, SectionLabel } from '../ui'
+import { Button, Input, SectionLabel, useDismiss } from '../ui'
 
 type Anchor = { top: number; left: number; bottom: number; right: number }
 
@@ -142,26 +143,10 @@ function UserCardPopover({
     setPos({ top, left })
   }, [anchor])
 
-  // TODO(ds): can't use useDismiss here — it lacks the trigger-aware exception
-  // (ignoring mousedown on the trigger) that keeps the toggle from close+reopen.
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      const target = e.target as Node
-      if (ref.current?.contains(target)) return
-      // Let the trigger's own click handler toggle closed (avoid close+reopen).
-      if (triggerRef.current?.contains(target)) return
-      onClose()
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [onClose, triggerRef])
+  // The trigger counts as "inside" so its own click toggles the card closed
+  // instead of this closing it and the click reopening it.
+  const dismissRefs = useMemo(() => [ref, triggerRef], [triggerRef])
+  useDismiss({ ref: dismissRefs, onClose })
 
   async function save() {
     const next = draft.trim()

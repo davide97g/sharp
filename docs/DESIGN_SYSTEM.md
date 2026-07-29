@@ -72,7 +72,7 @@ User-controlled, so never hard-code a row height or avatar size on a chat surfac
 
 ### Z-index bands (vars in `:root`, use `z-(--z-*)`)
 
-`--z-dropdown:30` menus/popovers · `--z-slideover:40` · `--z-modal:50` · `--z-overlay:60` palettes, notification center · `--z-floating:70` in-call widgets · `--z-popover:80` user cards · `--z-toast:100` · `--z-lightbox:110`. Never invent `z-[NN]` values.
+`--z-dropdown:30` in-flow dropdowns · `--z-slideover:40` · `--z-modal:50` · `--z-overlay:60` palettes, notification center · `--z-floating:70` in-call widgets · `--z-popover:80` `Popover`/`Menu` panels + user cards · `--z-toast:100` · `--z-lightbox:110`. Never invent `z-[NN]` values. `Popover` sits at `--z-popover` because it portals to `document.body` — it must clear the modal it may be opened from.
 
 ### Motion
 
@@ -111,8 +111,10 @@ Composites:
 | `Modal` | `title`, `onClose`, `size: 'md'\|'lg'\|'xl'`, `footer?`, `headerIcon?`, `children` (legacy `wide` still works) | Escape + backdrop + focus trap + open/close sound built in; portals into `document.body`, so it stays full-viewport even when opened from a transformed/contained ancestor (e.g. a chat row). **Never hand-roll `fixed inset-0` dialogs.** |
 | `ModalFooter` | children | `flex justify-end gap-2 pt-4` action row |
 | `SlideOver` | `side:'right'`, `width`, `title`, `onClose`, `portal?`, `footer?` | notification center / card panel pattern; Escape built in |
-| `Popover` | `open`, `onClose`, `align:'start'\|'end'`, `side:'bottom'\|'top'`, `width` — positioned panel + dismiss | all dropdown panels |
-| `useDismiss` | `{ref, onClose, escape=true, outside=true}` | THE click-outside/Escape hook; never re-implement |
+| `Sheet` | `title`, `subtitle?`, `onClose`, `footer?`, `initialFocusRef?` | bottom sheet for picking one thing on touch (section, mode, filter). Grabber + Escape + backdrop + focus trap + safe-area padding; rises with `.sharp-sheet` (`--motion-smooth`, reduced-motion aware). **Use it instead of a native `<select>` on mobile chrome** — the OS listbox ignores the theme and covers the page — and instead of `Menu` when the trigger sits at the top of a small screen. Not to be confused with `.mobile-sheet` (index.css), the full-height mobile panel for threads/Sharpy. |
+| `Popover` | `open`, `onClose`, `align:'start'\|'center'\|'end'`, `side:'bottom'\|'top'`, `width`, `matchTriggerWidth`, `anchorClassName` (trigger wrapper — pass `relative flex` for a trigger in a flex row), `role`, `aria-label` — panel portaled to `body`, `fixed` off the trigger rect, flips side + clamps to the viewport, re-measures on scroll/resize/content change. Escapes ancestor `overflow` (modal bodies, scrolling lists) and stacking contexts. Caps its own height unless you pass a `max-h-*` in `className`; `matchTriggerWidth` for trigger-width panels (`w-full` no longer works — the panel is not a child of the trigger) | all dropdown panels |
+| `useDismiss` | `{ref, onClose, escape=true, outside=true}` — `ref` also takes an array (a portaled panel plus its trigger); Escape only fires on the topmost registered layer, so a picker inside a modal closes the picker alone | THE click-outside/Escape hook; never re-implement |
+| `useFocusTrap` | `{ref, initialFocusRef?}` | focus in on open, Tab loop at the edges, focus restored on close — shared by `Modal` and `Sheet`; never hand-roll a Tab loop |
 | `Menu` / `MenuItem` | Menu wraps Popover with `role="menu"`; MenuItem: `icon?`, `danger`, `disabled`, `active` (keyboard-cursor highlight), `trailing?`, `onMouseEnter?` | the 3 duplicate MenuItem defs + filterable pickers |
 | `Card` | `interactive` (hover border-accent + focus ring), `padding: 'md'\|'sm'\|'lg'\|'none'`, `as` | panel surface recipe |
 | `PanelHeader` | `title`, `subtitle?`, `icon?`, `actions?`, `onClose?` | h-14 border-b header + close X |
@@ -146,7 +148,8 @@ Render a chord with `formatChord(chordFor(id))` inside `<Kbd>`, never a hard-cod
 - New `window.addEventListener('keydown'/'mousedown')` dismiss logic → `useDismiss`.
 - Hard-coded hex colors (incl. `text-red-400`, `bg-red-600`, `#ff8a80`) → tone tokens.
 - `text-[10px]`/`text-[11px]` → `text-3xs`/`text-2xs`.
-- `z-[NN]` arbitrary values → `z-(--z-*)` bands.
+- `z-[NN]` arbitrary values (and bare `z-30`/`z-40`/`z-50`) → `z-(--z-*)` bands.
+- A hand-rolled `absolute` dropdown panel next to its trigger → `Popover`/`Menu`. An absolute panel is clipped by the first scrolling ancestor and can't cross a stacking context; `Popover` portals and anchors for you.
 - Local `function XIcon()` for a glyph that exists in `web/src/ui/icons.tsx` — check the registry first, add there if missing (defaults: 24 viewBox, `stroke-width 2`, `currentColor`, `aria-hidden`).
 - Animations without a reduced-motion fallback.
 - A new `window.addEventListener('keydown')` for a shortcut → `registerShortcut`.

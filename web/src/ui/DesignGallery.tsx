@@ -40,6 +40,7 @@ import {
   Modal,
   ModalFooter,
   SlideOver,
+  Sheet,
   Popover,
   PanelHeader,
   Menu,
@@ -657,6 +658,8 @@ function BadgesSection() {
 function OverlaysSection() {
   const [modal, setModal] = useState<null | 'md' | 'lg' | 'xl'>(null)
   const [slideOver, setSlideOver] = useState(false)
+  const [sheet, setSheet] = useState(false)
+  const [sheetPick, setSheetPick] = useState('Chat')
   const [popover, setPopover] = useState(false)
   const [menu, setMenu] = useState(false)
 
@@ -681,6 +684,12 @@ function OverlaysSection() {
       <Demo label="SlideOver" code={'<SlideOver title="…" onClose={…} />'}>
         <Button variant="outline" onClick={() => setSlideOver(true)}>
           Open slide-over
+        </Button>
+      </Demo>
+
+      <Demo label="Sheet" code={'<Sheet title="…" subtitle="…" onClose={…} footer={…} />'}>
+        <Button variant="outline" onClick={() => setSheet(true)}>
+          Open sheet — picked: {sheetPick}
         </Button>
       </Demo>
 
@@ -769,6 +778,34 @@ function OverlaysSection() {
             <Badge tone="neutral">ModalFooter also available inside the body</Badge>
           </ModalFooter>
         </Modal>
+      )}
+
+      {sheet && (
+        <Sheet
+          title="Sheet"
+          subtitle="Touch-native single choice — use it instead of a native select"
+          onClose={() => setSheet(false)}
+          footer={
+            <Button variant="ghost" block onClick={() => setSheet(false)}>
+              Close
+            </Button>
+          }
+        >
+          {['Profile', 'Chat', 'Notifications', 'Appearance'].map((item) => (
+            <ListRow
+              key={item}
+              as="button"
+              selected={sheetPick === item}
+              trailing={sheetPick === item ? <CheckIcon className="text-accent" /> : undefined}
+              onClick={() => {
+                setSheetPick(item)
+                setSheet(false)
+              }}
+            >
+              {item}
+            </ListRow>
+          ))}
+        </Sheet>
       )}
 
       {slideOver && (

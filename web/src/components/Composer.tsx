@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Button, DocIcon, IconButton, Kbd, SectionLabel, useDismiss } from '../ui'
+import { Button, DocIcon, IconButton, Kbd, Menu, SectionLabel } from '../ui'
 import { useStore } from '../store'
 import { effectiveNicknames } from '../lib/displayName'
 import { api } from '../lib/api'
@@ -152,8 +152,6 @@ export function Composer({
   const condensed = compact || isMobile
   // Mobile "+" sheet holding attach / GIF / poll so the input row stays roomy.
   const [plusOpen, setPlusOpen] = useState(false)
-  const plusRef = useRef<HTMLDivElement>(null)
-  useDismiss({ ref: plusRef, onClose: () => setPlusOpen(false), enabled: plusOpen })
 
   // --- voice message recording ---
   const [recorder, setRecorder] = useState<VoiceRecorder | null>(null)
@@ -746,7 +744,7 @@ export function Composer({
     >
       {gifOpen && (
         <div
-          className={`composer-picker absolute bottom-full z-30 mb-2 ${compact ? 'left-2' : 'left-4'}`}
+          className={`composer-picker absolute bottom-full z-(--z-dropdown) mb-2 ${compact ? 'left-2' : 'left-4'}`}
         >
           <GifPicker
             ref={gifPickerRef}
@@ -1005,62 +1003,62 @@ export function Composer({
             (() => {
               const canPoll = channel.kind !== 'dm' && !isGuest && canPost
               return (
-                <div className="relative" ref={plusRef}>
-                  <button
-                    type="button"
+                <Menu
+                  open={plusOpen}
+                  onClose={() => setPlusOpen(false)}
+                  side="top"
+                  width="min-w-44"
+                  trigger={
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTrigger(null)
+                        setPlusOpen((open) => !open)
+                      }}
+                      aria-label="Add attachment, GIF, or poll"
+                      aria-expanded={plusOpen}
+                      className={`mb-0.5 flex shrink-0 items-center justify-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+                        compact ? 'h-9 w-9' : 'h-11 w-11'
+                      } ${
+                        plusOpen
+                          ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]'
+                          : 'text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]'
+                      }`}
+                    >
+                      <PlusIcon open={plusOpen} size={compact ? 18 : 22} />
+                    </button>
+                  }
+                >
+                  <PlusItem
+                    icon={<PaperclipGlyph />}
+                    label="Photo or file"
                     onClick={() => {
-                      setTrigger(null)
-                      setPlusOpen((open) => !open)
+                      setPlusOpen(false)
+                      fileRef.current?.click()
                     }}
-                    aria-label="Add attachment, GIF, or poll"
-                    aria-expanded={plusOpen}
-                    className={`mb-0.5 flex shrink-0 items-center justify-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
-                      compact ? 'h-9 w-9' : 'h-11 w-11'
-                    } ${
-                      plusOpen
-                        ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-hover)]'
-                        : 'text-[var(--color-text-faint)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text)]'
-                    }`}
-                  >
-                    <PlusIcon open={plusOpen} size={compact ? 18 : 22} />
-                  </button>
-                  {plusOpen && (
-                      <div
-                        role="menu"
-                        className="absolute bottom-full left-0 z-40 mb-2 min-w-44 overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-panel)] p-1.5 shadow-2xl"
-                      >
-                        <PlusItem
-                          icon={<PaperclipGlyph />}
-                          label="Photo or file"
-                          onClick={() => {
-                            setPlusOpen(false)
-                            fileRef.current?.click()
-                          }}
-                        />
-                        {gifEnabled && (
-                          <PlusItem
-                            icon={<span className="text-xs font-bold leading-none">GIF</span>}
-                            label="GIF"
-                            onClick={() => {
-                              setPlusOpen(false)
-                              setTrigger(null)
-                              setManualGifOpen(true)
-                            }}
-                          />
-                        )}
-                        {canPoll && (
-                          <PlusItem
-                            icon={<PollIcon />}
-                            label="Poll"
-                            onClick={() => {
-                              setPlusOpen(false)
-                              setPollOpen(true)
-                            }}
-                          />
-                        )}
-                      </div>
+                  />
+                  {gifEnabled && (
+                    <PlusItem
+                      icon={<span className="text-xs font-bold leading-none">GIF</span>}
+                      label="GIF"
+                      onClick={() => {
+                        setPlusOpen(false)
+                        setTrigger(null)
+                        setManualGifOpen(true)
+                      }}
+                    />
                   )}
-                </div>
+                  {canPoll && (
+                    <PlusItem
+                      icon={<PollIcon />}
+                      label="Poll"
+                      onClick={() => {
+                        setPlusOpen(false)
+                        setPollOpen(true)
+                      }}
+                    />
+                  )}
+                </Menu>
               )
             })()
           ) : (

@@ -22,7 +22,8 @@ function Dropdown({
       open={open}
       onClose={() => setOpen(false)}
       align={align === 'right' ? 'end' : 'start'}
-      width="w-full min-w-[12rem]"
+      matchTriggerWidth
+      width="min-w-[12rem]"
       className="max-h-64 overflow-y-auto"
       trigger={
         <button type="button" onClick={() => setOpen((o) => !o)} className="block w-full text-left">

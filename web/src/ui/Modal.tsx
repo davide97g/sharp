@@ -4,6 +4,8 @@ import { sound } from '../lib/sound'
 import { cn } from './cn'
 import { IconButton } from './IconButton'
 import { CloseIcon } from './icons'
+import { useDismiss } from './useDismiss'
+import { useFocusTrap } from './useFocusTrap'
 
 export type ModalSize = 'md' | 'lg' | 'xl'
 
@@ -12,9 +14,6 @@ const sizeClass: Record<ModalSize, string> = {
   lg: 'max-w-lg',
   xl: 'max-w-2xl',
 }
-
-const FOCUSABLE =
-  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
 export interface ModalProps {
   title: string
@@ -54,41 +53,10 @@ export function Modal({
   const cardRef = useRef<HTMLDivElement>(null)
   const resolvedSize: ModalSize = size ?? (wide ? 'lg' : 'md')
 
-  // Escape close + Tab focus-trap (loop focusables inside the card).
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        onClose()
-        return
-      }
-      if (e.key !== 'Tab') return
-      const focusables = cardRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE)
-      if (!focusables?.length) return
-      const first = focusables[0]
-      const last = focusables[focusables.length - 1]
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault()
-        last.focus()
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault()
-        first.focus()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
-  // Move focus into the dialog on open, restore it on close.
-  useEffect(() => {
-    const previousFocus = document.activeElement as HTMLElement | null
-    const target =
-      initialFocusRef?.current ??
-      cardRef.current?.querySelector<HTMLElement>(FOCUSABLE) ??
-      cardRef.current
-    target?.focus()
-    return () => previousFocus?.focus()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  // Escape closes (the backdrop mousedown below handles click-outside), and focus
+  // stays inside the card until it closes.
+  useDismiss({ ref: cardRef, onClose, outside: false })
+  useFocusTrap({ ref: cardRef, initialFocusRef })
 
   // Soft thup on open, slightly lower on close — every modal shares this.
   useEffect(() => {

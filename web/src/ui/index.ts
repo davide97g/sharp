@@ -5,6 +5,7 @@
 // ── Utilities ───────────────────────────────────────────────────────────────
 export { cn } from './cn'
 export { useDismiss } from './useDismiss'
+export { useFocusTrap } from './useFocusTrap'
 
 // ── Atoms ───────────────────────────────────────────────────────────────────
 export * from './Spinner'
@@ -30,6 +31,7 @@ export * from './Overlay'
 export * from './Modal'
 export * from './ModalFooter'
 export * from './SlideOver'
+export * from './Sheet'
 export * from './PanelHeader'
 export * from './Popover'
 export * from './Menu'

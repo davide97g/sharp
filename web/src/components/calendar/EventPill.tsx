@@ -1,15 +1,14 @@
 import { effectiveNicknames } from '../../lib/displayName'
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import type { CalendarItem } from '../../lib/types'
 import { timeRange } from '../../lib/calendar'
 import { useStore } from '../../store'
 import { channelLabel } from '../../lib/util'
 import { EventDetail } from './EventDetail'
-import { useDismiss } from '../../ui'
+import { Popover } from '../../ui'
 
 export function EventPill({ item }: { item: CalendarItem }) {
   const [open, setOpen] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
   const channels = useStore((s) => s.channels)
   const nicknames = useStore(effectiveNicknames)
   const joinScheduledMeeting = useStore((s) => s.joinScheduledMeeting)
@@ -24,11 +23,13 @@ export function EventPill({ item }: { item: CalendarItem }) {
   // Joinable any time (even early or late) as long as it isn't cancelled.
   const canJoin = item.source === 'native' && !cancelled && !!item.join_path
 
-  useDismiss({ ref: rootRef, onClose: () => setOpen(false), enabled: open })
-
   return (
-    <div ref={rootRef} className="relative">
-      <div
+    <Popover
+      open={open}
+      onClose={() => setOpen(false)}
+      width="w-72"
+      trigger={
+        <div
         className={`group flex min-h-11 w-full items-stretch rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] transition hover:border-[var(--color-accent)] hover:bg-[var(--color-panel-2)] ${
           cancelled ? 'opacity-60' : ''
         }`}
@@ -81,13 +82,12 @@ export function EventPill({ item }: { item: CalendarItem }) {
             Join
           </button>
         )}
-      </div>
-
-      {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-72 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-3 shadow-2xl">
-          <EventDetail item={item} />
         </div>
-      )}
-    </div>
+      }
+    >
+      <div className="p-2">
+        <EventDetail item={item} />
+      </div>
+    </Popover>
   )
 }

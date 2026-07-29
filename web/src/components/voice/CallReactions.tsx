@@ -14,7 +14,7 @@
 // The stream is `pointer-events: none` end to end: a reaction must never eat a click
 // meant for the video under it.
 
-import { useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useMemo, useState, useSyncExternalStore } from 'react'
 import {
   callReactions,
   quickReactions,
@@ -23,7 +23,7 @@ import {
 } from '../../lib/callReactions'
 import { searchEmojis } from '../../lib/emoji'
 import { useStore } from '../../store'
-import { SearchInput, useDismiss } from '../../ui'
+import { Popover, SearchInput } from '../../ui'
 
 export function CallReactionStream({
   channelId,
@@ -79,9 +79,6 @@ export function ReactionControl({
   const [query, setQuery] = useState('')
   // Read once per opening: the row must not reshuffle under the finger mid-burst.
   const [quick, setQuick] = useState<string[]>(() => quickReactions(recentReactions()))
-  const rootRef = useRef<HTMLDivElement>(null)
-
-  useDismiss({ ref: rootRef, onClose: () => setOpen(false), enabled: open })
 
   const results = query.trim() ? searchEmojis(query, 24) : []
   const dim = size === 'lg' ? 'h-12 w-12' : 'h-11 w-11'
@@ -98,30 +95,34 @@ export function ReactionControl({
   }
 
   return (
-    <div ref={rootRef} className="relative flex">
-      <button
-        type="button"
-        aria-label="Send a reaction"
-        title="Send a reaction"
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        disabled={disabled}
-        onClick={() => (open ? setOpen(false) : openPicker())}
-        className={`flex ${dim} shrink-0 cursor-pointer items-center justify-center rounded-full outline-none transition-[transform,background-color] duration-150 ease-out active:scale-95 focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:active:scale-100 ${
-          open
-            ? 'bg-accent text-white'
-            : 'bg-panel-2 text-text hover:bg-border'
-        }`}
-      >
-        <ReactionIcon />
-      </button>
-      {open && (
-        <div
-          role="dialog"
-          aria-label="Reactions"
-          className="absolute bottom-full left-1/2 z-(--z-dropdown) mb-2 w-[min(20rem,calc(100vw-1.5rem))] -translate-x-1/2 rounded-2xl border border-border bg-panel p-2 shadow-2xl"
+    <Popover
+      open={open}
+      onClose={() => setOpen(false)}
+      side="top"
+      align="center"
+      anchorClassName="relative flex"
+      width="w-[min(20rem,calc(100vw-1.5rem))]"
+      role="dialog"
+      aria-label="Reactions"
+      trigger={
+        <button
+          type="button"
+          aria-label="Send a reaction"
+          title="Send a reaction"
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          disabled={disabled}
+          onClick={() => (open ? setOpen(false) : openPicker())}
+          className={`flex ${dim} shrink-0 cursor-pointer items-center justify-center rounded-full outline-none transition-[transform,background-color] duration-150 ease-out active:scale-95 focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:active:scale-100 ${
+            open ? 'bg-accent text-white' : 'bg-panel-2 text-text hover:bg-border'
+          }`}
         >
-          <div className="flex items-center justify-between gap-1">
+          <ReactionIcon />
+        </button>
+      }
+    >
+      <div className="p-1">
+        <div className="flex items-center justify-between gap-1">
             {quick.map((emoji) => (
               <button
                 key={emoji}
@@ -165,9 +166,8 @@ export function ReactionControl({
               )
             ) : null}
           </div>
-        </div>
-      )}
-    </div>
+      </div>
+    </Popover>
   )
 }
 

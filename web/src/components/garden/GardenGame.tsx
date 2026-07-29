@@ -1842,8 +1842,13 @@ export function GardenGame({
               // object with the drag manager.
               this.input.setDraggable(entry.sprite)
             } else {
-              this.input.setDraggable(entry.sprite, false)
-              entry.sprite.disableInteractive()
+              // `setDraggable` writes straight into `sprite.input`, which is null
+              // until something makes the sprite interactive — and a sprite spawned
+              // outside creator mode never was.
+              if (entry.sprite.input) {
+                this.input.setDraggable(entry.sprite, false)
+                entry.sprite.disableInteractive()
+              }
               entry.sprite.clearTint()
             }
           }
