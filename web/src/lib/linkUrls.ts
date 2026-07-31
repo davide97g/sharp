@@ -55,7 +55,7 @@ function count(text: string, ch: string): number {
 }
 
 /** Drop sentence punctuation and brackets the URL never opened. */
-function trimTail(raw: string): string {
+export function trimUrlTail(raw: string): string {
   let end = raw.length
   for (;;) {
     const slice = raw.slice(0, end)
@@ -86,7 +86,7 @@ export function extractUrls(content: string): string[] {
     let end = start
     while (end < text.length && !/[\s<>"`|]/.test(text[end])) end++
     scheme.lastIndex = Math.max(end, start + 1)
-    const url = trimTail(text.slice(start, end))
+    const url = trimUrlTail(text.slice(start, end))
     if (suppressed || !url || out.includes(url)) continue
     out.push(url)
     if (out.length >= MAX_PREVIEWS_PER_MESSAGE) break

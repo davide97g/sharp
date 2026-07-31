@@ -43,7 +43,9 @@ rendered as tiles in columns. One view in v1: grouped by a status single-select.
     property's option order **is** the column order (no separate structure).
     `groupByPropertyId` names the select that drives columns (fixed to the seeded Status
     in v1, stored for future-proofing).
-  - `ydoc.getMap('cards')` — cardId → `Y.Map{ id, title, description, order, values: Y.Map }`.
+  - `ydoc.getMap('cards')` — cardId → `Y.Map{ id, title, description, order, values: Y.Map }`,
+    plus two lazily-created arrays: `checklist: Y.Array<Y.Map{id,text,done}>` and
+    `docRefs: Y.Array<Y.Map{id,docId,title,kind,icon}>`.
     `values` is keyed by propertyId: select → optionId; multiSelect → `Y.Array<optionId>`;
     date → `YYYY-MM-DD`; assignee → userId. A card's column is derived from
     `values[groupByPropertyId]`; a missing/dangling optionId falls into a synthetic
@@ -70,6 +72,15 @@ rendered as tiles in columns. One view in v1: grouped by a status single-select.
   hand-rolled `useBoardDnd` (Pointer Events, no `@dnd-kit`). Colors resolve from an 8-key
   categorical palette (`web/src/lib/boardColors.ts`) into `--board-*` CSS tokens; keys, not
   hex, are stored in the Y.Doc. No heavy dependency, so the board chunk is not lazy-loaded.
+- **Card doc references**: a card can point at any doc, canvas or board — `docRefs` above,
+  written by `addCardDocRef`/`deleteCardDocRef` in `web/src/lib/boardDoc.ts`, one reference
+  per target (re-adding is a no-op). The picker in `CardPanel` searches `/docs/search` and
+  falls back to `/docs/recent`, so **permissions stay the server's business** and the board
+  doc never queries the docs table. `title`/`kind`/`icon` are a snapshot taken at link time
+  (a renamed target keeps its old label until re-linked); `docId` is the truth and the chip
+  routes through `docRoute()` in `components/docs/DocSurface.tsx` — the one place that knows
+  `/d/` vs `/x/` vs `/b/`. `BoardCard` shows a 📄 count. Card descriptions grow with their
+  content rather than scrolling inside a fixed box.
 - **Embedding in docs**: the doc editor's `/` slash menu has a **Board** item (group Media)
   that inserts a custom BlockNote block `boardembed` (`propSchema: { docId }`, content
   `none` — `web/src/components/docs/BoardEmbed.tsx`, spec wired in `docs/schema.tsx`).

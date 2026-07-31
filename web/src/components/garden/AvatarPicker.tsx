@@ -21,11 +21,11 @@ type Props = {
 
 /**
  * Character picker, shown once on first Garden entry and reopenable from the
- * gear menu.
+ * gear icon.
  *
- * Deliberately dismissible: Garden is somewhere people go to relax, so gating
- * entry behind a modal is the wrong trade. Skipping keeps the deterministic
- * fallback, which already looks correct and distinct to everyone else.
+ * Deliberately dismissible: the garden is somewhere people go to relax, so
+ * gating entry behind a modal is the wrong trade. Skipping keeps the
+ * deterministic fallback, which already looks like a real character.
  */
 export function AvatarPicker({ value, allowed, onClose, onChoose }: Props) {
   const roster = (allowed?.length ? allowed : AVATAR_IDS).filter((id): id is GardenAvatarId =>
@@ -50,14 +50,14 @@ export function AvatarPicker({ value, allowed, onClose, onChoose }: Props) {
               if (selected) onChoose(selected)
             }}
           >
-            {value ? 'Save' : 'Enter the Garden'}
+            {value ? 'Save' : 'Enter the garden'}
           </Button>
         </ModalFooter>
       }
     >
       <p className="mb-3 text-xs text-[var(--color-text-faint)]">
-        Everyone in the Garden sees you as this character. You can change it any time from
-        the gear menu.
+        This is who walks around your garden. Nobody else sees it — change it any time
+        from the gear icon.
       </p>
       <div
         role="radiogroup"

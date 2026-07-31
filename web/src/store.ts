@@ -7,7 +7,6 @@ import {
   setSessionToken,
   setToken,
 } from './lib/api'
-import { applyLayoutOps } from './lib/store/gardenHelpers'
 import { applyUiPrefs } from './lib/theme'
 import { configureCelebrations } from './lib/celebrate'
 import { normalizeWallpaper, type Wallpaper } from './lib/wallpaper'
@@ -42,7 +41,7 @@ import {
   setVoiceRecognizer,
   stopVoiceRecognizer,
 } from './lib/store/recognizer'
-import { KEYS, readLocal, readLocalBool, writeLocal, writeLocalBool } from './lib/localPrefs'
+import { KEYS, readLocalBool, writeLocalBool } from './lib/localPrefs'
 import { applyWsEventTo } from './lib/wsEvents'
 import { sortTasks } from './lib/store/taskHelpers'
 import { applyUi } from './lib/store/uiHelpers'
@@ -122,10 +121,8 @@ import type {
   Doc,
   DocMention,
   GifConfig,
-  GardenLayoutOp,
-  GardenMap,
-  GardenObject,
-  GardenPeer,
+  GardenFocusResult,
+  GardenFocusSession,
   Message,
   EncryptedAttachment,
   Notification,
@@ -178,7 +175,6 @@ export type VoiceRoom = Record<
     hand_raised: boolean
     hand_raised_at: number | null
     aura_style: string | null
-    garden_active: boolean
     pos_x: number
     pos_y: number
     joined_at: string
@@ -239,33 +235,23 @@ export type VoiceState = {
   annotating: boolean
 }
 
-export type GardenAudioMode = 'ask' | 'on' | 'off'
-
 export type GardenClientState = {
-  active: boolean
-  status: 'idle' | 'loading' | 'connected' | 'error'
-  map: GardenMap | null
-  self: GardenPeer | null
-  peers: Record<string, GardenPeer>
-  space: 'hub' | 'room'
-  channelId: string | null
-  audioMode: GardenAudioMode
-  managedVoiceChannelId: string | null
+  /** `idle` before the first load, `ready` once `GET /garden` has landed. */
+  status: 'idle' | 'loading' | 'ready' | 'error'
+  /** Chosen character; `null` means never picked, which opens the picker once. */
+  avatar: string | null
+  /** Roster the server will accept, so the picker cannot offer a rejected id. */
+  avatars: string[]
+  /** Countdown lengths the picker offers, in minutes. */
+  presetMinutes: number[]
+  /** The running focus timer, or null when nothing is being tracked. */
+  session: GardenFocusSession | null
   /**
-   * This viewer's chosen character, mirrored out of the map response. `null`
-   * means never picked, which is what opens the first-join picker.
+   * `performance.now()` at the moment `session` was received. Elapsed time is
+   * `session.elapsed_secs` plus the monotonic delta since, so a suspended tab or
+   * a clock the user drags around cannot inflate or freeze a session.
    */
-  selfAvatar: string | null
-  /**
-   * Placed scenery. Deliberately a sibling of `map` rather than a field inside
-   * it: the Phaser scene rebuilds when `map` changes identity, so nesting layout
-   * there would restart the world on every drag.
-   */
-  layout: GardenObject[]
-  /** Whether this viewer may edit. Straight from the server, never inferred. */
-  canEdit: boolean
-  /** Scenery ids the server will accept. */
-  propIds: string[]
+  sessionSyncedAt: number
   error: string | null
 }
 
@@ -586,7 +572,7 @@ export type State = {
   // voice actions
   joinVoice: (
     channelId: string,
-    opts?: { stageMode?: VoiceStageMode; linkToken?: string; gardenActive?: boolean },
+    opts?: { stageMode?: VoiceStageMode; linkToken?: string },
   ) => Promise<void>
   connectVoiceMedia: (payload: VoiceStatePayload) => Promise<void>
   leaveVoice: () => void
@@ -621,22 +607,13 @@ export type State = {
 
   // Garden actions
   loadGarden: () => Promise<void>
-  enterGarden: () => Promise<void>
-  leaveGarden: () => void
-  moveGarden: (
-    seq: number,
-    x: number,
-    y: number,
-    facing: GardenPeer['facing'],
-  ) => void
-  enterGardenRoom: (channelId: string) => Promise<void>
-  teleportGardenRoom: (channelId: string) => Promise<void>
-  teleportGardenTemple: () => void
-  exitGardenRoom: () => void
-  setGardenZen: (enabled: boolean) => void
-  setGardenAvatar: (avatar: string) => void
-  saveGardenLayout: (ops: GardenLayoutOp[]) => Promise<void>
-  setGardenAudio: (mode: Exclude<GardenAudioMode, 'ask'>) => void
+  startGardenTimer: (
+    mode: 'countdown' | 'stopwatch',
+    durationSecs?: number,
+  ) => Promise<void>
+  /** Stop the running timer and return what it measured, for the summary. */
+  stopGardenTimer: () => Promise<GardenFocusResult | null>
+  setGardenAvatar: (avatar: string) => Promise<void>
 
   // docs actions
   loadChannelDocs: (channelId: string) => Promise<void>
@@ -780,26 +757,14 @@ function storedStreamRevertNicknames(): boolean {
   }
 }
 
-function storedGardenAudio(): GardenAudioMode {
-  const value = readLocal(KEYS.gardenAudio)
-  return value === 'on' || value === 'off' ? value : 'ask'
-}
-
-function emptyGardenState(audioMode = storedGardenAudio()): GardenClientState {
+function emptyGardenState(): GardenClientState {
   return {
-    active: false,
     status: 'idle',
-    map: null,
-    self: null,
-    peers: {},
-    space: 'hub',
-    channelId: null,
-    audioMode,
-    managedVoiceChannelId: null,
-    selfAvatar: null,
-    layout: [],
-    canEdit: false,
-    propIds: [],
+    avatar: null,
+    avatars: [],
+    presetMinutes: [],
+    session: null,
+    sessionSyncedAt: 0,
     error: null,
   }
 }
@@ -947,10 +912,6 @@ export const useStore = create<State>((set, get) => ({
         void get().loadMyTasks()
         const activeProject = get().activeProjectId
         if (activeProject) void get().loadProjectTasks(activeProject)
-        if (get().garden.active) {
-          void get().loadGarden()
-          get().ws?.send('garden.enter', {})
-        }
       },
     })
     set({ ws })
@@ -1028,7 +989,6 @@ export const useStore = create<State>((set, get) => ({
   },
 
   logout() {
-    get().leaveGarden()
     get().leaveVoice()
     const ws = get().ws
     if (ws) ws.close()
@@ -1965,16 +1925,16 @@ export const useStore = create<State>((set, get) => ({
   async loadGarden() {
     set((s) => ({ garden: { ...s.garden, status: 'loading', error: null } }))
     try {
-      const map = await api.gardenMap()
+      const state = await api.garden()
       set((s) => ({
         garden: {
           ...s.garden,
-          map,
-          selfAvatar: map.self_avatar ?? null,
-          layout: map.objects ?? [],
-          canEdit: map.can_edit ?? false,
-          propIds: map.props ?? [],
-          status: s.garden.active ? 'connected' : 'idle',
+          status: 'ready',
+          avatar: state.avatar,
+          avatars: state.avatars,
+          presetMinutes: state.preset_minutes,
+          session: state.session,
+          sessionSyncedAt: performance.now(),
           error: null,
         },
       }))
@@ -1983,129 +1943,51 @@ export const useStore = create<State>((set, get) => ({
         garden: {
           ...s.garden,
           status: 'error',
-          error: error instanceof Error ? error.message : 'Could not load Garden.',
+          error: error instanceof Error ? error.message : 'Could not open the garden.',
         },
       }))
     }
   },
 
-  async enterGarden() {
-    set((s) => ({
-      garden: { ...s.garden, active: true, status: 'loading', error: null },
-    }))
-    await get().loadGarden()
-    get().ws?.send('garden.enter', {})
-  },
-
-  leaveGarden() {
-    const garden = get().garden
-    get().ws?.send('garden.leave', {})
-    if (
-      garden.managedVoiceChannelId &&
-      get().voice.channelId === garden.managedVoiceChannelId
-    ) {
-      get().leaveVoice()
-    }
-    set({ garden: emptyGardenState(garden.audioMode) })
-  },
-
-  moveGarden(seq, x, y, facing) {
-    if (!get().garden.active) return
-    get().ws?.send('garden.move', { seq, x, y, facing })
-  },
-
-  async enterGardenRoom(channelId) {
-    const room = get().garden.map?.rooms.find((candidate) => candidate.channel_id === channelId)
-    if (!room) return
-    if (!room.is_member) {
-      if (room.kind !== 'public') return
-      await get().joinChannel(channelId)
-      await get().loadGarden()
-    }
-    get().ws?.send('garden.room_enter', { channel_id: channelId })
-  },
-
-  async teleportGardenRoom(channelId) {
-    const room = get().garden.map?.rooms.find((candidate) => candidate.channel_id === channelId)
-    if (!room) return
-    if (!room.is_member) {
-      if (room.kind !== 'public') return
-      await get().joinChannel(channelId)
-      await get().loadGarden()
-    }
-    get().ws?.send('garden.room_teleport', { channel_id: channelId })
-  },
-
-  teleportGardenTemple() {
-    get().ws?.send('garden.temple_teleport', {})
-  },
-
-  exitGardenRoom() {
-    get().ws?.send('garden.room_exit', {})
-  },
-
-  setGardenZen(enabled) {
-    get().ws?.send('garden.zen', { enabled })
-  },
-
-  async saveGardenLayout(ops) {
-    // Optimistic: apply locally, then reconcile with the authoritative list the
-    // server echoes back. On failure the previous layout is restored, so a
-    // rejected placement never lingers on screen.
-    const previous = get().garden.layout
-    set((s) => ({ garden: { ...s.garden, layout: applyLayoutOps(s.garden.layout, ops) } }))
+  async startGardenTimer(mode, durationSecs) {
     try {
-      const { objects } = await api.saveGardenLayout(ops)
-      set((s) => ({ garden: { ...s.garden, layout: objects } }))
+      const { session } = await api.startGardenSession(
+        mode === 'countdown'
+          ? { mode, duration_secs: durationSecs }
+          : { mode },
+      )
+      set((s) => ({
+        garden: { ...s.garden, session, sessionSyncedAt: performance.now(), error: null },
+      }))
     } catch (error) {
-      set((s) => ({ garden: { ...s.garden, layout: previous } }))
-      toastError(error instanceof Error ? error.message : 'Could not save the Garden.')
+      toastError(error instanceof Error ? error.message : 'Could not start the timer.')
     }
   },
 
-  setGardenAvatar(avatar) {
-    // Optimistic: the server validates against its allowlist and echoes
-    // garden.peer_avatar to everyone, including us.
-    set((s) => ({
-      garden: {
-        ...s.garden,
-        selfAvatar: avatar,
-        self: s.garden.self ? { ...s.garden.self, avatar } : s.garden.self,
-      },
-    }))
-    get().ws?.send('garden.avatar', { avatar })
+  async stopGardenTimer() {
+    const running = get().garden.session
+    // Cleared first: the timer must visibly stop even if the request is slow or
+    // fails, and the server call is idempotent so a retry costs nothing.
+    set((s) => ({ garden: { ...s.garden, session: null } }))
+    if (!running) return null
+    try {
+      const { stopped } = await api.stopGardenSession()
+      return stopped
+    } catch {
+      // Silent: the user is leaving a quiet space, and the row is closed by the
+      // next start anyway.
+      return null
+    }
   },
 
-  setGardenAudio(mode) {
-    writeLocal(KEYS.gardenAudio, mode)
-    const current = get()
-    set((s) => ({ garden: { ...s.garden, audioMode: mode, error: null } }))
-    if (mode === 'off') {
-      if (
-        current.garden.managedVoiceChannelId &&
-        current.voice.channelId === current.garden.managedVoiceChannelId
-      ) {
-        current.leaveVoice()
-      }
-      set((s) => ({
-        garden: { ...s.garden, managedVoiceChannelId: null },
-      }))
-      return
-    }
-    const channelId = current.garden.channelId
-    if (!channelId) return
-    if (!current.voice.channelId) {
-      set((s) => ({
-        garden: { ...s.garden, managedVoiceChannelId: channelId },
-      }))
-      void current.joinVoice(channelId, { stageMode: 'mini', gardenActive: true })
-    } else if (current.voice.channelId !== channelId) {
-      set((s) => ({
-        garden: {
-          ...s.garden,
-          error: 'Your current call is still active. Leave it to hear this room.',
-        },
-      }))
+  async setGardenAvatar(avatar) {
+    const previous = get().garden.avatar
+    set((s) => ({ garden: { ...s.garden, avatar } }))
+    try {
+      await api.setGardenAvatar(avatar)
+    } catch (error) {
+      set((s) => ({ garden: { ...s.garden, avatar: previous } }))
+      toastError(error instanceof Error ? error.message : 'Could not save your character.')
     }
   },
 
@@ -2169,7 +2051,6 @@ export const useStore = create<State>((set, get) => ({
       ws.send('voice.join', {
         channel_id: channelId,
         aura_style: getAudioAuraStyle(get().me?.id),
-        garden_active: opts?.gardenActive ?? false,
         ...(opts?.linkToken ? { link_token: opts.linkToken } : {}),
       })
     } catch (error) {

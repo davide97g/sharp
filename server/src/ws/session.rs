@@ -1,5 +1,4 @@
 use crate::state::SharedState;
-use crate::ws::garden;
 use crate::ws::voice;
 use crate::ws::{channel_member_ids, envelope, GuestInfo};
 use axum::extract::ws::{Message, WebSocket};
@@ -101,7 +100,6 @@ pub async fn handle_socket(
     }
 
     // Cleanup.
-    garden::cleanup_conn(&state, conn_id).await;
     voice::cleanup_conn(&state, user_id, conn_id).await;
     if guest.is_none() {
         state.hub.remove_visibility(user_id, conn_id).await;
@@ -192,18 +190,6 @@ async fn handle_client_event(
                 }
             }
         }
-        garden_event if is_client_garden_event(garden_event) && guest.is_none() => {
-            garden::handle_event(
-                state,
-                user_id,
-                conn_id,
-                display_name,
-                event_type,
-                payload,
-                tx,
-            )
-            .await;
-        }
         voice_event if is_client_voice_event(voice_event) => {
             voice::handle_voice_event(
                 state,
@@ -219,21 +205,6 @@ async fn handle_client_event(
         }
         _ => {}
     }
-}
-
-fn is_client_garden_event(event_type: &str) -> bool {
-    matches!(
-        event_type,
-        "garden.enter"
-            | "garden.leave"
-            | "garden.move"
-            | "garden.room_enter"
-            | "garden.room_teleport"
-            | "garden.temple_teleport"
-            | "garden.room_exit"
-            | "garden.zen"
-            | "garden.avatar"
-    )
 }
 
 /// Voice events accepted by the main WebSocket session and forwarded to the
@@ -264,7 +235,7 @@ fn is_client_voice_event(event_type: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_client_garden_event, is_client_voice_event};
+    use super::is_client_voice_event;
 
     #[test]
     fn annotation_events_reach_voice_handler() {
@@ -281,12 +252,13 @@ mod tests {
         assert!(is_client_voice_event("voice.aura"));
     }
 
-    /// Spatial call positions are a per-listener choice now, so there is no client
-    /// event that moves anyone: Garden owns the only shared floor (`garden.move`).
+    /// Spatial call positions are a per-listener choice, so there is no client
+    /// event that moves anyone in a call at all. Garden is single player and has
+    /// no WebSocket surface, so nothing else moves people either.
     #[test]
     fn there_is_no_client_move_event() {
         assert!(!is_client_voice_event("voice.move"));
-        assert!(is_client_garden_event("garden.move"));
+        assert!(!is_client_voice_event("garden.move"));
     }
 
     #[test]
@@ -298,15 +270,5 @@ mod tests {
     fn unrelated_events_do_not_reach_voice_handler() {
         assert!(!is_client_voice_event("typing"));
         assert!(!is_client_voice_event("voice.unknown"));
-    }
-
-    #[test]
-    fn garden_events_are_explicitly_allowlisted() {
-        assert!(is_client_garden_event("garden.enter"));
-        assert!(is_client_garden_event("garden.room_enter"));
-        assert!(is_client_garden_event("garden.room_teleport"));
-        assert!(is_client_garden_event("garden.temple_teleport"));
-        assert!(is_client_garden_event("garden.zen"));
-        assert!(!is_client_garden_event("garden.teleport"));
     }
 }

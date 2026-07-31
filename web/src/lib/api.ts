@@ -19,9 +19,9 @@ import type {
   GifResult,
   GifSettings,
   GifSuggestResponse,
-  GardenLayoutOp,
-  GardenMap,
-  GardenObject,
+  GardenFocusResult,
+  GardenFocusSession,
+  GardenState,
   VoiceConfigResponse,
   TranscriptionResponse,
   LinkPreview,
@@ -306,9 +306,15 @@ async function transcribeAudio(
 }
 
 export const api = {
-  gardenMap: () => request<GardenMap>('/garden/map'),
-  saveGardenLayout: (ops: GardenLayoutOp[]) =>
-    request<{ objects: GardenObject[] }>('/garden/layout', { method: 'POST', body: { ops } }),
+  // Garden — a private focus space. contract: docs/arch/12-garden.md
+  garden: () => request<GardenState>('/garden'),
+  setGardenAvatar: (avatar: string) =>
+    request<{ avatar: string }>('/garden/avatar', { method: 'POST', body: { avatar } }),
+  startGardenSession: (
+    body: { mode: 'countdown'; duration_secs?: number } | { mode: 'stopwatch' },
+  ) => request<{ session: GardenFocusSession }>('/garden/session', { method: 'POST', body }),
+  stopGardenSession: () =>
+    request<{ stopped: GardenFocusResult | null }>('/garden/session', { method: 'DELETE' }),
   tasks: {
     projects: () => request<{ projects: Project[] }>('/projects'),
     createProject: (input: { key: string; name: string; icon?: string; channel_id?: string }) =>

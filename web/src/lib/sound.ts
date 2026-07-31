@@ -693,9 +693,10 @@ function gardenInteract() {
   )
 }
 
-function gardenRoomCreate() {
+/** Timer started: two rising notes, quieter than an interaction tick. */
+function gardenTimerStart() {
   playNotes(
-    'garden.create',
+    'garden.timer-start',
     250,
     [
       { freq: 523.25, at: 0 },
@@ -706,18 +707,24 @@ function gardenRoomCreate() {
   )
 }
 
-function gardenTeleport() {
-  play('garden.teleport', 500, (context, t0, out) => {
-    for (let index = 0; index < 7; index += 1) {
-      tone(context, out, t0 + index * 0.045, {
-        freq: 410 + index * 105,
-        type: 'square',
-        attack: 0.002,
-        decay: 0.1,
-        peak: 0.04,
-      })
-    }
-  })
+/**
+ * A countdown reaching zero. Deliberately the longest Garden cue: it has to be
+ * noticed by someone who stopped looking at the screen, which is the entire
+ * point of setting a timer and walking around.
+ */
+function gardenTimerDone() {
+  playNotes(
+    'garden.timer-done',
+    1400,
+    [
+      { freq: 783.99, at: 0 },
+      { freq: 1046.5, at: 0.18 },
+      { freq: 1318.5, at: 0.36 },
+      { freq: 1046.5, at: 0.62 },
+      { freq: 1567.98, at: 0.86 },
+    ],
+    { volume: 0.11, decay: 0.6, wave: 'triangle' },
+  )
 }
 
 function gardenZen() {
@@ -808,8 +815,8 @@ export const sound = {
     jump: gardenJump,
     land: gardenLand,
     interact: gardenInteract,
-    roomCreate: gardenRoomCreate,
-    teleport: gardenTeleport,
+    timerStart: gardenTimerStart,
+    timerDone: gardenTimerDone,
     zen: gardenZen,
   },
   // notification family

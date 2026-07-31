@@ -1,6 +1,15 @@
+// The Garden world: one fixed, private, single-player scene.
+//
+// Everything here is derived from a constant seed. Nothing is fetched, nothing is
+// sent, and nobody else is in it — so this file has no peers, no rooms, no
+// network layer and no store writes. React owns the chrome (timer, controls);
+// Phaser owns high-frequency world rendering, exactly as before.
+//
+// Per-user decoration is a later feature. When it lands it becomes a diff painted
+// on top of this generated default, never a snapshot of it.
+
 import { useEffect, useRef, useState } from 'react'
-import type { GardenMap, GardenObject, GardenPeer, GardenRoom } from '../../lib/types'
-import { gardenColorValue } from '../../lib/gardenColors'
+import type { GardenFacing } from '../../lib/types'
 import {
   blocksMovement,
   generateTerrain,
@@ -12,40 +21,31 @@ import {
 } from '../../lib/garden/terrain'
 import { sound } from '../../lib/sound'
 import { useStore } from '../../store'
-import {
-  AVATAR_IDS,
-  avatarSheetUrl,
-  avatarTextureKey,
-  resolveAvatarId,
-} from './gardenAvatars'
-import {
-  GARDEN_PROPS,
-  propDef,
-  propSheetKey,
-  propTextureKey,
-} from './gardenProps'
+import { AVATAR_IDS, avatarSheetUrl, avatarTextureKey, resolveAvatarId } from './gardenAvatars'
+import { GARDEN_PROPS, propDef, propSheetKey, propTextureKey } from './gardenProps'
 
 const TILE = 16
 const SPEED = 7
-const SEND_EVERY_MS = 100
-const UI_FONT = 'Inter, ui-sans-serif, system-ui, sans-serif'
 const ASSET_ROOT = '/assets/garden/ninja-adventure'
-const TEMPLE_ASSET_ROOT = '/assets/garden/feudal-japan'
-// Grass-shore water family in tileset_water.png, in pixels. Its 3x3 ring, its
-// one-tile channels and its isolated tile are laid out exactly as
-// WATER_TILE_OFFSETS describes.
+const SHRINE_ASSET_ROOT = '/assets/garden/feudal-japan'
+// Grass-shore water family in tileset_water.png, in pixels.
 const WATER_BLOCK_X = 0
 const WATER_BLOCK_Y = 96
 /** Ground-strip index of the first water case; TERRAIN ids 0..3 precede it. */
 const WATER_TILE_BASE = 4
-/**
- * Hub terrain seed. A shared constant rather than server state: every client
- * must generate the identical world, and the layout also has to stay stable
- * across reloads. Change it to reshuffle the ponds for everyone.
- */
-const HUB_TERRAIN_SEED = 0x5a17c0de
 
-const DIRECTION_COLUMN: Record<GardenPeer['facing'], number> = {
+/**
+ * The garden. A constant rather than server state or a per-user value: everyone
+ * walks the same shaped garden, and it has to be the same one on every visit and
+ * every device. Change it to reshape the world for everybody.
+ */
+const GARDEN_SEED = 0x5a17c0de
+const WORLD_W = 80
+const WORLD_H = 72
+const PLAZA = { x: 40, y: 36 }
+const SHRINE = { x: 40, y: 58 }
+
+const DIRECTION_COLUMN: Record<GardenFacing, number> = {
   down: 0,
   up: 1,
   left: 2,
@@ -53,72 +53,27 @@ const DIRECTION_COLUMN: Record<GardenPeer['facing'], number> = {
 }
 
 type Props = {
-  map: GardenMap
-  space: 'hub' | 'room'
-  channelId: string | null
-  zenMode: boolean
-  onNearbyRoom: (room: GardenRoom | null) => void
-  onNearbyTemple: (nearby: boolean) => void
-  /** Creator mode active. The local player freezes and scenery becomes editable. */
-  editing: boolean
-  /** Catalogue id the palette has armed, or null to select rather than place. */
-  brush: string | null
-  /** Reports the current selection so React can show a delete affordance. */
-  onSelection: (id: string | null) => void
+  /**
+   * Freeze the player. Set while an overlay owns attention (the timer picker, the
+   * character picker), so a key press cannot mean two things at once.
+   */
+  frozen: boolean
 }
 
 type Point = { x: number; y: number }
 
-/** What an avatar needs to know about who it represents. */
-type AvatarIdentity = {
-  userId: string
-  name: string
-  /** The roster id this person chose, or null if they never picked one. */
-  avatarId: string | null
-  /** Join-order highlight slot from the server. */
-  colorIndex: number | undefined
+/** Stable per-tile pseudo-random in 0..1. Same shape as terrain's own hash. */
+function tileNoise(x: number, y: number, salt: number): number {
+  let h = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + GARDEN_SEED + salt) | 0
+  h = Math.imul(h ^ (h >>> 13), 1274126177)
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296
 }
 
-let pendingTeleportRoomId: string | null = null
-
-function labelFor(name: string) {
-  return name.length > 20 ? `${name.slice(0, 19)}…` : name
-}
-
-function hashName(name: string) {
-  let value = 0
-  for (let index = 0; index < name.length; index += 1) {
-    value = (value * 31 + name.charCodeAt(index)) >>> 0
-  }
-  return value
-}
-
-export function GardenGame({
-  map,
-  space,
-  channelId,
-  zenMode,
-  onNearbyRoom,
-  onNearbyTemple,
-  editing,
-  brush,
-  onSelection,
-}: Props) {
+export function GardenGame({ frozen }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
-  const nearbyRef = useRef(onNearbyRoom)
-  const nearbyTempleRef = useRef(onNearbyTemple)
-  // Mirrored into refs so the Phaser scene always reads current values without
-  // the game being rebuilt when they change — the same convention the nearby
-  // callbacks already use.
-  const editingRef = useRef(editing)
-  const brushRef = useRef(brush)
-  const selectionRef = useRef(onSelection)
-  editingRef.current = editing
-  brushRef.current = brush
-  selectionRef.current = onSelection
+  const frozenRef = useRef(frozen)
+  frozenRef.current = frozen
   const [themeRevision, setThemeRevision] = useState(0)
-  nearbyRef.current = onNearbyRoom
-  nearbyTempleRef.current = onNearbyTemple
 
   useEffect(() => {
     const observer = new MutationObserver(() => {
@@ -146,86 +101,33 @@ export function GardenGame({
 
       const styles = getComputedStyle(document.documentElement)
       const css = (token: string) => styles.getPropertyValue(token).trim()
-      const numeric = (token: string) => Number.parseInt(css(token).replace('#', ''), 16)
-      const palette = {
-        ink: numeric('--color-ink'),
-        panel: numeric('--color-panel'),
-        border: numeric('--color-border'),
-        accent: numeric('--color-accent'),
-        accentSoft: numeric('--color-accent-soft'),
-        text: numeric('--color-text'),
-        success: numeric('--color-presence-online'),
-      }
       const inkCss = css('--color-ink')
-      const panelCss = css('--color-panel')
-      const textCss = css('--color-text')
-      const textDimCss = css('--color-text-dim')
 
-      type Avatar = {
+      type AtlasCrop = { x: number; y: number; width: number; height: number }
+
+      /** The one character in the world. */
+      type Walker = {
         node: import('phaser').GameObjects.Container
         sprite: import('phaser').GameObjects.Sprite
         shadow: import('phaser').GameObjects.Image
-        halo: import('phaser').GameObjects.Ellipse
-        presence: import('phaser').GameObjects.Arc
-        label: import('phaser').GameObjects.Text
-        labelTick: import('phaser').GameObjects.Rectangle
         /** Resolved roster id currently rendered, so a change can be detected. */
         avatarId: string
-        /** Join-order ring colour, kept so Zen can restore it on exit. */
-        ringColor: number
-        name: string
-        targetX: number
-        targetY: number
+        facing: GardenFacing
         moving: boolean
-        facing: GardenPeer['facing']
-        idlePhase: number
         jumpHeight: number
-        airOffset: number
         jumping: boolean
-        teleporting: boolean
-        zen: boolean
-      }
-
-      type AtlasCrop = {
-        x: number
-        y: number
-        width: number
-        height: number
       }
 
       class GardenScene extends Phaser.Scene {
-        private player!: Avatar
-        private remotes = new Map<string, Avatar>()
+        private player!: Walker
         private cursors!: import('phaser').Types.Input.Keyboard.CursorKeys
         private wasd!: Record<'W' | 'A' | 'S' | 'D', import('phaser').Input.Keyboard.Key>
         private jumpKey!: import('phaser').Input.Keyboard.Key
         private blockers!: import('phaser').Physics.Arcade.StaticGroup
         private target: Point | null = null
-        private waypoints: Point[] = []
-        private seq = useStore.getState().garden.self?.seq ?? 0
-        private lastSent = 0
-        private wasMoving = false
-        private lastFacing: GardenPeer['facing'] = 'down'
-        private nearbyId: string | null = null
-        private templeNearby = false
-        private worldWidth = 0
-        private worldHeight = 0
-        /** Generated hub terrain, so scenery placement can avoid water. */
         private terrain: TerrainGrid | null = null
-        /** Placed scenery, keyed by object id, with its collision body. */
-        private placed = new Map<
-          string,
-          {
-            row: GardenObject
-            sprite: import('phaser').GameObjects.Image
-            blocker: import('phaser').GameObjects.Rectangle | null
-          }
-        >()
-        private selectedId: string | null = null
-        /** Last applied editing flag, so entering creator mode re-arms the props. */
-        private lastEditing = false
-        private ghost: import('phaser').GameObjects.Image | null = null
-        private lastLayout: GardenObject[] | null = null
+        private worldWidth = WORLD_W * TILE
+        private worldHeight = WORLD_H * TILE
         private lastStep = 0
         private lastBump = 0
         private reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -236,20 +138,14 @@ export function GardenGame({
 
         preload() {
           this.load.image('garden-floor-source', `${ASSET_ROOT}/tileset_floor.png`)
-          this.load.image(
-            'garden-interior-source',
-            `${ASSET_ROOT}/tileset_interior_floor.png`,
-          )
-          this.load.image('garden-village', `${ASSET_ROOT}/tileset_village.png`)
           this.load.image('garden-water-source', `${ASSET_ROOT}/tileset_water.png`)
+          this.load.image('garden-village', `${ASSET_ROOT}/tileset_village.png`)
           this.load.image('garden-nature', `${ASSET_ROOT}/tileset_nature.png`)
           this.load.image('garden-shadow', `${ASSET_ROOT}/avatar_shadow.png`)
-          this.load.image('garden-crate', `${ASSET_ROOT}/crate.png`)
-          this.load.image('garden-pot', `${ASSET_ROOT}/pot.png`)
-          this.load.image('garden-temple-gate', `${TEMPLE_ASSET_ROOT}/wooden_gate.png`)
-          this.load.image('garden-temple-steps', `${TEMPLE_ASSET_ROOT}/stone_steps.png`)
-          this.load.image('garden-temple-pillar', `${TEMPLE_ASSET_ROOT}/temple_pillar.png`)
-          this.load.image('garden-shrine-wall', `${TEMPLE_ASSET_ROOT}/shrine_wall.png`)
+          this.load.image('garden-shrine-gate', `${SHRINE_ASSET_ROOT}/wooden_gate.png`)
+          this.load.image('garden-shrine-steps', `${SHRINE_ASSET_ROOT}/stone_steps.png`)
+          this.load.image('garden-shrine-pillar', `${SHRINE_ASSET_ROOT}/temple_pillar.png`)
+          this.load.image('garden-shrine-wall', `${SHRINE_ASSET_ROOT}/shrine_wall.png`)
           this.load.spritesheet('garden-flower', `${ASSET_ROOT}/flower_dance.png`, {
             frameWidth: 16,
             frameHeight: 16,
@@ -271,23 +167,11 @@ export function GardenGame({
           this.blockers = this.physics.add.staticGroup()
           this.drawWorld()
 
-          const self = useStore.getState().garden.self
-          const startX = zenMode ? 16 * TILE : (self?.x ?? map.spawn.x) * TILE
-          const startY = zenMode ? 19 * TILE : (self?.y ?? map.spawn.y) * TILE
-          const me = useStore.getState().me
-          this.player = this.makeAvatar(
-            startX,
-            startY,
-            {
-              userId: me?.id ?? '',
-              name: me?.display_name ?? 'You',
-              // selfAvatar comes from the map response, so it is known even
-              // before this connection has a Garden peer.
-              avatarId: useStore.getState().garden.selfAvatar ?? self?.avatar ?? null,
-              colorIndex: self?.color_index,
-            },
-            true,
-            zenMode,
+          const store = useStore.getState()
+          this.player = this.makeWalker(
+            PLAZA.x * TILE,
+            (PLAZA.y + 2) * TILE,
+            resolveAvatarId(store.garden.avatar, store.me?.id ?? ''),
           )
           this.physics.add.existing(this.player.node)
           const body = this.player.node.body as import('phaser').Physics.Arcade.Body
@@ -304,145 +188,15 @@ export function GardenGame({
 
           this.cursors = this.input.keyboard!.createCursorKeys()
           this.wasd = this.input.keyboard!.addKeys('W,A,S,D') as typeof this.wasd
-          this.jumpKey = this.input.keyboard!.addKey(
-            Phaser.Input.Keyboard.KeyCodes.SPACE,
-          )
-          this.input.on(
-            'pointerdown',
-            (pointer: import('phaser').Input.Pointer) => {
-              // While editing, a click means place or select — never walk. That is
-              // why the player is frozen rather than sharing the gesture.
-              if (editingRef.current) {
-                // Clicking a piece selects it. Hit-tested explicitly against the
-                // sprite bounds rather than through Phaser's interactive system:
-                // the geometry here is a handful of rectangles we already know, and
-                // owning the test keeps selection independent of the input plugin.
-                const hit = this.pickAt(pointer.worldX, pointer.worldY)
-                if (hit) {
-                  this.select(hit)
-                  return
-                }
-                // Empty ground: place the armed brush, else move whatever is
-                // selected there. Click-to-move means moving works on touch and
-                // without a drag gesture at all.
-                if (brushRef.current) this.placeBrush(pointer.worldX, pointer.worldY)
-                else if (this.selectedId) this.moveSelected(pointer.worldX, pointer.worldY)
-                else this.select(null)
-                return
-              }
-              this.waypoints = []
-              this.target = { x: pointer.worldX, y: pointer.worldY }
-            },
-          )
-          this.input.on('pointermove', (pointer: import('phaser').Input.Pointer) => {
-            this.updateGhost(pointer.worldX, pointer.worldY)
+          this.jumpKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
+          this.input.on('pointerdown', (pointer: import('phaser').Input.Pointer) => {
+            if (frozenRef.current) return
+            this.target = { x: pointer.worldX, y: pointer.worldY }
           })
 
-          // Phaser owns the hit test and the world/screen projection, so dragging
-          // works unchanged as the camera pans and zooms. A React pointer hook
-          // would have to reimplement both.
-          // Scene-owned, so it dies with the scene and never fires while a modal
-          // or the composer has focus.
-          for (const key of ['keydown-DELETE', 'keydown-BACKSPACE'] as const) {
-            this.input.keyboard?.on(key, () => {
-              if (editingRef.current) this.deleteSelected()
-            })
-          }
-
-          this.input.dragDistanceThreshold = 4
-          this.input.on(
-            'dragstart',
-            (_p: import('phaser').Input.Pointer, object: import('phaser').GameObjects.Image) => {
-              const found = [...this.placed.entries()].find(
-                ([, entry]) => entry.sprite === object,
-              )
-              if (found) this.select(found[0])
-            },
-          )
-          this.input.on(
-            'drag',
-            (
-              _p: import('phaser').Input.Pointer,
-              object: import('phaser').GameObjects.Image,
-              dragX: number,
-              dragY: number,
-            ) => {
-              const at = this.snapToHalfTile(dragX, dragY)
-              object.setPosition(at.x * TILE, at.y * TILE).setDepth(at.y * TILE)
-            },
-          )
-          this.input.on(
-            'dragend',
-            (_p: import('phaser').Input.Pointer, object: import('phaser').GameObjects.Image) => {
-              const found = [...this.placed.entries()].find(
-                ([, entry]) => entry.sprite === object,
-              )
-              if (!found) return
-              const [id, entry] = found
-              const at = this.snapToHalfTile(object.x, object.y)
-              // Commit on drop, not during the drag: one gesture is one request
-              // and one broadcast.
-              if (at.x === entry.row.x && at.y === entry.row.y) {
-                this.positionPlaced(entry.sprite, entry.blocker, entry.row)
-                return
-              }
-              void useStore
-                .getState()
-                .saveGardenLayout([{ op: 'move', id, x: at.x, y: at.y }])
-            },
-          )
-          const routeToPlaza = () => {
-            const plaza = { x: 52 * TILE, y: 64 * TILE }
-            const playerY = this.player.node.y / TILE
-            if (Math.hypot(this.player.node.x / TILE - 52, playerY - 64) < 3) {
-              return [plaza]
-            }
-            if (playerY > 66) return [plaza]
-            const roomRows = [...new Set(map.rooms.map((room) => room.door_y))]
-            if (roomRows.length === 0) return [plaza]
-            const nearestRow = roomRows.reduce((nearest, candidate) =>
-              Math.abs(candidate - playerY) < Math.abs(nearest - playerY)
-                ? candidate
-                : nearest,
-            )
-            // Houses occupy the area north of each doorway. First step into
-            // the clear band south of the row, then cross to the central path.
-            const safeY = (nearestRow + 4) * TILE
-            return [
-              { x: this.player.node.x, y: safeY },
-              { x: plaza.x, y: safeY },
-              plaza,
-            ]
-          }
-          const walkToRoom = (event: Event) => {
-            if (zenMode || space !== 'hub') return
-            const room = (event as CustomEvent<GardenRoom>).detail
-            const safeY = (room.door_y + 4) * TILE
-            const central = { x: 52 * TILE, y: safeY }
-            const elbow = { x: room.door_x * TILE, y: safeY }
-            const door = { x: room.door_x * TILE, y: room.door_y * TILE }
-            this.waypoints = [...routeToPlaza(), central, elbow, door].filter(
-              (point, index, points) =>
-                index === 0 ||
-                point.x !== points[index - 1].x ||
-                point.y !== points[index - 1].y,
-            )
-            this.target = this.waypoints.shift() ?? null
-          }
-          const teleportToRoom = (event: Event) => {
-            const room = (event as CustomEvent<GardenRoom>).detail
-            this.startTeleport(room)
-          }
-          const teleportToTemple = () => this.startTempleTeleport()
-          // React asks for a delete rather than reaching into the scene, matching
-          // how teleport already crosses the boundary.
-          const deleteSelected = () => this.deleteSelected()
-          window.addEventListener('sharp:garden-delete', deleteSelected)
-          window.addEventListener('sharp:garden-walk-to', walkToRoom)
-          window.addEventListener('sharp:garden-teleport', teleportToRoom)
-          window.addEventListener('sharp:garden-teleport-temple', teleportToTemple)
           this.cameras.main.setBounds(0, 0, this.worldWidth, this.worldHeight)
           this.cameras.main.startFollow(this.player.node, true, 0.12, 0.12)
+          this.cameras.main.fadeIn(this.reducedMotion ? 120 : 520, 0, 0, 0)
           const setZoom = () => {
             const logicalWidth = this.scale.width / renderScale
             const logicalZoom = logicalWidth < 620 ? 1 : 2
@@ -451,135 +205,36 @@ export function GardenGame({
           this.scale.on('resize', setZoom)
           setZoom()
 
-          // Every per-scene listener has to come off here, not only in the React
-          // cleanup: a scene restart fires SHUTDOWN without unmounting the
-          // component, so anything torn down only outside would leak a handler
-          // holding destroyed game objects and throw on the next peer update.
+          // Picking a new character retextures the existing sprite rather than
+          // rebuilding it, so the walk in progress is not interrupted.
+          const sync = (state: ReturnType<typeof useStore.getState>) => {
+            const next = resolveAvatarId(state.garden.avatar, state.me?.id ?? '')
+            if (this.player.avatarId === next) return
+            this.player.avatarId = next
+            this.player.sprite.setTexture(avatarTextureKey(next))
+            this.player.sprite.setFrame(DIRECTION_COLUMN[this.player.facing])
+          }
+          unsubscribe = useStore.subscribe(sync)
+
+          // A scene restart fires SHUTDOWN without unmounting the component, so
+          // the subscription has to come off here too or it would outlive the
+          // objects it touches.
           this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-            window.removeEventListener('sharp:garden-delete', deleteSelected)
-            window.removeEventListener('sharp:garden-walk-to', walkToRoom)
-            window.removeEventListener('sharp:garden-teleport', teleportToRoom)
-            window.removeEventListener('sharp:garden-teleport-temple', teleportToTemple)
             this.scale.off('resize', setZoom)
             unsubscribe?.()
             unsubscribe = null
           })
-
-          if (
-            pendingTeleportRoomId &&
-            space === 'room' &&
-            channelId === pendingTeleportRoomId
-          ) {
-            pendingTeleportRoomId = null
-            this.playTeleportArrival()
-          }
-
-          let lastPeers: ReturnType<typeof useStore.getState>['garden']['peers'] | null = null
-          const sync = (state: ReturnType<typeof useStore.getState>) => {
-            // Your own character: the player sprite is built once in create(), so
-            // picking a new one has to retexture it here or it would only appear
-            // after a reload.
-            // Placed scenery, diffed in place. This is why layout is a sibling of
-            // garden.map rather than nested inside it: nesting would change map's
-            // identity on every edit and restart the whole scene.
-            if (space === 'hub' && !zenMode) this.syncPlaced(state.garden.layout)
-            const myUserId = state.me?.id ?? ''
-            this.setAvatarLook(
-              this.player,
-              state.garden.selfAvatar ?? state.garden.self?.avatar ?? null,
-              myUserId,
-            )
-            if (state.garden.peers !== lastPeers) {
-              lastPeers = state.garden.peers
-              const present = new Set<string>()
-              for (const [connId, peer] of Object.entries(state.garden.peers)) {
-                if (
-                  peer.space !== space ||
-                  (space === 'room' && peer.channel_id !== channelId)
-                ) {
-                  continue
-                }
-                present.add(connId)
-                let avatar = this.remotes.get(connId)
-                if (!avatar) {
-                  avatar = this.makeAvatar(
-                    peer.x * TILE,
-                    peer.y * TILE,
-                    {
-                      userId: peer.user_id,
-                      name: peer.display_name,
-                      avatarId: peer.avatar ?? null,
-                      colorIndex: peer.color_index,
-                    },
-                    false,
-                    peer.zen_mode,
-                  )
-                  this.remotes.set(connId, avatar)
-                }
-                avatar.targetX = peer.x * TILE
-                avatar.targetY = peer.y * TILE
-                avatar.moving = peer.moving
-                this.faceAvatar(avatar, peer.facing)
-                this.setAvatarZen(avatar, peer.zen_mode)
-                // Someone changed character: swap the texture in place rather than
-                // rebuilding the avatar, so their position and tweens survive.
-                this.setAvatarLook(avatar, peer.avatar ?? null, peer.user_id)
-              }
-              for (const [connId, avatar] of this.remotes) {
-                if (present.has(connId)) continue
-                avatar.node.destroy(true)
-                this.remotes.delete(connId)
-              }
-            }
-
-            const authoritative = state.garden.self
-            if (authoritative && this.player && !zenMode) {
-              const dx = authoritative.x * TILE - this.player.node.x
-              const dy = authoritative.y * TILE - this.player.node.y
-              if (Math.hypot(dx, dy) > TILE * 2.25) {
-                this.player.node.setPosition(
-                  authoritative.x * TILE,
-                  authoritative.y * TILE,
-                )
-                const playerBody = this.player.node.body as import(
-                  'phaser'
-                ).Physics.Arcade.Body
-                playerBody.reset(authoritative.x * TILE, authoritative.y * TILE)
-                this.target = null
-              }
-              this.seq = Math.max(this.seq, authoritative.seq)
-            }
-          }
-          sync(useStore.getState())
-          unsubscribe = useStore.subscribe(sync)
         }
 
-        update(time: number, delta: number) {
-          // Creator mode is React state, not store state, so the scene watches the
-          // ref. Affordances cannot come from syncPlaced alone: that early-returns
-          // when the layout is unchanged, which is exactly the case when the flag
-          // flips, so nothing would ever become interactive.
-          if (editingRef.current !== this.lastEditing) {
-            this.lastEditing = editingRef.current
-            this.applyEditAffordances()
-          }
-          if (editingRef.current) {
-            // Frozen: no input, no velocity, and no garden.move, so peers do not
-            // see the editor jitter in place while an admin works.
-            const body = this.player.node.body as import('phaser').Physics.Arcade.Body
+        update(time: number) {
+          if (!this.player) return
+          const body = this.player.node.body as import('phaser').Physics.Arcade.Body
+          if (frozenRef.current) {
             body.setVelocity(0, 0)
             this.target = null
-            this.waypoints = []
-            this.animateAvatar(this.player, time)
-            for (const avatar of this.remotes.values()) {
-              avatar.node.x = Phaser.Math.Linear(avatar.node.x, avatar.targetX, Math.min(1, delta / 95))
-              avatar.node.y = Phaser.Math.Linear(avatar.node.y, avatar.targetY, Math.min(1, delta / 95))
-              avatar.node.setDepth(avatar.node.y + 100)
-              this.animateAvatar(avatar, time)
-            }
+            this.animateWalker(this.player, time)
             return
           }
-          if (!this.player) return
           const activeElement = document.activeElement
           const typing =
             activeElement instanceof HTMLInputElement ||
@@ -587,57 +242,47 @@ export function GardenGame({
             activeElement?.getAttribute('contenteditable') === 'true'
           let dx = 0
           let dy = 0
-          if (
-            !typing &&
-            !this.player.teleporting &&
-            Phaser.Input.Keyboard.JustDown(this.jumpKey)
-          ) {
+          if (!typing && Phaser.Input.Keyboard.JustDown(this.jumpKey)) {
             this.startJump(this.player)
           }
-          if (!typing && !this.player.teleporting) {
+          if (!typing) {
             if (this.cursors.left.isDown || this.wasd.A.isDown) dx -= 1
             if (this.cursors.right.isDown || this.wasd.D.isDown) dx += 1
             if (this.cursors.up.isDown || this.wasd.W.isDown) dy -= 1
             if (this.cursors.down.isDown || this.wasd.S.isDown) dy += 1
           }
-          if (dx || dy) {
-            this.target = null
-            this.waypoints = []
-          }
+          if (dx || dy) this.target = null
           if (!dx && !dy && this.target) {
             const tx = this.target.x - this.player.node.x
             const ty = this.target.y - this.player.node.y
-            if (Math.hypot(tx, ty) < 5) {
-              this.target = this.waypoints.shift() ?? null
-            }
+            if (Math.hypot(tx, ty) < 5) this.target = null
             else {
               dx = tx
               dy = ty
             }
           }
 
-          let facing = this.player.facing
           const moving = dx !== 0 || dy !== 0
-          const body = this.player.node.body as import('phaser').Physics.Arcade.Body
-          if (moving && !this.player.teleporting) {
+          if (moving) {
             const length = Math.hypot(dx, dy)
             dx /= length
             dy /= length
             body.setVelocity(dx * SPEED * TILE, dy * SPEED * TILE)
-            facing =
+            this.faceWalker(
+              this.player,
               Math.abs(dx) > Math.abs(dy)
                 ? dx < 0
                   ? 'left'
                   : 'right'
                 : dy < 0
                   ? 'up'
-                  : 'down'
-            this.faceAvatar(this.player, facing)
+                  : 'down',
+            )
           } else {
             body.setVelocity(0, 0)
           }
-          const colliding =
-            moving && (!body.blocked.none || !body.touching.none)
+
+          const colliding = moving && (!body.blocked.none || !body.touching.none)
           if (colliding && time - this.lastBump > 320) {
             this.lastBump = time
             sound.garden.bump()
@@ -645,77 +290,88 @@ export function GardenGame({
             this.lastStep = time
             sound.garden.step()
           }
-          if (
-            this.target &&
-            (!body.blocked.none || (!body.touching.none && moving))
-          ) {
+          if (this.target && (!body.blocked.none || (!body.touching.none && moving))) {
             this.target = null
-            this.waypoints = []
           }
 
-          this.player.moving = moving && !this.player.teleporting
-          this.animateAvatar(this.player, time)
+          this.player.moving = moving
+          this.animateWalker(this.player, time)
           this.player.node.setDepth(this.player.node.y + 100)
-
-          const now = performance.now()
-          if (
-            !zenMode &&
-            now - this.lastSent >= SEND_EVERY_MS &&
-            (moving || this.wasMoving || facing !== this.lastFacing)
-          ) {
-            this.lastSent = now
-            this.seq += 1
-            useStore
-              .getState()
-              .moveGarden(
-                this.seq,
-                this.player.node.x / TILE,
-                this.player.node.y / TILE,
-                facing,
-              )
-          }
-          this.wasMoving = moving
-          this.lastFacing = facing
-
-          for (const avatar of this.remotes.values()) {
-            const factor = this.reducedMotion ? 1 : Math.min(1, delta / 95)
-            avatar.node.x = Phaser.Math.Linear(avatar.node.x, avatar.targetX, factor)
-            avatar.node.y = Phaser.Math.Linear(avatar.node.y, avatar.targetY, factor)
-            this.animateAvatar(avatar, time)
-            avatar.node.setDepth(avatar.node.y + 100)
-          }
-          this.updateNearby()
         }
 
-        private startJump(avatar: Avatar) {
-          if (avatar.jumping || avatar.teleporting) return
-          avatar.jumping = true
+        // --- The character ------------------------------------------------
+
+        private makeWalker(x: number, y: number, avatarId: string): Walker {
+          const shadow = this.add.image(0, 1, 'garden-shadow').setAlpha(0.7)
+          const sprite = this.add.sprite(0, -8, avatarTextureKey(avatarId), DIRECTION_COLUMN.down)
+          // No name label, no presence dot, no identity ring: there is nobody to
+          // read them, and the point of this room is that nothing is watching.
+          const node = this.add.container(x, y, [shadow, sprite])
+          node.setDepth(y + 100)
+          return {
+            node,
+            sprite,
+            shadow,
+            avatarId,
+            facing: 'down',
+            moving: false,
+            jumpHeight: 0,
+            jumping: false,
+          }
+        }
+
+        private faceWalker(walker: Walker, facing: GardenFacing) {
+          walker.facing = facing
+          if (!walker.moving) walker.sprite.setFrame(DIRECTION_COLUMN[facing])
+        }
+
+        private animateWalker(walker: Walker, time: number) {
+          const column = DIRECTION_COLUMN[walker.facing]
+          const lift = walker.jumpHeight
+          walker.shadow
+            .setScale(Math.max(0.2, 1 - lift / 110))
+            .setAlpha(Math.max(0.08, 0.7 - lift / 150))
+          if (walker.moving) {
+            const row = this.reducedMotion ? 1 : Math.floor(time / 135) % 4
+            walker.sprite.setFrame(row * 4 + column)
+            walker.sprite.y = -8 - lift
+            return
+          }
+          walker.sprite.setFrame(column)
+          walker.sprite.y = this.reducedMotion
+            ? -8 - lift
+            : -8 - lift + Math.round(Math.sin(time / 650))
+        }
+
+        private startJump(walker: Walker) {
+          if (walker.jumping) return
+          walker.jumping = true
           sound.garden.jump()
           if (this.reducedMotion) {
-            avatar.jumpHeight = 4
+            walker.jumpHeight = 4
             this.time.delayedCall(90, () => {
-              avatar.jumpHeight = 0
-              avatar.jumping = false
+              walker.jumpHeight = 0
+              walker.jumping = false
               sound.garden.land()
             })
             return
           }
           this.tweens.add({
-            targets: avatar,
+            targets: walker,
             jumpHeight: 19,
             duration: 220,
             ease: 'Sine.out',
             yoyo: true,
             onComplete: () => {
-              avatar.jumpHeight = 0
-              avatar.jumping = false
-              avatar.sprite.setScale(1)
+              walker.jumpHeight = 0
+              walker.jumping = false
+              walker.sprite.setScale(1)
               sound.garden.land()
-              this.addLandingDust(avatar.node.x, avatar.node.y)
+              this.addLandingDust(walker.node.x, walker.node.y)
             },
           })
           this.tweens.add({
-            targets: avatar.sprite,
+            targets: walker.sprite,
             scaleX: { from: 1.08, to: 0.92 },
             scaleY: { from: 0.9, to: 1.08 },
             duration: 220,
@@ -743,212 +399,240 @@ export function GardenGame({
           }
         }
 
-        private startTeleport(room: GardenRoom) {
-          if (this.player.teleporting) return
-          this.player.teleporting = true
-          this.target = null
-          this.waypoints = []
-          const body = this.player.node.body as import('phaser').Physics.Arcade.Body
-          body.setVelocity(0, 0)
-          sound.garden.teleport()
+        // --- The world -----------------------------------------------------
 
-          const commit = () => {
-            pendingTeleportRoomId = room.channel_id
-            void useStore
-              .getState()
-              .teleportGardenRoom(room.channel_id)
-              .catch(() => {
-                pendingTeleportRoomId = null
-                this.player.teleporting = false
-                this.player.airOffset = 0
-                this.player.sprite.setAngle(0)
-                this.cameras.main.fadeIn(180, 0, 0, 0)
-              })
-          }
-          if (this.reducedMotion) {
-            this.cameras.main.fadeOut(120, 0, 0, 0)
-            window.setTimeout(commit, 120)
-            return
-          }
-          this.tweens.add({
-            targets: this.player,
-            airOffset: 84,
-            duration: 520,
-            ease: 'Cubic.in',
+        private drawWorld() {
+          const terrain = generateTerrain({
+            seed: GARDEN_SEED,
+            width: WORLD_W,
+            height: WORLD_H,
+            shrine: SHRINE,
+            plaza: PLAZA,
           })
-          this.tweens.add({
-            targets: this.player.sprite,
-            angle: 720,
-            duration: 520,
-            ease: 'Cubic.in',
-          })
-          this.tweens.add({
-            targets: this.player.shadow,
-            alpha: 0,
-            scale: 0.08,
-            duration: 500,
-            ease: 'Cubic.in',
-          })
-          window.setTimeout(() => {
-            if (this.scene.isActive()) this.cameras.main.fadeOut(280, 0, 0, 0)
-          }, 260)
-          window.setTimeout(commit, 545)
+          this.terrain = terrain
+
+          // Terrain ids map straight onto strip indices, except water, which
+          // picks its shore case from the neighbourhood.
+          const data = Array.from({ length: WORLD_H }, (_, y) =>
+            Array.from({ length: WORLD_W }, (_, x) => {
+              const id = tileAt(terrain, x, y)
+              if (id !== TERRAIN.WATER) return id
+              return WATER_TILE_BASE + waterMask(terrain, x, y)
+            }),
+          )
+          this.addTileLayer(data, 'garden-ground')
+          this.addTerrainBlockers(terrain)
+          this.drawShrine()
+          this.scatterScenery()
         }
 
-        private startTempleTeleport() {
-          if (space !== 'hub' || zenMode || this.player.teleporting) return
-          this.player.teleporting = true
-          this.target = null
-          this.waypoints = []
-          const body = this.player.node.body as import('phaser').Physics.Arcade.Body
-          body.setVelocity(0, 0)
-          sound.garden.teleport()
-
-          const commit = () => {
-            let completed = false
-            const finish = () => {
-              if (completed) return
-              completed = true
-              unsubscribe()
-              const self = useStore.getState().garden.self
-              if (self) {
-                this.player.node.setPosition(self.x * TILE, self.y * TILE)
-                body.reset(self.x * TILE, self.y * TILE)
+        /**
+         * Static bodies for impassable terrain, merged into horizontal runs so a
+         * pond costs a handful of bodies rather than one per tile.
+         */
+        private addTerrainBlockers(terrain: TerrainGrid) {
+          for (let y = 0; y < terrain.height; y += 1) {
+            let runStart = -1
+            for (let x = 0; x <= terrain.width; x += 1) {
+              const solid = x < terrain.width && blocksMovement(tileAt(terrain, x, y))
+              if (solid && runStart === -1) runStart = x
+              if (!solid && runStart !== -1) {
+                const runWidth = x - runStart
+                this.addBlocker(
+                  (runStart + runWidth / 2) * TILE,
+                  (y + 0.5) * TILE,
+                  runWidth * TILE,
+                  TILE,
+                )
+                runStart = -1
               }
-              this.playTeleportArrival()
             }
-            const unsubscribe = useStore.subscribe((state) => {
-              const self = state.garden.self
-              if (
-                self &&
-                Math.hypot(self.x - map.temple.x, self.y - map.temple.y) <= 4.5
-              ) {
-                finish()
+          }
+        }
+
+        /**
+         * The one landmark: a shrine at the end of the path. It is scenery, not a
+         * control — nothing happens when you reach it, which is the point. Timers
+         * live in the chrome, where they can be reached without walking.
+         */
+        private drawShrine() {
+          const x = SHRINE.x * TILE
+          const gateY = SHRINE.y * TILE
+
+          this.add
+            .image(x, gateY + 2 * TILE, 'garden-shrine-steps')
+            .setOrigin(0.5)
+            .setDepth(gateY + 31)
+          this.add
+            .image(x, gateY, 'garden-shrine-gate')
+            .setOrigin(0.5, 1)
+            .setDepth(gateY + 8)
+          this.addBlocker(x - 12, gateY - 8, 8, 24)
+          this.addBlocker(x + 12, gateY - 8, 8, 24)
+
+          for (const side of [-1, 1]) {
+            this.add
+              .image(x + side * 45, gateY + 28, 'garden-shrine-pillar')
+              .setOrigin(0.5, 1)
+              .setDepth(gateY + 28)
+            this.add
+              .image(x + side * 42, gateY + 51, 'garden-shrine-wall')
+              .setOrigin(0.5)
+              .setDepth(gateY + 50)
+            this.addBlocker(x + side * 44, gateY + 14, 22, 36)
+            this.addFlower(x + side * 62, gateY + 38, side)
+          }
+        }
+
+        /**
+         * Deterministic scenery. A pure function of the tile coordinates, so it
+         * needs no storage and lands identically on every device, and it asks the
+         * terrain before every placement — ponds and paths move with the seed, so
+         * nothing may assume dry open ground.
+         */
+        private scatterScenery() {
+          const solidProps = GARDEN_PROPS.filter((prop) => prop.solid)
+          const softProps = GARDEN_PROPS.filter((prop) => !prop.solid)
+          for (let y = 3; y < WORLD_H - 3; y += 1) {
+            for (let x = 3; x < WORLD_W - 3; x += 1) {
+              if (!this.isPlantable(x, y)) continue
+              const roll = tileNoise(x, y, 7)
+              // Trees mass along the outer margin so the garden reads as enclosed
+              // without a fence, and thin out toward the middle.
+              const edge = Math.min(x, y, WORLD_W - 1 - x, WORLD_H - 1 - y)
+              const treeChance = edge < 6 ? 0.3 : edge < 12 ? 0.06 : 0.012
+              if (roll < treeChance) {
+                this.addTree(x * TILE, y * TILE, tileNoise(x, y, 11))
+                continue
               }
+              if (roll < treeChance + 0.02) {
+                const prop = solidProps[Math.floor(tileNoise(x, y, 13) * solidProps.length)]
+                this.addProp(prop.id, x, y)
+                continue
+              }
+              if (roll < treeChance + 0.07) {
+                const prop = softProps[Math.floor(tileNoise(x, y, 17) * softProps.length)]
+                this.addProp(prop.id, x, y)
+                continue
+              }
+              if (roll < treeChance + 0.085) {
+                this.addFlower(x * TILE, y * TILE, tileNoise(x, y, 19) * 1000)
+              }
+            }
+          }
+        }
+
+        /**
+         * Whether scenery may stand here. Water, paths and the stone clearing are
+         * all refused: a pond cannot hold a tree, and a path that a bush grows in
+         * the middle of stops being a path.
+         */
+        private isPlantable(tileX: number, tileY: number): boolean {
+          if (!this.terrain) return false
+          const id = tileAt(this.terrain, Math.round(tileX), Math.round(tileY))
+          if (id === TERRAIN.WATER || id === TERRAIN.DIRT || id === TERRAIN.STONE) return false
+          // Keep the shrine's own clearing readable.
+          if (Math.abs(tileX - SHRINE.x) <= 6 && Math.abs(tileY - SHRINE.y) <= 5) return false
+          return true
+        }
+
+        private addProp(id: string, tileX: number, tileY: number) {
+          const def = propDef(id)
+          if (!def) return
+          const x = tileX * TILE
+          const y = tileY * TILE
+          this.add.image(x, y, propTextureKey(id)).setOrigin(0.5, 1).setDepth(y)
+          if (def.solid) {
+            this.addBlocker(
+              x,
+              y - def.crop.height / 2 + 4,
+              def.crop.width * 0.7,
+              Math.max(8, def.crop.height * 0.4),
+            )
+          }
+        }
+
+        private addTree(x: number, y: number, roll: number) {
+          const wide = roll < 0.5
+          const tree = this.add
+            .image(x, y, wide ? 'garden-tree-wide' : 'garden-tree-tall')
+            .setOrigin(0.5, 1)
+            .setDepth(y)
+          if (roll > 0.75) tree.setFlipX(true)
+          this.addBlocker(x, y - 12, wide ? 48 : 30, 22)
+          if (!this.reducedMotion) {
+            this.tweens.add({
+              targets: tree,
+              angle: { from: -0.5, to: 0.5 },
+              duration: 1800 + Math.floor(roll * 1000),
+              yoyo: true,
+              repeat: -1,
+              ease: 'Sine.inOut',
             })
-            useStore.getState().teleportGardenTemple()
-            window.setTimeout(() => {
-              if (completed) return
-              unsubscribe()
-              this.player.teleporting = false
-              this.player.airOffset = 0
-              this.player.sprite.setAngle(0)
-              this.cameras.main.fadeIn(180, 0, 0, 0)
-            }, 1800)
           }
-
-          if (this.reducedMotion) {
-            this.cameras.main.fadeOut(120, 0, 0, 0)
-            window.setTimeout(commit, 120)
-            return
-          }
-          this.tweens.add({
-            targets: this.player,
-            airOffset: 84,
-            duration: 520,
-            ease: 'Cubic.in',
-          })
-          this.tweens.add({
-            targets: this.player.sprite,
-            angle: 720,
-            duration: 520,
-            ease: 'Cubic.in',
-          })
-          this.tweens.add({
-            targets: this.player.shadow,
-            alpha: 0,
-            scale: 0.08,
-            duration: 500,
-            ease: 'Cubic.in',
-          })
-          window.setTimeout(() => {
-            if (this.scene.isActive()) this.cameras.main.fadeOut(280, 0, 0, 0)
-          }, 260)
-          window.setTimeout(commit, 545)
+          return tree
         }
 
-        private playTeleportArrival() {
-          this.player.teleporting = true
-          this.cameras.main.fadeIn(this.reducedMotion ? 120 : 420, 0, 0, 0)
-          sound.garden.teleport()
-          if (this.reducedMotion) {
-            this.player.teleporting = false
-            return
+        private addFlower(x: number, y: number, seed: number) {
+          const flower = this.add
+            .sprite(x, y, 'garden-flower', Math.abs(Math.round(seed)) % 4)
+            .setOrigin(0.5, 1)
+            .setDepth(y)
+          if (!this.reducedMotion) {
+            flower.playAfterDelay('garden-flower-dance', Math.abs(Math.round(seed)) % 900)
+            this.tweens.add({
+              targets: flower,
+              angle: { from: -2, to: 2 },
+              duration: 900 + (Math.abs(Math.round(seed)) % 5) * 90,
+              yoyo: true,
+              repeat: -1,
+              ease: 'Sine.inOut',
+            })
           }
-          this.player.airOffset = 84
-          this.player.sprite.setAngle(-720)
-          this.player.shadow.setAlpha(0).setScale(0.08)
-          this.tweens.add({
-            targets: this.player,
-            airOffset: 0,
-            duration: 640,
-            ease: 'Cubic.out',
-            onComplete: () => {
-              this.player.teleporting = false
-              this.player.sprite.setAngle(0)
-              sound.garden.land()
-              this.addLandingDust(this.player.node.x, this.player.node.y)
-            },
-          })
-          this.tweens.add({
-            targets: this.player.sprite,
-            angle: 0,
-            duration: 640,
-            ease: 'Cubic.out',
-          })
-          this.tweens.add({
-            targets: this.player.shadow,
-            alpha: 0.7,
-            scale: 1,
-            duration: 600,
-            ease: 'Cubic.out',
-          })
+          return flower
         }
+
+        private addBlocker(x: number, y: number, width: number, height: number) {
+          const blocker = this.add.rectangle(x, y, width, height, 0x000000, 0)
+          this.blockers.add(blocker)
+          return blocker
+        }
+
+        private addTileLayer(data: number[][], textureKey: string) {
+          const tilemap = this.make.tilemap({ data, tileWidth: TILE, tileHeight: TILE })
+          const tiles = tilemap.addTilesetImage(textureKey, textureKey, TILE, TILE)
+          if (!tiles) return
+          tilemap.createLayer(0, tiles, 0, 0).setDepth(0)
+        }
+
+        // --- Texture plumbing ---------------------------------------------
 
         private makeCuratedTiles() {
           // Ground strip: TERRAIN ids 0..3 from the floor sheet, then the 16
           // water shore cases at index WATER_TILE_BASE + mask. Order here IS the
           // tile index, so it must match lib/garden/terrain.ts.
           this.copyTiles('garden-ground', [
-            // 0 grass, 1 tufted grass, 2 dirt road, 3 stone plaza
+            // 0 grass, 1 tufted grass, 2 dirt path, 3 sand clearing.
+            //
+            // The path is the *brown* variant of the same patch tile (x + 176 on
+            // this sheet), not the salmon one the old village used: a pink road
+            // through a green garden read as a mistake.
             ['garden-floor-source', 0, 192],
             ['garden-floor-source', 16, 192],
-            ['garden-floor-source', 16, 128],
-            // Pale flagstone. The old choice (80,128) was a *transition* tile from
-            // the grass family — the same salmon as the road, with a grass tuft
-            // baked into one corner — so the plaza was invisible against the roads.
+            ['garden-floor-source', 192, 128],
             ['garden-floor-source', 16, 16],
-            // Water, one entry per shore mask. Sourced from the grass-shore
-            // family in tileset_water.png, whose block origin is tile (0, 6) —
-            // its ring tiles already contain grass pixels, which is why water
-            // needs no second layer and no generated masks.
+            // Water, one entry per shore mask, from the grass-shore family whose
+            // ring tiles already contain grass pixels — which is why water needs
+            // no second layer and no generated masks.
             ...WATER_TILE_OFFSETS.map(
               ([tx, ty]) =>
-                ['garden-water-source', WATER_BLOCK_X + tx * TILE, WATER_BLOCK_Y + ty * TILE] as [
-                  string,
-                  number,
-                  number,
-                ],
+                [
+                  'garden-water-source',
+                  WATER_BLOCK_X + tx * TILE,
+                  WATER_BLOCK_Y + ty * TILE,
+                ] as [string, number, number],
             ),
           ])
-          this.copyTiles('garden-interior-ground', [
-            ['garden-interior-source', 32, 32],
-            ['garden-interior-source', 48, 32],
-            ['garden-interior-source', 64, 32],
-            ['garden-interior-source', 80, 32],
-          ])
-          this.copyCrop('garden-house-small', 'garden-village', {
-            x: 256,
-            y: 96,
-            width: 64,
-            height: 64,
-          })
-          this.copyCrop('garden-house-large', 'garden-village', {
-            x: 176,
-            y: 96,
-            width: 80,
-            height: 80,
-          })
           this.copyCrop('garden-tree-wide', 'garden-village', {
             x: 0,
             y: 96,
@@ -961,8 +645,8 @@ export function GardenGame({
             width: 32,
             height: 80,
           })
-          // One texture per catalogue entry, so placed scenery and the palette
-          // both draw from the same crop.
+          // One texture per catalogue entry, so scenery draws from the same crops
+          // a decoration palette will later offer.
           for (const prop of GARDEN_PROPS) {
             this.copyCrop(propTextureKey(prop.id), propSheetKey(prop.sheet), prop.crop)
           }
@@ -970,9 +654,8 @@ export function GardenGame({
 
         /**
          * Stitch hand-picked 16px tiles into one horizontal strip usable as a
-         * tileset. Each entry carries its own source sheet, so a strip can mix
-         * families — the ground strip pulls grass and roads from the floor sheet
-         * and its water cases from the water sheet.
+         * tileset. Each entry carries its own source sheet, so the strip mixes
+         * the grass/road family with the water shore family.
          */
         private copyTiles(key: string, sourceTiles: Array<[string, number, number]>) {
           if (this.textures.exists(key)) return
@@ -983,17 +666,7 @@ export function GardenGame({
           context.clearRect(0, 0, sourceTiles.length * TILE, TILE)
           sourceTiles.forEach(([sourceKey, sourceX, sourceY], index) => {
             const source = this.textures.get(sourceKey).getSourceImage() as CanvasImageSource
-            context.drawImage(
-              source,
-              sourceX,
-              sourceY,
-              TILE,
-              TILE,
-              index * TILE,
-              0,
-              TILE,
-              TILE,
-            )
+            context.drawImage(source, sourceX, sourceY, TILE, TILE, index * TILE, 0, TILE, TILE)
           })
           texture.refresh()
         }
@@ -1021,939 +694,14 @@ export function GardenGame({
         }
 
         private createAnimations() {
-          if (!this.anims.exists('garden-flower-dance')) {
-            this.anims.create({
-              key: 'garden-flower-dance',
-              frames: this.anims.generateFrameNumbers('garden-flower', {
-                start: 0,
-                end: 3,
-              }),
-              frameRate: 3.5,
-              repeat: -1,
-              yoyo: true,
-            })
-          }
-        }
-
-        private updateNearby() {
-          if (space !== 'hub' || zenMode) {
-            if (this.nearbyId !== null) {
-              this.nearbyId = null
-              nearbyRef.current(null)
-            }
-            if (this.templeNearby) {
-              this.templeNearby = false
-              nearbyTempleRef.current(false)
-            }
-            return
-          }
-          let nearest: GardenRoom | null = null
-          let distance = Number.POSITIVE_INFINITY
-          const x = this.player.node.x / TILE
-          const y = this.player.node.y / TILE
-          for (const room of map.rooms) {
-            const current = Math.hypot(x - room.door_x, y - room.door_y)
-            if (current < distance && current <= 4.5) {
-              distance = current
-              nearest = room
-            }
-          }
-          const nextId = nearest?.channel_id ?? null
-          if (nextId !== this.nearbyId) {
-            this.nearbyId = nextId
-            nearbyRef.current(nearest)
-          }
-
-          const atTemple =
-            Math.hypot(x - map.temple.x, y - map.temple.y) <= 4.5
-          if (atTemple !== this.templeNearby) {
-            this.templeNearby = atTemple
-            nearbyTempleRef.current(atTemple)
-          }
-        }
-
-        private makeAvatar(
-          x: number,
-          y: number,
-          identity: AvatarIdentity,
-          self: boolean,
-          zen = false,
-        ): Avatar {
-          const { name, userId } = identity
-          // Honour the peer's chosen character, else fall back deterministically
-          // from the immutable user id. Previously this hashed the *display
-          // name* and forced the local player to one sheet, so a rename changed
-          // your character and same-named users looked identical.
-          const avatarId = resolveAvatarId(identity.avatarId, userId)
-          const texture = avatarTextureKey(avatarId)
-          const shadow = this.add.image(0, 1, 'garden-shadow').setAlpha(0.7)
-          // The ring is now everyone's identity, not just a "this is you" marker:
-          // it carries the join-order colour. Self keeps a heavier stroke so you
-          // can still pick yourself out of a crowd wearing the same palette.
-          const ringColor = gardenColorValue(identity.colorIndex)
-          const halo = this.add
-            .ellipse(0, -1, 28, 17, ringColor, self ? 0.22 : 0.14)
-            .setStrokeStyle(self ? 2 : 1.25, ringColor, self ? 0.95 : 0.8)
-          const sprite = this.add.sprite(0, -8, texture, DIRECTION_COLUMN.down)
-          const presence = this.add
-            .circle(11, -6, 3, palette.success)
-            .setStrokeStyle(1, palette.panel)
-          const label = this.add
-            .text(0, -35, self ? 'You' : labelFor(name), {
-              fontFamily: UI_FONT,
-              fontSize: '8px',
-              fontStyle: '600',
-              color: textCss,
-              backgroundColor: panelCss,
-              padding: { x: 5, y: 3 },
-              resolution: renderScale,
-            })
-            .setOrigin(0.5)
-          // Phaser Text has no border, and a tinted *background* would fight
-          // --color-panel across themes, so the colour reads as a tick down the
-          // label's leading edge. Sized from the label so it tracks the name.
-          const labelTick = this.add
-            .rectangle(0, -35, 2, Math.max(8, label.height - 2), ringColor, 0.95)
-            .setOrigin(0.5)
-          labelTick.x = -label.width / 2
-          const node = this.add.container(x, y, [
-            halo,
-            shadow,
-            sprite,
-            presence,
-            label,
-            labelTick,
-          ])
-          node.setDepth(y + 100)
-          const avatar: Avatar = {
-            node,
-            sprite,
-            shadow,
-            halo,
-            presence,
-            label,
-            labelTick,
-            avatarId,
-            ringColor,
-            name: self ? 'You' : labelFor(name),
-            targetX: x,
-            targetY: y,
-            moving: false,
-            facing: 'down',
-            // Desync the idle bob per person, keyed on the stable id so a rename
-            // does not visibly re-sync everyone.
-            idlePhase: hashName(userId) % 1000,
-            jumpHeight: 0,
-            airOffset: 0,
-            jumping: false,
-            teleporting: false,
-            zen,
-          }
-          this.setAvatarZen(avatar, zen)
-          return avatar
-        }
-
-        private setAvatarZen(avatar: Avatar, zen: boolean) {
-          if (avatar.zen === zen && avatar.label.text.startsWith('ZEN') === zen) return
-          avatar.zen = zen
-          avatar.label.setText(zen ? `ZEN · ${avatar.name}` : avatar.name)
-          // Zen is a state and wins over identity while it lasts, so the ring goes
-          // temple-green; leaving restores the person's own colour.
-          avatar.halo
-            .setFillStyle(zen ? 0x9fca78 : avatar.ringColor, zen ? 0.22 : 0.16)
-            .setStrokeStyle(1.25, zen ? 0xd7efb5 : avatar.ringColor, 0.85)
-          avatar.labelTick.setFillStyle(zen ? 0xd7efb5 : avatar.ringColor, 0.95)
-          // The label text changed width, so the tick has to re-hug its edge.
-          avatar.labelTick.x = -avatar.label.width / 2
-        }
-
-        /**
-         * Retexture an existing avatar when its owner picks a new character.
-         * No-ops when the resolved sheet has not changed, so this is safe to call
-         * on every peer sync.
-         */
-        private setAvatarLook(
-          avatar: Avatar,
-          chosen: string | null,
-          userId: string,
-        ) {
-          const next = resolveAvatarId(chosen, userId)
-          if (avatar.avatarId === next) return
-          avatar.avatarId = next
-          avatar.sprite.setTexture(avatarTextureKey(next))
-          // setTexture resets to frame 0; restore the facing the peer actually has.
-          avatar.sprite.setFrame(DIRECTION_COLUMN[avatar.facing])
-        }
-
-        private faceAvatar(avatar: Avatar, facing: GardenPeer['facing']) {
-          avatar.facing = facing
-          if (!avatar.moving) avatar.sprite.setFrame(DIRECTION_COLUMN[facing])
-        }
-
-        private animateAvatar(avatar: Avatar, time: number) {
-          const column = DIRECTION_COLUMN[avatar.facing]
-          const lift = avatar.jumpHeight + avatar.airOffset
-          avatar.shadow
-            .setScale(Math.max(0.2, 1 - lift / 110))
-            .setAlpha(Math.max(0.08, 0.7 - lift / 150))
-          avatar.label.y = -35 - lift
-          avatar.presence.y = -6 - lift
-          avatar.halo.y = -1
-          if (avatar.moving) {
-            const row = this.reducedMotion ? 1 : Math.floor(time / 135) % 4
-            avatar.sprite.setFrame(row * 4 + column)
-            avatar.sprite.y = -8 - lift
-            return
-          }
-          avatar.sprite.setFrame(column)
-          avatar.sprite.y = this.reducedMotion
-            ? -8 - lift
-            : -8 - lift + Math.round(Math.sin((time + avatar.idlePhase) / 650))
-        }
-
-        private drawWorld() {
-          if (zenMode) this.drawZenInterior()
-          else if (space === 'room') this.drawInterior()
-          else this.drawHub()
-        }
-
-        private drawHub() {
-          const maxDoorY = Math.max(
-            map.temple.y + 12,
-            78,
-            ...map.rooms.map((room) => room.door_y),
-          )
-          const widthInTiles = 104
-          const heightInTiles = Math.max(96, Math.ceil(maxDoorY + 16))
-          this.worldWidth = widthInTiles * TILE
-          this.worldHeight = heightInTiles * TILE
-
-          const plaza = { x: 52, y: 64 }
-          // One deterministic generator, shared with the minimap, replaces the old
-          // modulo scatter and the hand-painted plaza/road rects.
-          const terrain = generateTerrain({
-            seed: HUB_TERRAIN_SEED,
-            width: widthInTiles,
-            height: heightInTiles,
-            doors: map.rooms.map((room) => ({ x: room.door_x, y: room.door_y })),
-            temple: map.temple,
-            plaza,
+          if (this.anims.exists('garden-flower-dance')) return
+          this.anims.create({
+            key: 'garden-flower-dance',
+            frames: this.anims.generateFrameNumbers('garden-flower', { start: 0, end: 3 }),
+            frameRate: 3.5,
+            repeat: -1,
+            yoyo: true,
           })
-          this.terrain = terrain
-
-          // Terrain ids map straight onto strip indices, except water, which picks
-          // its shore case from the neighbourhood.
-          const data = Array.from({ length: heightInTiles }, (_, y) =>
-            Array.from({ length: widthInTiles }, (_, x) => {
-              const id = tileAt(terrain, x, y)
-              if (id !== TERRAIN.WATER) return id
-              return WATER_TILE_BASE + waterMask(terrain, x, y)
-            }),
-          )
-          this.addTileLayer(data, 'garden-ground')
-          this.addTerrainBlockers(terrain)
-
-          map.rooms.forEach((room) => this.drawHouse(room))
-          this.drawTemple()
-          // Keep the central path clear: the sign sits inside the plaza, above the
-          // horizontal guide lane, so both manual and guided walks can pass it.
-          this.drawCourtyard((plaza.x - 3) * TILE, (plaza.y - 3) * TILE)
-          this.drawGardenEdges(heightInTiles)
-          this.drawFlowerBeds()
-        }
-
-        /**
-         * Static bodies for impassable terrain, merged into horizontal runs so a
-         * pond costs a handful of bodies rather than one per tile.
-         */
-        private addTerrainBlockers(terrain: TerrainGrid) {
-          for (let y = 0; y < terrain.height; y += 1) {
-            let runStart = -1
-            for (let x = 0; x <= terrain.width; x += 1) {
-              const solid = x < terrain.width && blocksMovement(tileAt(terrain, x, y))
-              if (solid && runStart === -1) runStart = x
-              if (!solid && runStart !== -1) {
-                const runWidth = x - runStart
-                this.addBlocker(
-                  (runStart + runWidth / 2) * TILE,
-                  (y + 0.5) * TILE,
-                  runWidth * TILE,
-                  TILE,
-                )
-                runStart = -1
-              }
-            }
-          }
-        }
-
-        private drawTemple() {
-          const x = map.temple.x * TILE
-          const gateY = map.temple.y * TILE
-          const houseY = gateY + 8 * TILE
-
-          this.add
-            .image(x, houseY, 'garden-house-large')
-            .setOrigin(0.5, 1)
-            .setTint(0xc3d99a)
-            .setDepth(houseY - 5)
-          this.addBlocker(x, houseY - 36, 61, 48)
-
-          this.add
-            .image(x, gateY + 2 * TILE, 'garden-temple-steps')
-            .setOrigin(0.5)
-            .setDepth(gateY + 31)
-          this.add
-            .image(x, gateY, 'garden-temple-gate')
-            .setOrigin(0.5, 1)
-            .setDepth(gateY + 8)
-          this.addBlocker(x - 12, gateY - 8, 8, 24)
-          this.addBlocker(x + 12, gateY - 8, 8, 24)
-
-          for (const side of [-1, 1]) {
-            this.add
-              .image(x + side * 45, gateY + 28, 'garden-temple-pillar')
-              .setOrigin(0.5, 1)
-              .setDepth(gateY + 28)
-            this.add
-              .image(x + side * 42, gateY + 51, 'garden-shrine-wall')
-              .setOrigin(0.5)
-              .setDepth(gateY + 50)
-            this.addBlocker(x + side * 44, gateY + 14, 22, 36)
-          }
-
-          this.add
-            .text(x, gateY - 47, 'ZEN TEMPLE', {
-              fontFamily: UI_FONT,
-              fontSize: '8px',
-              fontStyle: '700',
-              color: '#f3f5ec',
-              backgroundColor: '#171914',
-              padding: { x: 7, y: 4 },
-              resolution: renderScale,
-            })
-            .setOrigin(0.5)
-            .setDepth(gateY + 60)
-          this.addFlower(x - 62, gateY + 38, 818)
-          this.addFlower(x + 62, gateY + 38, 919)
-        }
-
-
-        private addTileLayer(data: number[][], textureKey: string) {
-          const tilemap = this.make.tilemap({
-            data,
-            tileWidth: TILE,
-            tileHeight: TILE,
-          })
-          const tiles = tilemap.addTilesetImage(textureKey, textureKey, TILE, TILE)
-          if (!tiles) return
-          tilemap.createLayer(0, tiles, 0, 0).setDepth(0)
-        }
-
-        private drawCourtyard(x: number, y: number) {
-          const sign = this.add.graphics().setDepth(y + 3)
-          sign.fillStyle(0x6a3b2b).fillRect(x - 19, y - 19, 38, 22)
-          sign.fillStyle(0xd7a65a).fillRect(x - 17, y - 17, 34, 16)
-          sign.fillStyle(0x4c281f).fillRect(x - 2, y + 3, 4, 18)
-          sign.fillStyle(0x291b18).fillRect(x - 16, y - 16, 32, 2)
-          this.add
-            .text(x, y - 9, 'GARDEN', {
-              fontFamily: 'monospace',
-              fontSize: '7px',
-              fontStyle: '700',
-              color: '#3b241a',
-              resolution: renderScale,
-            })
-            .setOrigin(0.5)
-            .setDepth(y + 4)
-          this.addBlocker(x, y - 5, 34, 20)
-        }
-
-        private drawHouse(room: GardenRoom) {
-          const x = room.door_x * TILE
-          const y = room.door_y * TILE
-          const crops: Record<GardenRoom['room_variant'], AtlasCrop> = {
-            meadow: { x: 256, y: 96, width: 64, height: 64 },
-            pond: { x: 176, y: 96, width: 80, height: 80 },
-            orchard: { x: 256, y: 96, width: 64, height: 64 },
-            greenhouse: { x: 176, y: 96, width: 80, height: 80 },
-          }
-          const crop = crops[room.room_variant]
-          const texture =
-            crop.width === 80 ? 'garden-house-large' : 'garden-house-small'
-          const house = this.add
-            .image(x, y, texture)
-            .setOrigin(0.5, 1)
-            .setDepth(y - 4)
-          if (room.room_variant === 'orchard') house.setFlipX(true)
-          if (room.room_variant === 'greenhouse') house.setTint(0xcaf1a4)
-
-          const visualWidth = crop.width
-          const visualHeight = crop.height
-          this.addBlocker(
-            x,
-            y - visualHeight / 2 + 4,
-            visualWidth * 0.76,
-            visualHeight - 32,
-          )
-
-          const label = this.add
-            .text(x, y - visualHeight - 13, labelFor(room.name), {
-              fontFamily: UI_FONT,
-              fontSize: '8px',
-              fontStyle: '700',
-              color: textCss,
-              backgroundColor: panelCss,
-              padding: { x: 7, y: 4 },
-              resolution: renderScale,
-            })
-            .setOrigin(0.5)
-            .setDepth(y + 6)
-          if (room.kind === 'private') label.setText(`◆ ${labelFor(room.name)}`)
-
-          if (room.occupancy > 0) {
-            this.add
-              .circle(x + visualWidth * 0.38, y - visualHeight + 4, 8, palette.accent)
-              .setDepth(y + 7)
-            this.add
-              .text(
-                x + visualWidth * 0.38,
-                y - visualHeight + 4,
-                String(room.occupancy),
-                {
-                  fontFamily: UI_FONT,
-                  fontSize: '8px',
-                  fontStyle: '700',
-                  color: inkCss,
-                  resolution: renderScale,
-                },
-              )
-              .setOrigin(0.5)
-              .setDepth(y + 8)
-          }
-
-          const side = room.plot_index % 2 === 0 ? -1 : 1
-          this.addTree(x + side * (visualWidth / 2 + 31), y + 14, room.plot_index)
-          this.addFlower(x - side * 47, y + 18, room.plot_index * 97)
-          this.addFlower(x - side * 64, y + 12, room.plot_index * 131)
-        }
-
-        /**
-         * Whether scenery may stand on this tile. Generated ponds move with the
-         * seed and the room list, so every fixed-coordinate prop has to ask
-         * rather than assume dry land.
-         */
-        private isPlantable(tileX: number, tileY: number): boolean {
-          if (!this.terrain) return true
-          return !blocksMovement(tileAt(this.terrain, Math.round(tileX), Math.round(tileY)))
-        }
-
-        private addTreeIfDry(tileX: number, tileY: number, seed: number) {
-          if (!this.isPlantable(tileX, tileY)) return
-          this.addTree(tileX * TILE, tileY * TILE, seed)
-        }
-
-        private drawGardenEdges(heightInTiles: number) {
-          for (let y = 8; y < heightInTiles - 4; y += 10) {
-            this.addTreeIfDry(4, y, y)
-            this.addTreeIfDry(100, y + 4, y + 1)
-          }
-          for (let x = 11; x < 98; x += 13) {
-            this.addTreeIfDry(x, 4, x)
-            this.addTreeIfDry(x + 5, heightInTiles - 3, x + 1)
-          }
-        }
-
-        private drawFlowerBeds() {
-          const positions: Array<[number, number]> = [
-            [44, 59],
-            [47, 58],
-            [57, 58],
-            [60, 59],
-            [45, 69],
-            [48, 70],
-            [56, 70],
-            [59, 69],
-            [8, 58],
-            [95, 48],
-            [91, 72],
-          ]
-          positions.forEach(([x, y], index) => {
-            if (!this.isPlantable(x, y)) return
-            this.addFlower(x * TILE, y * TILE, index * 173)
-          })
-        }
-
-        private addTree(x: number, y: number, seed: number) {
-          const crops: AtlasCrop[] = [
-            { x: 0, y: 96, width: 64, height: 96 },
-            { x: 64, y: 96, width: 32, height: 80 },
-            { x: 272, y: 0, width: 48, height: 48 },
-          ]
-          const cropIndex = Math.abs(seed) % crops.length
-          const crop = crops[cropIndex]
-          // Two crops, not three: 'garden-tree-round' was cropping (272,0) of
-          // tileset_village, which is a building fragment rather than a tree, so
-          // roughly a third of the generated tree line was drawing scenery debris.
-          const textures = ['garden-tree-wide', 'garden-tree-tall']
-          const tree = this.add
-            .image(x, y, textures[cropIndex])
-            .setOrigin(0.5, 1)
-            .setDepth(y)
-          this.addBlocker(x, y - 12, Math.min(crop.width * 1.2, 48), 22)
-          if (!this.reducedMotion) {
-            this.tweens.add({
-              targets: tree,
-              angle: { from: -0.5, to: 0.5 },
-              duration: 1800 + (Math.abs(seed) % 4) * 260,
-              yoyo: true,
-              repeat: -1,
-              ease: 'Sine.inOut',
-            })
-          }
-          return tree
-        }
-
-        private addFlower(x: number, y: number, seed: number) {
-          const flower = this.add
-            .sprite(x, y, 'garden-flower', Math.abs(seed) % 4)
-            .setOrigin(0.5, 1)
-            .setDepth(y)
-          if (!this.reducedMotion) {
-            flower.playAfterDelay('garden-flower-dance', Math.abs(seed) % 900)
-            this.tweens.add({
-              targets: flower,
-              angle: { from: -2, to: 2 },
-              duration: 900 + (Math.abs(seed) % 5) * 90,
-              yoyo: true,
-              repeat: -1,
-              ease: 'Sine.inOut',
-            })
-          }
-          return flower
-        }
-
-        private drawZenInterior() {
-          const widthInTiles = 32
-          const heightInTiles = 24
-          this.worldWidth = widthInTiles * TILE
-          this.worldHeight = heightInTiles * TILE
-          const data = Array.from({ length: heightInTiles }, (_, y) =>
-            Array.from({ length: widthInTiles }, (_, x) =>
-              x <= 1 ||
-              y <= 1 ||
-              x >= widthInTiles - 2 ||
-              y >= heightInTiles - 2
-                ? 1
-                : (x * 5 + y * 3) % 19 === 0
-                  ? 1
-                  : 0,
-            ),
-          )
-          this.addTileLayer(data, 'garden-ground')
-
-          const veil = this.add
-            .rectangle(
-              this.worldWidth / 2,
-              this.worldHeight / 2,
-              this.worldWidth,
-              this.worldHeight,
-              0x213b2b,
-              0.22,
-            )
-            .setDepth(2)
-          veil.setBlendMode(Phaser.BlendModes.MULTIPLY)
-
-          const border = this.add.graphics().setDepth(5)
-          border.lineStyle(6, 0x283f2d, 1).strokeRect(
-            TILE,
-            TILE,
-            this.worldWidth - TILE * 2,
-            this.worldHeight - TILE * 2,
-          )
-          border.lineStyle(2, 0xa4c683, 0.9).strokeRect(
-            TILE + 6,
-            TILE + 6,
-            this.worldWidth - TILE * 2 - 12,
-            this.worldHeight - TILE * 2 - 12,
-          )
-
-          this.addBlocker(this.worldWidth / 2, TILE + 3, this.worldWidth - TILE * 2, 8)
-          this.addBlocker(
-            this.worldWidth / 2,
-            this.worldHeight - TILE - 3,
-            this.worldWidth - TILE * 2,
-            8,
-          )
-          this.addBlocker(TILE + 3, this.worldHeight / 2, 8, this.worldHeight - TILE * 2)
-          this.addBlocker(
-            this.worldWidth - TILE - 3,
-            this.worldHeight / 2,
-            8,
-            this.worldHeight - TILE * 2,
-          )
-
-          const altarX = this.worldWidth / 2
-          const altarY = 7 * TILE
-          this.add
-            .image(altarX, altarY, 'garden-temple-gate')
-            .setScale(1.5)
-            .setOrigin(0.5, 1)
-            .setDepth(altarY)
-          this.add
-            .image(altarX, altarY + 20, 'garden-temple-steps')
-            .setOrigin(0.5)
-            .setDepth(altarY + 20)
-          this.addBlocker(altarX, altarY - 10, 54, 30)
-
-          for (const side of [-1, 1]) {
-            this.add
-              .image(altarX + side * 74, altarY + 22, 'garden-temple-pillar')
-              .setOrigin(0.5, 1)
-              .setDepth(altarY + 22)
-            this.addFlower(altarX + side * 55, altarY + 34, 1200 + side * 37)
-            this.addBlocker(altarX + side * 74, altarY + 7, 22, 28)
-          }
-
-          const pool = this.add.graphics().setDepth(6)
-          pool.fillStyle(0x355c58, 0.92).fillEllipse(altarX, 13 * TILE, 112, 55)
-          pool.lineStyle(3, 0x9fc3a4, 0.75).strokeEllipse(altarX, 13 * TILE, 112, 55)
-          pool.lineStyle(1, 0xd3e7c1, 0.55).strokeEllipse(altarX, 13 * TILE, 64, 25)
-          this.addBlocker(altarX, 13 * TILE, 106, 48)
-
-          this.add
-            .text(3 * TILE, 2.5 * TILE, 'ZEN MODE', {
-              fontFamily: UI_FONT,
-              fontSize: '15px',
-              fontStyle: '700',
-              color: '#f4f6ef',
-              backgroundColor: '#171914',
-              padding: { x: 8, y: 5 },
-              resolution: renderScale,
-            })
-            .setDepth(70)
-          this.add
-            .text(3 * TILE, 4.7 * TILE, 'Notifications are paused while you are here', {
-              fontFamily: UI_FONT,
-              fontSize: '8px',
-              color: '#d7dfd0',
-              backgroundColor: '#171914',
-              padding: { x: 6, y: 3 },
-              resolution: renderScale,
-            })
-            .setDepth(70)
-        }
-
-        private drawInterior() {
-          const widthInTiles = 32
-          const heightInTiles = 24
-          this.worldWidth = widthInTiles * TILE
-          this.worldHeight = heightInTiles * TILE
-          const data = Array.from({ length: heightInTiles }, (_, y) =>
-            Array.from({ length: widthInTiles }, (_, x) =>
-              x === 0 || y === 0 || x === widthInTiles - 1 || y === heightInTiles - 1
-                ? 2
-                : (x + y) % 9 === 0
-                  ? 1
-                  : 0,
-            ),
-          )
-          this.addTileLayer(data, 'garden-interior-ground')
-
-          const border = this.add.graphics().setDepth(4)
-          border.lineStyle(6, 0x486c4d, 1).strokeRect(
-            TILE,
-            TILE,
-            this.worldWidth - TILE * 2,
-            this.worldHeight - TILE * 2,
-          )
-          border.lineStyle(2, 0x243d2a, 1).strokeRect(
-            TILE + 5,
-            TILE + 5,
-            this.worldWidth - TILE * 2 - 10,
-            this.worldHeight - TILE * 2 - 10,
-          )
-
-          this.addBlocker(this.worldWidth / 2, TILE + 3, this.worldWidth - TILE * 2, 8)
-          this.addBlocker(
-            this.worldWidth / 2,
-            this.worldHeight - TILE - 3,
-            this.worldWidth - TILE * 2,
-            8,
-          )
-          this.addBlocker(TILE + 3, this.worldHeight / 2, 8, this.worldHeight - TILE * 2)
-          this.addBlocker(
-            this.worldWidth - TILE - 3,
-            this.worldHeight / 2,
-            8,
-            this.worldHeight - TILE * 2,
-          )
-
-          const room = map.rooms.find((candidate) => candidate.channel_id === channelId)
-          const roomName = room?.name ?? 'Garden room'
-          this.add
-            .text(3 * TILE, 2.25 * TILE, labelFor(roomName), {
-              fontFamily: UI_FONT,
-              fontSize: '15px',
-              fontStyle: '700',
-              color: textCss,
-              backgroundColor: panelCss,
-              padding: { x: 8, y: 5 },
-              resolution: renderScale,
-            })
-            .setDepth(60)
-          this.add
-            .text(3 * TILE, 4.5 * TILE, 'Room audio follows where people gather', {
-              fontFamily: UI_FONT,
-              fontSize: '9px',
-              color: textDimCss,
-              backgroundColor: panelCss,
-              padding: { x: 6, y: 3 },
-              resolution: renderScale,
-            })
-            .setDepth(60)
-
-          this.drawMeetingTable(16 * TILE, 13 * TILE)
-          const crates: Array<[number, number]> = [
-            [5, 8],
-            [6, 8],
-            [26, 7],
-            [27, 7],
-          ]
-          crates.forEach(([x, y]) => {
-            this.add.image(x * TILE, y * TILE, 'garden-crate').setDepth(y * TILE)
-            this.addBlocker(x * TILE, y * TILE, 24, 20)
-          })
-          const pots: Array<[number, number]> = [
-            [4, 20],
-            [28, 20],
-          ]
-          pots.forEach(([x, y], index) => {
-            this.add.image(x * TILE, y * TILE, 'garden-pot').setDepth(y * TILE)
-            this.addFlower(x * TILE, y * TILE - 12, 500 + index * 311)
-            this.addBlocker(x * TILE, y * TILE, 18, 15)
-          })
-        }
-
-        private drawMeetingTable(x: number, y: number) {
-          const table = this.add.graphics().setDepth(y)
-          table.fillStyle(0x4b2b22).fillRect(x - 74, y - 29, 148, 58)
-          table.fillStyle(0xa8653f).fillRect(x - 70, y - 25, 140, 50)
-          table.fillStyle(0xd28a4d).fillRect(x - 65, y - 20, 130, 5)
-          table.fillStyle(0x34201c).fillRect(x - 56, y + 25, 10, 16)
-          table.fillStyle(0x34201c).fillRect(x + 46, y + 25, 10, 16)
-          this.addBlocker(x, y, 148, 58)
-
-          const chairs: Array<[number, number]> = [
-            [-54, -49],
-            [0, -49],
-            [54, -49],
-            [-54, 49],
-            [0, 49],
-            [54, 49],
-          ]
-          chairs.forEach(([offsetX, offsetY]) => {
-            const chair = this.add.graphics().setDepth(y + offsetY)
-            chair.fillStyle(0x3b251f).fillRect(x + offsetX - 9, y + offsetY - 8, 18, 16)
-            chair.fillStyle(0x7b4932).fillRect(x + offsetX - 7, y + offsetY - 6, 14, 12)
-            this.addBlocker(x + offsetX, y + offsetY, 18, 16)
-          })
-        }
-
-        private addBlocker(x: number, y: number, width: number, height: number) {
-          const blocker = this.add.rectangle(x, y, width, height, 0x000000, 0)
-          this.blockers.add(blocker)
-          return blocker
-        }
-
-        // --- Placed scenery + creator mode ---------------------------------
-
-        /**
-         * Diff the store's layout into the scene. Same present-set shape as the
-         * peer diff, so a foreign edit adds, moves or destroys exactly the objects
-         * that changed and never rebuilds the world.
-         */
-        private syncPlaced(layout: GardenObject[]) {
-          if (layout === this.lastLayout) return
-          this.lastLayout = layout
-          const present = new Set<string>()
-          for (const row of layout) {
-            present.add(row.id)
-            const existing = this.placed.get(row.id)
-            if (!existing) {
-              this.spawnPlaced(row)
-              continue
-            }
-            if (
-              existing.row.x !== row.x ||
-              existing.row.y !== row.y ||
-              existing.row.flip !== row.flip
-            ) {
-              existing.row = row
-              this.positionPlaced(existing.sprite, existing.blocker, row)
-            }
-          }
-          for (const [id, entry] of this.placed) {
-            if (present.has(id)) continue
-            entry.sprite.destroy()
-            entry.blocker?.destroy()
-            this.placed.delete(id)
-            if (this.selectedId === id) this.select(null)
-          }
-          this.applyEditAffordances()
-        }
-
-        private positionPlaced(
-          sprite: import('phaser').GameObjects.Image,
-          blocker: import('phaser').GameObjects.Rectangle | null,
-          row: GardenObject,
-        ) {
-          const x = row.x * TILE
-          const y = row.y * TILE
-          // Origin at the feet, so depth sorting against walkers matches the
-          // houses and trees.
-          sprite.setPosition(x, y).setFlipX(row.flip).setDepth(y)
-          if (blocker) {
-            blocker.setPosition(x, y - sprite.height / 2 + 4)
-          }
-        }
-
-        private spawnPlaced(row: GardenObject) {
-          const def = propDef(row.kind)
-          // Unknown kind: the catalogue shrank under an existing row. Skip rather
-          // than crash, and leave the row alone so a rollback restores it.
-          if (!def) return
-          const sprite = this.add.image(0, 0, propTextureKey(row.kind)).setOrigin(0.5, 1)
-          const blocker = def.solid
-            ? this.addBlocker(0, 0, def.crop.width * 0.7, Math.max(8, def.crop.height * 0.4))
-            : null
-          const entry = { row, sprite, blocker }
-          this.placed.set(row.id, entry)
-          this.positionPlaced(sprite, blocker, row)
-        }
-
-        /** Only interactive while editing, so normal play is unaffected. */
-        private applyEditAffordances() {
-          const editing = editingRef.current
-          for (const entry of this.placed.values()) {
-            if (editing) {
-              entry.sprite.setInteractive({ useHandCursor: true })
-              // The explicit call, not the `draggable: true` config shorthand:
-              // this is the documented API and the one that actually registers the
-              // object with the drag manager.
-              this.input.setDraggable(entry.sprite)
-            } else {
-              // `setDraggable` writes straight into `sprite.input`, which is null
-              // until something makes the sprite interactive — and a sprite spawned
-              // outside creator mode never was.
-              if (entry.sprite.input) {
-                this.input.setDraggable(entry.sprite, false)
-                entry.sprite.disableInteractive()
-              }
-              entry.sprite.clearTint()
-            }
-          }
-          if (!editing) {
-            this.ghost?.destroy()
-            this.ghost = null
-            if (this.selectedId) this.select(null)
-          }
-        }
-
-        private select(id: string | null) {
-          if (this.selectedId === id) return
-          const previous = this.selectedId ? this.placed.get(this.selectedId) : null
-          previous?.sprite.clearTint()
-          this.selectedId = id
-          const next = id ? this.placed.get(id) : null
-          next?.sprite.setTint(0x9fd3ff)
-          selectionRef.current(id)
-        }
-
-        /** Half-tile snap, matching the server's own rounding. */
-        private snapToHalfTile(worldX: number, worldY: number): Point {
-          return {
-            x: Math.round((worldX / TILE) * 2) / 2,
-            y: Math.round((worldY / TILE) * 2) / 2,
-          }
-        }
-
-        private updateGhost(worldX: number, worldY: number) {
-          const kind = brushRef.current
-          if (!editingRef.current || !kind) {
-            this.ghost?.destroy()
-            this.ghost = null
-            return
-          }
-          const key = propTextureKey(kind)
-          if (!this.ghost || this.ghost.texture.key !== key) {
-            this.ghost?.destroy()
-            this.ghost = this.add
-              .image(0, 0, key)
-              .setOrigin(0.5, 1)
-              .setAlpha(0.55)
-              .setDepth(20_000)
-          }
-          const at = this.snapToHalfTile(worldX, worldY)
-          this.ghost.setPosition(at.x * TILE, at.y * TILE)
-        }
-
-        /** Place the armed brush. The id is ours, so the op is idempotent. */
-        private placeBrush(worldX: number, worldY: number) {
-          const kind = brushRef.current
-          if (!kind) return
-          const at = this.snapToHalfTile(worldX, worldY)
-          void useStore.getState().saveGardenLayout([
-            { op: 'add', id: crypto.randomUUID(), kind, x: at.x, y: at.y },
-          ])
-          sound.garden.interact()
-        }
-
-        /**
-         * Topmost placed piece under a world point, or null. Sprites are
-         * bottom-centre anchored, so bounds run upward from the anchor. Iterated
-         * back to front so the visually top piece wins.
-         */
-        private pickAt(worldX: number, worldY: number): string | null {
-          const entries = [...this.placed.entries()].sort(
-            (a, b) => b[1].row.y - a[1].row.y,
-          )
-          for (const [id, entry] of entries) {
-            const width = entry.sprite.width
-            const height = entry.sprite.height
-            const left = entry.sprite.x - width / 2
-            const top = entry.sprite.y - height
-            if (
-              worldX >= left &&
-              worldX <= left + width &&
-              worldY >= top &&
-              worldY <= entry.sprite.y
-            ) {
-              return id
-            }
-          }
-          return null
-        }
-
-        /** Move the selected piece to a point, committing one op. */
-        private moveSelected(worldX: number, worldY: number) {
-          const id = this.selectedId
-          if (!id) return
-          const entry = this.placed.get(id)
-          if (!entry) return
-          const at = this.snapToHalfTile(worldX, worldY)
-          if (at.x === entry.row.x && at.y === entry.row.y) return
-          void useStore
-            .getState()
-            .saveGardenLayout([{ op: 'move', id, x: at.x, y: at.y }])
-          sound.garden.interact()
-        }
-
-        public deleteSelected() {
-          const id = this.selectedId
-          if (!id) return
-          this.select(null)
-          void useStore.getState().saveGardenLayout([{ op: 'remove', id }])
-          sound.garden.interact()
         }
       }
 
@@ -1969,10 +717,7 @@ export function GardenGame({
         scene: GardenScene,
         physics: {
           default: 'arcade',
-          arcade: {
-            gravity: { x: 0, y: 0 },
-            debug: false,
-          },
+          arcade: { gravity: { x: 0, y: 0 }, debug: false },
         },
         scale: {
           mode: Phaser.Scale.NONE,
@@ -1993,21 +738,19 @@ export function GardenGame({
 
     return () => {
       disposed = true
-      nearbyRef.current(null)
-      nearbyTempleRef.current(false)
       resizeObserver?.disconnect()
       unsubscribe?.()
       game?.destroy(true)
       host.replaceChildren()
     }
-  }, [channelId, map, space, themeRevision, zenMode])
+  }, [themeRevision])
 
   return (
     <div
       ref={hostRef}
       className="h-full w-full bg-ink [&>canvas]:block"
       role="application"
-      aria-label="Garden spatial map. Use arrow keys or WASD to move, Space to jump, tap a destination, Enter to interact, R to create a room, and Escape to exit."
+      aria-label="Your garden. Use arrow keys or WASD to walk, Space to jump, tap to choose a spot, T for the focus timer, Escape to leave."
     />
   )
 }

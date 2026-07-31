@@ -27,7 +27,6 @@ export function voiceRoomEntry(participant: VoiceParticipant): VoiceRoom[string]
     hand_raised: participant.hand_raised,
     hand_raised_at: participant.hand_raised_at,
     aura_style: participant.aura_style,
-    garden_active: participant.garden_active,
     pos_x: participant.pos_x,
     pos_y: participant.pos_y,
     joined_at: participant.joined_at,

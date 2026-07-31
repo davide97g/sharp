@@ -243,6 +243,19 @@ export function fmtCountdown(ms: number): string {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
 }
 
+/**
+ * `m:ss`, or `h:mm:ss` once an hour is on the clock — for a timer that may run
+ * for hours, where `fmtClock`'s `119:59` stops being readable. Rounds **up**, so
+ * it can front a countdown without hitting zero early.
+ */
+export function fmtClockHours(seconds: number): string {
+  const total = Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : 0
+  const mm = Math.floor(total / 60) % 60
+  const ss = String(total % 60).padStart(2, '0')
+  if (total < 3600) return `${Math.floor(total / 60)}:${ss}`
+  return `${Math.floor(total / 3600)}:${String(mm).padStart(2, '0')}:${ss}`
+}
+
 /** `45m` / `2h 5m` from whole minutes. Used for meeting lengths. */
 export function fmtHoursMinutes(minutes: number): string {
   const safe = Math.max(0, Math.round(minutes))

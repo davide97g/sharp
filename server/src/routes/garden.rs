@@ -1,118 +1,97 @@
+//! Garden — a private focus space.
+//!
+//! Garden used to be a shared spatial hub over channels. It is now single
+//! player: one fixed default world per person, walked alone, with an optional
+//! focus timer. There are no peers, no rooms, no calls and no positions, so
+//! there is no WebSocket surface left — the whole feature is these four
+//! endpoints plus a Phaser scene the client renders on its own.
+//!
+//! The server owns exactly two things:
+//!
+//! - the character roster (`GARDEN_AVATARS`), because the client must not be
+//!   able to store an id that would later fail to render, and
+//! - the running focus session, because elapsed time has to be derived from a
+//!   clock the client cannot move.
+//!
+//! Everything else about the world — terrain, scenery, collision — is generated
+//! client-side from a constant seed (`web/src/lib/garden/terrain.ts`).
+
 use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
-use crate::routes::{is_workspace_admin, require_workspace_admin};
 use crate::state::SharedState;
-use crate::ws::envelope;
-use crate::ws::garden::{
-    is_garden_avatar, plot_door, GARDEN_AVATARS, HUB_MAX_X, HUB_MAX_Y, HUB_SPAWN_X, HUB_SPAWN_Y,
-    TEMPLE_X, TEMPLE_Y,
-};
 use axum::extract::State;
 use axum::Json;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
 
-/// Scenery a client may place. Validated here so an arbitrary string never
-/// reaches another client's texture lookup, and never lands in a row that would
-/// then fail to render. Mirrored by `PROP_IDS` in
-/// `web/src/components/garden/gardenProps.ts` — keep the two in lockstep.
-pub const GARDEN_PROP_IDS: [&str; 15] = [
-    "tree_wide",
-    "tree_tall",
-    "boulder",
-    "rock_brown",
-    "rock_grey",
-    "pebble",
-    "stump",
-    "log",
-    "post",
-    "bush",
-    "tuft",
-    "flower_yellow",
-    "flower_red",
-    "berry_bush",
-    "berry_bush_blue",
+/// Character sheets a client may choose. Mirrored by `AVATAR_IDS` in
+/// `web/src/components/garden/gardenAvatars.ts` — keep the two in lockstep.
+///
+/// Validated on write and tolerated-then-ignored on read, so adding or removing
+/// a sheet is a code change and never a migration.
+pub const GARDEN_AVATARS: [&str; 12] = [
+    "samurai",
+    "scout",
+    "ninja",
+    "monk",
+    "knight",
+    "hunter",
+    "royal",
+    "noble",
+    "explorer",
+    "villager",
+    "florist",
+    "mage",
 ];
 
-/// One gesture is one request, so a drag or a multi-delete is a single round trip
-/// and a single broadcast.
-const MAX_OPS_PER_REQUEST: usize = 64;
-/// Ceiling on total scenery. Bounded by map-fetch size, not by database cost.
-const MAX_OBJECTS: i64 = 1500;
-
-pub fn is_garden_prop(kind: &str) -> bool {
-    GARDEN_PROP_IDS.contains(&kind)
+pub fn is_garden_avatar(value: &str) -> bool {
+    GARDEN_AVATARS.contains(&value)
 }
 
-#[derive(Serialize)]
-pub struct GardenRoom {
-    channel_id: Uuid,
-    name: String,
-    kind: String,
-    is_member: bool,
-    plot_index: i32,
-    room_variant: String,
-    occupancy: usize,
-    door_x: f64,
-    door_y: f64,
-}
+/// Countdown lengths the picker offers, in minutes. Sent to the client so the
+/// two cannot drift; the server still accepts any duration inside
+/// `MAX_DURATION_SECS`, because a preset list is a UI affordance, not a rule.
+const PRESET_MINUTES: [i32; 6] = [10, 20, 30, 45, 60, 120];
+
+/// Hard ceiling on a countdown, matching the column's own CHECK. A day is far
+/// past any focus session and keeps a typo from parking a timer for a month.
+const MAX_DURATION_SECS: i32 = 86_400;
 
 #[derive(Serialize)]
-pub struct GardenMap {
-    version: i32,
-    tile_size: i32,
-    spawn: GardenPoint,
-    temple: GardenPoint,
-    rooms: Vec<GardenRoom>,
-    /// The caller's chosen character, or `null` when they have never picked —
-    /// which is what the first-join picker keys off. Viewer-scoped: a peer's
-    /// choice arrives on the peer, never here.
-    self_avatar: Option<String>,
-    /// The server's roster allowlist, so the picker cannot drift out of lockstep
-    /// with what the server will accept.
-    avatars: Vec<&'static str>,
-    /// Whether this viewer may edit the world. The only place the admin flag is
-    /// exposed to a client — `models::User` is deliberately untouched, since it is
-    /// shared with `GET /users`.
-    can_edit: bool,
-    /// Placed scenery, in paint order.
-    objects: Vec<GardenObject>,
-    /// The server's scenery allowlist, so the palette cannot offer a rejected id.
-    props: Vec<&'static str>,
-}
-
-#[derive(Serialize)]
-pub struct GardenObject {
+pub struct FocusSession {
     id: Uuid,
-    kind: String,
-    x: f64,
-    y: f64,
-    flip: bool,
+    mode: String,
+    /// Countdown length, or `null` for a stopwatch.
+    duration_secs: Option<i32>,
+    started_at: DateTime<Utc>,
+    /// Seconds since `started_at`, measured by the server. The client ticks
+    /// locally from this instead of trusting its own clock against `started_at`,
+    /// so a device an hour out of sync still shows the right remaining time.
+    elapsed_secs: i64,
 }
 
 #[derive(Serialize)]
-struct GardenPoint {
-    x: f64,
-    y: f64,
+pub struct GardenState {
+    /// The caller's chosen character, or `null` when they have never picked —
+    /// which is what the first-visit picker keys off.
+    avatar: Option<String>,
+    /// The server's roster, so the picker cannot offer an id it would reject.
+    avatars: Vec<&'static str>,
+    /// The running focus session, if a timer survived a reload.
+    session: Option<FocusSession>,
+    preset_minutes: Vec<i32>,
 }
 
-pub async fn map(State(state): State<SharedState>, auth: AuthUser) -> AppResult<Json<GardenMap>> {
-    let rows = sqlx::query(
-        "SELECT c.id, c.name, c.kind, gr.plot_index, gr.room_variant,
-                (cm.user_id IS NOT NULL) AS is_member
-           FROM garden_rooms gr
-           JOIN channels c ON c.id = gr.channel_id
-           LEFT JOIN channel_members cm
-             ON cm.channel_id = c.id AND cm.user_id = $1
-          WHERE c.kind = 'public' OR cm.user_id IS NOT NULL
-          ORDER BY gr.plot_index",
-    )
-    .bind(auth.id)
-    .fetch_all(&state.pool)
-    .await?;
-    let self_avatar: Option<String> =
+/// Everything the Garden route needs on entry: who you look like, and whether a
+/// timer is still running from a previous visit.
+pub async fn state(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+) -> AppResult<Json<GardenState>> {
+    let avatar: Option<String> =
         sqlx::query("SELECT garden_avatar FROM user_prefs WHERE user_id = $1")
             .bind(auth.id)
             .fetch_optional(&state.pool)
@@ -120,264 +99,182 @@ pub async fn map(State(state): State<SharedState>, auth: AuthUser) -> AppResult<
             .and_then(|row| row.try_get::<Option<String>, _>("garden_avatar").ok())
             .flatten()
             .filter(|value| is_garden_avatar(value));
-    let can_edit = is_workspace_admin(&state.pool, auth.id).await?;
-    let objects = load_objects(&state).await?;
-    let occupancy = state.garden.occupancy();
-    let mut rooms = Vec::with_capacity(rows.len());
-    for row in rows {
-        let channel_id: Uuid = row.try_get("id")?;
-        let plot_index: i32 = row.try_get("plot_index")?;
-        let (door_x, door_y) = plot_door(plot_index);
-        rooms.push(GardenRoom {
-            channel_id,
-            name: row.try_get("name")?,
-            kind: row.try_get("kind")?,
-            is_member: row.try_get("is_member")?,
-            plot_index,
-            room_variant: row.try_get("room_variant")?,
-            occupancy: occupancy.get(&channel_id).copied().unwrap_or(0),
-            door_x,
-            door_y,
-        });
-    }
-    Ok(Json(GardenMap {
-        version: 2,
-        tile_size: 16,
-        spawn: GardenPoint {
-            x: HUB_SPAWN_X,
-            y: HUB_SPAWN_Y,
-        },
-        temple: GardenPoint {
-            x: TEMPLE_X,
-            y: TEMPLE_Y,
-        },
-        rooms,
-        self_avatar,
+    Ok(Json(GardenState {
+        avatar,
         avatars: GARDEN_AVATARS.to_vec(),
-        can_edit,
-        objects,
-        props: GARDEN_PROP_IDS.to_vec(),
+        session: active_session(&state, auth.id).await?,
+        preset_minutes: PRESET_MINUTES.to_vec(),
     }))
 }
 
-async fn load_objects(state: &SharedState) -> AppResult<Vec<GardenObject>> {
-    let rows = sqlx::query("SELECT id, kind, x, y, flip FROM garden_objects ORDER BY y, x")
-        .fetch_all(&state.pool)
-        .await?;
-    let mut objects = Vec::with_capacity(rows.len());
-    for row in rows {
-        objects.push(GardenObject {
-            id: row.try_get("id")?,
-            kind: row.try_get("kind")?,
-            x: row.try_get("x")?,
-            y: row.try_get("y")?,
-            flip: row.try_get("flip")?,
-        });
-    }
-    Ok(objects)
-}
-
-// --- Creator mode ----------------------------------------------------------
-
 #[derive(Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
-pub enum LayoutOp {
-    /// Idempotent on replay: the client owns the id.
-    Add {
-        id: Uuid,
-        kind: String,
-        x: f64,
-        y: f64,
-        #[serde(default)]
-        flip: bool,
-    },
-    Move {
-        id: Uuid,
-        x: f64,
-        y: f64,
-        #[serde(default)]
-        flip: bool,
-    },
-    Remove {
-        id: Uuid,
-    },
+pub struct AvatarRequest {
+    avatar: String,
 }
 
-#[derive(Deserialize)]
-pub struct SaveLayoutRequest {
-    ops: Vec<LayoutOp>,
-}
-
-/// Snap to a half tile and clamp inside the hub, so no NaN, infinity or
-/// out-of-world coordinate can ever reach a row. Shares the hub bounds with
-/// movement, so the two cannot disagree.
-fn clamp_placement(x: f64, y: f64) -> AppResult<(f64, f64)> {
-    if !x.is_finite() || !y.is_finite() {
-        return Err(AppError::Validation("coordinates must be finite".to_string()));
-    }
-    let snap = |v: f64| (v * 2.0).round() / 2.0;
-    Ok((
-        snap(x.clamp(0.0, HUB_MAX_X)),
-        snap(y.clamp(0.0, HUB_MAX_Y)),
-    ))
-}
-
-/// Refuse scenery that would block a doorway or the plaza. An admin must not be
-/// able to wall the workspace out of its own rooms.
-fn placement_is_allowed(x: f64, y: f64, doors: &[(f64, f64)]) -> bool {
-    // The plaza core, where the signpost and the through-lanes are.
-    if (x - 52.0).abs() <= 3.0 && (y - 64.0).abs() <= 2.0 {
-        return false
-    }
-    // The temple threshold.
-    if (x - TEMPLE_X).abs() <= 2.0 && (y - TEMPLE_Y).abs() <= 2.0 {
-        return false
-    }
-    // Every doorway and the tile in front of it.
-    doors
-        .iter()
-        .all(|(door_x, door_y)| (x - door_x).abs() > 1.5 || (y - door_y).abs() > 1.5)
-}
-
-pub async fn save_layout(
+pub async fn set_avatar(
     State(state): State<SharedState>,
     auth: AuthUser,
-    Json(body): Json<SaveLayoutRequest>,
+    Json(body): Json<AvatarRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
-    require_workspace_admin(&state.pool, auth.id).await?;
-    if body.ops.is_empty() || body.ops.len() > MAX_OPS_PER_REQUEST {
-        return Err(AppError::Validation(format!(
-            "between 1 and {MAX_OPS_PER_REQUEST} ops required"
-        )));
+    if !is_garden_avatar(&body.avatar) {
+        return Err(AppError::Validation("unknown character".to_string()));
     }
+    sqlx::query(
+        "INSERT INTO user_prefs (user_id, garden_avatar) VALUES ($1, $2)
+         ON CONFLICT (user_id) DO UPDATE SET garden_avatar = $2",
+    )
+    .bind(auth.id)
+    .bind(&body.avatar)
+    .execute(&state.pool)
+    .await?;
+    Ok(Json(json!({ "avatar": body.avatar })))
+}
 
-    // Doorways come from the same deterministic function the proximity check uses.
-    let door_rows = sqlx::query("SELECT plot_index FROM garden_rooms")
-        .fetch_all(&state.pool)
-        .await?;
-    let mut doors = Vec::with_capacity(door_rows.len());
-    for row in door_rows {
-        doors.push(plot_door(row.try_get::<i32, _>("plot_index")?));
+// --- Focus sessions --------------------------------------------------------
+
+/// The caller's running session, if any. Elapsed time comes from the database
+/// clock in the same query, so it is consistent with `started_at`.
+async fn active_session(state: &SharedState, user_id: Uuid) -> AppResult<Option<FocusSession>> {
+    let row = sqlx::query(
+        "SELECT id, mode, duration_secs, started_at,
+                GREATEST(0, floor(EXTRACT(EPOCH FROM (now() - started_at))))::bigint AS elapsed
+           FROM garden_focus_sessions
+          WHERE user_id = $1 AND ended_at IS NULL",
+    )
+    .bind(user_id)
+    .fetch_optional(&state.pool)
+    .await?;
+    let Some(row) = row else { return Ok(None) };
+    Ok(Some(FocusSession {
+        id: row.try_get("id")?,
+        mode: row.try_get("mode")?,
+        duration_secs: row.try_get("duration_secs")?,
+        started_at: row.try_get("started_at")?,
+        elapsed_secs: row.try_get("elapsed")?,
+    }))
+}
+
+#[derive(Deserialize)]
+pub struct StartSessionRequest {
+    /// `countdown` or `stopwatch`.
+    mode: String,
+    /// Required for a countdown, refused for a stopwatch.
+    duration_secs: Option<i32>,
+}
+
+/// Validate a start request into the pair the row wants.
+///
+/// Split out so the mode/duration agreement is testable without a database, and
+/// so it states the same rule as the `garden_focus_mode_duration` constraint.
+fn parse_start(mode: &str, duration_secs: Option<i32>) -> Result<(&str, Option<i32>), String> {
+    match (mode, duration_secs) {
+        ("countdown", Some(secs)) if secs > 0 && secs <= MAX_DURATION_SECS => {
+            Ok(("countdown", Some(secs)))
+        }
+        ("countdown", Some(_)) => {
+            Err(format!("duration_secs must be 1..={MAX_DURATION_SECS}"))
+        }
+        ("countdown", None) => Err("a countdown needs duration_secs".to_string()),
+        ("stopwatch", None) => Ok(("stopwatch", None)),
+        ("stopwatch", Some(_)) => Err("a stopwatch has no duration".to_string()),
+        _ => Err("mode must be 'countdown' or 'stopwatch'".to_string()),
     }
+}
+
+/// Start a timer, replacing whatever was running.
+///
+/// Replacing rather than refusing: the user pressing "30 minutes" while a
+/// stopwatch runs means they want 30 minutes, and the partial unique index would
+/// otherwise turn that into an error the UI has nothing useful to do with. Both
+/// statements share one transaction, so the index can never see two live rows.
+pub async fn start_session(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Json(body): Json<StartSessionRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    let (mode, duration_secs) =
+        parse_start(&body.mode, body.duration_secs).map_err(AppError::Validation)?;
 
     let mut tx = state.pool.begin().await?;
-    for op in &body.ops {
-        match op {
-            LayoutOp::Add { id, kind, x, y, flip } => {
-                if !is_garden_prop(kind) {
-                    return Err(AppError::Validation(format!("unknown scenery: {kind}")));
-                }
-                let (cx, cy) = clamp_placement(*x, *y)?;
-                if !placement_is_allowed(cx, cy, &doors) {
-                    return Err(AppError::Validation(
-                        "that spot has to stay clear".to_string(),
-                    ));
-                }
-                sqlx::query(
-                    "INSERT INTO garden_objects (id, kind, x, y, flip, created_by)
-                     VALUES ($1, $2, $3, $4, $5, $6)
-                     ON CONFLICT (id) DO NOTHING",
-                )
-                .bind(id)
-                .bind(kind)
-                .bind(cx)
-                .bind(cy)
-                .bind(flip)
-                .bind(auth.id)
-                .execute(&mut *tx)
-                .await?;
-            }
-            LayoutOp::Move { id, x, y, flip } => {
-                let (cx, cy) = clamp_placement(*x, *y)?;
-                if !placement_is_allowed(cx, cy, &doors) {
-                    return Err(AppError::Validation(
-                        "that spot has to stay clear".to_string(),
-                    ));
-                }
-                sqlx::query(
-                    "UPDATE garden_objects SET x = $2, y = $3, flip = $4, updated_at = now()
-                     WHERE id = $1",
-                )
-                .bind(id)
-                .bind(cx)
-                .bind(cy)
-                .bind(flip)
-                .execute(&mut *tx)
-                .await?;
-            }
-            LayoutOp::Remove { id } => {
-                sqlx::query("DELETE FROM garden_objects WHERE id = $1")
-                    .bind(id)
-                    .execute(&mut *tx)
-                    .await?;
-            }
-        }
-    }
-
-    let total: i64 = sqlx::query("SELECT count(*) AS c FROM garden_objects")
-        .fetch_one(&mut *tx)
-        .await?
-        .try_get("c")?;
-    if total > MAX_OBJECTS {
-        // Rolls back by dropping the transaction, so an over-cap batch places
-        // nothing rather than part of itself.
-        return Err(AppError::Validation(format!(
-            "the Garden is full ({MAX_OBJECTS} pieces of scenery)"
-        )));
-    }
+    sqlx::query(
+        "UPDATE garden_focus_sessions SET ended_at = now()
+          WHERE user_id = $1 AND ended_at IS NULL",
+    )
+    .bind(auth.id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO garden_focus_sessions (user_id, mode, duration_secs)
+         VALUES ($1, $2, $3)",
+    )
+    .bind(auth.id)
+    .bind(mode)
+    .bind(duration_secs)
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
 
-    // The layout is public, so this goes to every online user; a client not in
-    // Garden simply ignores it.
-    let objects = load_objects(&state).await?;
-    state
-        .hub
-        .broadcast(
-            envelope(
-                "garden.layout_changed",
-                json!({ "objects": objects, "actor_id": auth.id }),
-            ),
-            state.hub.online_user_ids(),
-        )
-        .await;
+    Ok(Json(json!({ "session": active_session(&state, auth.id).await? })))
+}
 
-    Ok(Json(json!({ "objects": objects })))
+/// Stop the running timer. Idempotent: stopping nothing is a success with a null
+/// session, because a countdown that finished can be reported by two tabs at
+/// once and neither should see an error.
+pub async fn stop_session(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+) -> AppResult<Json<serde_json::Value>> {
+    let row = sqlx::query(
+        "UPDATE garden_focus_sessions SET ended_at = now()
+          WHERE user_id = $1 AND ended_at IS NULL
+      RETURNING mode, duration_secs,
+                GREATEST(0, floor(EXTRACT(EPOCH FROM (ended_at - started_at))))::bigint AS elapsed",
+    )
+    .bind(auth.id)
+    .fetch_optional(&state.pool)
+    .await?;
+    let Some(row) = row else {
+        return Ok(Json(json!({ "stopped": null })));
+    };
+    Ok(Json(json!({
+        "stopped": {
+            "mode": row.try_get::<String, _>("mode")?,
+            "duration_secs": row.try_get::<Option<i32>, _>("duration_secs")?,
+            "elapsed_secs": row.try_get::<i64, _>("elapsed")?,
+        }
+    })))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{clamp_placement, is_garden_prop, placement_is_allowed};
-    use crate::ws::garden::plot_door;
+    use super::{is_garden_avatar, parse_start, MAX_DURATION_SECS};
 
     #[test]
-    fn scenery_is_allowlisted() {
-        assert!(is_garden_prop("boulder"));
-        assert!(!is_garden_prop("../../etc/passwd"));
-        assert!(!is_garden_prop(""));
+    fn characters_are_allowlisted() {
+        assert!(is_garden_avatar("monk"));
+        assert!(!is_garden_avatar("../../etc/passwd"));
+        assert!(!is_garden_avatar(""));
     }
 
     #[test]
-    fn placements_snap_to_a_half_tile_and_clamp_into_the_hub() {
-        assert_eq!(clamp_placement(10.3, 20.9).unwrap(), (10.5, 21.0));
-        assert_eq!(clamp_placement(-50.0, 9999.0).unwrap(), (0.0, 398.0));
+    fn a_countdown_needs_a_sane_duration() {
+        assert_eq!(parse_start("countdown", Some(600)), Ok(("countdown", Some(600))));
+        assert!(parse_start("countdown", None).is_err());
+        assert!(parse_start("countdown", Some(0)).is_err());
+        assert!(parse_start("countdown", Some(-60)).is_err());
+        assert!(parse_start("countdown", Some(MAX_DURATION_SECS + 1)).is_err());
     }
 
     #[test]
-    fn non_finite_placements_are_refused() {
-        assert!(clamp_placement(f64::NAN, 1.0).is_err());
-        assert!(clamp_placement(1.0, f64::INFINITY).is_err());
+    fn a_stopwatch_has_no_duration() {
+        assert_eq!(parse_start("stopwatch", None), Ok(("stopwatch", None)));
+        assert!(parse_start("stopwatch", Some(600)).is_err());
     }
 
     #[test]
-    fn doorways_and_the_plaza_stay_clear() {
-        let doors = vec![plot_door(0), plot_door(3)];
-        // Right on a doorway, and the tile in front of it.
-        assert!(!placement_is_allowed(14.0, 19.0, &doors));
-        assert!(!placement_is_allowed(14.0, 20.0, &doors));
-        // The plaza core and the temple threshold.
-        assert!(!placement_is_allowed(52.0, 64.0, &doors));
-        assert!(!placement_is_allowed(52.0, 84.0, &doors));
-        // Open ground is fine.
-        assert!(placement_is_allowed(30.0, 40.0, &doors));
+    fn unknown_modes_are_refused() {
+        assert!(parse_start("pomodoro", Some(600)).is_err());
+        assert!(parse_start("", None).is_err());
     }
 }

@@ -35,7 +35,7 @@ proxy to an OpenAI-compatible transcription provider.
 All ids are strings in JSON (UUIDs). A WebSocket connection id is the peer identity.
 
 ```ts
-VoiceParticipant = { conn_id: string, user_id: string, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null, hand_raised: boolean, hand_raised_at: number | null, annotation_color: string, aura_style: string | null, garden_active: boolean, pos_x: number, pos_y: number, joined_at: string }
+VoiceParticipant = { conn_id: string, user_id: string, display_name: string, guest: boolean, muted: boolean, transcribing: boolean, camera_on: boolean, screen_on: boolean, screen_stream_id: string | null, hand_raised: boolean, hand_raised_at: number | null, annotation_color: string, aura_style: string | null, pos_x: number, pos_y: number, joined_at: string }
 MediaCredentials = { provider: 'livekit', server_url: string, participant_token: string, participant_identity: string }
 VoiceRoomSnapshot = { channel_id: string, participants: VoiceParticipant[], active_meeting_id: string | null, annotations_allowed: boolean, media?: MediaCredentials }
 ```
@@ -46,12 +46,10 @@ The existing envelope remains `{"type": string, "payload": object}` in both dire
 
 Client → server:
 
-- `voice.join` `{channel_id, link_token?, aura_style?, garden_active?}` — `channel_id` is the room UUID for wire
+- `voice.join` `{channel_id, link_token?, aura_style?}` — `channel_id` is the room UUID for wire
   compatibility. Authenticated link visitors send `link_token` as admission proof without
   replacing their account session. `aura_style` seeds the participant's broadcast audio-aura pick
   (see `voice.aura`).
-  `garden_active=true` marks a call entered through Garden; Garden movement then owns the
-  participant's spatial coordinates until that connection leaves the room.
 - `voice.leave` `{channel_id}`
 - `voice.mute` `{channel_id, muted: boolean}`
 - `voice.force_mute` `{channel_id, conn_id}` — mute **someone else's** microphone for the
@@ -81,7 +79,8 @@ Client → server:
   `voice.join`. Broadcasts `voice.participant_updated`.
 - **There is no `voice.move`.** Positions on the spatial call floor are a per-listener choice
   that never leaves the device (see "Spatial view and positional audio"), so no client event
-  moves anyone. The only shared floor is Garden's, written by `garden.move`.
+  moves anyone. There is no shared floor at all: Garden is single player and has no wire
+  surface (`12-garden.md`).
 - `voice.poll_create` `{room_id, question, options, multi, expires_at?}`
 - `voice.poll_vote` `{room_id, poll_id, option_ids}` — an empty option list retracts the vote.
 - `voice.poll_close` `{room_id, poll_id}` — creator only.
@@ -120,8 +119,8 @@ Server → client:
   `helios|mercury|voiceprint|kinetic-type|eclipse` (validated server-side; unknown values become `null`).
   `hand_raised_at` is Unix epoch milliseconds set when the hand was raised and `null` while lowered.
   `pos_x`/`pos_y` are the participant's normalized position on the spatial floor: the spawn
-  position every listener starts them at, and — for `garden_active` participants — where Garden
-  has walked them. Each client may override it locally without telling anyone.
+  position every listener starts them at. Each client may override it locally without telling
+  anyone.
   `display_name` is filled server-side for everyone (users from the `users` table,
   guests from their token) so clients can render names without `/users` access; `guest`
   marks public voice-link joiners.
@@ -135,10 +134,6 @@ Server → client:
 - `voice.participant_updated` `{channel_id, participant: VoiceParticipant}` — broadcast to
   the room audience after mute, transcription, camera, screen-share, or raise-hand state
   changes.
-- `voice.participant_moved` `{channel_id, conn_id, x, y}` — broadcast to the room audience after
-  an accepted `garden.move` changed a Garden-owned participant's coordinates. Deliberately
-  smaller than `participant_updated`: it travels at walking rate. Garden is now its only
-  source; call-floor arrangements are local and broadcast nothing.
 - `voice.roast_armed` `{channel_id, armed: boolean}` — broadcast to the room audience when
   three phrases with gaps of at most 20 seconds arm a voice roast, and with `armed=false`
   after a successful voice GIF suggestion consumes it.
@@ -190,10 +185,10 @@ Server → client:
   from the centre that skips any point within 0.11 of someone already standing there, so
   arrivals never stack. No RNG — the spawn is a pure function of who is already in the room. Demoting a registered participant to channel viewer removes all of that
   user's connections from the room immediately.
-- Positions: the server only ever *spawns* a participant (`spawn_position`) and lets Garden walk
-  them (`garden.move` → `set_garden_position` → `voice.participant_moved`). Nothing else writes
-  `pos_x`/`pos_y`, and there is no client event that moves someone in another listener's mix.
-- **Broadcast targeting**: every voice broadcast (`participant_joined`/`left`/`updated`/`moved` and
+- Positions: the server only ever *spawns* a participant (`spawn_position`) and never moves one
+  again. Nothing else writes `pos_x`/`pos_y`, and there is no client event that moves someone in
+  another listener's mix.
+- **Broadcast targeting**: every voice broadcast (`participant_joined`/`left`/`updated` and
   `voice.roast_armed`)
   targets the **union** of the channel's member ids and the user-ids currently in the room's
   participant map (computed at broadcast time; `participant_left` additionally includes the
@@ -352,7 +347,7 @@ Meet-style ephemeral emoji, wired through `voice.react` / `voice.reaction` above
   and nothing else: the same call can be laid out differently on every device, and no event is
   sent. Two layers resolve a position — this device's override
   (`voice.spatialPositions`, conn id → `{x, y}`, never persisted) falling back to the room's
-  `pos_x`/`pos_y`, which is the server's spawn position plus whatever Garden has walked. Whether
+  `pos_x`/`pos_y`, the server's spawn position. Whether
   you *hear* the room spatially is the same device-local preference (`sharp.voiceSpatial`),
   toggled from the call header.
 - Web: `web/src/components/voice/SpatialStage.tsx` draws the floor and moves you (drag, click the

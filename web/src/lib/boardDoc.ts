@@ -9,6 +9,7 @@
 // `color` on options is a palette key (see boardColors.ts), never hex. The server
 // never interprets any of this (title-only search, no backlinks).
 import * as Y from 'yjs'
+import type { DocKind } from './types'
 
 export type BoardPropertyType = 'select' | 'multiSelect' | 'date' | 'assignee'
 
@@ -27,6 +28,21 @@ export type BoardProperty = {
 
 export type ChecklistItem = { id: string; text: string; done: boolean }
 
+/**
+ * A doc/canvas/board this card points at. `title` and `kind` are a snapshot taken
+ * when the reference was added: the board doc never queries the docs table, so a
+ * renamed target keeps its old label until the reference is re-added. `docId` is
+ * the truth — the chip navigates by it (`kind` only picks the route).
+ */
+export type CardDocRef = {
+  id: string
+  docId: string
+  title: string
+  kind: DocKind
+  /** The target's emoji at the time it was linked; '' falls back to a kind icon. */
+  icon: string
+}
+
 export type BoardCardData = {
   id: string
   title: string
@@ -34,6 +50,7 @@ export type BoardCardData = {
   order: string
   values: Record<string, string | string[]>
   checklist: ChecklistItem[]
+  docRefs: CardDocRef[]
 }
 
 export type BoardSnapshot = {
@@ -151,6 +168,17 @@ function checklistToPlain(arr: Y.Array<Y.Map<unknown>> | undefined): ChecklistIt
   }))
 }
 
+function docRefsToPlain(arr: Y.Array<Y.Map<unknown>> | undefined): CardDocRef[] {
+  if (!arr) return []
+  return arr.map((m) => ({
+    id: m.get('id') as string,
+    docId: (m.get('docId') as string) ?? '',
+    title: (m.get('title') as string) ?? '',
+    kind: ((m.get('kind') as DocKind) ?? 'doc') as DocKind,
+    icon: (m.get('icon') as string) ?? '',
+  }))
+}
+
 function valuesToPlain(values: Y.Map<unknown> | undefined): Record<string, string | string[]> {
   const out: Record<string, string | string[]> = {}
   if (!values) return out
@@ -173,6 +201,7 @@ export function readSnapshot(ydoc: Y.Doc): BoardSnapshot {
       order: (card.get('order') as string) ?? '',
       values: valuesToPlain(card.get('values') as Y.Map<unknown> | undefined),
       checklist: checklistToPlain(card.get('checklist') as Y.Array<Y.Map<unknown>> | undefined),
+      docRefs: docRefsToPlain(card.get('docRefs') as Y.Array<Y.Map<unknown>> | undefined),
     })
   })
   return {
@@ -474,6 +503,58 @@ export function deleteChecklistItem(ydoc: Y.Doc, cardId: string, itemId: string)
     if (!arr) return
     for (let i = 0; i < arr.length; i++) {
       if (arr.get(i).get('id') === itemId) {
+        arr.delete(i, 1)
+        break
+      }
+    }
+  })
+}
+
+// ---- doc-reference mutations -----------------------------------------------
+//
+// Same shape as the checklist: a lazily-created Y.Array of Y.Map { id, docId,
+// title, kind } under the card's 'docRefs' key. A card can point at the same doc
+// only once — adding it again is a no-op rather than a duplicate chip.
+
+function docRefsArray(card: Y.Map<unknown>, create = false): Y.Array<Y.Map<unknown>> | undefined {
+  let arr = card.get('docRefs') as Y.Array<Y.Map<unknown>> | undefined
+  if (!arr && create) {
+    arr = new Y.Array<Y.Map<unknown>>()
+    card.set('docRefs', arr)
+  }
+  return arr
+}
+
+export function addCardDocRef(
+  ydoc: Y.Doc,
+  cardId: string,
+  ref: { docId: string; title: string; kind: DocKind; icon?: string },
+): void {
+  const { cards } = getBoardMaps(ydoc)
+  ydoc.transact(() => {
+    const card = cards.get(cardId) as Y.Map<unknown> | undefined
+    if (!card) return
+    const arr = docRefsArray(card, true)!
+    for (const existing of arr) if (existing.get('docId') === ref.docId) return
+    const m = new Y.Map<unknown>()
+    m.set('id', uid())
+    m.set('docId', ref.docId)
+    m.set('title', ref.title)
+    m.set('kind', ref.kind)
+    m.set('icon', ref.icon ?? '')
+    arr.push([m])
+  })
+}
+
+export function deleteCardDocRef(ydoc: Y.Doc, cardId: string, refId: string): void {
+  const { cards } = getBoardMaps(ydoc)
+  ydoc.transact(() => {
+    const card = cards.get(cardId) as Y.Map<unknown> | undefined
+    if (!card) return
+    const arr = docRefsArray(card)
+    if (!arr) return
+    for (let i = 0; i < arr.length; i++) {
+      if (arr.get(i).get('id') === refId) {
         arr.delete(i, 1)
         break
       }

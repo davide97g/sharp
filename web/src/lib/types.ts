@@ -368,90 +368,47 @@ export type VoiceParticipant = {
   hand_raised_at: number | null
   // Audio-aura style this participant broadcasts; null falls back to the viewer's local style.
   aura_style: string | null
-  // True when Garden owns this participant's spatial position.
-  garden_active: boolean
   // Spatial-room position, normalized 0..1 (x = left→right, y = top→bottom).
   pos_x: number
   pos_y: number
   joined_at: string
 }
 
-// --- Garden spatial rooms ---
+// --- Garden focus space ---
 
-export type GardenRoomVariant = 'meadow' | 'pond' | 'orchard' | 'greenhouse'
-
-export type GardenRoom = {
-  channel_id: string
-  name: string
-  kind: 'public' | 'private'
-  is_member: boolean
-  plot_index: number
-  room_variant: GardenRoomVariant
-  occupancy: number
-  door_x: number
-  door_y: number
-}
-
-export type GardenMap = {
-  version: number
-  tile_size: number
-  spawn: { x: number; y: number }
-  temple: { x: number; y: number }
-  rooms: GardenRoom[]
-  /** This viewer's chosen character; null means they have never picked one. */
-  self_avatar?: string | null
-  /** Server-side roster allowlist, so the picker cannot offer a rejected id. */
-  avatars?: string[]
-  /** Whether this viewer may edit the world. Server-computed, never inferred. */
-  can_edit?: boolean
-  /** Placed scenery, in paint order. */
-  objects?: GardenObject[]
-  /** Server-side scenery allowlist, so the palette cannot offer a rejected id. */
-  props?: string[]
-}
-
-/** A piece of admin-placed Garden scenery. */
-export type GardenObject = {
-  id: string
-  kind: string
-  x: number
-  y: number
-  flip: boolean
-}
+/** Direction a Garden character faces; the sprite sheets have one column each. */
+export type GardenFacing = 'up' | 'down' | 'left' | 'right'
 
 /**
- * A creator-mode edit. The client generates the id on `add`, so an optimistic
- * placement needs no reconciliation and a replayed op is idempotent.
+ * A running focus timer. `duration_secs` is set for a countdown and null for a
+ * stopwatch, and `elapsed_secs` is measured by the server so a device with a
+ * skewed clock still shows the right remaining time.
  */
-export type GardenLayoutOp =
-  | { op: 'add'; id: string; kind: string; x: number; y: number; flip?: boolean }
-  | { op: 'move'; id: string; x: number; y: number; flip?: boolean }
-  | { op: 'remove'; id: string }
+export type GardenFocusSession = {
+  id: string
+  mode: 'countdown' | 'stopwatch'
+  duration_secs: number | null
+  started_at: string
+  elapsed_secs: number
+}
 
-export type GardenPeer = {
-  conn_id: string
-  user_id: string
-  display_name: string
-  space: 'hub' | 'room'
-  channel_id: string | null
-  x: number
-  y: number
-  facing: 'up' | 'down' | 'left' | 'right'
-  moving: boolean
-  zen_mode: boolean
-  seq: number
-  /**
-   * Chosen character roster id (see `components/garden/gardenAvatars.ts`), or
-   * null when this person has never picked one — the client then falls back
-   * deterministically from `user_id`. Optional so a client can talk to a server
-   * that predates the roster.
-   */
-  avatar?: string | null
-  /**
-   * Highlight-colour slot, assigned by join order within the live Garden
-   * session and never persisted. Index into `GARDEN_COLOR_KEYS`.
-   */
-  color_index?: number
+/** `GET /garden` — what the route needs on entry. */
+export type GardenState = {
+  /** This viewer's chosen character; null means they have never picked one. */
+  avatar: string | null
+  /** Server roster allowlist, so the picker cannot offer a rejected id. */
+  avatars: string[]
+  /** A timer still running from a previous visit, else null. */
+  session: GardenFocusSession | null
+  /** Countdown lengths the picker offers, in minutes. */
+  preset_minutes: number[]
+}
+
+/** What stopping a timer reports back, for the session summary. */
+export type GardenFocusResult = {
+  mode: 'countdown' | 'stopwatch'
+  duration_secs: number | null
+  elapsed_secs: number
 }
 
 export type VoiceRoomSnapshot = {
@@ -641,14 +598,6 @@ export type VoiceParticipantLeftPayload = {
 export type VoiceParticipantUpdatedPayload = {
   channel_id: string
   participant: VoiceParticipant
-}
-// Spatial-room movement. Deliberately thinner than participant_updated: it
-// arrives at pointer rate, so only the moved coordinates travel.
-export type VoiceParticipantMovedPayload = {
-  channel_id: string
-  conn_id: string
-  x: number
-  y: number
 }
 // Someone force-muted someone else. The mute itself rides the participant_updated
 // broadcast that precedes this; the payload exists so the target can name who did it.

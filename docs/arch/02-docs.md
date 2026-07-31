@@ -199,6 +199,37 @@ fills (1024 frames) is evicted from the room.
   suggestion menus key on a single character). Serialized into
   the Yjs XML as a `<doclink docId="…"/>` element — that's what compaction scans for
   backlinks.
+- **URLs in docs**: a plain http(s) URL becomes a **chip** — custom BlockNote inline
+  content `urlchip` with props `{url, title, favicon}`, serialized as
+  `<urlchip url="…" title="…"/>`. The unfurl is captured **once, by the writer**, through
+  `POST /unfurl/resolve` (the same on-demand endpoint encrypted DMs use — the server never
+  parses a Yjs blob, so it cannot unfurl a doc itself) and stored in the props: opening a
+  doc full of links costs a reader zero requests. The chip shows favicon + title (host +
+  path when there is no title) and the **full URL on hover**; the favicon loads through
+  `/unfurl/image`, never hot-linked. An unlabelled chip self-heals on first render — but
+  only for a viewer with edit rights, never a read-only reader.
+  Conversion happens at three moments, all in `web/src/components/docs/DocEditorInner.tsx`
+  with the rules in `web/src/lib/docLinkify.ts`:
+  - **paste** — a clipboard payload that is nothing but a URL becomes a `bookmark` block on
+    an empty paragraph, a chip inside a line of text, and the plain BlockNote default (a
+    link over the selected text) when there is a selection to label it with;
+  - **typing** — a URL terminated by whitespace, or left behind above the caret by Enter;
+  - **backfill** — one pass when a doc opens, for docs written before chips existed. Gated
+    on edit rights **and on being alone in the doc** (awareness), because two clients
+    rewriting the same text merge into duplicated chips.
+
+  Code blocks and inline-code runs are skipped, mirroring what `extract_urls` skips in chat.
+  `urlchip`'s label lives in an XML *attribute*, so `xml_to_text` does not index it: a
+  chipped link is findable by neither title nor URL. Chipping is a doc *edit* like any other
+  — it replays through the update log and every peer sees it.
+- **Bookmark blocks**: custom block `bookmark` (`propSchema: { url }`, content `none`), also
+  insertable from the `/` slash menu (group Media, 🔗). Only the URL is stored; the card
+  itself is resolved **per viewer** through `POST /unfurl/resolve` and rendered by the same
+  `LinkPreviewCard` chat uses, so a site that changes its title or art is not frozen into
+  the doc. That resolve shares the 20/min/user rate limit — a doc with dozens of bookmarks
+  degrades to plain link rows, never an error. The shared plumbing (resolve cache, image
+  proxy hook, labels) is `web/src/lib/linkPreviews.ts`; a bookmark is explicit authored
+  content, so it ignores the `ui.linkPreviews` chat opt-out.
 - **People mentions in docs**: custom BlockNote inline content `mention` with props
   `{userId, name}`, inserted via `@` suggestion menu (channel members). On insert the
   client calls `POST /docs/{id}/mentions`; the server persists it and emits `doc.mention`.

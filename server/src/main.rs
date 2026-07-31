@@ -192,7 +192,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config,
         hub,
         voice_rooms: Default::default(),
-        garden: Default::default(),
         doc_rooms: Default::default(),
         storage,
         vapid,
@@ -439,8 +438,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/channels",
             get(routes::channels::list_channels).post(routes::channels::create_channel),
         )
-        .route("/garden/map", get(routes::garden::map))
-        .route("/garden/layout", post(routes::garden::save_layout))
+        // ── Garden focus space — contract: docs/arch/12-garden.md ──────────────────────────
+        .route("/garden", get(routes::garden::state))
+        .route("/garden/avatar", post(routes::garden::set_avatar))
+        .route(
+            "/garden/session",
+            post(routes::garden::start_session).delete(routes::garden::stop_session),
+        )
         // ── Channels, membership, roles, read state — contract: docs/arch/01-core.md ─────────
         .route("/channels/dm", post(routes::channels::create_dm))
         .route(

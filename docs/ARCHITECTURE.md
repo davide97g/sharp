@@ -55,7 +55,7 @@ These hold across every feature. Breaking one compiles fine and fails in product
 | Docs (BlockNote/Yjs) | `routes/docs.rs`, `docs_sync.rs` | `components/docs/`, `lib/docSync.ts` | [02-docs](arch/02-docs.md) |
 | Canvas, Boards | same as docs (`kind` column) | `components/canvas/`, `components/board/`, `lib/tldrawYjs.ts`, `lib/boardDoc.ts` | [03-canvas-board](arch/03-canvas-board.md) |
 | Voice, video, screen share, call links | `ws/voice/`, `routes/voice.rs`, `routes/call_links.rs`, `livekit.rs` | `components/voice/`, `lib/voice.ts`, `lib/pip.ts` | [04-voice](arch/04-voice.md) |
-| Garden spatial rooms | `ws/garden.rs`, `routes/garden.rs` | `components/garden/`, `store.ts` | [12-garden](arch/12-garden.md) |
+| Garden focus space | `routes/garden.rs` | `components/garden/`, `lib/garden/terrain.ts`, `store.ts` | [12-garden](arch/12-garden.md) |
 | File uploads | `routes/files.rs`, `storage.rs` | `components/Composer.tsx`, `lib/api.ts` | [05-files-notifications](arch/05-files-notifications.md) |
 | Notification inbox | `routes/notifications.rs`, `notify.rs` | `components/NotificationCenter.tsx` | [05-files-notifications](arch/05-files-notifications.md) |
 | Notification prefs, DND, appearance, privacy | `routes/prefs.rs`, `privacy.rs` | `components/settings/`, `lib/uiPrefs.ts`, `lib/theme.ts`, `lib/localPrefs.ts` | [05-files-notifications](arch/05-files-notifications.md) |
@@ -105,7 +105,7 @@ Shared web helpers:
 | [09-e2ee.md](arch/09-e2ee.md) | Encrypted DMs: device keys, opaque envelopes, server blind spots |
 | [10-sharpy.md](arch/10-sharpy.md) | pgvector embeddings, ACL-filtered retrieval, SSE ask flow |
 | [11-tasks.md](arch/11-tasks.md) | Projects, identifiers, workflow-state types, fracIndex ordering, GitHub sync |
-| [12-garden.md](arch/12-garden.md) | Spatial channel village, movement protocol, room ACLs, and call handoff |
+| [12-garden.md](arch/12-garden.md) | Single-player focus space: DnD on entry, focus timers, the generated world |
 
 Phase numbers in these titles are historical shipping order, not a hierarchy — and they are
 not unique (docs and Sharpy were both "Phase 6" at different times). Navigate by feature.

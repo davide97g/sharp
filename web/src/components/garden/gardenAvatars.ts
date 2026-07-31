@@ -1,9 +1,9 @@
 // Garden character roster.
 //
 // One list, three consumers: the Phaser preloader, the avatar picker, and — by
-// hand — `GARDEN_AVATARS` in `server/src/ws/garden.rs`, which validates the id
-// before it ever reaches another client's texture lookup (the `AURA_STYLES`
-// precedent in `server/src/ws/voice/mod.rs`). Keep the two lists in lockstep.
+// hand — `GARDEN_AVATARS` in `server/src/routes/garden.rs`, which validates the
+// id before it is stored (the `AURA_STYLES` precedent in
+// `server/src/ws/voice/mod.rs`). Keep the two lists in lockstep.
 //
 // Adding a character is deliberately a drop-in:
 //   1. Put `avatar_<id>.png` in `web/public/assets/garden/ninja-adventure/`.
@@ -74,11 +74,10 @@ export function isAvatarId(value: string | null | undefined): value is GardenAva
 }
 
 /**
- * Appearance for a peer who has never picked one.
+ * Appearance for someone who has never picked one.
  *
- * Keyed on the immutable user id, NOT the display name: a rename must not
- * change your character, and two people sharing a name must not be
- * indistinguishable. Both were true before this existed.
+ * Keyed on the immutable user id, NOT the display name: a rename must not change
+ * your character.
  */
 export function fallbackAvatarId(userId: string): GardenAvatarId {
   let value = 0

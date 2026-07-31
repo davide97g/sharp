@@ -79,8 +79,6 @@ import type {
   DocUpdatedPayload,
   DuckStreakPayload,
   E2eeDevicesChangedPayload,
-  GardenObject,
-  GardenPeer,
   HelloPayload,
   MeetingEndedPayload,
   MeetingStartedPayload,
@@ -109,7 +107,6 @@ import type {
   VoiceForceMutedPayload,
   VoiceParticipantJoinedPayload,
   VoiceParticipantLeftPayload,
-  VoiceParticipantMovedPayload,
   VoiceParticipantUpdatedPayload,
   VoicePollStatePayload,
   VoiceReactionPayload,
@@ -120,40 +117,6 @@ import type {
 } from './types'
 import type { State } from '../store'
 import type { WsEnvelope } from './ws'
-
-function syncGardenAudio(set: Setter, get: () => State) {
-  const state = get()
-  const { garden, voice } = state
-  if (garden.space === 'hub') {
-    if (
-      garden.managedVoiceChannelId &&
-      voice.channelId === garden.managedVoiceChannelId
-    ) {
-      state.leaveVoice()
-    }
-    if (garden.managedVoiceChannelId) {
-      set((s) => ({
-        garden: { ...s.garden, managedVoiceChannelId: null },
-      }))
-    }
-    return
-  }
-  if (garden.audioMode !== 'on' || !garden.channelId) return
-  if (!voice.channelId) {
-    const channelId = garden.channelId
-    set((s) => ({
-      garden: { ...s.garden, managedVoiceChannelId: channelId, error: null },
-    }))
-    void state.joinVoice(channelId, { stageMode: 'mini', gardenActive: true })
-  } else if (voice.channelId !== garden.channelId) {
-    set((s) => ({
-      garden: {
-        ...s.garden,
-        error: 'Your current call is still active. Leave it to hear this room.',
-      },
-    }))
-  }
-}
 
 /** Apply one server event to the store. `set`/`get` come from the store itself. */
 export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
@@ -223,212 +186,6 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
             },
           },
         }))
-        break
-      }
-      case 'garden.state': {
-        const p = env.payload as { self: GardenPeer; peers: GardenPeer[] }
-        const peers = Object.fromEntries(
-          p.peers
-            .filter((peer) => peer.conn_id !== p.self.conn_id)
-            .map((peer) => [peer.conn_id, peer]),
-        )
-        set((s) => ({
-          garden: {
-            ...s.garden,
-            status: 'connected',
-            self: p.self,
-            peers,
-            space: p.self.space,
-            channelId: p.self.channel_id,
-            error: null,
-          },
-        }))
-        syncGardenAudio(set, get)
-        break
-      }
-      case 'garden.peer_joined': {
-        const { peer } = env.payload as { peer: GardenPeer }
-        if (peer.conn_id === get().myConnId) break
-        const garden = get().garden
-        if (
-          peer.space !== garden.space ||
-          (peer.space === 'room' && peer.channel_id !== garden.channelId)
-        ) {
-          break
-        }
-        set((s) => ({
-          garden: {
-            ...s.garden,
-            peers: { ...s.garden.peers, [peer.conn_id]: peer },
-          },
-        }))
-        break
-      }
-      case 'garden.layout_changed': {
-        // Carries the authoritative list rather than a diff, so a client that
-        // missed an earlier event still converges. The actor already applied it
-        // optimistically and will be reconciled by its own response.
-        const p = env.payload as { objects: GardenObject[]; actor_id: string }
-        if (p.actor_id === get().me?.id) break
-        set((s) => ({ garden: { ...s.garden, layout: p.objects } }))
-        break
-      }
-      case 'garden.peer_avatar': {
-        // One event per connection of the changing user, so a change made in one
-        // tab lands for peers watching any of them.
-        const p = env.payload as { conn_id: string; user_id: string; avatar: string }
-        set((s) => {
-          const isSelf = p.conn_id === s.myConnId
-          const peer = s.garden.peers[p.conn_id]
-          if (!isSelf && !peer) return {}
-          return {
-            garden: {
-              ...s.garden,
-              selfAvatar: isSelf ? p.avatar : s.garden.selfAvatar,
-              self:
-                isSelf && s.garden.self
-                  ? { ...s.garden.self, avatar: p.avatar }
-                  : s.garden.self,
-              peers: peer
-                ? { ...s.garden.peers, [p.conn_id]: { ...peer, avatar: p.avatar } }
-                : s.garden.peers,
-            },
-          }
-        })
-        break
-      }
-      case 'garden.peer_moved': {
-        const p = env.payload as Pick<
-          GardenPeer,
-          'conn_id' | 'seq' | 'x' | 'y' | 'facing' | 'moving'
-        >
-        set((s) => {
-          if (p.conn_id === s.myConnId && s.garden.self) {
-            return {
-              garden: { ...s.garden, self: { ...s.garden.self, ...p } },
-            }
-          }
-          const peer = s.garden.peers[p.conn_id]
-          if (!peer) return {}
-          return {
-            garden: {
-              ...s.garden,
-              peers: {
-                ...s.garden.peers,
-                [p.conn_id]: { ...peer, ...p },
-              },
-            },
-          }
-        })
-        break
-      }
-      case 'garden.peer_zen': {
-        const p = env.payload as { conn_id: string; zen_mode: boolean }
-        set((s) => {
-          if (p.conn_id === s.myConnId && s.garden.self) {
-            return {
-              garden: {
-                ...s.garden,
-                self: { ...s.garden.self, zen_mode: p.zen_mode },
-              },
-            }
-          }
-          const peer = s.garden.peers[p.conn_id]
-          if (!peer) return {}
-          return {
-            garden: {
-              ...s.garden,
-              peers: {
-                ...s.garden.peers,
-                [p.conn_id]: { ...peer, zen_mode: p.zen_mode },
-              },
-            },
-          }
-        })
-        break
-      }
-      case 'garden.peer_left': {
-        const { conn_id } = env.payload as { conn_id: string }
-        set((s) => {
-          if (!s.garden.peers[conn_id]) return {}
-          const peers = { ...s.garden.peers }
-          delete peers[conn_id]
-          return { garden: { ...s.garden, peers } }
-        })
-        break
-      }
-      case 'garden.corrected': {
-        const p = env.payload as { seq: number; x: number; y: number }
-        set((s) => ({
-          garden: {
-            ...s.garden,
-            self: s.garden.self ? { ...s.garden.self, ...p, moving: false } : null,
-          },
-        }))
-        break
-      }
-      case 'garden.space_changed': {
-        const p = env.payload as {
-          space: 'hub' | 'room'
-          channel_id?: string
-          peer: GardenPeer
-        }
-        if (p.peer.conn_id !== get().myConnId) break
-        set((s) => ({
-          garden: {
-            ...s.garden,
-            space: p.space,
-            channelId: p.channel_id ?? null,
-            self: p.peer,
-            peers: {},
-            error: null,
-          },
-        }))
-        syncGardenAudio(set, get)
-        break
-      }
-      case 'garden.temple_arrived': {
-        const p = env.payload as { peer: GardenPeer }
-        if (p.peer.conn_id !== get().myConnId) break
-        set((s) => ({
-          garden: {
-            ...s.garden,
-            space: 'hub',
-            channelId: null,
-            self: p.peer,
-            error: null,
-          },
-        }))
-        break
-      }
-      case 'garden.map_changed': {
-        if (get().garden.active) void get().loadGarden()
-        break
-      }
-      case 'garden.error': {
-        const p = env.payload as { code?: string }
-        // The server holds no peer for this connection, so it ignored the action.
-        // Re-announce ourselves rather than leaving the page in a state where the
-        // map looks alive and every doorway is inert. The server respawns us in
-        // the hub, and `garden.state` puts the client back in step with it.
-        if (p.code === 'no_peer') {
-          if (get().garden.active) {
-            get().ws?.send('garden.enter', {})
-            set((s) => ({
-              garden: { ...s.garden, error: 'Garden reconnected — try that again.' },
-            }))
-          }
-          break
-        }
-        const message =
-          p.code === 'not_member'
-            ? 'Join this group before entering its room.'
-            : p.code === 'not_at_door'
-              ? 'Walk closer to the doorway first.'
-              : p.code === 'not_at_temple'
-                ? 'Walk through the temple gate before entering Zen mode.'
-              : 'Garden could not complete that move.'
-        set((s) => ({ garden: { ...s.garden, error: message } }))
         break
       }
       case 'voice.state': {
@@ -556,21 +313,6 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
             })
           }
         }
-        break
-      }
-      case 'voice.participant_moved': {
-        const p = env.payload as VoiceParticipantMovedPayload
-        set((s) => {
-          const room = s.voiceRooms[p.channel_id]
-          const entry = room?.[p.conn_id]
-          if (!entry) return {}
-          return {
-            voiceRooms: {
-              ...s.voiceRooms,
-              [p.channel_id]: { ...room, [p.conn_id]: { ...entry, pos_x: p.x, pos_y: p.y } },
-            },
-          }
-        })
         break
       }
       case 'voice.participant_updated': {

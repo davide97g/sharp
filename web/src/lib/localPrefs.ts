@@ -61,11 +61,12 @@ export const KEYS = {
   voiceSpatial: 'sharp.voiceSpatial',
   /** Push-to-talk: mic closed until Space is held. Per-device, like the mic itself. */
   voicePushToTalk: 'sharp.voicePushToTalk',
-  /** Whether entering a Garden room should join its audio call on this device. */
-  gardenAudio: 'sharp.gardenAudio',
-  /** Garden room rail pinned open. Collapsed is the default; a pin is a per-device
-   *  viewport choice (how much canvas you want covered), not a synced preference. */
-  gardenRailPinned: 'sharp.gardenRailPinned',
+
+  /** Garden ambience loop on/off. Device-local: it is about the speakers in front
+   *  of you, not about the account. */
+  gardenAmbience: 'sharp.gardenAmbience',
+  /** Garden ambience volume, 0..1 as a string. */
+  gardenAmbienceVolume: 'sharp.gardenAmbienceVolume',
   /** Garden avatar picker already offered on this device, so it asks once and
    *  never nags. The chosen avatar itself is server-side and follows the user. */
   gardenAvatarPrompted: 'sharp.gardenAvatarPrompted',

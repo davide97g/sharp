@@ -1,7 +1,9 @@
 // Link preview cards — the unfurl of a URL posted in chat.
 //
 // Contract: docs/arch/01-core.md ("Link previews"). The server owns what a card
-// says; this file only decides how it looks.
+// says; this file only decides how it looks. The resolve cache, the image proxy
+// hook and the label helpers live in `lib/linkPreviews.ts` — docs render the same
+// cards from there, so both surfaces share one fetch per URL.
 //
 // Two rules worth keeping:
 //
@@ -14,49 +16,19 @@
 //      asks for one.
 
 import { useEffect, useMemo, useState } from 'react'
-import { api, fetchAttachmentBlob, previewImageUrl } from '../lib/api'
+import { api } from '../lib/api'
 import { extractUrls } from '../lib/linkUrls'
+import {
+  hostOf,
+  isRenderablePreview,
+  resolvePreview,
+  useProxiedImage,
+} from '../lib/linkPreviews'
 import { toastError } from '../lib/toast'
 import { useStore } from '../store'
 import type { LinkPreview } from '../lib/types'
 import { IconButton } from '../ui'
 import { ImageLightbox } from './ImageLightbox'
-
-// One in-flight fetch and one object URL per remote asset, shared by every card
-// showing it (the same article linked in three channels loads once).
-const imageCache = new Map<string, Promise<string>>()
-function loadPreviewImage(remoteUrl: string): Promise<string> {
-  let pending = imageCache.get(remoteUrl)
-  if (!pending) {
-    pending = fetchAttachmentBlob(previewImageUrl(remoteUrl)).then((b) => URL.createObjectURL(b))
-    pending.catch(() => imageCache.delete(remoteUrl))
-    imageCache.set(remoteUrl, pending)
-  }
-  return pending
-}
-
-function useProxiedImage(remoteUrl: string | null): string | null {
-  const [src, setSrc] = useState<string | null>(null)
-  useEffect(() => {
-    if (!remoteUrl) {
-      setSrc(null)
-      return
-    }
-    let cancelled = false
-    loadPreviewImage(remoteUrl)
-      .then((url) => !cancelled && setSrc(url))
-      .catch(() => !cancelled && setSrc(null))
-    return () => {
-      cancelled = true
-    }
-  }, [remoteUrl])
-  return src
-}
-
-/** A card with nothing but a URL in it is noise — the link already renders. */
-function isRenderable(preview: LinkPreview): boolean {
-  return Boolean(preview.title || preview.description || preview.image_url)
-}
 
 // ── Encrypted DMs ────────────────────────────────────────────────────────────────────
 //
@@ -65,20 +37,6 @@ function isRenderable(preview: LinkPreview): boolean {
 // each URL. The result is per-viewer and lives only in this tab: nothing is
 // attached to the message, which is the point — the conversation stays opaque to
 // the server beyond the URL itself.
-
-const resolveCache = new Map<string, Promise<LinkPreview | null>>()
-function resolvePreview(url: string): Promise<LinkPreview | null> {
-  let pending = resolveCache.get(url)
-  if (!pending) {
-    pending = api
-      .resolvePreview(url)
-      .then((r) => r.preview)
-      // A rate-limit or a dead link is a missing card, never an error surface.
-      .catch(() => null)
-    resolveCache.set(url, pending)
-  }
-  return pending
-}
 
 /**
  * Cards for a decrypted message. Renders nothing until the resolves land, so a
@@ -130,7 +88,7 @@ export function LinkPreviewList({
   align?: 'start' | 'end'
 }) {
   const enabled = useStore((s) => s.ui.linkPreviews)
-  const cards = previews.filter(isRenderable)
+  const cards = previews.filter(isRenderablePreview)
   if (!enabled || cards.length === 0) return null
   return (
     <div
@@ -148,14 +106,19 @@ export function LinkPreviewList({
   )
 }
 
-function LinkPreviewCard({
+/**
+ * One card. Presentational: the caller decides whether a ✕ is offered (chat, for
+ * the author) or not (encrypted DMs and docs, where nothing is stored per message).
+ */
+export function LinkPreviewCard({
   preview,
-  messageId,
-  canRemove,
+  messageId = '',
+  canRemove = false,
 }: {
   preview: LinkPreview
-  messageId: string
-  canRemove: boolean
+  messageId?: string
+  /** Author-only ✕ that hides the cards for everyone. Needs `messageId`. */
+  canRemove?: boolean
 }) {
   const [playing, setPlaying] = useState(false)
   const [lightbox, setLightbox] = useState(false)
@@ -325,10 +288,3 @@ function Favicon({ url }: { url: string | null }) {
   return <img src={src} alt="" className="h-3.5 w-3.5 shrink-0 rounded-sm object-contain" />
 }
 
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host.replace(/^www\./, '')
-  } catch {
-    return url
-  }
-}

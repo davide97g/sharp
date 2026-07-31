@@ -1,17 +1,23 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as Y from 'yjs'
-import type { BoardCardData, BoardProperty, ChecklistItem } from '../../lib/boardDoc'
+import type { BoardCardData, BoardProperty, CardDocRef, ChecklistItem } from '../../lib/boardDoc'
 import {
+  addCardDocRef,
   addChecklistItem,
   deleteCard,
+  deleteCardDocRef,
   deleteChecklistItem,
   setCardValue,
   updateCardField,
   updateChecklistItem,
 } from '../../lib/boardDoc'
-import type { ChannelMember } from '../../lib/types'
+import { api } from '../../lib/api'
+import { navigateTo } from '../../lib/nav'
+import { toastError } from '../../lib/toast'
+import type { ChannelMember, DocKind } from '../../lib/types'
+import { docRoute } from '../docs/DocSurface'
 import { AssigneeControl, DateControl, MultiSelectControl, SelectControl } from './PropertyControls'
-import { CloseIcon, IconButton, useDismiss } from '../../ui'
+import { CloseIcon, IconButton, Popover, SearchInput, useDismiss } from '../../ui'
 
 export function CardPanel({
   card,
@@ -35,6 +41,7 @@ export function CardPanel({
   const titleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const descTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const titleRef = useRef<HTMLTextAreaElement>(null)
+  const descRef = useRef<HTMLTextAreaElement>(null)
   const asideRef = useRef<HTMLElement>(null)
 
   // Grow the title textarea to fit its content so long, wrapped titles aren't
@@ -45,6 +52,15 @@ export function CardPanel({
     el.style.height = 'auto'
     el.style.height = `${el.scrollHeight}px`
   }, [title])
+
+  // Same for the description: it starts at five rows and grows with the text
+  // instead of turning into a small scroll box.
+  useEffect(() => {
+    const el = descRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [description])
 
   // Mirror remote edits when the field isn't being typed in locally.
   useEffect(() => {
@@ -122,6 +138,7 @@ export function CardPanel({
           <div className="mt-6">
             <div className="mb-1.5 text-xs font-medium text-[var(--color-text-faint)]">Description</div>
             <textarea
+              ref={descRef}
               value={description}
               onChange={(e) => onDesc(e.target.value)}
               onFocus={() => (descFocused.current = true)}
@@ -129,9 +146,11 @@ export function CardPanel({
               readOnly={!canEdit}
               rows={5}
               placeholder={canEdit ? 'Add a description…' : ''}
-              className="w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm leading-relaxed text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none"
+              className="min-h-[7.5rem] w-full resize-none overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm leading-relaxed text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)] focus:outline-none"
             />
           </div>
+
+          <DocRefs refs={card.docRefs} cardId={card.id} ydoc={ydoc} canEdit={canEdit} />
 
           <Checklist items={card.checklist} cardId={card.id} ydoc={ydoc} canEdit={canEdit} />
         </div>
@@ -204,6 +223,214 @@ function PropertyControl({
         />
       )
   }
+}
+
+// ---- doc references --------------------------------------------------------
+//
+// A card can point at docs, canvases and boards. Only the id/title/kind are
+// stored on the card (see boardDoc.ts) — the picker searches the docs API, so
+// permissions stay the server's business and the board doc stays self-contained.
+
+const KIND_ICON: Record<DocKind, string> = { doc: '📄', canvas: '🎨', board: '🗂️' }
+const KIND_LABEL: Record<DocKind, string> = { doc: 'Doc', canvas: 'Canvas', board: 'Board' }
+
+type PickerRow = { id: string; title: string; kind: DocKind; icon: string; sub?: string }
+
+function DocRefs({
+  refs,
+  cardId,
+  ydoc,
+  canEdit,
+}: {
+  refs: CardDocRef[]
+  cardId: string
+  ydoc: Y.Doc
+  canEdit: boolean
+}) {
+  const [picking, setPicking] = useState(false)
+
+  if (refs.length === 0 && !canEdit) return null
+
+  return (
+    <div className="mt-6">
+      <div className="mb-2 text-xs font-medium text-[var(--color-text-faint)]">Docs</div>
+
+      <div className="space-y-0.5">
+        {refs.map((ref) => (
+          <div
+            key={ref.id}
+            className="group/ref flex items-center gap-2 rounded-md px-1 py-1 hover:bg-[var(--color-panel-2)]"
+          >
+            <button
+              type="button"
+              onClick={() => navigateTo(docRoute(ref.kind, ref.docId))}
+              className="flex min-w-0 flex-1 items-center gap-2 text-left"
+            >
+              <span aria-hidden className="shrink-0 text-sm">
+                {ref.icon || KIND_ICON[ref.kind]}
+              </span>
+              <span className="truncate text-sm text-[var(--color-text)]">
+                {ref.title || 'Untitled'}
+              </span>
+              <span className="shrink-0 text-2xs text-[var(--color-text-faint)]">
+                {KIND_LABEL[ref.kind]}
+              </span>
+            </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => deleteCardDocRef(ydoc, cardId, ref.id)}
+                aria-label={`Remove ${ref.title || 'reference'}`}
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--color-text-faint)] opacity-0 hover:text-danger-fg focus:opacity-100 group-hover/ref:opacity-100"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {canEdit && (
+        <Popover
+          open={picking}
+          onClose={() => setPicking(false)}
+          width="w-72"
+          role="dialog"
+          aria-label="Link a doc"
+          trigger={
+            <button
+              type="button"
+              onClick={() => setPicking((v) => !v)}
+              className="mt-1 flex items-center gap-2 rounded-md px-1 py-1 text-sm text-[var(--color-text-faint)] hover:text-[var(--color-text)]"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="shrink-0" aria-hidden>
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              Link a doc
+            </button>
+          }
+        >
+          <DocPicker
+            existing={refs.map((r) => r.docId)}
+            onPick={(row) => {
+              addCardDocRef(ydoc, cardId, {
+                docId: row.id,
+                title: row.title,
+                kind: row.kind,
+                icon: row.icon,
+              })
+              setPicking(false)
+            }}
+          />
+        </Popover>
+      )}
+    </div>
+  )
+}
+
+function DocPicker({
+  existing,
+  onPick,
+}: {
+  existing: string[]
+  onPick: (row: PickerRow) => void
+}) {
+  const [query, setQuery] = useState('')
+  const [rows, setRows] = useState<PickerRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const alreadyLinked = useMemo(() => new Set(existing), [existing])
+
+  // Empty query lists the workspace's recent docs; typing searches. Debounced so
+  // a fast typist doesn't fire a request per keystroke.
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    const timer = setTimeout(
+      () => {
+        const q = query.trim()
+        const request = q
+          ? api.docSearch(q, 12).then((r) =>
+              r.results.map((d) => ({
+                id: d.id,
+                title: d.title || 'Untitled',
+                kind: d.kind,
+                icon: d.icon,
+                sub: d.channel_name ? `#${d.channel_name}` : undefined,
+              })),
+            )
+          : api.recentDocs(undefined, 12).then((r) =>
+              r.docs.map(({ doc, channel_name }) => ({
+                id: doc.id,
+                title: doc.title || 'Untitled',
+                kind: doc.kind,
+                icon: doc.icon,
+                sub: channel_name ? `#${channel_name}` : undefined,
+              })),
+            )
+        request
+          .then((next) => {
+            if (!cancelled) setRows(next)
+          })
+          .catch((e) => {
+            if (!cancelled && e instanceof Error) toastError(e.message)
+          })
+          .finally(() => {
+            if (!cancelled) setLoading(false)
+          })
+      },
+      query ? 180 : 0,
+    )
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [query])
+
+  const visible = rows.filter((r) => !alreadyLinked.has(r.id))
+
+  return (
+    <div className="p-2">
+      <SearchInput
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search docs, canvases, boards…"
+        autoFocus
+      />
+      <div className="mt-2 max-h-64 overflow-y-auto">
+        {visible.length === 0 ? (
+          <div className="px-2 py-3 text-xs text-[var(--color-text-faint)]">
+            {loading ? 'Searching…' : 'Nothing to link'}
+          </div>
+        ) : (
+          visible.map((row) => (
+            <button
+              key={row.id}
+              type="button"
+              onClick={() => onPick(row)}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--color-panel-2)]"
+            >
+              <span aria-hidden className="shrink-0 text-sm">
+                {row.icon || KIND_ICON[row.kind]}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm text-[var(--color-text)]">{row.title}</span>
+                {row.sub && (
+                  <span className="block truncate text-2xs text-[var(--color-text-faint)]">
+                    {row.sub}
+                  </span>
+                )}
+              </span>
+              <span className="shrink-0 text-2xs text-[var(--color-text-faint)]">
+                {KIND_LABEL[row.kind]}
+              </span>
+            </button>
+          ))
+        )}
+      </div>
+    </div>
+  )
 }
 
 function Checklist({

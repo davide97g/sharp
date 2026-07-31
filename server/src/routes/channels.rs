@@ -70,16 +70,6 @@ async fn broadcast_channel_to_members(
     Ok(())
 }
 
-async fn broadcast_garden_map_changed(state: &SharedState, targets: Vec<Uuid>) {
-    state
-        .hub
-        .broadcast(
-            envelope("garden.map_changed", json!({ "version": 1 })),
-            targets,
-        )
-        .await;
-}
-
 async fn dm_other_user(pool: &PgPool, channel_id: Uuid, viewer: Uuid) -> AppResult<Option<User>> {
     let row = sqlx::query(
         "SELECT u.id, u.email, u.display_name, u.avatar_url, u.created_at
@@ -240,7 +230,6 @@ pub async fn create_channel(
         let public_ev = envelope("channel.created", json!({ "channel": &public_view }));
         state.hub.broadcast(public_ev, others).await;
     }
-    broadcast_garden_map_changed(&state, state.hub.online_user_ids()).await;
 
     Ok((StatusCode::CREATED, Json(channel)))
 }
@@ -372,7 +361,6 @@ pub async fn join_channel(
             json!({ "channel_id": channel_id.to_string(), "user": user, "role": "editor" }),
         );
         state.hub.broadcast(ev, targets).await;
-        broadcast_garden_map_changed(&state, vec![auth.id]).await;
     }
 
     Ok(StatusCode::NO_CONTENT)
@@ -402,7 +390,6 @@ pub async fn leave_channel(
 
     if was_member {
         crate::ws::voice::remove_member_from_room(&state, channel_id, auth.id).await;
-        crate::ws::garden::remove_member_from_room(&state, channel_id, auth.id).await;
     }
 
     sqlx::query("DELETE FROM channel_members WHERE channel_id = $1 AND user_id = $2")
@@ -422,7 +409,6 @@ pub async fn leave_channel(
             json!({ "channel_id": channel_id.to_string(), "user": user }),
         );
         state.hub.broadcast(ev, targets).await;
-        broadcast_garden_map_changed(&state, vec![auth.id]).await;
     }
 
     Ok(StatusCode::NO_CONTENT)
@@ -608,7 +594,6 @@ pub async fn update_channel(
             state.hub.broadcast(ev, others).await;
         }
     }
-    broadcast_garden_map_changed(&state, state.hub.online_user_ids()).await;
 
     Ok(Json(channel))
 }
@@ -642,7 +627,6 @@ pub async fn delete_channel(
     }
 
     crate::ws::voice::close_room(&state, channel_id).await;
-    crate::ws::garden::close_room(&state, channel_id).await;
 
     sqlx::query("DELETE FROM channels WHERE id = $1")
         .bind(channel_id)
@@ -654,7 +638,6 @@ pub async fn delete_channel(
         json!({ "channel_id": channel_id.to_string() }),
     );
     state.hub.broadcast(ev, targets).await;
-    broadcast_garden_map_changed(&state, state.hub.online_user_ids()).await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -715,7 +698,6 @@ pub async fn add_members(
             json!({ "channel_id": channel_id.to_string(), "user": user, "role": "editor" }),
         );
         state.hub.broadcast(joined_ev, targets).await;
-        broadcast_garden_map_changed(&state, vec![*uid]).await;
     }
 
     Ok(StatusCode::NO_CONTENT)
@@ -751,7 +733,6 @@ pub async fn remove_member(
     let targets = channel_member_ids(&state.pool, channel_id).await?;
 
     crate::ws::voice::remove_member_from_room(&state, channel_id, user_id).await;
-    crate::ws::garden::remove_member_from_room(&state, channel_id, user_id).await;
 
     sqlx::query("DELETE FROM channel_members WHERE channel_id = $1 AND user_id = $2")
         .bind(channel_id)
@@ -767,7 +748,6 @@ pub async fn remove_member(
         json!({ "channel_id": channel_id.to_string(), "user": user }),
     );
     state.hub.broadcast(ev, targets).await;
-    broadcast_garden_map_changed(&state, vec![user_id]).await;
 
     // A private channel becomes invisible to the removed user; tell their
     // client to drop it entirely (public channels stay browsable).

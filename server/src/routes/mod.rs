@@ -216,31 +216,6 @@ pub async fn require_owner(pool: &PgPool, channel_id: Uuid, user_id: Uuid) -> Ap
     Ok(())
 }
 
-/// Workspace-level gate, as opposed to the channel-scoped `ChannelRole` above.
-///
-/// v1 is a single workspace with no roles table, so this is one boolean column
-/// seeded to the founding account (migration `0038`). Every workspace-wide
-/// mutation must go through this rather than reading `is_admin` itself, so
-/// introducing a real roles model later is a one-function change and no call site
-/// moves.
-pub async fn is_workspace_admin(pool: &PgPool, user_id: Uuid) -> AppResult<bool> {
-    let row = sqlx::query("SELECT is_admin FROM users WHERE id = $1")
-        .bind(user_id)
-        .fetch_optional(pool)
-        .await?;
-    match row {
-        Some(r) => Ok(r.try_get::<bool, _>("is_admin")?),
-        None => Ok(false),
-    }
-}
-
-pub async fn require_workspace_admin(pool: &PgPool, user_id: Uuid) -> AppResult<()> {
-    if !is_workspace_admin(pool, user_id).await? {
-        return Err(AppError::Forbidden("workspace admin required".to_string()));
-    }
-    Ok(())
-}
-
 // --- Browser-redirect helpers (OAuth callbacks) -------------------------------
 //
 // An OAuth callback lands in a browser tab, not in `fetch`, so it can't answer with

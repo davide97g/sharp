@@ -88,6 +88,15 @@ const KINDS: Record<DocKind, KindConfig> = {
   },
 }
 
+/**
+ * Route to a doc of any kind — the one place that knows `/d/`, `/x/` and `/b/`.
+ * Anything linking to a doc it did not open (board card references, search hits)
+ * should build its href from here rather than re-deriving the prefix.
+ */
+export function docRoute(kind: DocKind, id: string): string {
+  return KINDS[kind].route(id)
+}
+
 /** What the shell hands the body. */
 export type DocSurfaceContext = {
   doc: Doc

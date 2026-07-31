@@ -75,11 +75,12 @@ function BoardCardImpl({
   }
 
   const assignee = assigneeId ? members?.find((m) => m.id === assigneeId) : undefined
+  const linkedDocs = card.docRefs.length
   const total = card.checklist.length
   const done = card.checklist.reduce((n, i) => n + (i.done ? 1 : 0), 0)
   const complete = total > 0 && done === total
   const pct = total > 0 ? Math.round((done / total) * 100) : 0
-  const hasMeta = chips.length > 0 || dates.length > 0 || !!assigneeId
+  const hasMeta = chips.length > 0 || dates.length > 0 || !!assigneeId || linkedDocs > 0
 
   return (
     <div
@@ -118,6 +119,16 @@ function BoardCardImpl({
               {d.label}
             </span>
           ))}
+          {linkedDocs > 0 && (
+            <span
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs font-medium text-[var(--color-text-dim)]"
+              style={{ backgroundColor: 'var(--color-panel)' }}
+              title={`${linkedDocs} linked ${linkedDocs === 1 ? 'doc' : 'docs'}`}
+            >
+              <span aria-hidden>📄</span>
+              {linkedDocs}
+            </span>
+          )}
           {/* TODO(ds): Avatar — card assignee circle; kept custom for the '?'
               unknown-member fallback. */}
           {assigneeId && (

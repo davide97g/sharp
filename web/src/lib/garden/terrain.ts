@@ -1,13 +1,11 @@
-// Deterministic Garden hub terrain.
+// Deterministic Garden terrain.
 //
-// Pure function of (seed, size, doorways, temple), so every client and the
-// minimap agree without the server ever sending a tile grid. The server stays
-// authoritative for movement speed and scene bounds, exactly as before — terrain
-// is cosmetic plus client-side collision, the same deal the houses and trees
-// already have.
+// Pure function of (seed, size, shrine, plaza): nothing about the world is stored
+// or sent, so the garden costs one constant instead of ten thousand tiles. The
+// seed is fixed, so the same person walks back into the same garden every time.
 //
-// Roads are painted last and always win, so adding a channel can never strand a
-// doorway behind a pond.
+// Roads are painted last and always win, so a pond can never strand the shrine
+// behind water.
 
 export const TERRAIN = {
   GRASS: 0,
@@ -34,9 +32,9 @@ export type TerrainInput = {
   seed: number
   width: number
   height: number
-  /** Building doorways in tile coords; kept clear and reachable. */
-  doors: Array<{ x: number; y: number }>
-  temple: { x: number; y: number }
+  /** The shrine at the end of the path; its apron and axis stay clear. */
+  shrine: { x: number; y: number }
+  /** The stone clearing you spawn on. */
   plaza: { x: number; y: number }
 }
 
@@ -97,21 +95,32 @@ function fillRect(
   }
 }
 
+function fillEllipse(
+  grid: TerrainGrid,
+  cx: number,
+  cy: number,
+  rx: number,
+  ry: number,
+  id: number,
+) {
+  for (let y = Math.max(0, cy - ry); y <= Math.min(grid.height - 1, cy + ry); y += 1) {
+    for (let x = Math.max(0, cx - rx); x <= Math.min(grid.width - 1, cx + rx); x += 1) {
+      const dx = (x - cx) / rx
+      const dy = (y - cy) / ry
+      if (dx * dx + dy * dy <= 1) grid.tiles[index(grid, x, y)] = id
+    }
+  }
+}
+
 /**
- * Cells that must stay walkable: every doorway and its approach, the plaza, the
- * temple axis, and the hub spawn. Ponds and scenery are refused here, which is
- * what keeps a generated world from ever soft-locking a room.
+ * Cells that must stay walkable: the plaza you spawn on and the shrine axis.
+ * Ponds and scenery are refused here, which is what keeps a generated garden
+ * from ever fencing you in or drowning the path.
  */
 function isReserved(input: TerrainInput, x: number, y: number): boolean {
-  const { plaza, temple } = input
+  const { plaza, shrine } = input
   if (Math.abs(x - plaza.x) <= 10 && Math.abs(y - plaza.y) <= 8) return true
-  if (Math.abs(x - temple.x) <= 6) return true
-  for (const door of input.doors) {
-    // Generous: the doorway, the building footprint above it, and the road spur
-    // running down from it.
-    if (Math.abs(x - door.x) <= 6 && y >= door.y - 8 && y <= door.y + 6) return true
-    if (Math.abs(x - door.x) <= 3) return true
-  }
+  if (Math.abs(x - shrine.x) <= 6) return true
   return false
 }
 
@@ -157,46 +166,36 @@ export function generateTerrain(input: TerrainInput): TerrainGrid {
     placed += 1
   }
 
-  // 3. Stone plaza and the temple apron.
-  const { plaza, temple } = input
-  fillRect(grid, plaza.x - 6, plaza.y - 4, 13, 9, TERRAIN.STONE)
-  fillRect(grid, Math.round(temple.x) - 3, Math.round(temple.y) - 2, 7, 6, TERRAIN.STONE)
+  // 3. The clearing and the shrine apron. The clearing is an ellipse, not a
+  //    rectangle: a hard-edged slab in the middle of a garden reads as an
+  //    unfinished tilemap rather than as a place to stand.
+  const { plaza, shrine } = input
+  fillEllipse(grid, plaza.x, plaza.y, 7, 5, TERRAIN.STONE)
+  fillRect(grid, Math.round(shrine.x) - 3, Math.round(shrine.y) - 2, 7, 6, TERRAIN.STONE)
 
-  // 4. Roads last, so they always win over water and always reach every door.
+  // 4. Paths last, so they always win over water and always reach the shrine.
   //
-  // Two tiles wide, not three. Every plot column runs a full-height spur and
-  // every plot row meets the central lane, so their union covers a lot of ground;
-  // at three tiles the village read as a giant dirt cross rather than a garden.
-  // Two is still four times the player's collision width.
+  // Two tiles wide: four times the player's collision width, and narrow enough
+  // that the garden still reads as grass rather than as a dirt cross. A ring lane
+  // loops the garden so wandering always finds its way back to the plaza.
   const ROAD = 2
+  const top = Math.min(Math.round(shrine.y), plaza.y)
   fillRect(
     grid,
-    Math.round(temple.x) - 1,
-    plaza.y,
+    Math.round(shrine.x) - 1,
+    top,
     ROAD,
-    Math.round(temple.y) - plaza.y + 2,
+    Math.abs(Math.round(shrine.y) - plaza.y) + 2,
     TERRAIN.DIRT,
   )
-  for (const door of input.doors) {
-    const doorX = Math.round(door.x)
-    const doorY = Math.round(door.y)
-    fillRect(
-      grid,
-      doorX - 1,
-      Math.min(doorY, plaza.y),
-      ROAD,
-      Math.abs(plaza.y - doorY) + 1,
-      TERRAIN.DIRT,
-    )
-    fillRect(
-      grid,
-      Math.min(doorX, plaza.x),
-      plaza.y - 1,
-      Math.abs(plaza.x - doorX) + 1,
-      ROAD,
-      TERRAIN.DIRT,
-    )
-  }
+  const margin = 8
+  fillRect(grid, margin, margin, width - margin * 2, ROAD, TERRAIN.DIRT)
+  fillRect(grid, margin, height - margin - ROAD, width - margin * 2, ROAD, TERRAIN.DIRT)
+  fillRect(grid, margin, margin, ROAD, height - margin * 2, TERRAIN.DIRT)
+  fillRect(grid, width - margin - ROAD, margin, ROAD, height - margin * 2, TERRAIN.DIRT)
+  // The spur that connects the plaza to the ring, so the loop is walkable from
+  // where you spawn without cutting across a pond.
+  fillRect(grid, plaza.x - 1, margin, ROAD, plaza.y - margin, TERRAIN.DIRT)
 
   return grid
 }

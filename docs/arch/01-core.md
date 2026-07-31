@@ -253,7 +253,7 @@ ReplyPreview = { id: string, user: { id, display_name, avatar_url }, content: st
 | PUT | `/messages/{id}/reactions/{emoji}` | → `204` |
 | DELETE | `/messages/{id}/reactions/{emoji}` | → `204` |
 | DELETE | `/messages/{id}/previews` | → `204` (author only) — hides this message's link cards for everyone and keeps them hidden across later edits; emits `message.previews` with an empty list. The message text is untouched. |
-| POST | `/unfurl/resolve` | `{url}` → `{preview: LinkPreview\|null}` — unfurls one URL on demand, for encrypted DMs (the server cannot read the message, so the client extracts URLs from the decrypted text and asks per URL). Same SSRF guards and cache as the message unfurler; nothing is attached to any message. Rate-limited per user (20/min, in-process) → `429`. `null` for a blocked, non-http or unreachable URL. |
+| POST | `/unfurl/resolve` | `{url}` → `{preview: LinkPreview\|null}` — unfurls one URL on demand, for content the server cannot unfurl itself: encrypted DMs (it cannot read the message, so the client extracts URLs from the decrypted text and asks per URL) and docs (it never parses a Yjs blob — see `02-docs.md`, "URLs in docs"). Same SSRF guards and cache as the message unfurler; nothing is attached to any message. Rate-limited per user (20/min, in-process) → `429`. `null` for a blocked, non-http or unreachable URL. |
 | GET | `/unfurl/image?url=<encoded>` | → image bytes. Proxies a card thumbnail/favicon so the linked site never sees a reader's IP. Refuses (404) any URL that is not already an `image_url`/`favicon_url` in `link_previews`, and any response that is not one of png/jpeg/gif/webp/avif/icon. Same SSRF guard and a 5 MB cap. |
 | GET | `/search?q=&limit=20&channel_id=` | → `{results: (Message & {channel_name: string, snippet: string})[]}` (my channels only; optional `channel_id` scopes to one channel; `snippet` is a `ts_headline` with `<<`/`>>` markers around matches) |
 | GET | `/healthz` | → `200 {"status":"ok","version":"<server package version>"}` (no auth) |
@@ -310,7 +310,13 @@ written to `message_link_previews`, there is no `message.previews` event, and no
 is nothing stored to remove). Only the URL leaves the client — never the message.
 
 Per-user opt-out is `ui.linkPreviews` in the synced appearance blob (Settings → Chat);
-it suppresses both paths (and in a DM, suppresses the resolve calls entirely).
+it suppresses both paths (and in a DM, suppresses the resolve calls entirely). It is a
+*chat* setting: authored doc bookmarks still render (see `02-docs.md`).
+
+**Docs take the same client path**, for the same reason — the server stores a doc as Yjs
+bytes it never parses. The editor resolves a URL once and stores the title/favicon in the
+chip; a bookmark block resolves per viewer. Shared client plumbing (one resolve and one
+proxied image per URL per tab) is `web/src/lib/linkPreviews.ts`.
 
 ### Social sign-in (Google, GitHub)
 

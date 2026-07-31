@@ -7,8 +7,8 @@
 // in your mix only; the same call can be arranged differently on every device, and
 // nothing about the layout is sent. Two layers:
 //   - The server's spawn position (`pos_x`/`pos_y` on the room entry) is the baseline
-//     for anyone you have not moved, so a fresh call still starts spread out. Garden
-//     movement keeps writing it, which is why it is read live rather than snapshotted.
+//     for anyone you have not moved, so a fresh call still starts spread out. Read live
+//     rather than snapshotted, so a late joiner lands where the server put them.
 //   - `voice.spatialPositions` holds this device's overrides (store action
 //     `moveVoiceParticipant`), and `resetVoiceSpatial` replaces them with everyone
 //     gathered into zone 1.
@@ -102,7 +102,7 @@ export function SpatialStage({
     return Object.entries(room ?? {}).map(([connId, entry]) => ({
       connId,
       // Same resolution the audio engine uses: my override, else where the server
-      // spawned (or Garden walked) them.
+      // spawned them.
       x: overrides[connId]?.x ?? entry.pos_x,
       y: overrides[connId]?.y ?? entry.pos_y,
       userId: entry.user_id,

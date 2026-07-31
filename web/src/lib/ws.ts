@@ -132,11 +132,11 @@ export class WsClient {
   /**
    * A send on a socket that is still opening is queued, not dropped. The app
    * bootstraps the socket and its first REST calls in parallel, so a feature
-   * that announces itself right after a fetch (`garden.enter`) used to lose that
-   * frame whenever the handshake was slower than the fetch — true over TLS
-   * behind a proxy, never true on localhost, which is why it only bit in
-   * production. The server then held no Garden peer and silently ignored every
-   * later `garden.room_*`.
+   * that announces itself right after a fetch used to lose that frame whenever
+   * the handshake was slower than the fetch — true over TLS behind a proxy,
+   * never true on localhost, which is why it only bit in production. The server
+   * then held no registration for that connection and silently ignored every
+   * later event on it.
    *
    * Only the CONNECTING window is buffered, and the queue is dropped on close:
    * an intent worth replaying seconds later belongs in `onReconnect`, not here.

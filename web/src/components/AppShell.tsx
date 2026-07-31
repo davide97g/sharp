@@ -120,11 +120,14 @@ export function AppShell() {
   // the composer + safe area own the bottom edge — WhatsApp/Slack pattern. The
   // top back button and channel tabs already carry navigation in that view.
   const inChatDetail = /^\/c\//.test(location.pathname)
-  const showMobileTabBar = isMobile && !settingsMode && !inChatDetail
+  // The garden is a zen room: the mode rail, the dock and the mobile tab bar all
+  // stand down for it, so the world is the page and nothing blinks at the edges.
+  // Its own header carries the way out.
+  const showMobileTabBar = isMobile && !settingsMode && !inChatDetail && !gardenMode
 
   const dockEdge: 'bottom' | 'top' | null =
     railPosition === 'bottom' ? 'bottom' : railPosition === 'top' ? 'top' : null
-  const dockRail = !isMobile && !settingsMode && dockEdge !== null
+  const dockRail = !isMobile && !settingsMode && !gardenMode && dockEdge !== null
 
   // Auto-hidden dock: slides away until the cursor nears the bottom edge (or
   // focus moves into it). A short delay keeps it from flickering on exit.
@@ -258,7 +261,7 @@ export function AppShell() {
       <ScreenLock />
       {shortcutsOpen && <ShortcutsModal onClose={() => setShortcutsOpen(false)} />}
       <div className={`relative flex min-h-0 w-full flex-1 overflow-hidden ${isMobile ? 'flex-col' : ''}`}>
-      {!settingsMode && !isMobile && !dockRail && (
+      {!settingsMode && !isMobile && !gardenMode && !dockRail && (
         <ModeRail mode={mode} orientation="vertical" />
       )}
       <div className={`flex min-h-0 min-w-0 flex-1 overflow-hidden ${showMobileTabBar ? 'mobile-main' : ''}`}>
@@ -287,7 +290,7 @@ export function AppShell() {
           <SharpyPanel />
         </div>
       </div>
-      {!settingsMode && !isMobile && dockEdge && (
+      {!settingsMode && !isMobile && !gardenMode && dockEdge && (
         <div
           className={`pointer-events-none absolute inset-x-0 z-40 ${
             dockEdge === 'top' ? 'top-0' : 'bottom-0'
