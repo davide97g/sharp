@@ -60,7 +60,6 @@ import {
   streamShieldsChannel,
 } from './store/predicates'
 import { stopVoiceRecognizer } from './store/recognizer'
-import { sortTasks } from './store/taskHelpers'
 import { applyUi } from './store/uiHelpers'
 import type {
   CalendarMeetingCancelledPayload,
@@ -91,13 +90,7 @@ import type {
   PollDeletedPayload,
   PollUpdatedPayload,
   PresencePayload,
-  ProjectCreatedPayload,
-  ProjectUpdatedPayload,
   ReactionPayload,
-  TaskCommentPayload,
-  TaskCreatedPayload,
-  TaskDeletedPayload,
-  TaskUpdatedPayload,
   TypingPayload,
   UserUpdatedPayload,
   VoiceAnnotateClearPayload,
@@ -815,11 +808,7 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
           const title =
             notification.kind === 'dm'
               ? notification.actor.display_name
-              : notification.kind === 'task_assigned'
-                ? `${notification.actor.display_name} assigned you ${notification.task_identifier ?? 'a task'}`
-                : notification.kind === 'task_comment'
-                  ? `${notification.actor.display_name} commented on ${notification.task_identifier ?? 'a task'}`
-                  : `${notification.actor.display_name} in #${notification.channel_name}`
+              : `${notification.actor.display_name} in #${notification.channel_name}`
           const path = notificationPath(notification)
           const preview = gifPreviewText(notification.preview)
           toastNotify(preview || 'sent you a message', {
@@ -832,110 +821,9 @@ export function applyWsEventTo(env: WsEnvelope, set: Setter, get: () => State) {
           if (!pushWillNotify()) playNotifySound()
           void showOsNotification(title, preview, {
             deepLink: path,
-            tag: notification.task_id
-              ? `sharp-task-${notification.task_id}`
-              : `sharp-${notification.channel_id}`,
+            tag: `sharp-${notification.channel_id}`,
           })
         }
-        break
-      }
-      case 'project.created':
-      case 'project.updated': {
-        const { project } = env.payload as ProjectCreatedPayload | ProjectUpdatedPayload
-        set((s) => ({
-          projects: s.projects.some((p) => p.id === project.id)
-            ? s.projects.map((p) => (p.id === project.id ? project : p))
-            : [...s.projects, project],
-        }))
-        break
-      }
-      case 'task.created':
-      case 'task.updated': {
-        const { task } = env.payload as TaskCreatedPayload | TaskUpdatedPayload
-        // Celebrate a task crossing into a completed-type state. Keyed on the
-        // state *type*, never its name — projects rename their states freely.
-        const before = get().tasksByProject[task.project_id]?.find(
-          (t) => t.id === task.id,
-        )
-        const typeOfState = (stateId: string | null | undefined) =>
-          get()
-            .projects.find((p) => p.id === task.project_id)
-            ?.states.find((st) => st.id === stateId)?.type
-        if (
-          env.type === 'task.updated' &&
-          before &&
-          before.state_id !== task.state_id &&
-          typeOfState(task.state_id) === 'completed'
-        ) {
-          confettiAt()
-        }
-        set((s) => {
-          const list = s.tasksByProject[task.project_id]
-          const tasksByProject = list
-            ? {
-                ...s.tasksByProject,
-                [task.project_id]: sortTasks([
-                  ...list.filter((t) => t.id !== task.id),
-                  task,
-                ]),
-              }
-            : s.tasksByProject
-          const stateOf = s.projects
-            .find((p) => p.id === task.project_id)
-            ?.states.find((st) => st.id === task.state_id)
-          const open =
-            !stateOf || (stateOf.type !== 'completed' && stateOf.type !== 'canceled')
-          let myTasks = s.myTasks.filter((t) => t.id !== task.id)
-          if (s.me && task.assignee_id === s.me.id && open) myTasks = [task, ...myTasks]
-          const detail = s.taskDetails[task.id]
-          const taskDetails = detail
-            ? { ...s.taskDetails, [task.id]: { ...detail, ...task } }
-            : s.taskDetails
-          return { tasksByProject, myTasks, taskDetails }
-        })
-        break
-      }
-      case 'task.deleted': {
-        const { task_id, project_id } = env.payload as TaskDeletedPayload
-        set((s) => {
-          const list = s.tasksByProject[project_id]
-          const taskDetails = { ...s.taskDetails }
-          delete taskDetails[task_id]
-          return {
-            tasksByProject: list
-              ? {
-                  ...s.tasksByProject,
-                  [project_id]: list.filter((t) => t.id !== task_id),
-                }
-              : s.tasksByProject,
-            myTasks: s.myTasks.filter((t) => t.id !== task_id),
-            taskDetails,
-          }
-        })
-        break
-      }
-      case 'task.comment.created':
-      case 'task.comment.updated':
-      case 'task.comment.deleted': {
-        const { comment } = env.payload as TaskCommentPayload
-        set((s) => {
-          const detail = s.taskDetails[comment.task_id]
-          if (!detail) return {}
-          const comments =
-            env.type === 'task.comment.created'
-              ? [...detail.comments.filter((c) => c.id !== comment.id), comment]
-              : detail.comments.map((c) => (c.id === comment.id ? comment : c))
-          return {
-            taskDetails: {
-              ...s.taskDetails,
-              [comment.task_id]: { ...detail, comments },
-            },
-          }
-        })
-        break
-      }
-      case 'task.labels.changed': {
-        void get().loadTaskLabels()
         break
       }
       case 'poll.created':

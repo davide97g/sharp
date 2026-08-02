@@ -22,8 +22,6 @@ import { CanvasHome } from './components/canvas/CanvasHome'
 import { ChannelCanvases } from './components/canvas/ChannelCanvases'
 import { BoardHome } from './components/board/BoardHome'
 import { ChannelBoards } from './components/board/ChannelBoards'
-import { TasksHome } from './components/tasks/TasksHome'
-import { ProjectView } from './components/tasks/ProjectView'
 import { PasskeySetupPrompt } from './components/PasskeySetupPrompt'
 // Route-level code splitting. Chat is the app's front door, so it stays in the
 // main chunk; these are the heavy or occasional modules — BlockNote, the board
@@ -63,7 +61,7 @@ const UserSettingsPage = lazy(() =>
 const DesignGallery = lazy(() =>
   import('./ui/DesignGallery').then((m) => ({ default: m.DesignGallery })),
 )
-// tldraw is a large dependency; keep it out of the main bundle by loading the
+// Excalidraw is a large dependency; keep it out of the main bundle by loading the
 // canvas editor lazily (only fetched when a whiteboard is actually opened).
 const CanvasEditor = lazy(() =>
   import('./components/canvas/CanvasEditor').then((m) => ({ default: m.CanvasEditor })),
@@ -206,9 +204,6 @@ export function App() {
           <Route path="board" element={<BoardHome />} />
           <Route path="board/c/:channelId" element={<ChannelBoards />} />
           <Route path="b/:docId" element={<BoardEditor />} />
-          <Route path="tasks" element={<TasksHome />} />
-          <Route path="t/:key" element={<ProjectView />} />
-          <Route path="t/:key/:num" element={<ProjectView />} />
           <Route path="meetings" element={<MeetingsHome />} />
           <Route path="meetings/:meetingId" element={<MeetingDetailView />} />
           <Route path="calendar" element={<CalendarView />} />

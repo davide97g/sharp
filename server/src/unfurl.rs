@@ -193,7 +193,7 @@ pub fn normalize(raw: &str) -> Option<String> {
     (out.len() <= MAX_URL_LEN).then_some(out)
 }
 
-/// True when the URL points back at this deployment. Doc, task and call links
+/// True when the URL points back at this deployment. Doc and call links
 /// already render as their own chips, so a card would be a duplicate.
 fn is_self_link(url: &Url, app_url: Option<&str>) -> bool {
     let Some(app) = app_url.and_then(|u| Url::parse(u).ok()) else {

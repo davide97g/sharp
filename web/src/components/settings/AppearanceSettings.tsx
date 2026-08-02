@@ -257,7 +257,7 @@ export function AppearanceSettings() {
           ))}
           <ToggleRow
             title="Celebrations"
-            description="Confetti when a task is completed or a poll closes."
+            description="Confetti when a poll closes or you join a call."
             checked={ui.celebrations}
             onChange={(celebrations) => patchUi({ celebrations })}
           />
@@ -482,4 +482,3 @@ export function SoundSettingsSection() {
 }
 
 // ---- Notifications tab ----
-

@@ -8,11 +8,11 @@ and agents that would rather read text than render a page.
 ## What is sharp?
 
 sharp is an open-source, self-hosted team communication platform. A single Rust binary serves
-chat, collaborative docs, whiteboards, kanban boards, a calendar, LiveKit voice and video
-calls, a Linear-lite task tracker and an AI assistant — backed by Postgres, deployed as one
+chat, collaborative docs, whiteboards, flexible idea boards, a calendar, LiveKit voice and video
+calls and an AI assistant — backed by Postgres, deployed as one
 container, licensed AGPL-3.0.
 
-It is built for teams that want the whole Slack-plus-Notion-plus-Linear bundle without
+It is built for teams that want a focused communication and idea-capture workspace without
 per-seat pricing, capped message history, or their conversations sitting in someone else's
 data centre.
 
@@ -45,7 +45,7 @@ changes revoke open sync sessions live. `[[doc:<id>|title]]` chips bridge chat a
 doc mentions land in the same inbox as chat mentions.
 
 ### Canvas and boards
-Infinite tldraw whiteboards with self-hosted assets (no CDN), plus Notion-style kanban boards.
+Infinite Excalidraw whiteboards with self-hosted fonts (no CDN), plus Notion-style kanban boards.
 Both are the same `docs` row with a different `kind`, so they reuse the identical sync socket,
 permission model and inbox.
 
@@ -57,18 +57,15 @@ join by name without an account. Optional live transcription and meeting notes t
 OpenAI-compatible transcription endpoint.
 
 ### Sharpy, the AI assistant
-Retrieval-augmented answers grounded in your own workspace. Messages, docs and task titles are
+Retrieval-augmented answers grounded in your own workspace. Messages and docs are
 embedded into pgvector; each retrieval re-checks channel membership and doc roles per request,
 so Sharpy can never surface content the asker cannot already read. Encrypted DMs are never
 embedded. Answers stream over SSE with their sources. Works against OpenAI, DeepSeek, Ollama or
 anything OpenAI-compatible; the entire feature is absent unless `AI_API_KEY` is set.
 
-### Tasks and projects
-A built-in Linear-lite tracker: projects carry a key, issues get identifiers like `SHARP-123`
-allocated in-transaction, and workflow states have fixed types
-(backlog/unstarted/started/completed/canceled) that drive automation. List and board views,
-keyboard-first peek panel, create-a-task from any chat message, bare identifiers auto-linkified
-in chat, and GitHub sync that starts a task when a branch or PR opens and completes it on merge.
+### Idea boards
+Flexible kanban boards provide one shared entry point for capturing and shaping ideas. Once work
+becomes committed execution, teams move it into Jira, Linear or another external issue tracker.
 
 ### Calendar and meetings
 A workspace calendar with scheduled meetings that open straight into a call room, plus opt-in
@@ -80,11 +77,11 @@ meeting. Results broadcast in real time and everyone gets a `poll_ended` notific
 
 ### Files and search
 Drag-and-drop uploads with inline images, instant Postgres full-text search across channels, and
-a quick switcher that jumps to channels, docs, canvases and tasks. Files live on your own S3 or
+a quick switcher that jumps to channels, docs, canvases and boards. Files live on your own S3 or
 MinIO bucket.
 
 ### Notifications
-A unified inbox across chat, docs, canvas and tasks. Web push (VAPID), native macOS APNs, and
+A unified inbox across chat, docs, canvas and boards. Web push (VAPID), native macOS APNs, and
 in-app toasts. Per-channel mode (all / mentions only / muted), per-type master switches, and
 do-not-disturb either manual or on a scheduled quiet-hours window.
 
@@ -112,7 +109,6 @@ authenticate through the system browser against whatever server URL you enter.
 | Where messages live | Your Postgres, your disk | The vendor's cloud |
 | Message history | Unlimited until you delete it | Often capped on free and lower tiers |
 | Docs, canvas and boards | Built in, same permissions as channels | Add-on product or separate subscription |
-| Issue tracker | Built in, with GitHub sync | Usually a third-party integration |
 | AI assistant | Built in, your model and keys | Paid upgrade on the vendor's model |
 | Video calls | Self-hosted LiveKit, 25 people, 16 cameras | Vendor SFU, tier-limited |
 | End-to-end encrypted DMs | Optional, per-device keys | Rare |
@@ -122,7 +118,7 @@ authenticate through the system browser against whatever server URL you enter.
 
 Already looking at self-hosted options? Mattermost, Rocket.Chat and Zulip are all mature,
 open-source and worth a shortlist. sharp is the newer, narrower bet: one workspace where chat,
-docs, canvas, boards, calls, calendar, tasks and AI ship together in a single container, with
+docs, canvas, boards, calls, calendar and AI ship together in a single container, with
 every integration optional and inert until configured.
 
 ## How to self-host sharp
@@ -142,7 +138,7 @@ git clone https://github.com/davide97g/sharp \
 
 **Optional and inert until set:** `REDIS_URL` (multi-replica fanout), `LIVEKIT_*` (voice, video,
 screen share), `S3_*` (uploads), `AI_*` (Sharpy, embeddings, transcription), `GOOGLE_*`
-(calendar sync), `GITHUB_WEBHOOK_SECRET` (task sync), `RESEND_API_KEY` or `SMTP_*` (password
+(calendar sync), social OAuth credentials (sign-in), `RESEND_API_KEY` or `SMTP_*` (password
 reset email), APNs and VAPID keys (push).
 
 ## Downloads
@@ -158,7 +154,7 @@ in development.
 ### What is sharp?
 sharp is an open-source, self-hosted team communication platform — a Slack alternative you run
 yourself. One Rust binary serves chat, collaborative docs, whiteboards, kanban boards, a
-calendar, voice and video calls, a task tracker and an AI assistant, backed by Postgres. It is
+calendar, voice and video calls, flexible idea boards and an AI assistant, backed by Postgres. It is
 licensed AGPL-3.0.
 
 ### Is sharp free?
@@ -193,7 +189,7 @@ cryptography and stores only opaque ciphertext plus public keys. It is a Keybase
 without forward secrecy, and encrypted DMs are never indexed by the AI assistant.
 
 ### How does the AI assistant work?
-Sharpy is retrieval-augmented: workspace messages, docs and tasks are embedded into pgvector, and
+Sharpy is retrieval-augmented: workspace messages and docs are embedded into pgvector, and
 every retrieval re-checks channel membership and doc roles per request, so Sharpy can never
 surface content the asker cannot already read. It talks to any OpenAI-compatible endpoint,
 including a local model.
@@ -203,10 +199,9 @@ sharp runs in any modern browser, and native Tauri 2 desktop builds are publishe
 Windows and Linux — you point them at your own server URL and sign in through the system browser.
 A React Native mobile app is in development; the web app is responsive in the meantime.
 
-### How does sharp handle tasks and issues?
-With a built-in Linear-lite tracker: projects carry a key, issues get identifiers like SHARP-123,
-and workflow states drive list and board views. Turn any chat message into a task, and GitHub
-sync moves state automatically — started when a branch or PR opens, completed on merge.
+### How does sharp handle ideas and execution work?
+Boards are the flexible capture point for ideas, context and early shaping. When an idea becomes
+committed execution work, move it into Jira, Linear or another issue tracker your team already uses.
 
 ### Does sharp scale beyond one server?
 Yes. Set `REDIS_URL` and WebSocket events fan out through Redis pub/sub, so several replicas stay

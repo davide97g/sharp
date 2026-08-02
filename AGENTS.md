@@ -32,5 +32,5 @@ across sessions.
   time should be visible in workspace settings.
 - Automated "duck" GIF roast suggestions auto-pick from recent chat context and can send
   immediately; roast-sent GIFs must be excluded from later suggestion context.
-- Landing marketing lives in `landing/` (Astro); product positioning includes Tasks as a
-  Linear-lite tracker section.
+- Landing marketing lives in `landing/` (Astro); Boards are the workspace's flexible idea
+  capture surface. Execution tracking belongs in external tools such as Jira or Linear.

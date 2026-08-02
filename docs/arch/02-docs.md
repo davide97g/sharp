@@ -27,7 +27,7 @@ docs are Yjs CRDTs. Both are served by the same single binary — no sidecar.
 docs(
   id uuid PK default gen_random_uuid(),
   channel_id uuid NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-  kind text NOT NULL default 'doc'            -- 'doc' (blocknote) | 'canvas' (tldraw, migration 0006) | 'board' (kanban, migration 0021)
+  kind text NOT NULL default 'doc'            -- 'doc' (blocknote) | 'canvas' (Excalidraw, migration 0006) | 'board' (kanban, migration 0021)
     CHECK (kind IN ('doc','canvas','board')),
   title text NOT NULL default '',            -- shown as 'Untitled' when empty
   icon text NOT NULL default '',              -- emoji, may be empty
@@ -152,8 +152,8 @@ Trashed docs accept read-only connections (restore preview), updates are dropped
 
 The Yjs fragment name is **`blocknote`** — client binds
 `ydoc.getXmlFragment('blocknote')`, server reads `get_or_insert_xml_fragment("blocknote")`.
-(Canvas docs — `kind = 'canvas'` — reuse this exact sync socket but store a tldraw document
-under `ydoc.getMap('tldraw')` instead; the server never interprets it. See Phase 3 below.)
+(Canvas docs — `kind = 'canvas'` — reuse this exact sync socket but store an Excalidraw scene
+under `ydoc.getMap('excalidraw')` instead; the server never interprets it. See Phase 3 below.)
 
 **Persistence & compaction**: every incoming `0x00` inserts a `doc_updates` row and bumps
 `docs.updated_at`. Compaction (merge all rows into one via yrs, refresh `content_text` and

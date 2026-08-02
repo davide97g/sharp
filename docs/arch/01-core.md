@@ -286,7 +286,7 @@ fetching what we could read would hand it to a third party.
 
 Extraction skips URLs inside code fences/spans, markdown link and image targets (which
 includes GIF chips), `<https://…>` (the Discord-compatible "no card" form), and links back
-to `APP_URL` (doc/task links already render as their own chips).
+to `APP_URL` (doc links already render as their own chips).
 
 The rules that must not be relaxed:
 
@@ -488,4 +488,3 @@ apex and the app on `app.<domain>` — or app at `/` if one domain). `.env.examp
 strong-secret placeholders. One command: `docker compose up -d`.
 
 ---
-

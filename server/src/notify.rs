@@ -9,7 +9,6 @@
 //!     channel member
 //!   - `reply`          — a thread reply notifies the parent message's author
 //!   - `poll_ended`     — the poll's creator and everyone who voted
-//!   - `task_assigned` / `task_comment` — channel-less, bound to `notifications.task_id`
 //!
 //! The three suppression layers, in the order they apply:
 //!   1. `kind_enabled` — a disabled *type* produces nothing at all: no row, no event,
@@ -40,15 +39,12 @@ const NOTIFICATION_SELECT: &str = "
         COALESCE(nn.nickname, a.display_name) AS actor_name,
         a.avatar_url AS actor_avatar,
         n.channel_id, c.kind AS channel_kind, c.name AS channel_name,
-        n.message_id, n.preview, n.created_at, n.read_at,
-        n.task_id, (tp.key || '-' || t.number) AS task_identifier
+        n.message_id, n.preview, n.created_at, n.read_at
     FROM notifications n
     JOIN users a ON a.id = n.actor_id
     LEFT JOIN user_nicknames nn
         ON nn.viewer_id = n.user_id AND nn.target_user_id = n.actor_id
-    LEFT JOIN channels c ON c.id = n.channel_id
-    LEFT JOIN tasks t ON t.id = n.task_id
-    LEFT JOIN projects tp ON tp.id = t.project_id
+    JOIN channels c ON c.id = n.channel_id
 ";
 
 pub fn map_notification_row(row: &PgRow) -> AppResult<Notification> {
@@ -64,21 +60,13 @@ pub fn map_notification_row(row: &PgRow) -> AppResult<Notification> {
         channel_kind: row.try_get("channel_kind")?,
         channel_name: row.try_get("channel_name")?,
         message_id: row.try_get("message_id")?,
-        task_id: row.try_get("task_id")?,
-        task_identifier: row.try_get("task_identifier")?,
         preview: row.try_get("preview")?,
         created_at: row.try_get("created_at")?,
         read_at: row.try_get("read_at")?,
     })
 }
 
-/// Deep-link path for a notification: task page for task kinds, channel otherwise.
 pub fn notification_path(notif: &Notification) -> String {
-    if let Some(identifier) = &notif.task_identifier {
-        if let Some((key, number)) = identifier.rsplit_once('-') {
-            return format!("/t/{}/{}", key.to_lowercase(), number);
-        }
-    }
     match notif.channel_id {
         Some(channel_id) => format!("/c/{channel_id}"),
         None => "/".to_string(),
@@ -454,7 +442,6 @@ async fn kind_enabled(pool: &PgPool, user_id: Uuid, kind: &str) -> bool {
         "dm" => "notify_dm",
         "mention" => "notify_mention",
         "reply" => "notify_reply",
-        "task_assigned" | "task_comment" => "notify_task",
         "poll_ended" => "notify_poll",
         _ => return true,
     };
@@ -628,8 +615,6 @@ async fn deliver_push(state: &SharedState, recipient: Uuid, notif: &Notification
                 recipient,
                 &title,
                 &body,
-                // Task notifications are channel-less; the native payload takes a nil
-                // uuid and the deep-link path carries the real target.
                 notif.channel_id.unwrap_or_else(Uuid::nil),
                 &notif.kind,
             )
@@ -654,17 +639,13 @@ async fn deliver_push(state: &SharedState, recipient: Uuid, notif: &Notification
 
 /// One inbox row to create.
 ///
-/// The three id columns are all optional because kinds differ: chat kinds carry a
-/// channel and a message, `poll_ended` carries a channel and *maybe* a card message,
-/// task kinds are channel-less (migration `0023_tasks.sql` dropped the NOT NULL on
-/// `channel_id` and added `task_id`).
+/// Message-backed kinds carry a message; `poll_ended` may not when its card was deleted.
 struct NewNotification<'a> {
     recipient: Uuid,
     kind: &'a str,
     actor: Uuid,
     channel_id: Option<Uuid>,
     message_id: Option<i64>,
-    task_id: Option<Uuid>,
     preview: &'a str,
 }
 
@@ -676,15 +657,14 @@ struct NewNotification<'a> {
 async fn insert_and_fanout(state: &SharedState, new: NewNotification<'_>) -> AppResult<()> {
     let row = sqlx::query(
         "INSERT INTO notifications
-            (user_id, kind, actor_id, channel_id, message_id, task_id, preview)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+            (user_id, kind, actor_id, channel_id, message_id, preview)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
     )
     .bind(new.recipient)
     .bind(new.kind)
     .bind(new.actor)
     .bind(new.channel_id)
     .bind(new.message_id)
-    .bind(new.task_id)
     .bind(new.preview)
     .fetch_one(&state.pool)
     .await?;
@@ -797,7 +777,6 @@ async fn dispatch_inner(
                 actor: author,
                 channel_id: Some(channel_id),
                 message_id: Some(message_id),
-                task_id: None,
                 preview: &preview,
             },
         )
@@ -858,81 +837,12 @@ async fn dispatch_poll_ended_inner(
                 channel_id: Some(poll.channel_id),
                 // The card message is gone if the poll's message was deleted.
                 message_id: poll.card_message_id,
-                task_id: None,
                 preview: &preview,
             },
         )
         .await?;
     }
     Ok(())
-}
-
-/// Best-effort task-assignment notification (skips self-assign upstream).
-pub async fn dispatch_task_assigned(
-    state: &SharedState,
-    task: &crate::models::Task,
-    actor_id: Uuid,
-) {
-    let Some(assignee) = task.assignee_id else { return };
-    if assignee == actor_id {
-        return;
-    }
-    let preview = format!("🎯 {} {}", task.identifier, task.title);
-    if let Err(error) =
-        dispatch_task_event(state, assignee, actor_id, task.id, "task_assigned", &preview).await
-    {
-        tracing::warn!("task-assigned notification dispatch failed: {}", error);
-    }
-}
-
-/// Best-effort task-comment notification to the task's creator + assignee.
-pub async fn dispatch_task_comment(
-    state: &SharedState,
-    task: &crate::models::Task,
-    actor_id: Uuid,
-    body: &str,
-) {
-    let mut recipients: HashSet<Uuid> = HashSet::from([task.creator_id]);
-    if let Some(assignee) = task.assignee_id {
-        recipients.insert(assignee);
-    }
-    recipients.remove(&actor_id);
-    let preview = truncate_chars(&body.replace('\n', " "), 140);
-    for uid in recipients {
-        if let Err(error) =
-            dispatch_task_event(state, uid, actor_id, task.id, "task_comment", &preview).await
-        {
-            tracing::warn!("task-comment notification dispatch failed: {}", error);
-        }
-    }
-}
-
-/// Insert + fan out one task notification. Task kinds are channel-less, so there is no
-/// `channel_allows` check to make — only the per-type master switch applies.
-async fn dispatch_task_event(
-    state: &SharedState,
-    recipient: Uuid,
-    actor_id: Uuid,
-    task_id: Uuid,
-    kind: &str,
-    preview: &str,
-) -> AppResult<()> {
-    if !kind_enabled(&state.pool, recipient, kind).await {
-        return Ok(());
-    }
-    insert_and_fanout(
-        state,
-        NewNotification {
-            recipient,
-            kind,
-            actor: actor_id,
-            channel_id: None,
-            message_id: None,
-            task_id: Some(task_id),
-            preview,
-        },
-    )
-    .await
 }
 
 /// Web push (RFC 8291 / VAPID) delivery.
@@ -949,13 +859,10 @@ mod push {
 
     pub fn title_and_body(notif: &Notification) -> (String, String) {
         let channel = notif.channel_name.as_deref().unwrap_or("channel");
-        let task = notif.task_identifier.as_deref().unwrap_or("a task");
         // Title/body shaped for the service worker.
         let title = match notif.kind.as_str() {
             "dm" => notif.actor.display_name.clone(),
             "poll_ended" => format!("Poll ended in #{channel}"),
-            "task_assigned" => format!("{} assigned you {task}", notif.actor.display_name),
-            "task_comment" => format!("{} commented on {task}", notif.actor.display_name),
             _ => format!("{} in #{channel}", notif.actor.display_name),
         };
         (title, notif.preview.clone())
@@ -974,10 +881,9 @@ mod push {
 
     /// Collapse-tag for a notification (APNs `thread-id` / web-push `tag`).
     pub fn tag_for(notif: &Notification) -> String {
-        match (&notif.task_id, &notif.channel_id) {
-            (Some(task_id), _) => format!("sharp-task-{task_id}"),
-            (None, Some(channel_id)) => format!("sharp-{channel_id}"),
-            (None, None) => "sharp".to_string(),
+        match notif.channel_id {
+            Some(channel_id) => format!("sharp-{channel_id}"),
+            None => "sharp".to_string(),
         }
     }
 

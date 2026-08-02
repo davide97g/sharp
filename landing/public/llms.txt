@@ -1,8 +1,8 @@
 # sharp
 
 > sharp is an open-source, self-hosted Slack alternative. One Rust binary serves team chat,
-> collaborative docs, tldraw whiteboards, kanban boards, a calendar, LiveKit voice/video calls
-> with screen sharing, a Linear-lite task tracker and a permission-aware AI assistant — backed
+> collaborative docs, Excalidraw whiteboards, flexible idea boards, a calendar, LiveKit voice/video calls
+> with screen sharing and a permission-aware AI assistant — backed
 > by Postgres, deployed as a single container, licensed AGPL-3.0 with no paid tier.
 
 Version 0.3.0 · last updated 2026-07-26 · https://sharp.davideghiotto.it
@@ -23,15 +23,14 @@ Key facts:
   encrypted DMs with per-device X25519/Ed25519 keys — the server performs zero cryptography
   and stores only opaque ciphertext (no forward secrecy). Encrypted DMs are never embedded
   for AI retrieval.
-- AI assistant ("Sharpy"): retrieval-augmented over workspace messages, docs and tasks using
+- AI assistant ("Sharpy"): retrieval-augmented over workspace messages and docs using
   pgvector. Every retrieval re-checks channel membership and doc roles, so it can never
   surface content the asker cannot already read. Works with any OpenAI-compatible endpoint,
   including local models. Entirely absent unless `AI_API_KEY` is set.
-- Tasks: projects with keys, identifiers like `SHARP-123`, workflow state types
-  (backlog/unstarted/started/completed/canceled), list and board views, create-from-message,
-  and GitHub sync that moves state on branch/PR open and on merge.
+- Boards: a flexible, shared entry point for ideas before committed execution moves to Jira,
+  Linear or another external issue tracker.
 - Optional integrations are inert until configured, and the feature disappears from the UI:
-  Redis, S3/MinIO, LiveKit, AI/embeddings/transcription, Google Calendar, GitHub webhooks,
+  Redis, S3/MinIO, LiveKit, AI/embeddings/transcription, Google Calendar, social sign-in,
   Resend or SMTP email, web push, Apple APNs.
 - Not included: multi-workspace tenancy (single workspace in v1), thread nesting beyond one
   level, a hosted SaaS option.

@@ -1,7 +1,7 @@
 # sharp — Architecture & API Contract
 
 sharp is a self-hostable Slack replacement: chat, collaborative docs/canvas/boards, LiveKit
-voice & video, a calendar, a task tracker, and an AI assistant — one Rust binary serving the
+voice & video, a calendar, flexible idea boards, and an AI assistant — one Rust binary serving the
 API plus the built React SPA.
 
 **This file is the index.** The contract itself lives in [`docs/arch/`](arch/), split by feature.
@@ -53,7 +53,7 @@ These hold across every feature. Breaking one compiles fine and fails in product
 | Home screen: resume rail + "what moved" board | — (reads `/docs/recent`, `/calendar/events`; everything else is already-loaded store state) | `components/Home.tsx`, `components/home/`, `lib/recents.ts` | [01-core](arch/01-core.md) |
 | Realtime fanout, presence, typing | `ws/mod.rs`, `ws/session.rs` | `lib/ws.ts`, `lib/wsEvents.ts` | [01-core](arch/01-core.md) |
 | Docs (BlockNote/Yjs) | `routes/docs.rs`, `docs_sync.rs` | `components/docs/`, `lib/docSync.ts` | [02-docs](arch/02-docs.md) |
-| Canvas, Boards | same as docs (`kind` column) | `components/canvas/`, `components/board/`, `lib/tldrawYjs.ts`, `lib/boardDoc.ts` | [03-canvas-board](arch/03-canvas-board.md) |
+| Canvas, Boards | same as docs (`kind` column) | `components/canvas/`, `components/board/`, `lib/excalidrawYjs.ts`, `lib/boardDoc.ts` | [03-canvas-board](arch/03-canvas-board.md) |
 | Voice, video, screen share, call links | `ws/voice/`, `routes/voice.rs`, `routes/call_links.rs`, `livekit.rs` | `components/voice/`, `lib/voice.ts`, `lib/pip.ts` | [04-voice](arch/04-voice.md) |
 | Garden focus space | `routes/garden.rs` | `components/garden/`, `lib/garden/terrain.ts`, `store.ts` | [12-garden](arch/12-garden.md) |
 | File uploads | `routes/files.rs`, `storage.rs` | `components/Composer.tsx`, `lib/api.ts` | [05-files-notifications](arch/05-files-notifications.md) |
@@ -65,7 +65,6 @@ These hold across every feature. Breaking one compiles fine and fails in product
 | Polls | `routes/polls.rs`, `ws/voice/polls.rs` | `components/PollView.tsx`, `CreatePollModal.tsx` | [08-polls](arch/08-polls.md) |
 | E2EE DMs | `routes/e2ee.rs` (key transport only) | `lib/e2ee/` | [09-e2ee](arch/09-e2ee.md) |
 | Sharpy AI | `routes/sharpy.rs`, `ai.rs` | `components/SharpyPanel.tsx`, `components/sharpy/` | [10-sharpy](arch/10-sharpy.md) |
-| Tasks, projects, GitHub sync | `routes/tasks.rs`, `routes/github.rs` | `components/tasks/` | [11-tasks](arch/11-tasks.md) |
 | Env vars, feature gating | `config.rs` | `vite.config.ts` | `deploy/.env.example` |
 | Deploy topology | — | — | `deploy/README.md`, `deploy/DOKPLOY.md` |
 
@@ -104,7 +103,6 @@ Shared web helpers:
 | [08-polls.md](arch/08-polls.md) | Channel polls and call polls, persistence boundary |
 | [09-e2ee.md](arch/09-e2ee.md) | Encrypted DMs: device keys, opaque envelopes, server blind spots |
 | [10-sharpy.md](arch/10-sharpy.md) | pgvector embeddings, ACL-filtered retrieval, SSE ask flow |
-| [11-tasks.md](arch/11-tasks.md) | Projects, identifiers, workflow-state types, fracIndex ordering, GitHub sync |
 | [12-garden.md](arch/12-garden.md) | Single-player focus space: DnD on entry, focus timers, the generated world |
 
 Phase numbers in these titles are historical shipping order, not a hierarchy — and they are

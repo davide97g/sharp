@@ -12,7 +12,7 @@ Last updated: 2026-07-26 · version 0.3.0 · https://sharp.davideghiotto.it
 - Users: unlimited — no seat count, no per-user billing
 - Message history: unlimited, retained until you delete it
 - Feature gates: none. Chat, threads, DMs, collaborative docs, whiteboards, kanban boards,
-  calendar, voice/video calls, screen sharing, task tracker, AI assistant and end-to-end
+  calendar, voice/video calls, screen sharing, idea boards, AI assistant and end-to-end
   encrypted DMs are all in the same build.
 - Call limits: 25 participants, 16 cameras, 1 screen share per room (product limits, not
   license limits — they live in the source)

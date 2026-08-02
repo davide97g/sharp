@@ -7,7 +7,6 @@
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Badge,
   Banner,
   BoardIcon,
   CanvasIcon,
@@ -21,17 +20,15 @@ import {
   HashIcon,
   UserIcon,
 } from '../../ui'
-import { TasksGlyph } from '../tasks/taskUi'
 import { useStore, streamShieldOn } from '../../store'
 import { channelLabel, fmtDurationMs, fmtRelative } from '../../lib/util'
 import { effectiveNicknames } from '../../lib/displayName'
 import { joinScheduledMeeting, shortTime } from '../../lib/calendar'
 import { recordVisit } from '../../lib/frecency'
 import type { RecentEntry, RecentKind } from '../../lib/recents'
-import type { Channel, RecentDoc, Task } from '../../lib/types'
+import type { Channel, RecentDoc } from '../../lib/types'
 import {
   useActiveConversations,
-  useMyOpenTasks,
   useRecentDocs,
   useResume,
   useUpNext,
@@ -43,14 +40,11 @@ const KIND_GLYPH: Record<RecentKind, ReactNode> = {
   doc: <DocIcon size={15} />,
   canvas: <CanvasIcon size={15} />,
   board: <BoardIcon size={15} />,
-  task: <TasksGlyph size={15} />,
 }
 
 // Opening something here should teach the command palette, so the key has to be
 // the one the palette files it under: DMs count as channels, and every doc kind
-// counts as a doc. Tasks are absent on purpose — the palette keys them by UUID
-// and a trail entry only carries the identifier, so a write here would create a
-// second, never-matching entry.
+// counts as a doc.
 const FRECENCY_KIND: Partial<Record<RecentKind, string>> = {
   channel: 'channel',
   dm: 'channel',
@@ -184,14 +178,11 @@ function UpdateLanes({ hide }: { hide: Set<string> }) {
   const conversations = useActiveConversations().filter((channel) => !hide.has(channel.id))
   const { docs: allDocs, loading: docsLoading } = useRecentDocs()
   const docs = allDocs.filter((entry) => !hide.has(entry.doc.id))
-  const tasks = useMyOpenTasks()
-
   const lanes = [
     conversations.length > 0 && <ConversationsLane key="chat" channels={conversations} />,
     (docs.length > 0 || docsLoading) && (
       <DocsLane key="docs" docs={docs} loading={docsLoading} />
     ),
-    tasks.length > 0 && <TasksLane key="tasks" tasks={tasks} />,
   ].filter(Boolean)
 
   if (lanes.length === 0) return null
@@ -328,46 +319,6 @@ function DocsLane({ docs, loading }: { docs: RecentDoc[]; loading: boolean }) {
           )
         })
       )}
-    </Lane>
-  )
-}
-
-function TasksLane({ tasks }: { tasks: Task[] }) {
-  const navigate = useNavigate()
-
-  return (
-    <Lane
-      title="Your tasks"
-      count={tasks.length}
-      action={<LaneLink label="All tasks" onClick={() => navigate('/tasks')} />}
-    >
-      {tasks.map((task) => {
-          const dash = task.identifier.lastIndexOf('-')
-          const path = `/t/${task.identifier.slice(0, dash).toLowerCase()}/${task.number}`
-          return (
-            <ListRow
-              key={task.id}
-              size="sm"
-              onClick={() => {
-                recordVisit(`task:${task.id}`)
-                navigate(path)
-              }}
-              leading={
-                <span aria-hidden="true" className="shrink-0 text-text-faint">
-                  <TasksGlyph size={14} />
-                </span>
-              }
-              trailing={
-                <span className="font-mono text-2xs tabular-nums text-text-faint">
-                  {fmtRelative(task.updated_at)}
-                </span>
-              }
-            >
-              <Badge className="mr-1.5 font-mono">{task.identifier}</Badge>
-              {task.title}
-            </ListRow>
-        )
-      })}
     </Lane>
   )
 }

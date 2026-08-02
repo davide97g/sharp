@@ -492,7 +492,7 @@ the supported video target; Tauri camera behavior and Linux/Windows WebViews are
 ## Roadmap after v1
 
 ~~Files/uploads (S3/MinIO)~~ (shipped) → ~~notifications~~ (shipped) → ~~Phase 2 docs~~
-(shipped: BlockNote+Yjs+yrs, in-binary) → ~~Phase 3 canvas~~ (shipped: tldraw on the same
+(shipped: BlockNote+Yjs+yrs, in-binary) → ~~Phase 3 canvas~~ (shipped: Excalidraw on the same
 doc/sync/permission foundation — see the Phase 3 section above) → ~~Phase 3.5 boards~~
 (shipped: Notion-style kanban as a third doc kind — see the Phase 3.5 section above) →
 ~~Phase 4 voice~~ (shipped:

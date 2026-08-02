@@ -3578,7 +3578,6 @@ dependencies = [
  "dotenvy",
  "futures-util",
  "hkdf",
- "hmac",
  "jsonwebtoken 9.3.1",
  "lettre",
  "livekit-api",

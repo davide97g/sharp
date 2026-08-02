@@ -38,16 +38,6 @@ const KIND_META: Record<
     verb: 'closed a poll',
     accent: 'bg-violet-500/15 text-violet-300',
   },
-  task_assigned: {
-    label: 'Tasks',
-    verb: 'assigned you a task',
-    accent: 'bg-sky-500/15 text-sky-300',
-  },
-  task_comment: {
-    label: 'Task comments',
-    verb: 'commented on your task',
-    accent: 'bg-sky-500/15 text-sky-300',
-  },
 }
 
 // Shared navigation for a notification: mark it read, focus its message (if any),
@@ -178,8 +168,6 @@ export function InboxPanel() {
       dm: 0,
       reply: 0,
       poll_ended: 0,
-      task_assigned: 0,
-      task_comment: 0,
       unread: 0,
     }
     for (const n of notifications) {
@@ -246,7 +234,7 @@ export function InboxPanel() {
             label="All"
             count={counts.unread}
           />
-          {(['mention', 'dm', 'reply', 'poll_ended', 'task_assigned', 'task_comment'] as const).map((kind) => (
+          {(['mention', 'dm', 'reply', 'poll_ended'] as const).map((kind) => (
             <FilterChip
               key={kind}
               active={filter === kind}
@@ -445,9 +433,7 @@ function InboxRow({ n, onOpen }: { n: Notification; onOpen: () => void }) {
   const shielded =
     useStore((s) => streamChannelShielded(s, n.channel_id)) &&
     (n.kind === 'dm' || n.channel_kind === 'dm' || n.channel_kind === 'private')
-  const where = n.task_identifier
-    ? n.task_identifier
-    : n.channel_kind === 'dm'
+  const where = n.channel_kind === 'dm'
       ? 'Direct message'
       : `#${n.channel_name}`
 
@@ -508,9 +494,7 @@ function InboxEmpty({ filter }: { filter: Filter }) {
           ? { title: 'No direct messages', sub: 'New DMs will appear in this filter.' }
           : filter === 'reply'
             ? { title: 'No thread replies', sub: 'Replies to your threads show up here.' }
-            : filter === 'task_assigned' || filter === 'task_comment'
-              ? { title: 'No task activity', sub: 'Task assignments and comments show up here.' }
-              : { title: 'No poll results', sub: 'Polls you created or voted in show up here.' }
+            : { title: 'No poll results', sub: 'Polls you created or voted in show up here.' }
 
   return <EmptyState icon={<BellIcon dnd={false} size={22} />} title={copy.title} description={copy.sub} />
 }
@@ -618,18 +602,9 @@ function KindGlyph({ kind }: { kind: NotificationKind }) {
           <path d="M5 20V10M12 20V4M19 20v-7" />
         </svg>
       )
-    case 'task_assigned':
-    case 'task_comment':
-      return (
-        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <circle cx="12" cy="12" r="9" />
-          <path d="m8.5 12 2.5 2.5 5-5.5" />
-        </svg>
-      )
     default: {
       const _exhaustive: never = kind
       return _exhaustive
     }
   }
 }
-

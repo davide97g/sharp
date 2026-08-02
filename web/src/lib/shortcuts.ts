@@ -177,13 +177,6 @@ export const SHORTCUTS: ShortcutDef[] = [
     displayOnly: 'Hold Space',
   },
   {
-    id: 'task.create',
-    label: 'New task',
-    group: 'Tasks',
-    defaultChord: 'c',
-    scope: 'pane',
-  },
-  {
     id: 'garden.leave',
     label: 'Leave the garden',
     group: 'Garden',

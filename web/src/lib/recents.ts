@@ -18,11 +18,11 @@ import { useStore } from '../store'
 import { effectiveNicknames } from './displayName'
 import { channelLabel } from './util'
 
-export type RecentKind = 'channel' | 'dm' | 'doc' | 'canvas' | 'board' | 'task'
+export type RecentKind = 'channel' | 'dm' | 'doc' | 'canvas' | 'board'
 
 export type RecentEntry = {
   kind: RecentKind
-  /** Route id: channel/doc UUID, or a task identifier like `SHARP-12`. */
+  /** Route id: channel or doc UUID. */
   id: string
   /** Where to go back to. Stored so the rail never re-derives routing rules. */
   path: string
@@ -80,7 +80,7 @@ export function clearRecents() {
  */
 export function describeRoute(pathname: string): Omit<RecentEntry, 'at'> | null {
   const state = useStore.getState()
-  const [, head, a, b] = pathname.split('/')
+  const [, head, a] = pathname.split('/')
 
   if (head === 'c' && a) {
     const channel = state.channels.find((c) => c.id === a)
@@ -118,23 +118,6 @@ export function describeRoute(pathname: string): Omit<RecentEntry, 'at'> | null 
       icon: doc.icon || undefined,
       priv: channel ? channel.kind !== 'public' : false,
       chanId: doc.channel_id,
-    }
-  }
-
-  // `/t/:key/:num` is a task; `/t/:key` alone is the project board, which is a
-  // place rather than a piece of work.
-  if (head === 't' && a && b) {
-    const identifier = `${a.toUpperCase()}-${b}`
-    const task = [...state.myTasks, ...Object.values(state.tasksByProject).flat()].find(
-      (t) => t.identifier === identifier,
-    )
-    if (!task) return null
-    return {
-      kind: 'task',
-      id: identifier,
-      path: `/t/${a}/${b}`,
-      title: task.title || identifier,
-      sub: identifier,
     }
   }
 

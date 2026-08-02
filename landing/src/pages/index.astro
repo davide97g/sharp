@@ -21,7 +21,7 @@ const ogImage = `${siteUrl}/og.png`;
 /* Title ≤ 60 chars, description ≈ 155 — both fully visible in the SERP. */
 const title = "sharp — open-source self-hosted Slack alternative";
 const description =
-  "sharp is an open-source, self-hosted Slack alternative: chat, docs, canvas, boards, video calls, tasks and an AI assistant in one container.";
+  "sharp is an open-source, self-hosted Slack alternative: chat, docs, canvas, idea boards, video calls and an AI assistant in one container.";
 
 /* One source of truth for the feature grid — also feeds schema.org featureList. */
 const features = [
@@ -49,10 +49,10 @@ const features = [
     icon: "◈",
     title: "Canvas & boards",
     points: [
-      "Infinite tldraw whiteboards, self-hosted assets",
-      "Notion-style kanban boards as a doc kind",
+      "Infinite Excalidraw whiteboards, self-hosted assets",
+      "Flexible kanban boards for capturing team ideas",
       "Same permissions and inbox as docs",
-      "One click from any channel",
+      "One shared entry point before Jira or Linear",
     ],
   },
   {
@@ -73,16 +73,6 @@ const features = [
       "Every retrieval re-checks channel and doc permissions",
       "Any OpenAI-compatible endpoint, including local models",
       "No API key set? The whole feature disappears",
-    ],
-  },
-  {
-    icon: "◪",
-    title: "Tasks & projects",
-    points: [
-      "Linear-lite tracker with <code>SHARP-123</code> identifiers",
-      "List and board views, keyboard-first peek panel",
-      "Create a task straight from a chat message",
-      "GitHub branches and PRs move state automatically",
     ],
   },
   {
@@ -112,14 +102,14 @@ const features = [
       "Drag-and-drop uploads, images inline",
       "Instant Postgres full-text search across channels",
       "Files on your own S3 or MinIO bucket",
-      "Quick switcher jumps to channels, docs and tasks",
+      "Quick switcher jumps to channels, docs and boards",
     ],
   },
   {
     icon: "◔",
     title: "Notifications you control",
     points: [
-      "Unified inbox across chat, docs, canvas and tasks",
+      "Unified inbox across chat, docs, canvas and boards",
       "Web push, native macOS APNs, in-app toasts",
       "Per-channel mode: all, mentions only, or muted",
       "Do-not-disturb with scheduled quiet hours",
@@ -152,7 +142,7 @@ const features = [
 const faqs = [
   {
     q: "What is sharp?",
-    a: "sharp is an open-source, self-hosted team communication platform — a Slack alternative you run yourself. One Rust binary serves chat, collaborative docs, whiteboards, kanban boards, a calendar, voice and video calls, a task tracker and an AI assistant, backed by Postgres. It is licensed AGPL-3.0.",
+    a: "sharp is an open-source, self-hosted team communication platform — a Slack alternative you run yourself. One Rust binary serves chat, collaborative docs, whiteboards, flexible idea boards, a calendar, voice and video calls, and an AI assistant, backed by Postgres. It is licensed AGPL-3.0.",
   },
   {
     q: "Is sharp free?",
@@ -180,15 +170,15 @@ const faqs = [
   },
   {
     q: "How does the AI assistant work?",
-    a: "Sharpy is retrieval-augmented: workspace messages, docs and tasks are embedded into pgvector, and every retrieval re-checks channel membership and doc roles, so Sharpy can never surface content the asker cannot already read. It talks to any OpenAI-compatible endpoint, including a local model.",
+    a: "Sharpy is retrieval-augmented: workspace messages and docs are embedded into pgvector, and every retrieval re-checks channel membership and doc roles, so Sharpy can never surface content the asker cannot already read. It talks to any OpenAI-compatible endpoint, including a local model.",
   },
   {
     q: "Can I use sharp on desktop and mobile?",
     a: "sharp runs in any modern browser, and native Tauri 2 desktop builds are published for macOS, Windows and Linux — you point them at your own server URL and sign in through the system browser. A React Native mobile app is in development; the web app is responsive in the meantime.",
   },
   {
-    q: "How does sharp handle tasks and issues?",
-    a: "With a built-in Linear-lite tracker: projects carry a key, issues get identifiers like SHARP-123, and workflow states drive list and board views. Turn any chat message into a task, and GitHub sync moves state automatically — started when a branch or PR opens, completed on merge.",
+    q: "How does sharp handle ideas and execution work?",
+    a: "Boards are the flexible capture point for ideas, context and early shaping. When an idea becomes committed execution work, move it into the Jira, Linear or other issue tracker your team already uses.",
   },
   {
     q: "Does sharp scale beyond one server?",
@@ -323,7 +313,7 @@ const jsonLd = {
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="sharp — self-hosted team chat, docs, canvas, calls and tasks"
+      content="sharp — self-hosted team chat, docs, canvas, boards and calls"
     />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
@@ -377,7 +367,7 @@ const jsonLd = {
         </h1>
         <p class="subline reveal" style="transition-delay:0.3s">
           Chat, collaborative docs, whiteboards, kanban boards, voice and video
-          calls, a calendar, a Linear-lite task tracker and an AI assistant —
+          calls, a calendar, flexible idea boards and an AI assistant —
           one open-source container on your own server. Your data never leaves
           your infrastructure.
         </p>
@@ -505,7 +495,7 @@ const jsonLd = {
                 sharp is an open-source, self-hosted team communication platform.
                 A single Rust binary serves chat, collaborative docs, whiteboards,
                 kanban boards, a calendar, LiveKit voice and video calls, a
-                Linear-lite task tracker and an AI assistant — backed by Postgres,
+                flexible idea boards and an AI assistant — backed by Postgres,
                 deployed as one container, licensed AGPL-3.0.
               </p>
               <p class="answer-sub">
@@ -538,7 +528,7 @@ const jsonLd = {
         <div class="container">
           <div class="section-head reveal">
             <div class="eyebrow">Why sharp</div>
-            <h2>One workspace. Chat, docs, canvas, calls, tasks &amp; AI.</h2>
+            <h2>One workspace. Chat, docs, canvas, boards, calls &amp; AI.</h2>
             <p>Everything a team needs to talk, write, draw, meet and ship — and nothing that phones home.</p>
           </div>
           <div class="features stagger" id="featuresGrid">
@@ -555,101 +545,6 @@ const jsonLd = {
         </div>
       </section>
 
-      <!-- ===== Tasks (Linear-lite) ===== -->
-      <section id="tasks" class="tasks-section">
-        <div class="container">
-          <div class="section-head reveal">
-            <div class="eyebrow">Tasks</div>
-            <h2>Linear-lite, built in.</h2>
-            <p>
-              A native issue tracker for the same workspace — projects, workflow states,
-              list &amp; board views, chat bridging, and GitHub sync. No third-party SaaS.
-            </p>
-          </div>
-
-          <div class="tasks-layout">
-            <div class="tasks-copy reveal-left">
-              <ul class="tasks-points">
-                <li>
-                  <strong>Projects &amp; identifiers</strong>
-                  <span><code>SHARP-123</code> keys allocate from a sequence. Dense list rows or a state board — your call.</span>
-                </li>
-                <li>
-                  <strong>Create from chat</strong>
-                  <span>Turn a message into a task. Bare identifiers auto-linkify; chips deep-link back.</span>
-                </li>
-                <li>
-                  <strong>GitHub sync</strong>
-                  <span>Branch &amp; PR names move state for you — started on open, completed on merge.</span>
-                </li>
-                <li>
-                  <strong>Keyboard-first</strong>
-                  <span>Peek panel, property pickers, <code>c</code> to create. Same muscle memory as Linear.</span>
-                </li>
-              </ul>
-            </div>
-
-            <div class="tasks-mock reveal-right" aria-hidden="true">
-              <div class="tm-bar">
-                <span class="tm-proj"><span class="tm-key">SHARP</span> Engineering</span>
-                <span class="tm-views"><span class="on">List</span><span>Board</span></span>
-              </div>
-              <div class="tm-group">
-                <div class="tm-group-head"><span class="tm-dot started"></span> In Progress <em>3</em></div>
-                <div class="tm-row active">
-                  <span class="tm-pri high" title="High"></span>
-                  <span class="tm-id">SHARP-128</span>
-                  <span class="tm-title">Wire GitHub webhook state automation</span>
-                  <span class="tm-label">backend</span>
-                  <span class="tm-avatar" style="background:#7c6cff">JL</span>
-                </div>
-                <div class="tm-row">
-                  <span class="tm-pri urgent" title="Urgent"></span>
-                  <span class="tm-id">SHARP-124</span>
-                  <span class="tm-title">Task peek: comments + activity feed</span>
-                  <span class="tm-label">web</span>
-                  <span class="tm-avatar" style="background:#ff8a5c">MK</span>
-                </div>
-                <div class="tm-row">
-                  <span class="tm-pri med" title="Medium"></span>
-                  <span class="tm-id">SHARP-119</span>
-                  <span class="tm-title">Create task from message toolbar</span>
-                  <span class="tm-label">chat</span>
-                  <span class="tm-avatar" style="background:#3ddc84">PS</span>
-                </div>
-              </div>
-              <div class="tm-group">
-                <div class="tm-group-head"><span class="tm-dot todo"></span> Todo <em>2</em></div>
-                <div class="tm-row">
-                  <span class="tm-pri none" title="No priority"></span>
-                  <span class="tm-id">SHARP-131</span>
-                  <span class="tm-title">Sharpy embeddings for task titles</span>
-                  <span class="tm-label">ai</span>
-                  <span class="tm-due">Fri</span>
-                </div>
-                <div class="tm-row">
-                  <span class="tm-pri low" title="Low"></span>
-                  <span class="tm-id">SHARP-132</span>
-                  <span class="tm-title">Filter bar: assignee + label + priority</span>
-                  <span class="tm-label">web</span>
-                  <span class="tm-due">Mon</span>
-                </div>
-              </div>
-              <div class="tm-peek">
-                <div class="tm-peek-id">SHARP-128</div>
-                <div class="tm-peek-title">Wire GitHub webhook state automation</div>
-                <div class="tm-props">
-                  <div><span>Status</span><strong><i class="tm-dot started"></i> In Progress</strong></div>
-                  <div><span>Priority</span><strong>High</strong></div>
-                  <div><span>Assignee</span><strong>Jordan Lee</strong></div>
-                  <div><span>GitHub</span><strong class="tm-gh">davide97g/sharp#128</strong></div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <!-- ===== Sharpy (AI assistant) ===== -->
       <section id="sharpy" class="sharpy-section">
         <div class="container">
@@ -657,18 +552,18 @@ const jsonLd = {
             <div class="eyebrow">Sharpy</div>
             <h2>An AI assistant that only sees what you can see</h2>
             <p>
-              Retrieval-augmented answers over your own messages, docs and tasks —
+              Retrieval-augmented answers over your own messages and docs —
               running against any OpenAI-compatible endpoint, including a model on
               your own hardware.
             </p>
           </div>
 
-          <div class="tasks-layout">
+          <div class="detail-layout">
             <div class="reveal-left">
-              <ul class="tasks-points">
+              <ul class="detail-points">
                 <li>
                   <strong>Grounded in your workspace</strong>
-                  <span>Messages, docs and task titles are embedded into pgvector and cited back as sources with every answer.</span>
+                  <span>Messages and docs are embedded into pgvector and cited back as sources with every answer.</span>
                 </li>
                 <li>
                   <strong>Permission-aware retrieval</strong>
@@ -696,7 +591,7 @@ const jsonLd = {
               <div class="ask-sources">
                 <span class="ask-src"># engineering</span>
                 <span class="ask-src">¶ Launch plan</span>
-                <span class="ask-src">SHARP-118</span>
+                <span class="ask-src">▦ Product ideas</span>
               </div>
             </div>
           </div>
@@ -750,11 +645,6 @@ const jsonLd = {
                   <td>Add-on product or separate subscription</td>
                 </tr>
                 <tr>
-                  <th scope="row">Issue tracker</th>
-                  <td class="yes">Built in, with GitHub sync</td>
-                  <td>Usually a third-party integration</td>
-                </tr>
-                <tr>
                   <th scope="row">AI assistant</th>
                   <td class="yes">Built in · your model, your keys</td>
                   <td>Paid upgrade on the vendor's model</td>
@@ -793,7 +683,7 @@ const jsonLd = {
             Mattermost, Rocket.Chat and Zulip are all mature, open-source and worth
             your shortlist — Zulip especially if threading is your whole religion.
             sharp is the newer, narrower bet: one workspace where chat, docs, canvas,
-            boards, calls, calendar, tasks and AI ship together in a single container,
+            boards, calls, calendar and AI ship together in a single container,
             with every integration optional and inert until you configure it.
           </p>
         </div>
@@ -840,7 +730,7 @@ const jsonLd = {
                 <li><code>LIVEKIT_*</code> — voice, video, screen share</li>
                 <li><code>S3_*</code> — uploads on your own bucket</li>
                 <li><code>AI_*</code> — Sharpy, embeddings, transcription</li>
-                <li><code>GOOGLE_*</code>, <code>GITHUB_*</code> — calendar &amp; task sync</li>
+                <li><code>GOOGLE_*</code>, <code>GITHUB_OAUTH_*</code> — calendar sync &amp; sign-in</li>
                 <li><code>RESEND_API_KEY</code> or <code>SMTP_*</code> — password reset</li>
               </ul>
             </div>

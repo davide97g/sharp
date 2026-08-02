@@ -36,7 +36,6 @@ export function NotificationsSettings() {
   const notifyDm = useStore((s) => s.notifyDm)
   const notifyMention = useStore((s) => s.notifyMention)
   const notifyReply = useStore((s) => s.notifyReply)
-  const notifyTask = useStore((s) => s.notifyTask)
   const notifyPoll = useStore((s) => s.notifyPoll)
   const channels = useStore((s) => s.channels)
   const channelModes = useStore((s) => s.channelModes)
@@ -69,7 +68,6 @@ export function NotificationsSettings() {
     { key: 'dm', label: 'Direct messages', hint: 'New messages in your DMs.', value: notifyDm, field: 'notify_dm' },
     { key: 'mention', label: 'Mentions & @all', hint: 'When someone @-mentions you or the channel.', value: notifyMention, field: 'notify_mention' },
     { key: 'reply', label: 'Thread replies', hint: 'Replies to threads you started.', value: notifyReply, field: 'notify_reply' },
-    { key: 'task', label: 'Task activity', hint: 'Assigned a task or a new comment on one.', value: notifyTask, field: 'notify_task' },
     { key: 'poll', label: 'Poll results', hint: 'When a poll you created or voted in ends.', value: notifyPoll, field: 'notify_poll' },
   ]
 

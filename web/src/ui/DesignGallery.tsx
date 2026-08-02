@@ -594,7 +594,7 @@ function BadgesSection() {
     <Section
       id="badges"
       title="Badges & chips"
-      note="Badge for status/labels (tone × variant). CountBadge for unread pills. Tag for board/task colours (keyed, never hex). Kbd for shortcuts."
+      note="Badge for status/labels (tone × variant). CountBadge for unread pills. Tag for board colours (keyed, never hex). Kbd for shortcuts."
     >
       {BADGE_VARIANTS.map((v) => (
         <Demo key={v} label={`Badge · ${v}`} code={`<Badge tone="…" variant="${v}">`}>

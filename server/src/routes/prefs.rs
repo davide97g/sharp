@@ -34,7 +34,7 @@ pub async fn get_prefs(
     auth: AuthUser,
 ) -> AppResult<Json<serde_json::Value>> {
     let prefs_row = sqlx::query(
-        "SELECT dnd, chat_layout, notify_dm, notify_mention, notify_reply, notify_task,
+        "SELECT dnd, chat_layout, notify_dm, notify_mention, notify_reply,
                 notify_poll, dnd_scheduled, dnd_start, dnd_end, tz_offset, ui,
                 invisible, share_typing, push_preview
          FROM user_prefs WHERE user_id = $1",
@@ -102,7 +102,6 @@ pub async fn get_prefs(
         "notify_dm": flag("notify_dm", true),
         "notify_mention": flag("notify_mention", true),
         "notify_reply": flag("notify_reply", true),
-        "notify_task": flag("notify_task", true),
         "notify_poll": flag("notify_poll", true),
         "dnd_scheduled": flag("dnd_scheduled", false),
         "dnd_start": dnd_start,
@@ -131,7 +130,6 @@ pub struct PrefsUpdate {
     pub notify_dm: Option<bool>,
     pub notify_mention: Option<bool>,
     pub notify_reply: Option<bool>,
-    pub notify_task: Option<bool>,
     pub notify_poll: Option<bool>,
     pub dnd_scheduled: Option<bool>,
     pub dnd_start: Option<i32>,
@@ -170,33 +168,31 @@ pub async fn set_prefs(
     }
     sqlx::query(
         "INSERT INTO user_prefs
-            (user_id, notify_dm, notify_mention, notify_reply, notify_task, notify_poll,
+            (user_id, notify_dm, notify_mention, notify_reply, notify_poll,
              dnd_scheduled, dnd_start, dnd_end, tz_offset,
              invisible, share_typing, push_preview)
          VALUES ($1,
              COALESCE($2, true), COALESCE($3, true), COALESCE($4, true),
-             COALESCE($5, true), COALESCE($6, true), COALESCE($7, false),
-             $8, $9, COALESCE($10, 0),
-             COALESCE($11, false), COALESCE($12, true), COALESCE($13, 'full'))
+             COALESCE($5, true), COALESCE($6, false),
+             $7, $8, COALESCE($9, 0),
+             COALESCE($10, false), COALESCE($11, true), COALESCE($12, 'full'))
          ON CONFLICT (user_id) DO UPDATE SET
              notify_dm      = COALESCE($2, user_prefs.notify_dm),
              notify_mention = COALESCE($3, user_prefs.notify_mention),
              notify_reply   = COALESCE($4, user_prefs.notify_reply),
-             notify_task    = COALESCE($5, user_prefs.notify_task),
-             notify_poll    = COALESCE($6, user_prefs.notify_poll),
-             dnd_scheduled  = COALESCE($7, user_prefs.dnd_scheduled),
-             dnd_start      = COALESCE($8, user_prefs.dnd_start),
-             dnd_end        = COALESCE($9, user_prefs.dnd_end),
-             tz_offset      = COALESCE($10, user_prefs.tz_offset),
-             invisible      = COALESCE($11, user_prefs.invisible),
-             share_typing   = COALESCE($12, user_prefs.share_typing),
-             push_preview   = COALESCE($13, user_prefs.push_preview)",
+             notify_poll    = COALESCE($5, user_prefs.notify_poll),
+             dnd_scheduled  = COALESCE($6, user_prefs.dnd_scheduled),
+             dnd_start      = COALESCE($7, user_prefs.dnd_start),
+             dnd_end        = COALESCE($8, user_prefs.dnd_end),
+             tz_offset      = COALESCE($9, user_prefs.tz_offset),
+             invisible      = COALESCE($10, user_prefs.invisible),
+             share_typing   = COALESCE($11, user_prefs.share_typing),
+             push_preview   = COALESCE($12, user_prefs.push_preview)",
     )
     .bind(auth.id)
     .bind(body.notify_dm)
     .bind(body.notify_mention)
     .bind(body.notify_reply)
-    .bind(body.notify_task)
     .bind(body.notify_poll)
     .bind(body.dnd_scheduled)
     .bind(body.dnd_start)
@@ -388,4 +384,3 @@ pub async fn set_channel_pref(
 }
 
 // ---- web push ----
-

@@ -2,7 +2,7 @@
 // MediaPipe selfie segmenter + its wasm fileset live under /public/mediapipe and
 // are loaded lazily — this module (and the ~11MB wasm) is only imported the first
 // time a user selects blur or a wallpaper, keeping the main bundle lean like the
-// tldraw editor.
+// canvas editor.
 //
 // The processor takes the raw camera track, runs per-frame segmentation, then
 // composites the person over blur or a wallpaper. canvas.captureStream() output

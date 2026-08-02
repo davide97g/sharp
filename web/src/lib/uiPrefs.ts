@@ -76,7 +76,7 @@ export type UiPrefs = {
 
   // --- effects ---
   effects: EffectFlags
-  /** Confetti/burst on completed tasks, ended polls, and call joins. */
+  /** Confetti/burst on ended polls and call joins. */
   celebrations: boolean
   soundPack: SoundPack
   /** Action id → chord, overriding the default in lib/shortcuts.ts. */

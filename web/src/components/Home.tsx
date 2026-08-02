@@ -6,7 +6,7 @@ import { chordFor, formatChord } from '../lib/shortcuts'
 import { useStore } from '../store'
 import { Sidebar } from './Sidebar'
 import { HomeBoard, UpNextBanner } from './home/HomeBoard'
-import { useActiveConversations, useMyOpenTasks, useResume } from './home/homeData'
+import { useActiveConversations, useResume } from './home/homeData'
 
 const SIGNALS = Array.from({ length: 12 })
 
@@ -186,7 +186,6 @@ function WelcomeIdentity() {
  */
 function ConsoleHeader() {
   const channels = useStore((state) => state.channels)
-  const tasks = useMyOpenTasks()
   const unread = channels.reduce((n, channel) => n + (channel.unread_count ? 1 : 0), 0)
 
   const today = new Date().toLocaleDateString(undefined, {
@@ -197,7 +196,6 @@ function ConsoleHeader() {
   const status = [
     today,
     unread ? `${unread} unread` : null,
-    tasks.length ? `${tasks.length} open ${tasks.length === 1 ? 'task' : 'tasks'}` : null,
   ].filter(Boolean)
 
   return (

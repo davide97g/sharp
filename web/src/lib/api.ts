@@ -60,14 +60,6 @@ import type {
   CalendarEventsResponse,
   ScheduledMeeting,
   Poll,
-  Project,
-  ProjectGithubSetup,
-  Task,
-  TaskComment,
-  TaskCreateInput,
-  TaskDetail,
-  TaskLabel,
-  TaskUpdateInput,
   SharpyConversation,
   SharpyConversationDetail,
   SharpyMessage,
@@ -315,76 +307,6 @@ export const api = {
   ) => request<{ session: GardenFocusSession }>('/garden/session', { method: 'POST', body }),
   stopGardenSession: () =>
     request<{ stopped: GardenFocusResult | null }>('/garden/session', { method: 'DELETE' }),
-  tasks: {
-    projects: () => request<{ projects: Project[] }>('/projects'),
-    createProject: (input: { key: string; name: string; icon?: string; channel_id?: string }) =>
-      request<Project>('/projects', { method: 'POST', body: input }),
-    updateProject: (
-      id: string,
-      input: {
-        name?: string
-        icon?: string
-        channel_id?: string | null
-        archived?: boolean
-        branch_template?: string
-      },
-    ) => request<Project>(`/projects/${id}`, { method: 'PATCH', body: input }),
-    // GitHub links. Every mutation answers with the same setup payload as `github()`.
-    github: (projectId: string) =>
-      request<ProjectGithubSetup>(`/projects/${projectId}/github`),
-    connectGithub: (projectId: string, input: { repo: string; token?: string }) =>
-      request<ProjectGithubSetup>(`/projects/${projectId}/github`, { method: 'POST', body: input }),
-    updateGithub: (
-      projectId: string,
-      linkId: string,
-      input: { token?: string | null; rotate_secret?: boolean },
-    ) =>
-      request<ProjectGithubSetup>(`/projects/${projectId}/github/${linkId}`, {
-        method: 'PATCH',
-        body: input,
-      }),
-    verifyGithub: (projectId: string, linkId: string) =>
-      request<ProjectGithubSetup>(`/projects/${projectId}/github/${linkId}/verify`, {
-        method: 'POST',
-      }),
-    disconnectGithub: (projectId: string, linkId: string) =>
-      request<ProjectGithubSetup>(`/projects/${projectId}/github/${linkId}`, { method: 'DELETE' }),
-    list: (
-      projectId: string,
-      filters: {
-        state_type?: string
-        assignee?: string
-        label?: string
-        priority?: number
-        q?: string
-      } = {},
-    ) => {
-      return request<{ tasks: Task[] }>(`/projects/${projectId}/tasks${qs(filters)}`)
-    },
-    create: (projectId: string, input: TaskCreateInput) =>
-      request<Task>(`/projects/${projectId}/tasks`, { method: 'POST', body: input }),
-    get: (id: string) => request<TaskDetail>(`/tasks/${id}`),
-    byKey: (identifier: string) =>
-      request<Task>(`/tasks/by-key/${encodeURIComponent(identifier)}`),
-    update: (id: string, patch: TaskUpdateInput) =>
-      request<Task>(`/tasks/${id}`, { method: 'PATCH', body: patch }),
-    delete: (id: string) => request<void>(`/tasks/${id}`, { method: 'DELETE' }),
-    mine: () => request<{ tasks: Task[] }>('/me/tasks'),
-    search: (q: string, limit = 10) =>
-      request<{ tasks: Task[] }>(`/tasks/search?q=${encodeURIComponent(q)}&limit=${limit}`),
-    comment: (taskId: string, body: string) =>
-      request<TaskComment>(`/tasks/${taskId}/comments`, { method: 'POST', body: { body } }),
-    updateComment: (id: string, body: string) =>
-      request<TaskComment>(`/task-comments/${id}`, { method: 'PATCH', body: { body } }),
-    deleteComment: (id: string) =>
-      request<void>(`/task-comments/${id}`, { method: 'DELETE' }),
-    labels: () => request<{ labels: TaskLabel[] }>('/task-labels'),
-    createLabel: (input: { name: string; color: string }) =>
-      request<TaskLabel>('/task-labels', { method: 'POST', body: input }),
-    updateLabel: (id: string, input: { name: string; color: string }) =>
-      request<TaskLabel>(`/task-labels/${id}`, { method: 'PATCH', body: input }),
-    deleteLabel: (id: string) => request<void>(`/task-labels/${id}`, { method: 'DELETE' }),
-  },
   polls: {
     create: (
       channelId: string,

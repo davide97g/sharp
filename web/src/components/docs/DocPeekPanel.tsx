@@ -15,7 +15,7 @@ const DocEditorInner = lazy(() =>
 )
 import { BoardEditorInner } from '../board/BoardEditorInner'
 
-// tldraw is heavy — lazy-load the inner canvas so its chunk stays out of the
+// Excalidraw is heavy — lazy-load the inner canvas so its chunk stays out of the
 // main bundle (mirrors App.tsx's lazy CanvasEditor).
 const CanvasEditorInner = lazy(() =>
   import('../canvas/CanvasEditorInner').then((m) => ({ default: m.CanvasEditorInner })),
@@ -66,7 +66,7 @@ export function DocPeekPanel() {
     }
   }, [docPeekId, fetchDoc])
 
-  // No Escape-to-close: the embedded editors (tldraw menus, BlockNote slash
+  // No Escape-to-close: the embedded editors (Excalidraw menus, BlockNote slash
   // menu) own that key. Back button / navigating away are the exits.
 
   const user = useMemo(

@@ -91,8 +91,6 @@ export const KEY_PREFIXES = {
   /** Per user: audio-aura on/off and its style. */
   audioAura: 'sharp.audioAura.v1.',
   audioAuraStyle: 'sharp.audioAuraStyle.v1.',
-  /** Per project: 'list' | 'board'. */
-  taskView: 'sharp.taskView.',
   /** Per orientation ('p'|'l'): best viewport height seen (iOS launch-bug workaround). */
   maxViewportHeight: 'sharp.maxViewportH.',
 } as const
@@ -107,7 +105,7 @@ export const LEGACY_UI_KEYS = {
   dockAutoHide: 'sharp.dockAutoHide',
 } as const
 
-/** Build a per-scope key, e.g. `scopedKey(KEY_PREFIXES.taskView, projectId)`. */
+/** Build a per-scope key. */
 export function scopedKey(prefix: string, scope: string): string {
   return `${prefix}${scope}`
 }

@@ -16,7 +16,7 @@
 // Two rules encoded here that are easy to get wrong:
 //
 //   1. **Never mount an editor for the wrong kind.** Binding BlockNote against a
-//      canvas's Yjs container (or tldraw against a doc's) corrupts the document. The
+//      canvas's Yjs container (or Excalidraw against a doc's) corrupts the document. The
 //      kind-guard effect redirects, and until it has, this renders a skeleton rather
 //      than the body.
 //   2. **Access loss is silent.** A revoked role and a permanent delete both just drop

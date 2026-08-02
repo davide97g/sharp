@@ -43,7 +43,6 @@ import {
 } from './lib/store/recognizer'
 import { KEYS, readLocalBool, writeLocalBool } from './lib/localPrefs'
 import { applyWsEventTo } from './lib/wsEvents'
-import { sortTasks } from './lib/store/taskHelpers'
 import { applyUi } from './lib/store/uiHelpers'
 import {
   emptyVoiceState,
@@ -134,11 +133,6 @@ import type {
   ScheduledMeeting,
   Poll,
   CallPoll,
-  Project,
-  Task,
-  TaskDetail,
-  TaskLabel,
-  TaskUpdateInput,
   SharpyConversation,
   SharpyMessage,
   SharpySource,
@@ -372,7 +366,6 @@ export type State = {
   notifyDm: boolean
   notifyMention: boolean
   notifyReply: boolean
-  notifyTask: boolean
   notifyPoll: boolean
   // Server-enforced privacy switches (migration 0031).
   invisible: boolean
@@ -428,16 +421,6 @@ export type State = {
   calendarRange: { from: string; to: string } | null
   // local-day key (YYYY-MM-DD) the agenda is focused on
   calendarSelectedDate: string | null
-
-  // --- tasks (Phase 7) ---
-  projects: Project[]
-  taskLabels: TaskLabel[]
-  // per-project task lists, sorted by sort_order (board/list views read these)
-  tasksByProject: Record<string, Task[]>
-  myTasks: Task[]
-  // detail cache for open peeks; WS events patch entries that are present
-  taskDetails: Record<string, TaskDetail>
-  activeProjectId: string | null
 
   // ws
   ws: WsClient | null
@@ -669,16 +652,6 @@ export type State = {
   setCalendarSelectedDate: (dayKey: string | null) => void
   joinScheduledMeeting: (joinPath: string | null) => void
 
-  // tasks actions
-  loadProjects: () => Promise<void>
-  loadTaskLabels: () => Promise<void>
-  loadProjectTasks: (projectId: string) => Promise<void>
-  loadMyTasks: () => Promise<void>
-  loadTaskDetail: (taskId: string) => Promise<TaskDetail>
-  setActiveProject: (projectId: string | null) => void
-  // optimistic field update: applies locally, PATCHes, refetches on failure
-  patchTask: (taskId: string, patch: TaskUpdateInput) => Promise<void>
-
   // notifications + preferences
   loadInboxAndPrefs: () => Promise<void>
   loadMoreNotifications: () => Promise<void>
@@ -830,7 +803,6 @@ export const useStore = create<State>((set, get) => ({
   notifyDm: true,
   notifyMention: true,
   notifyReply: true,
-  notifyTask: true,
   notifyPoll: true,
   dndScheduled: false,
   dndStart: null,
@@ -856,12 +828,6 @@ export const useStore = create<State>((set, get) => ({
   activeMeetings: {},
   voice: emptyVoiceState(),
   garden: emptyGardenState(),
-  projects: [],
-  taskLabels: [],
-  tasksByProject: {},
-  myTasks: [],
-  taskDetails: {},
-  activeProjectId: null,
   calendarConnections: [],
   calendarItems: [],
   calendarRange: null,
@@ -908,10 +874,6 @@ export const useStore = create<State>((set, get) => ({
         for (const channelId of Object.keys(get().channelVoiceTriggers)) {
           void get().loadChannelVoiceTriggers(channelId).catch(() => {})
         }
-        void get().loadProjects()
-        void get().loadMyTasks()
-        const activeProject = get().activeProjectId
-        if (activeProject) void get().loadProjectTasks(activeProject)
       },
     })
     set({ ws })
@@ -925,9 +887,6 @@ export const useStore = create<State>((set, get) => ({
     await get().refetchDirectory()
     get().loadMentions()
     void get().initSharpy()
-    void get().loadProjects()
-    void get().loadTaskLabels()
-    void get().loadMyTasks()
     await get().loadInboxAndPrefs()
     set({ ready: true })
 
@@ -1061,7 +1020,6 @@ export const useStore = create<State>((set, get) => ({
       notifyDm: true,
       notifyMention: true,
       notifyReply: true,
-      notifyTask: true,
       notifyPoll: true,
       dndScheduled: false,
       dndStart: null,
@@ -2720,79 +2678,6 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
-  // --- tasks (Phase 7) ---
-
-  async loadProjects() {
-    try {
-      const res = await api.tasks.projects()
-      set({ projects: res.projects })
-    } catch (e) {
-      if (e instanceof Error) toastError(e.message)
-    }
-  },
-
-  async loadTaskLabels() {
-    try {
-      const res = await api.tasks.labels()
-      set({ taskLabels: res.labels })
-    } catch {
-      /* non-fatal */
-    }
-  },
-
-  async loadProjectTasks(projectId) {
-    try {
-      const res = await api.tasks.list(projectId)
-      set((s) => ({
-        tasksByProject: { ...s.tasksByProject, [projectId]: res.tasks },
-      }))
-    } catch (e) {
-      if (e instanceof Error) toastError(e.message)
-    }
-  },
-
-  async loadMyTasks() {
-    try {
-      const res = await api.tasks.mine()
-      set({ myTasks: res.tasks })
-    } catch {
-      /* non-fatal */
-    }
-  },
-
-  async loadTaskDetail(taskId) {
-    const detail = await api.tasks.get(taskId)
-    set((s) => ({ taskDetails: { ...s.taskDetails, [taskId]: detail } }))
-    return detail
-  },
-
-  setActiveProject(projectId) {
-    set({ activeProjectId: projectId })
-  },
-
-  async patchTask(taskId, patch) {
-    // Optimistic: merge scalar fields into every cached copy, then PATCH. The
-    // authoritative task comes back on the task.updated broadcast.
-    set((s) => {
-      const apply = (t: Task): Task => (t.id === taskId ? { ...t, ...patch } as Task : t)
-      const tasksByProject = Object.fromEntries(
-        Object.entries(s.tasksByProject).map(([pid, list]) => [
-          pid,
-          sortTasks(list.map(apply)),
-        ]),
-      )
-      return { tasksByProject, myTasks: s.myTasks.map(apply) }
-    })
-    try {
-      await api.tasks.update(taskId, patch)
-    } catch (e) {
-      if (e instanceof Error) toastError(e.message)
-      const pid = get().activeProjectId
-      if (pid) void get().loadProjectTasks(pid)
-      void get().loadMyTasks()
-    }
-  },
-
   async loadCalendar(from, to) {
     try {
       const res = await api.calendar.events(from, to)
@@ -2876,7 +2761,6 @@ export const useStore = create<State>((set, get) => ({
         notifyDm: prefs.notify_dm,
         notifyMention: prefs.notify_mention,
         notifyReply: prefs.notify_reply,
-        notifyTask: prefs.notify_task,
         notifyPoll: prefs.notify_poll,
         dndScheduled: prefs.dnd_scheduled,
         dndStart: prefs.dnd_start,
@@ -3173,7 +3057,6 @@ export const useStore = create<State>((set, get) => ({
     if (patch.notify_dm !== undefined) next.notifyDm = patch.notify_dm
     if (patch.notify_mention !== undefined) next.notifyMention = patch.notify_mention
     if (patch.notify_reply !== undefined) next.notifyReply = patch.notify_reply
-    if (patch.notify_task !== undefined) next.notifyTask = patch.notify_task
     if (patch.notify_poll !== undefined) next.notifyPoll = patch.notify_poll
     if (patch.dnd_scheduled !== undefined) next.dndScheduled = patch.dnd_scheduled
     if (patch.dnd_start !== undefined) next.dndStart = patch.dnd_start
@@ -3190,7 +3073,6 @@ export const useStore = create<State>((set, get) => ({
         notifyDm: prev.notifyDm,
         notifyMention: prev.notifyMention,
         notifyReply: prev.notifyReply,
-        notifyTask: prev.notifyTask,
         notifyPoll: prev.notifyPoll,
         dndScheduled: prev.dndScheduled,
         dndStart: prev.dndStart,

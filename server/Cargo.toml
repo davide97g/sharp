@@ -43,8 +43,6 @@ base64 = "0.22"
 aes-gcm = "0.10"
 hkdf = "0.12"
 sha2 = "0.10"
-# GitHub webhook signature verification (X-Hub-Signature-256)
-hmac = "0.12"
 # Transactional email (password reset) over SMTP — rustls to match the stack
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls", "pool"] }
 webauthn-rs = { version = "0.5.5", features = ["conditional-ui", "danger-allow-state-serialisation"] }

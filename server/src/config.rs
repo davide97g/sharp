@@ -58,8 +58,6 @@ pub struct Config {
     pub oauth: OAuthLoginConfig,
     /// WebAuthn relying-party configuration. `None` keeps passkeys disabled.
     pub webauthn: Option<WebauthnConfig>,
-    /// GitHub task sync. `None` when `GITHUB_WEBHOOK_SECRET` is unset — inert.
-    pub github: Option<GithubConfig>,
     /// Apple Push Notification service (token-based) for the native macOS desktop
     /// app. `None` unless all `APNS_*` credentials are set — inert otherwise.
     pub apns: Option<ApnsConfig>,
@@ -216,14 +214,6 @@ pub struct ApnsConfig {
     pub bundle_id: String,
     /// true → `api.push.apple.com`; false → `api.sandbox.push.apple.com`.
     pub production: bool,
-}
-
-#[derive(Clone)]
-pub struct GithubConfig {
-    /// Shared secret for `X-Hub-Signature-256` webhook verification.
-    pub webhook_secret: String,
-    /// `owner/name` allowlist; empty = accept any repo that signs correctly.
-    pub repos: Vec<String>,
 }
 
 /// Resolve one social sign-in provider, enforcing "all or nothing".
@@ -450,20 +440,6 @@ impl Config {
             _ => return Err("WEBAUTHN_RP_ID and WEBAUTHN_ORIGINS must be set together".to_string()),
         };
 
-        let github = env_opt("GITHUB_WEBHOOK_SECRET").map(|webhook_secret| GithubConfig {
-            webhook_secret,
-            repos: env_opt("GITHUB_REPOS")
-                .map(|repos| {
-                    repos
-                        .split(',')
-                        .map(str::trim)
-                        .filter(|repo| !repo.is_empty())
-                        .map(str::to_lowercase)
-                        .collect()
-                })
-                .unwrap_or_default(),
-        });
-
         // APNs is enabled only when all four credentials are present. The private
         // key may be given inline (`APNS_PRIVATE_KEY`) or via a path to the `.p8`
         // (`APNS_PRIVATE_KEY_PATH`). `APNS_ENV=production` targets the prod host.
@@ -553,7 +529,6 @@ impl Config {
             google,
             oauth,
             webauthn,
-            github,
             apns,
             mail,
             app_url,

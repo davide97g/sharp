@@ -1,7 +1,6 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
-import { TasksGlyph } from './tasks/taskUi'
 import { CompactSidebar } from './CompactSidebar'
 import { ThreadPanel } from './ThreadPanel'
 import { KEYS, readLocal, writeLocal } from '../lib/localPrefs'
@@ -42,7 +41,7 @@ function RouteFallback() {
 
 
 // Module jump targets (chord+1…9), in the rail's visual order.
-const MODE_ROUTES = ['/', '/garden', '/docs', '/canvas', '/board', '/tasks', '/meetings', '/calendar', '/help']
+const MODE_ROUTES = ['/', '/garden', '/docs', '/canvas', '/board', '/meetings', '/calendar', '/help']
 
 // Browsers reserve ⌘/Ctrl+digit for tab switching, so the chord adapts:
 // desktop app (no browser chrome) gets the native ⌘/Ctrl+digit, Mac browsers
@@ -88,14 +87,12 @@ export function AppShell() {
     location.pathname.startsWith('/canvas') || location.pathname.startsWith('/x/')
   const boardMode =
     location.pathname.startsWith('/board') || location.pathname.startsWith('/b/')
-  const tasksMode =
-    location.pathname.startsWith('/tasks') || location.pathname.startsWith('/t/')
   const meetingsMode = location.pathname.startsWith('/meetings')
   const calendarMode = location.pathname.startsWith('/calendar')
   const sharpyMode = location.pathname.startsWith('/sharpy')
   const helpMode = location.pathname.startsWith('/help')
   const settingsMode = location.pathname.startsWith('/settings')
-  const mode: 'chat' | 'garden' | 'docs' | 'canvas' | 'board' | 'tasks' | 'meetings' | 'calendar' | 'sharpy' | 'help' =
+  const mode: 'chat' | 'garden' | 'docs' | 'canvas' | 'board' | 'meetings' | 'calendar' | 'sharpy' | 'help' =
     helpMode
       ? 'help'
       : calendarMode
@@ -104,9 +101,7 @@ export function AppShell() {
           ? 'sharpy'
         : meetingsMode
           ? 'meetings'
-          : tasksMode
-            ? 'tasks'
-            : boardMode
+          : boardMode
               ? 'board'
               : canvasMode
                 ? 'canvas'
@@ -349,7 +344,7 @@ function ModeRail({
   orientation,
   edge = 'bottom',
 }: {
-  mode: 'chat' | 'garden' | 'docs' | 'canvas' | 'board' | 'tasks' | 'meetings' | 'calendar' | 'sharpy' | 'help'
+  mode: 'chat' | 'garden' | 'docs' | 'canvas' | 'board' | 'meetings' | 'calendar' | 'sharpy' | 'help'
   orientation: 'vertical' | 'horizontal'
   edge?: 'bottom' | 'top'
 }) {
@@ -499,14 +494,6 @@ function ModeRail({
       <RailButton
         tip={tip}
         shortcut={chord(6)}
-        active={mode === 'tasks'}
-        onClick={() => navigate('/tasks')}
-        title="Tasks"
-        label={<TasksGlyph size={18} />}
-      />
-      <RailButton
-        tip={tip}
-        shortcut={chord(7)}
         active={mode === 'meetings'}
         onClick={() => navigate('/meetings')}
         title="Meetings"
@@ -529,7 +516,7 @@ function ModeRail({
       />
       <RailButton
         tip={tip}
-        shortcut={chord(8)}
+        shortcut={chord(7)}
         active={mode === 'calendar'}
         onClick={() => navigate('/calendar')}
         title="Calendar"
@@ -552,7 +539,7 @@ function ModeRail({
       />
       <RailButton
         tip={tip}
-        shortcut={chord(9)}
+        shortcut={chord(8)}
         active={mode === 'help'}
         onClick={() => navigate('/help')}
         title="Help"

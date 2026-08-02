@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useStore } from '../store'
 import { hasUnseenRelease } from '../lib/whatsNew'
 import { Avatar } from './Avatar'
-import { TasksGlyph } from './tasks/taskUi'
 
 type TabId = 'chat' | 'garden' | 'docs' | 'more'
 
@@ -15,8 +14,6 @@ function tabFromPath(pathname: string): TabId {
     pathname.startsWith('/x/') ||
     pathname.startsWith('/board') ||
     pathname.startsWith('/b/') ||
-    pathname.startsWith('/tasks') ||
-    pathname.startsWith('/t/') ||
     pathname.startsWith('/sharpy') ||
     pathname.startsWith('/meetings') ||
     pathname.startsWith('/calendar') ||
@@ -106,14 +103,6 @@ export function MobileTabBar() {
               onClick={() => {
                 setMoreOpen(false)
                 navigate('/board')
-              }}
-            />
-            <MoreLink
-              label="Tasks"
-              icon={<TasksGlyph size={18} />}
-              onClick={() => {
-                setMoreOpen(false)
-                navigate('/tasks')
               }}
             />
             <MoreLink

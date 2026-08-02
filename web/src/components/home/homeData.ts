@@ -2,8 +2,8 @@
 //
 // Two registers, deliberately kept apart, because they answer different
 // questions: **your trail** (what you opened, newest first — `lib/recents.ts`)
-// and **the workspace's changes** (unread conversations, docs that moved, tasks
-// on your plate, the next thing on the calendar). Mixing them into one "recent"
+// and **the workspace's changes** (unread conversations, docs that moved, the
+// next thing on the calendar). Mixing them into one "recent"
 // list reads as noise; the split is what makes the screen scannable.
 //
 // Cost discipline: everything except the doc feed and the agenda comes from
@@ -17,7 +17,7 @@ import { channelLabel } from '../../lib/util'
 import { effectiveNicknames } from '../../lib/displayName'
 import { withinJoinWindow } from '../../lib/calendar'
 import { useStore } from '../../store'
-import type { CalendarItem, Channel, RecentDoc, Task } from '../../lib/types'
+import type { CalendarItem, Channel, RecentDoc } from '../../lib/types'
 
 const RESUME_MAX = 6
 const LANE_MAX = 5
@@ -101,25 +101,6 @@ export function useActiveConversations(): Channel[] {
         .slice(0, LANE_MAX),
     [channels],
   )
-}
-
-/** Open tasks assigned to you, most recently touched first. */
-export function useMyOpenTasks(): Task[] {
-  const myTasks = useStore((s) => s.myTasks)
-  const projects = useStore((s) => s.projects)
-  return useMemo(() => {
-    const closed = new Set(
-      projects.flatMap((project) =>
-        project.states
-          .filter((state) => state.type === 'completed' || state.type === 'canceled')
-          .map((state) => state.id),
-      ),
-    )
-    return [...myTasks]
-      .filter((task) => !closed.has(task.state_id))
-      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-      .slice(0, LANE_MAX)
-  }, [myTasks, projects])
 }
 
 let docsCache: Cached<RecentDoc[]> = null

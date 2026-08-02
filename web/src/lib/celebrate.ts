@@ -1,5 +1,5 @@
-// Celebration bursts for the handful of moments worth marking: a task reaching
-// a completed state, a poll closing, someone joining a call.
+// Celebration bursts for the handful of moments worth marking: a poll closing
+// or someone joining a call.
 //
 // Deliberately dependency-free and DOM-based (a dozen absolutely-positioned
 // spans driven by WAAPI) rather than a canvas library — the whole effect is

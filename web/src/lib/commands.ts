@@ -31,9 +31,9 @@ export function buildCommands(navigate: NavigateFunction): Command[] {
     // palette routes to the surface rather than reaching into another
     // component — a global modal store would be a heavier change than the
     // command warrants.
-    { id: 'cmd.tasks', label: 'Go to Tasks', icon: '🎯', run: go('/tasks') },
     { id: 'cmd.docs', label: 'Go to Docs', icon: '📄', run: go('/docs') },
     { id: 'cmd.canvas', label: 'Go to Canvas', icon: '🎨', run: go('/canvas') },
+    { id: 'cmd.boards', label: 'Go to Boards', icon: '🗂️', run: go('/board') },
     { id: 'cmd.meetings', label: 'Go to Meetings', icon: '📹', run: go('/meetings') },
     { id: 'cmd.sharpy', label: 'Ask Sharpy', icon: '✦', run: go('/sharpy') },
     { id: 'cmd.read.all', label: 'Mark all notifications read', icon: '✓', run: () => st.markAllNotifRead() },

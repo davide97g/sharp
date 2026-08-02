@@ -9,7 +9,6 @@ mod docs_sync;
 mod error;
 mod expo_push;
 mod gif;
-mod github_api;
 mod google_oauth;
 mod http;
 mod livekit;
@@ -583,60 +582,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         // ── Full-text search — contract: docs/arch/01-core.md ────────────────────────────────
         .route("/search", get(routes::search::search))
-        // ── Tasks, projects, GitHub sync — contract: docs/arch/11-tasks.md ───────────────────
-        .route(
-            "/projects",
-            get(routes::tasks::list_projects).post(routes::tasks::create_project),
-        )
-        .route("/projects/:id", patch(routes::tasks::update_project))
-        .route(
-            "/projects/:id/tasks",
-            get(routes::tasks::list_tasks).post(routes::tasks::create_task),
-        )
-        .route("/tasks/search", get(routes::tasks::search_tasks))
-        .route(
-            "/tasks/by-key/:identifier",
-            get(routes::tasks::get_task_by_key),
-        )
-        .route(
-            "/tasks/:id",
-            get(routes::tasks::get_task)
-                .patch(routes::tasks::update_task)
-                .delete(routes::tasks::delete_task),
-        )
-        .route(
-            "/tasks/:id/comments",
-            post(routes::tasks::create_comment),
-        )
-        .route(
-            "/task-comments/:id",
-            patch(routes::tasks::update_comment).delete(routes::tasks::delete_comment),
-        )
-        .route("/me/tasks", get(routes::tasks::my_tasks))
-        .route(
-            "/task-labels",
-            get(routes::tasks::list_labels).post(routes::tasks::create_label),
-        )
-        .route(
-            "/task-labels/:id",
-            patch(routes::tasks::update_label).delete(routes::tasks::delete_label),
-        )
-        .route(
-            "/projects/:id/github",
-            get(routes::github::get_project_github).post(routes::github::connect_repo),
-        )
-        .route(
-            "/projects/:id/github/:link_id",
-            patch(routes::github::update_repo).delete(routes::github::disconnect_repo),
-        )
-        .route(
-            "/projects/:id/github/:link_id/verify",
-            post(routes::github::verify_repo),
-        )
-        .route(
-            "/integrations/github/webhook",
-            post(routes::github::webhook),
-        )
         // ── Sharpy AI assistant (inert without AI_API_KEY) — contract: docs/arch/10-sharpy.md 
         .route("/sharpy/status", get(routes::sharpy::status))
         .route(

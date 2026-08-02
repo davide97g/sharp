@@ -97,7 +97,7 @@ Atoms:
 | `Heading` | `level: 1\|2\|3` (1=page, 2=panel `text-lg`, 3=modal `text-sm font-semibold`) | ad-hoc headings |
 | `Badge` | `tone: 'neutral'\|'accent'\|'success'\|'warning'\|'danger'`, `variant: 'soft'\|'solid'\|'outline'`, `uppercase` | status/BETA/guest pills |
 | `CountBadge` | `count`, `max=99` (renders `99+`), `muted` | 6 unread-badge variants |
-| `Tag` | `colorKey` (boardColors key), `withDot`, `shape: 'square'\|'pill'` | board/task colored chips |
+| `Tag` | `colorKey` (boardColors key), `withDot`, `shape: 'square'\|'pill'` | board colored chips |
 | `Kbd` | children | shortcut chips |
 | `Spinner` | `size: 'md'\|'sm'\|'lg'` — always `motion-reduce:animate-none` | 4 divergent spinners |
 | `Skeleton` | `className` (sizing); `EditorSkeleton` preset | `.skeleton` divs |

@@ -104,7 +104,7 @@ const transparency = `${repo}/blob/main/web/src/content/transparency.md`;
         <tr>
           <td>Workspace content</td>
           <td>Messages, thread replies, reactions, uploaded files and images, collaborative
-            docs, canvases, boards, tasks and comments, polls, calendar events, and the
+            docs, canvases, boards and comments, polls, calendar events, and the
             channel memberships that scope them</td>
           <td>You and the people you work with</td>
         </tr>
@@ -135,7 +135,7 @@ const transparency = `${repo}/blob/main/web/src/content/transparency.md`;
         </tr>
         <tr>
           <td>Search and AI index</td>
-          <td>Vector embeddings of messages, docs and tasks, used by the assistant. Every
+          <td>Vector embeddings of messages and docs, used by the assistant. Every
             retrieval re-checks your channel membership and doc role, so the assistant cannot
             surface anything you could not already open. Encrypted DMs are never indexed</td>
           <td>Derived from workspace content, only when the assistant is configured</td>
@@ -218,9 +218,8 @@ const transparency = `${repo}/blob/main/web/src/content/transparency.md`;
         </tr>
         <tr>
           <td>GitHub</td>
-          <td>Sign-in: as above. Repository sync: task identifiers and state changes for the
-            repositories a project is linked to</td>
-          <td>If you sign in with GitHub, or link a repository</td>
+          <td>Sign-in: as above</td>
+          <td>If you sign in with GitHub</td>
         </tr>
         <tr>
           <td>GIPHY</td>

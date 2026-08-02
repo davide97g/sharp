@@ -118,10 +118,7 @@ export type NotificationKind =
   | 'dm'
   | 'reply'
   | 'poll_ended'
-  | 'task_assigned'
-  | 'task_comment'
 
-// Message kinds carry a channel; task kinds carry a task instead.
 export type Notification = {
   id: string
   kind: NotificationKind
@@ -130,21 +127,12 @@ export type Notification = {
   channel_kind: ChannelKind | null
   channel_name: string | null
   message_id: string | null
-  task_id: string | null
-  task_identifier: string | null // "SHARP-123" — deep link derives from this
   preview: string
   created_at: string
   read_at: string | null
 }
 
-/** /t/{key}/{num} for task notifications, /c/{channel} otherwise. */
 export function notificationPath(n: Notification): string {
-  if (n.task_identifier) {
-    const at = n.task_identifier.lastIndexOf('-')
-    if (at > 0) {
-      return `/t/${n.task_identifier.slice(0, at).toLowerCase()}/${n.task_identifier.slice(at + 1)}`
-    }
-  }
   return n.channel_id ? `/c/${n.channel_id}` : '/'
 }
 
@@ -162,7 +150,6 @@ export type Prefs = {
   notify_dm: boolean
   notify_mention: boolean
   notify_reply: boolean
-  notify_task: boolean
   notify_poll: boolean
   dnd_scheduled: boolean
   dnd_start: number | null // minutes-of-day, local time
@@ -183,7 +170,6 @@ export type PrefsUpdate = Partial<
     | 'notify_dm'
     | 'notify_mention'
     | 'notify_reply'
-    | 'notify_task'
     | 'notify_poll'
     | 'dnd_scheduled'
     | 'dnd_start'
@@ -831,13 +817,6 @@ export type SharpySource =
       doc_kind: 'doc' | 'canvas' | 'board'
       snippet: string
     }
-  | {
-      kind: 'task'
-      task_id: string
-      identifier: string
-      title: string
-      snippet: string
-    }
 
 export type SharpyMessage = {
   id: string
@@ -860,160 +839,3 @@ export type SharpyStreamEvent =
   | { type: 'delta'; text: string }
   | { type: 'done'; message: SharpyMessage }
   | { type: 'error'; message: string }
-
-// --- Tasks (Phase 7 — Linear-lite planner) ---
-
-export type TaskStateType = 'backlog' | 'unstarted' | 'started' | 'completed' | 'canceled'
-
-export type TaskState = {
-  id: string
-  project_id: string
-  name: string
-  color: string // board palette key
-  type: TaskStateType
-  position: number
-}
-
-export type Project = {
-  id: string
-  key: string
-  name: string
-  icon: string
-  channel_id: string | null
-  created_by: string
-  archived_at: string | null
-  created_at: string
-  /** Branch naming convention; '' means the built-in `{identifier}-{slug}`. */
-  branch_template: string
-  states: TaskState[]
-  open_count: number
-  github_repos: ProjectGithubRepo[]
-}
-
-/** A repository linked to a project. Webhook secret and PAT stay server-side. */
-export type ProjectGithubRepo = {
-  id: string
-  project_id: string
-  repo: string // owner/name
-  visibility: '' | 'public' | 'private' | 'internal'
-  default_branch: string
-  hook_installed: boolean // we created the webhook through the API
-  hook_active: boolean // a signed delivery has arrived
-  has_token: boolean
-  last_error: string
-  last_event_at: string | null
-  last_event_kind: string
-  created_at: string
-}
-
-/** `GET /projects/:id/github` — status plus what manual setup needs. */
-export type ProjectGithubSetup = {
-  project: Project
-  webhook_url: string
-  events: string[]
-  /** Webhook secret per link id — shown so it can be pasted into GitHub. */
-  secrets: Record<string, string>
-  /** A global GITHUB_WEBHOOK_SECRET is also configured on this server. */
-  env_fallback: boolean
-}
-
-export type TaskGithubLink = {
-  id: string
-  kind: 'branch' | 'pr' | 'issue'
-  repo: string
-  ref: string
-  url: string
-  title: string
-  state: string // '' | 'open' | 'draft' | 'merged' | 'closed'
-  created_at: string
-}
-
-// 0 none, 1 urgent, 2 high, 3 medium, 4 low (Linear order)
-export type TaskPriority = 0 | 1 | 2 | 3 | 4
-
-export type Task = {
-  id: string
-  project_id: string
-  number: number
-  identifier: string // "SHARP-123", precomputed server-side
-  title: string
-  description: string
-  state_id: string
-  priority: TaskPriority
-  assignee_id: string | null
-  creator_id: string
-  parent_id: string | null
-  due_date: string | null // YYYY-MM-DD
-  sort_order: string
-  source_message_id: string | null
-  created_at: string
-  updated_at: string
-  completed_at: string | null
-  label_ids: string[]
-  github_links: TaskGithubLink[]
-  comment_count: number
-  sub_count: number
-}
-
-export type TaskComment = {
-  id: string
-  task_id: string
-  author: MessageAuthor
-  body: string
-  created_at: string
-  updated_at: string | null
-  deleted: boolean
-}
-
-export type TaskActivity = {
-  id: string
-  task_id: string
-  actor: MessageAuthor | null // null = automation (GitHub)
-  kind: string
-  payload: Record<string, unknown>
-  created_at: string
-}
-
-export type TaskDetail = Task & {
-  comments: TaskComment[]
-  activity: TaskActivity[]
-  sub_tasks: Task[]
-}
-
-export type TaskLabel = {
-  id: string
-  name: string
-  color: string
-}
-
-export type TaskCreateInput = {
-  title: string
-  description?: string
-  state_id?: string
-  priority?: TaskPriority
-  assignee_id?: string
-  label_ids?: string[]
-  due_date?: string
-  parent_id?: string
-  source_message_id?: string
-}
-
-export type TaskUpdateInput = {
-  title?: string
-  description?: string
-  state_id?: string
-  priority?: TaskPriority
-  assignee_id?: string | null
-  label_ids?: string[]
-  due_date?: string | null
-  parent_id?: string | null
-  sort_order?: string
-}
-
-// WS payloads
-export type ProjectCreatedPayload = { project: Project }
-export type ProjectUpdatedPayload = { project: Project }
-export type TaskCreatedPayload = { task: Task }
-export type TaskUpdatedPayload = { task: Task }
-export type TaskDeletedPayload = { task_id: string; project_id: string }
-export type TaskCommentPayload = { comment: TaskComment }

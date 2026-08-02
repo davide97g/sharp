@@ -16,7 +16,7 @@ you will find no dependency and no call site.
 
 | Destination | What goes there | When |
 |---|---|---|
-| **Your sharp server** | Everything: messages, files, docs, canvases, tasks, calls | Always — this is the app |
+| **Your sharp server** | Everything: messages, files, docs, canvases, boards, calls | Always — this is the app |
 | **Your LiveKit server** | Audio, video, and screen-share media | Only during a call |
 | **Nowhere else** | — | — |
 
