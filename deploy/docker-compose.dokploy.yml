@@ -181,11 +181,6 @@ services:
       TRANSCRIBE_API_KEY: ${TRANSCRIBE_API_KEY:-}
       TRANSCRIBE_BASE_URL: ${TRANSCRIBE_BASE_URL:-}
       TRANSCRIBE_MODEL: ${TRANSCRIBE_MODEL:-gpt-4o-mini-transcribe}
-      # GitHub task sync (Phase 7) — inert without the webhook secret. GITHUB_REPOS
-      # is an optional comma-separated owner/repo allowlist (all repos when unset).
-      # Webhook endpoint: https://<api-domain>/api/v1/integrations/github/webhook
-      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
-      GITHUB_REPOS: ${GITHUB_REPOS:-}
       # Google Calendar (Phase 5) — optional. Leave unset to disable calendar sync.
       # GOOGLE_REDIRECT_URI must exactly match a redirect registered on the OAuth
       # client and point at the API subdomain (split deploy):
@@ -226,10 +221,6 @@ services:
       dockerfile: deploy/Dockerfile.web
       args:
         VITE_API_URL: ${API_URL:-https://server.sharp.davideghiotto.it}
-        # tldraw license key (removes the canvas watermark). Baked into the public
-        # client bundle at build time, so it is not a secret. Override in the
-        # Dokploy Environment tab if the key is rotated.
-        VITE_TLDRAW_LICENSE_KEY: ${TLDRAW_LICENSE_KEY:-tldraw-2026-07-29/WyJJNFNEa0RIbCIsWyIqIl0sMTYsIjIwMjYtMDctMjkiXQ.HI3ay8fvFOqy6cMFRvrk5FpR1JmkiGpCb+50LFn/AWXVSf/1aeQJAHsnEFHJZ1X5By52D7ZRDNVB+6cRC3rhaQ}
     restart: unless-stopped
     expose:
       - "80"

@@ -1,23 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import * as Y from 'yjs'
-import 'tldraw/tldraw.css'
-import { Tldraw, type Editor } from 'tldraw'
-import { getAssetUrlsByImport } from '@tldraw/assets/imports.vite'
+// Must precede the editor import: it sets window.EXCALIDRAW_ASSET_PATH, which is
+// what keeps font loading on our own origin instead of a CDN.
+import '../../lib/excalidrawAssets'
+import '@excalidraw/excalidraw/index.css'
+import { Excalidraw } from '@excalidraw/excalidraw'
 import { SharpDocProvider, type DocConnStatus, type DocRoleByte } from '../../lib/docSync'
-import { useYjsTldrawStore } from '../../lib/tldrawYjs'
+import { useExcalidrawYjs } from '../../lib/excalidrawYjs'
+import { resolveScheme } from '../../lib/theme'
 import { useStore } from '../../store'
 
 import type { DocPeer as Peer } from '../../lib/types'
 export type { DocPeer as Peer } from '../../lib/types'
-
-// Self-hosted tldraw assets (this app must never hit the tldraw CDN). Resolved
-// once at module scope.
-const assetUrls = getAssetUrlsByImport()
-
-// tldraw commercial license key (removes the watermark). Baked in at build time
-// via VITE_TLDRAW_LICENSE_KEY; undefined in dev falls back to the watermarked
-// non-commercial mode.
-const licenseKey = import.meta.env.VITE_TLDRAW_LICENSE_KEY as string | undefined
 
 export function CanvasEditorInner({
   docId,
@@ -35,6 +29,7 @@ export function CanvasEditorInner({
   const [role, setRole] = useState<DocRoleByte>(editable ? 'editor' : 'viewer')
   const [status, setStatus] = useState<DocConnStatus>('connecting')
   const me = useStore((s) => s.me)
+  const ui = useStore((s) => s.ui)
 
   // One Y.Doc + provider per mount (component is keyed by docId upstream).
   // Lazily initialised via a ref so React StrictMode's double-render doesn't
@@ -48,7 +43,7 @@ export function CanvasEditorInner({
         docId,
         doc: ydoc,
         user,
-        // Track status locally (to gate the store's `synced`) and forward it up.
+        // Track status locally (to gate the editor mount) and forward it up.
         onStatus: (s) => {
           setStatus(s)
           onStatus(s)
@@ -62,20 +57,16 @@ export function CanvasEditorInner({
 
   const canEdit = editable && role === 'editor'
 
-  // tldraw store bound to our Y.Doc + Awareness. `synced` gates the initial
-  // hydrate so we never seed defaults over authoritative server state.
-  const storeWithStatus = useYjsTldrawStore({
+  // Excalidraw scene bound to our Y.Doc + Awareness. `synced` gates the mount,
+  // so an empty default scene can never be written over server state.
+  const yjs = useExcalidrawYjs({
+    docId,
     doc: provider.doc,
     awareness: provider.awareness,
     user: { id: me?.id ?? '', name: user.name, color: user.color },
+    canEdit,
     synced: status === 'connected',
   })
-
-  // Read-only mirrors role: apply on mount and re-apply whenever it changes.
-  const editorRef = useRef<Editor | null>(null)
-  useEffect(() => {
-    editorRef.current?.updateInstanceState({ isReadonly: !canEdit })
-  }, [canEdit])
 
   // Socket lifecycle: connect on mount, disconnect on cleanup. Full teardown is
   // deferred so a StrictMode remount cancels it; only a real unmount tears down.
@@ -114,15 +105,20 @@ export function CanvasEditorInner({
   return (
     <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
       <div style={{ position: 'absolute', inset: 0 }}>
-        <Tldraw
-          store={storeWithStatus}
-          assetUrls={assetUrls}
-          licenseKey={licenseKey}
-          onMount={(editor) => {
-            editorRef.current = editor
-            editor.updateInstanceState({ isReadonly: !canEdit })
-          }}
-        />
+        {yjs.ready && yjs.initialData ? (
+          <Excalidraw
+            initialData={yjs.initialData}
+            excalidrawAPI={yjs.setApi}
+            onChange={yjs.onChange}
+            onPointerUpdate={yjs.onPointerUpdate}
+            isCollaborating={yjs.peerCount > 0}
+            viewModeEnabled={!canEdit}
+            theme={resolveScheme(ui.scheme)}
+            // The scene lives in the doc; loading a .excalidraw file over it would
+            // fight the CRDT, so that action stays off.
+            UIOptions={{ canvasActions: { loadScene: false } }}
+          />
+        ) : null}
       </div>
     </div>
   )

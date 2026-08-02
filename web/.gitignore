@@ -14,3 +14,6 @@ npm-debug.log*
 .vscode
 .idea
 *.local
+
+# Excalidraw fonts mirrored out of node_modules by vite.config.ts
+public/excalidraw-assets

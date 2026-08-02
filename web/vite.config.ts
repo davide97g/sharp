@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -21,20 +21,42 @@ function stampServiceWorker(): Plugin {
   }
 }
 
+// Excalidraw loads its fonts at runtime from `window.EXCALIDRAW_ASSET_PATH`, and
+// silently falls back to a public CDN when a file 404s. This app must never reach
+// a third-party CDN, so the font tree is mirrored into `public/excalidraw-assets/`
+// (gitignored, re-copied whenever the package version changes) and
+// `lib/excalidrawAssets.ts` points the editor at it.
+function copyExcalidrawAssets(): Plugin {
+  return {
+    name: 'sharp-excalidraw-assets',
+    config() {
+      const pkgPath = './node_modules/@excalidraw/excalidraw/package.json'
+      const source = fileURLToPath(
+        new URL('./node_modules/@excalidraw/excalidraw/dist/prod/fonts', import.meta.url),
+      )
+      if (!existsSync(source)) return
+      const version = JSON.parse(
+        readFileSync(fileURLToPath(new URL(pkgPath, import.meta.url)), 'utf8'),
+      ).version as string
+      const target = fileURLToPath(new URL('./public/excalidraw-assets', import.meta.url))
+      const stamp = `${target}/.version`
+      if (existsSync(stamp) && readFileSync(stamp, 'utf8') === version) return
+      rmSync(target, { recursive: true, force: true })
+      mkdirSync(target, { recursive: true })
+      cpSync(source, `${target}/fonts`, { recursive: true })
+      writeFileSync(stamp, version)
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss(), stampServiceWorker()],
+  plugins: [react(), tailwindcss(), copyExcalidrawAssets(), stampServiceWorker()],
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
     // Same id stamped into sw.js — the Settings → About tab shows it, so you
     // can verify a deploy actually reached the client you're looking at.
     __BUILD_ID__: JSON.stringify(buildId),
-  },
-  optimizeDeps: {
-    // `@tldraw/assets/imports.vite` resolves fonts/icons via Vite `?url` imports.
-    // esbuild's dep pre-bundling can't handle `?url` (URLs come back undefined and
-    // getAssetUrlsByImport() throws), so let Vite process this package natively.
-    exclude: ['@tldraw/assets'],
   },
   server: {
     proxy: {

@@ -42,8 +42,8 @@ user_prefs(user_id uuid PK, dnd boolean NOT NULL default false,
   chat_layout text,                                  -- 'bubble'|'classic'; null = not chosen yet
   -- migration 0026: per-type toggles + scheduled DND (quiet hours)
   notify_dm boolean NOT NULL default true, notify_mention boolean NOT NULL default true,
-  notify_reply boolean NOT NULL default true, notify_task boolean NOT NULL default true,
-  notify_poll boolean NOT NULL default true, dnd_scheduled boolean NOT NULL default false,
+  notify_reply boolean NOT NULL default true, notify_poll boolean NOT NULL default true,
+  dnd_scheduled boolean NOT NULL default false,
   dnd_start integer, dnd_end integer,                -- minutes-of-day, user-local; may wrap midnight
   tz_offset integer NOT NULL default 0,              -- minutes east of UTC
   -- migration 0029: opaque client-owned appearance blob (theme, scheme, accent
@@ -74,12 +74,12 @@ Attachment = { id: string, filename: string, content_type: string, size: number,
                url: string }              // url = proxied path "/api/v1/files/<id>"
 Message = { …, attachments: Attachment[] }  // added to the existing Message shape
 
-NotificationKind = 'mention'|'dm'|'reply'|'poll_ended'|'task_assigned'|'task_comment'
+NotificationKind = 'mention'|'dm'|'reply'|'poll_ended'
 Notification = {
   id: string, kind: NotificationKind,
   actor: { id: string, display_name: string, avatar_url: string|null },
-  channel_id: string|null, channel_kind: 'public'|'private'|'dm'|null, channel_name: string|null,
-  message_id: string|null, task_id: string|null, task_identifier: string|null,
+  channel_id: string, channel_kind: 'public'|'private'|'dm', channel_name: string,
+  message_id: string|null,
   preview: string, created_at: string, read_at: string|null
 }
 ChatLayout = 'bubble' | 'classic'        // DM rendering: WhatsApp-style vs Slack-style rows
@@ -89,7 +89,7 @@ Prefs = {
   channel_modes: Record<string, ChannelNotifyMode>,  // per-channel override
   chat_layout: ChatLayout | null,
   notify_dm: boolean, notify_mention: boolean, notify_reply: boolean,
-  notify_task: boolean, notify_poll: boolean,        // per-type master switches (default on)
+  notify_poll: boolean,                              // per-type master switches (default on)
   dnd_scheduled: boolean,                             // quiet-hours enabled
   dnd_start: number|null, dnd_end: number|null,       // minutes-of-day, user-local; may wrap midnight
   tz_offset: number                                   // minutes east of UTC (client-supplied)
@@ -103,7 +103,7 @@ PrefsUpdate = Partial<Pick<Prefs, notify_*|dnd_scheduled|dnd_start|dnd_end|tz_of
 |---|---|---|
 | POST | `/channels/{id}/messages` | now also accepts `attachment_ids?: string[]`; content may be empty iff ≥1 attachment |
 | POST | `/channels/{id}/uploads` | multipart `file` → `201 Attachment` (channel owner/editor; ≤ `MAX_UPLOAD_MB`) |
-| POST | `/docs/{id}/uploads` | multipart `file` → `201 Attachment` (doc editor/owner; active `kind:'doc'` only; PNG/JPEG/GIF/WebP/AVIF signature required; ≤ `MAX_UPLOAD_MB`) |
+| POST | `/docs/{id}/uploads` | multipart `file` → `201 Attachment` (doc editor/owner; active `kind:'doc'` or `kind:'canvas'` only; PNG/JPEG/GIF/WebP/AVIF signature required; ≤ `MAX_UPLOAD_MB`) |
 | GET | `/files/{id}?download=1` | streamed bytes (message file: channel member; doc image: visible doc role); `download=1` forces attachment disposition |
 | GET | `/notifications?before=<id>&limit=30` | → `{notifications: Notification[], unread_count}` (newest first) |
 | POST | `/notifications/read` | `{ids?: string[]}` or `{all: true}` → `204` |
@@ -200,8 +200,8 @@ Also in the `ui` blob, all applied client-side:
 - **Sound packs** re-tune the existing synthesis engine rather than shipping assets: a pack
   is a transform (waveform, pitch, decay, gain, chorus) applied at `envGain` and `tone` in
   `lib/sound.ts`, so all 28 sounds keep their melody and timing.
-- **Celebrations** (`lib/celebrate.ts`) fire on a task entering a `completed`-*type* state
-  and on a poll closing — both detected in the WS reducer by comparing against prior state.
+- **Celebrations** (`lib/celebrate.ts`) fire when a poll closes, detected in the WS reducer
+  by comparing against prior state.
 - **Focus mode** is the master kill switch for effects, wallpapers, and celebrations. The
   streaming privacy shield borrows it via `applyUiPrefs(prefs, focusOverride)` without
   writing the stored preference, so the user's own setting returns when the stream ends.
@@ -273,9 +273,8 @@ Controls (all enforced server-side in `notify.rs`; the client mirrors DND for to
 - **Per-channel mode** (`channel_prefs.mode`, default `all`) — `muted` creates no row for
   that channel; `mentions` allows only `mention`/`reply` there; `all` is unrestricted. The
   legacy `muted` boolean is kept in sync (`muted` = mode `muted`) for older reads.
-- **Per-type master switch** (`user_prefs.notify_{dm,mention,reply,task,poll}`, default on) —
+- **Per-type master switch** (`user_prefs.notify_{dm,mention,reply,poll}`, default on) —
   a disabled type produces **no notification at all** (no inbox row, no push), like a mute.
-  `task` covers both `task_assigned` and `task_comment`.
 - **Do Not Disturb** — the manual `dnd` toggle, or an active **scheduled** window
   (`dnd_scheduled` + `dnd_start`/`dnd_end` minutes-of-day in the user's local time via
   `tz_offset`, wrap-aware past midnight). While DND is active the inbox row +
@@ -351,4 +350,3 @@ in sync.
 `minio` service + bucket-init job.
 
 ---
-

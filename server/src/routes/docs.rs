@@ -226,17 +226,19 @@ async fn access(pool: &PgPool, doc_id: Uuid, user_id: Uuid) -> AppResult<(RawDoc
     Ok((raw, role))
 }
 
-/// Resolve an editable, active BlockNote doc and return its channel.
+/// Resolve an editable, active image-bearing doc and return its channel.
 /// Used by doc-scoped uploads so image permissions match live editor permissions.
+/// Canvases qualify too: an Excalidraw image element uploads its bytes here rather
+/// than inlining a data URL that would blow the sync socket's update cap.
 pub(crate) async fn editable_doc_channel(
     pool: &PgPool,
     doc_id: Uuid,
     user_id: Uuid,
 ) -> AppResult<Uuid> {
     let (raw, role) = access(pool, doc_id, user_id).await?;
-    if raw.kind != "doc" {
+    if raw.kind != "doc" && raw.kind != "canvas" {
         return Err(AppError::Validation(
-            "images can only be uploaded to docs".to_string(),
+            "images can only be uploaded to docs and canvases".to_string(),
         ));
     }
     if raw.deleted_at.is_some() {

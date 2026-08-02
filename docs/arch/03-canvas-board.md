@@ -1,20 +1,41 @@
 # Phase 3 — Canvas (edgeless whiteboard)
 
 > Part of the sharp architecture contract. Index: [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
-> Canvas (tldraw) and Board (kanban) doc kinds. Both are `docs` rows with a different `kind` — read 02-docs.md first; only the deltas are here.
+> Canvas (Excalidraw) and Board (kanban) doc kinds. Both are `docs` rows with a different `kind` — read 02-docs.md first; only the deltas are here.
 
-Collaborative tldraw whiteboards, built entirely on the Phase 2 doc foundation: a canvas
+Collaborative whiteboards, built entirely on the Phase 2 doc foundation: a canvas
 **is a `docs` row with `kind = 'canvas'`** (migration `0006_doc_kind.sql`). It reuses the
 doc REST surface, the per-channel + per-doc role model, trash/restore, and the
 `/api/v1/docs/{id}/sync` WebSocket **unchanged**.
 
-- **Editor**: `tldraw` v5 — full edgeless toolset (draw, shapes, arrows, text, sticky
-  notes, images) with live multiplayer cursors.
+- **Editor**: `@excalidraw/excalidraw` — full edgeless toolset (draw, shapes, arrows, text,
+  images, frames, laser pointer) with live multiplayer cursors. **The engine choice is a
+  licensing constraint, not a preference**: Excalidraw is MIT (deps MIT/CC0, fonts OFL-1.1),
+  so it is free to self-host, fork and redistribute under sharp's AGPL. tldraw — used until
+  2026-08 — is proprietary source-available: production use needs a paid key and its
+  modifications may not be redistributed. Do not reintroduce a dependency that needs a
+  license key.
 - **Sync**: the doc-sync socket is content-agnostic (raw Yjs v1 bytes + `yrs` merge). A
-  canvas stores its tldraw document as whole `TLRecord`s in `ydoc.getMap('tldraw')` —
-  document-scope records only, so each viewer keeps its own camera/selection. The client
-  binds it with `useYjsTldrawStore` (`web/src/lib/tldrawYjs.ts`) over the shared
-  `SharpDocProvider`; presence rides the existing `y-protocols` awareness.
+  canvas stores one Excalidraw element per key in `ydoc.getMap('excalidraw')`; deletes are
+  `isDeleted: true` tombstones, not removed keys. Client binding is `useExcalidrawYjs`
+  (`web/src/lib/excalidrawYjs.ts`) over the shared `SharpDocProvider`:
+  - local → Yjs is batched one `doc.transact` per animation frame, filtered by a
+    `versionNonce` cache (which is also the echo guard);
+  - Yjs → local goes through Excalidraw's own `reconcileElements` (per-element LWW on
+    `version`/`versionNonce`) and applies with `CaptureUpdateAction.NEVER`, so remote work
+    never lands in local undo;
+  - `<Excalidraw>` is not mounted until the provider's first server sync completes, so a
+    default empty scene can never overwrite server state;
+  - presence (cursor, button, selection) rides the existing `y-protocols` awareness under an
+    `excalidrawPresence` field and maps to Excalidraw `collaborators`.
+- **Images are never inlined in the Y.Doc** — `MAX_UPDATE_BYTES` is 512 KB. A pasted image
+  uploads through the existing doc-image endpoint (`POST /docs/{id}/uploads`) and only
+  `{ id, url, mimeType }` is shared, in `ydoc.getMap('excalidraw_files')`; each client fetches
+  the bytes itself (authenticated) and feeds them to `addFiles`. Server-side validation limits
+  canvas images to PNG/JPEG/GIF/WebP/AVIF — SVG is rejected with a toast.
+- **Pre-2026-08 canvases** hold tldraw records under the old `ydoc.getMap('tldraw')` key. That
+  data is untouched but inert: those canvases open as an empty Excalidraw scene. No converter
+  exists (deliberate).
 - **Compaction**: `compact_doc` still merges the update log for canvases, but **skips the
   blocknote text/link extraction** — `content_text` stays empty and no `doc_links` are
   written, so canvas search matches on title only and canvases have no backlinks.
@@ -22,8 +43,13 @@ doc REST surface, the per-channel + per-doc role model, trash/restore, and the
   `doc.created`/`doc.updated` carry `kind`, so clients route to the doc editor (`/d/:id`)
   or the canvas editor (`/x/:id`).
 - **Web**: a third **Canvas** mode in the rail; `web/src/components/canvas/` mirrors
-  `components/docs/` (Home / channel list / sidebar / editor). The tldraw editor chunk is
-  lazy-loaded, and tldraw assets are **self-hosted** (bundled by Vite) — no CDN dependency.
+  `components/docs/` (Home / channel list / sidebar / editor). The editor chunk is
+  lazy-loaded, and its fonts are **self-hosted** — no CDN. `vite.config.ts`
+  (`sharp-excalidraw-assets`) mirrors the package's font tree into
+  `public/excalidraw-assets/` (gitignored, refreshed on version change) and
+  `lib/excalidrawAssets.ts` sets `window.EXCALIDRAW_ASSET_PATH` before the editor import.
+  Excalidraw silently falls back to its public CDN when a font 404s, so that mirror must stay
+  in place.
 
 # Phase 3.5 — Boards (Notion-style kanban)
 

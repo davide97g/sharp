@@ -337,7 +337,7 @@ async fn build_state(blobs: Vec<Vec<u8>>) -> AppResult<(Vec<u8>, Vec<u8>)> {
 }
 
 /// Merge the update log into a single v1 update, WITHOUT any content extraction.
-/// Used to compact a canvas doc, whose Yjs store is a tldraw store (a `Y.Map`), not
+/// Used to compact a canvas doc, whose Yjs store is an Excalidraw scene (a `Y.Map`), not
 /// a blocknote XML fragment — so there is no plain text / doc-links to extract.
 async fn merge_state(blobs: Vec<Vec<u8>>) -> AppResult<Vec<u8>> {
     tokio::task::spawn_blocking(move || {
@@ -484,7 +484,7 @@ async fn compact_doc(state: &SharedState, doc_id: Uuid) -> AppResult<bool> {
         return Ok(false);
     }
 
-    // Canvas and board docs store non-blocknote Yjs state (a tldraw / kanban Y.Map),
+    // Canvas and board docs store non-blocknote Yjs state (an Excalidraw / kanban Y.Map),
     // so merge the update log but skip content_text / doc_link extraction (blocknote-only).
     let skip_extraction = sqlx::query("SELECT kind FROM docs WHERE id = $1")
         .bind(doc_id)
