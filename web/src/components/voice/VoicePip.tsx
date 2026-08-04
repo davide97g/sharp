@@ -17,6 +17,8 @@ import { MicActivityIcon } from './MicActivityIcon'
 type PipParticipant = {
   userId: string
   connIds: string[]
+  /** Name the room payload carries — the only source for guests, who are not in the directory. */
+  displayName: string
   muted: boolean
   speaking: boolean
   handRaised: boolean
@@ -39,28 +41,50 @@ export type VoicePipController = {
   portal: React.ReactPortal | null
 }
 
+// A torn-down PiP window still reads as a Window. `pagehide` is the documented
+// close signal but the browser's own auto-PiP teardown (returning to the tab)
+// does not always deliver it, and portalling the call into that dead document
+// renders it nowhere — then throws once `document.body` goes null, which with no
+// error boundary takes the whole app down. So liveness is re-checked, never
+// remembered.
+function pipAlive(win: Window | null): win is Window {
+  if (!win || win.closed) return false
+  try {
+    return Boolean(win.document?.body)
+  } catch {
+    return false
+  }
+}
+
 export function useVoicePip(hasFallbackVideo: boolean): VoicePipController {
   const status = useStore((s) => s.voice.status)
   const muted = useStore((s) => s.voice.muted)
   const cameraStatus = useStore((s) => s.voice.cameraStatus)
   const pipWindowRef = useRef<Window | null>(null)
-  const pageHideRef = useRef<(() => void) | null>(null)
+  const detachRef = useRef<(() => void) | null>(null)
+  /** Opened by the browser on tab-switch (Media Session) rather than by a click. */
+  const autoOpenedRef = useRef(false)
   const [pipWindow, setPipWindow] = useState<Window | null>(null)
   const documentPipSupported = supportsDocumentPip()
   const supported = documentPipSupported || (hasFallbackVideo && supportsElementPip())
 
-  const close = useCallback(() => {
+  // Drop our hold on the window without closing it — the teardown path for a
+  // window the browser already closed behind our back.
+  const forget = useCallback(() => {
+    detachRef.current?.()
+    detachRef.current = null
     const current = pipWindowRef.current
-    const onPageHide = pageHideRef.current
     pipWindowRef.current = null
-    pageHideRef.current = null
+    autoOpenedRef.current = false
     setPipWindow(null)
-    if (current) {
-      if (onPageHide) current.removeEventListener('pagehide', onPageHide)
-      if (!current.closed) current.close()
-    }
-    closeElementPip()
+    return current
   }, [])
+
+  const close = useCallback(() => {
+    const current = forget()
+    if (current && !current.closed) current.close()
+    closeElementPip()
+  }, [forget])
 
   const closeAndFocus = useCallback(() => {
     close()
@@ -69,10 +93,11 @@ export function useVoicePip(hasFallbackVideo: boolean): VoicePipController {
 
   const open = useCallback(async () => {
     const existing = pipWindowRef.current
-    if (existing && !existing.closed) {
+    if (pipAlive(existing)) {
       existing.focus()
       return
     }
+    if (existing) forget()
 
     if (!supportsDocumentPip()) {
       try {
@@ -83,6 +108,10 @@ export function useVoicePip(hasFallbackVideo: boolean): VoicePipController {
       return
     }
 
+    // Auto-PiP only ever fires while the tab is hidden; a click happens with the
+    // tab in front. That tells the two apart without a second entry point.
+    const auto = document.visibilityState === 'hidden'
+
     try {
       const next = await window.documentPictureInPicture!.requestWindow({
         width: 360,
@@ -91,26 +120,53 @@ export function useVoicePip(hasFallbackVideo: boolean): VoicePipController {
       next.document.title = 'Sharp call'
       copyDocumentStyles(next)
 
-      const onPageHide = () => {
+      const onGone = () => {
         if (pipWindowRef.current !== next) return
-        pipWindowRef.current = null
-        pageHideRef.current = null
-        setPipWindow(null)
+        forget()
       }
       pipWindowRef.current = next
-      pageHideRef.current = onPageHide
-      next.addEventListener('pagehide', onPageHide, { once: true })
+      autoOpenedRef.current = auto
+      next.addEventListener('pagehide', onGone)
+      next.addEventListener('unload', onGone)
+      detachRef.current = () => {
+        next.removeEventListener('pagehide', onGone)
+        next.removeEventListener('unload', onGone)
+      }
       setPipWindow(next)
     } catch {
       // Permission denial leaves the in-page stage available.
     }
-  }, [])
+  }, [forget])
 
   useEffect(() => close, [close])
 
   useEffect(() => {
     if (status !== 'connected' && status !== 'reconnecting') close()
   }, [close, status])
+
+  // Coming back to the tab is the moment both failure modes surface: the browser
+  // has torn its auto-PiP window down (possibly without `pagehide`), and a window
+  // it opened *because* we left has no reason to outlive our return. Polling backs
+  // the events up so a stale hold can never survive more than a second — while it
+  // does, the stage is already rendered in the page (see the guarded return).
+  useEffect(() => {
+    if (!pipWindow) return
+    const check = () => {
+      if (!pipAlive(pipWindowRef.current)) {
+        forget()
+        return
+      }
+      if (autoOpenedRef.current && document.visibilityState === 'visible') close()
+    }
+    const timer = window.setInterval(check, 1000)
+    document.addEventListener('visibilitychange', check)
+    window.addEventListener('focus', check)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', check)
+      window.removeEventListener('focus', check)
+    }
+  }, [close, forget, pipWindow])
 
   useEffect(() => {
     if (
@@ -168,14 +224,17 @@ export function useVoicePip(hasFallbackVideo: boolean): VoicePipController {
     }
   }, [status])
 
+  // Callers gate the whole in-page stage on `pipWindow`, so a window that is gone
+  // must read as gone in the same render that discovers it — waiting for the
+  // watchdog would blank the call UI (and portal into a dead document).
+  const live = pipAlive(pipWindow) ? pipWindow : null
+
   return {
     supported,
     open,
     closeAndFocus,
-    pipWindow,
-    portal: pipWindow
-      ? createPortal(<PipStage onReturn={closeAndFocus} />, pipWindow.document.body)
-      : null,
+    pipWindow: live,
+    portal: live ? createPortal(<PipStage onReturn={closeAndFocus} />, live.document.body) : null,
   }
 }
 
@@ -271,6 +330,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
         byUser.set(entry.user_id, {
           userId: entry.user_id,
           connIds: [connId],
+          displayName: entry.display_name,
           muted: entry.muted,
           speaking: Boolean(speaking[connId]),
           handRaised: entry.hand_raised,
@@ -302,12 +362,16 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
     return null
   }, [room, myConnId, localScreenStream, remoteScreenStreams])
 
-  const resolveName = (userId: string, fallback?: string) =>
+  // Same order as the stage: nickname → directory → the room payload's own name →
+  // last resort. The payload step is what keeps guests (never in the directory)
+  // from collapsing to "Participant" — and what shows members their real names to
+  // a guest viewer, who has no directory at all.
+  const resolveName = (userId: string, roomName?: string) =>
     displayNameFor(userId, {
       nicknames,
       users,
       fallback:
-        (me?.id === userId ? me.display_name : undefined) ?? fallback ?? 'Participant',
+        (me?.id === userId ? me.display_name : undefined) ?? roomName ?? 'Participant',
     })
 
   const roomName = channel
@@ -358,7 +422,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
               className="flex shrink-0 items-center gap-1.5 overflow-x-auto"
             >
               {participants.map((participant) => {
-                const name = resolveName(participant.userId)
+                const name = resolveName(participant.userId, participant.displayName)
                 return (
                   <div
                     key={participant.userId}
@@ -403,7 +467,7 @@ function PipStage({ onReturn }: { onReturn: () => void }) {
               <PipTile
                 key={participant.userId}
                 userId={participant.userId}
-                name={resolveName(participant.userId)}
+                name={resolveName(participant.userId, participant.displayName)}
                 stream={stream}
                 local={local}
                 muted={participant.muted}

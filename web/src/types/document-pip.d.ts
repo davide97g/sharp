@@ -14,4 +14,5 @@ interface Window {
 
 interface HTMLVideoElement {
   webkitSetPresentationMode?: (mode: 'inline' | 'picture-in-picture' | 'fullscreen') => void
+  readonly webkitPresentationMode?: 'inline' | 'picture-in-picture' | 'fullscreen'
 }

@@ -19,7 +19,13 @@ const DRAG_THRESHOLD = 5
 
 type Corner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 type Position = { left: number; top: number }
-type MiniParticipant = { userId: string; connIds: string[]; speaking: boolean }
+type MiniParticipant = {
+  userId: string
+  connIds: string[]
+  /** From the room payload — the only name source for guests, who are not in the directory. */
+  displayName: string
+  speaking: boolean
+}
 
 type DragState = {
   pointerId: number
@@ -87,6 +93,7 @@ export function VoiceMiniWidget() {
         byUser.set(entry.user_id, {
           userId: entry.user_id,
           connIds: [connId],
+          displayName: entry.display_name,
           speaking: Boolean(speaking[connId]),
         })
       }
@@ -261,7 +268,8 @@ export function VoiceMiniWidget() {
             nicknames,
             users,
             fallback:
-              me?.id === participant.userId ? me.display_name : 'Participant',
+              (me?.id === participant.userId ? me.display_name : undefined) ??
+              participant.displayName,
           })
           return (
             <div

@@ -123,7 +123,10 @@ Server → client:
   anyone.
   `display_name` is filled server-side for everyone (users from the `users` table,
   guests from their token) so clients can render names without `/users` access; `guest`
-  marks public voice-link joiners.
+  marks public voice-link joiners. **Every call surface resolves names the same way —
+  nickname → `/users` directory → this `display_name` → last-resort placeholder.** Skipping
+  the payload step is how guests (never in the directory) and members seen *by* a guest
+  (who has no directory) degrade to "Participant", initials and all.
 - `voice.state` `{channel_id, participants: VoiceParticipant[], active_meeting_id, poll, annotations_allowed, media}` — sent only to the joining
   connection immediately after a successful join. `media` contains a 60-second, room-bound
   LiveKit participant token and public SFU URL; it is never broadcast to other connections.

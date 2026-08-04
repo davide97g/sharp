@@ -59,6 +59,15 @@ export async function openElementPip() {
   const video = bestVoiceVideo()
   if (!video) return
   activeElementPipVideo = video
+  // The browser (or the tile unmounting) can end element PiP on its own; without
+  // this the stale reference would later try to un-PiP a video that moved on.
+  const forget = () => {
+    if (activeElementPipVideo === video) activeElementPipVideo = null
+  }
+  video.addEventListener('leavepictureinpicture', forget, { once: true })
+  video.addEventListener('webkitpresentationmodechanged', () => {
+    if (video.webkitPresentationMode !== 'picture-in-picture') forget()
+  })
 
   if (document.pictureInPictureEnabled && video.requestPictureInPicture) {
     try {
