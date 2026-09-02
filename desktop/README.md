@@ -18,18 +18,78 @@ localStorage.
 
 ```bash
 bun install
-bun run tauri dev     # runs `bun --cwd ../web run dev` and opens the shell
+bun run tauri dev     # runs `bun run --cwd ../web dev` and opens the shell
 ```
 
 ## Build
 
 ```bash
-bun run tauri build   # runs `bun --cwd ../web run build` first, then bundles
+bun run tauri build   # runs `bun run --cwd ../web build` first, then bundles
 ```
+
+Set `CI=true` when building the `.dmg` from a shell that has no Automation
+permission for Finder: the dmg bundler otherwise blocks on an AppleScript that
+only arranges the disk-image window, and fails with `AppleEvent timed out
+(-1712)`.
 
 Bundle targets are `all` (macOS `.dmg`, Windows NSIS `.exe`, Linux AppImage/`.deb`),
 resolved per host platform. CI builds these on tags via `tauri-apps/tauri-action`
 (see `.github/workflows/release.yml`).
+
+## Signed + notarized macOS build (shareable)
+
+An unsigned bundle only runs on the machine that built it — anyone else gets
+"sharp is damaged and can't be opened". To hand the `.dmg` to someone, it must be
+signed with a **Developer ID Application** certificate (a paid Apple Developer
+membership; an "Apple Development" certificate is *not* enough) and notarized.
+
+Two one-time manual steps, because Apple gates each on a human:
+
+1. **The certificate.** Xcode → Settings → Accounts → your Apple ID → *Manage
+   Certificates…* → **+** → **Developer ID Application**. This is the short path:
+   it creates the keypair and puts the identity straight in the login keychain.
+   Creating one over the App Store Connect API is impossible — it is reserved for
+   the *Account Holder*, a role no API key can hold (`403 FORBIDDEN_ERROR: This
+   operation can only be performed by the Account Holder`). If you would rather
+   use the portal, `scripts/create-devid-cert.sh` generates a CSR to upload at
+   <https://developer.apple.com/account/resources/certificates/add> and imports
+   the downloaded `.cer` back next to its key when re-run with
+   `DEVID_CER=~/Downloads/developerID_application.cer`. Once the certificate
+   exists on the account, plain runs of that script just fetch it — handy on a
+   second machine. Its keypair lives in `scripts/.devid/` (gitignored); back that
+   up, it is what lets another machine sign as the same identity.
+
+2. **Notarization credentials.** An App Store Connect API key with the **Admin**
+   role at <https://appstoreconnect.apple.com/access/integrations/api>: download
+   the `AuthKey_<KEYID>.p8` (Apple allows exactly one download), and note the Key
+   ID plus the Issuer ID shown above the table. Keep the key at
+   `~/.appstoreconnect/private_keys/` with mode 600 — it grants Admin access to
+   the whole account.
+
+Then, per release:
+
+```bash
+export ASC_KEY=~/.appstoreconnect/private_keys/AuthKey_XXXXXXXXXX.p8
+export ASC_KEY_ID=XXXXXXXXXX
+export ASC_ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+./scripts/build-macos-signed.sh    # build, sign, notarize, staple, verify
+```
+
+`build-macos-signed.sh` builds with `src-tauri/tauri.dist.conf.json`, which swaps
+in `Entitlements.dist.plist`. That file deliberately drops
+`com.apple.developer.aps-environment`: it is a *restricted* entitlement, and a
+Developer-ID build that claims it without an embedded provisioning profile is
+killed at launch. Native APNs is therefore off in shared builds and push falls
+back to the WebSocket, local notifications and web push. To enable it, add the
+Push Notifications capability to the `dev.sharp.app` App ID, create a Developer ID
+provisioning profile, embed it as `Contents/embedded.provisionprofile`, and sign
+with `Entitlements.plist`.
+
+The result is `src-tauri/target/release/bundle/dmg/sharp_<version>_aarch64.dmg`,
+stapled — it opens on any Mac with no right-click dance. Note it is an
+Apple-silicon build; a colleague on an Intel Mac needs
+`--target x86_64-apple-darwin` (or `universal-apple-darwin`) added to the build.
 
 ## Icons (required once, locally)
 

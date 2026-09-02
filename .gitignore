@@ -27,3 +27,7 @@ desktop/src-tauri/gen/
 
 
 exports
+
+# Signing material: Developer ID private key + certificate, App Store Connect key
+desktop/scripts/.devid/
+AuthKey_*.p8
