@@ -158,7 +158,10 @@ echo "==> creating release commit"
 git commit -m "chore(release): v$NEXT — $NAME"
 
 echo "==> tagging v$NEXT"
-git tag "v$NEXT"
+# Annotated, not lightweight: `git push --follow-tags` below only carries annotated
+# tags, so a lightweight tag here means --push silently ships the commit without the
+# tag — and the release workflow, which triggers on v*, never runs.
+git tag -a "v$NEXT" -m "v$NEXT — $NAME"
 
 if [[ "$PUSH" == true ]]; then
   echo "==> pushing release commit and tag"
