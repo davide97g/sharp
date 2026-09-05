@@ -91,6 +91,32 @@ stapled — it opens on any Mac with no right-click dance. Note it is an
 Apple-silicon build; a colleague on an Intel Mac needs
 `--target x86_64-apple-darwin` (or `universal-apple-darwin`) added to the build.
 
+### Signing in CI
+
+`.github/workflows/release.yml` builds both macOS architectures on every `v*`
+tag and uses the same distribution config, so a tagged release can be signed and
+notarized without a local build. It stays **unsigned** until these repository
+secrets exist; the workflow imports a certificate only when `APPLE_CERTIFICATE`
+is set, and notarizes only when the API key is present.
+
+| Secret | Value |
+| --- | --- |
+| `APPLE_CERTIFICATE` | the Developer ID Application certificate as a base64 `.p12`: `security export -t identities -f pkcs12 -k login.keychain -P '<pw>' -o cert.p12` then `base64 -i cert.p12` |
+| `APPLE_CERTIFICATE_PASSWORD` | the `-P` password used above |
+| `APPLE_SIGNING_IDENTITY` | the full identity string, e.g. `Developer ID Application: Your Name (TEAMID)` — `security find-identity -v -p codesigning` prints it |
+| `APPLE_TEAM_ID` | the 10-character team id in the parentheses above |
+| `APPLE_API_KEY_ID` | App Store Connect Key ID (the `XXXXXXXXXX` in `AuthKey_XXXXXXXXXX.p8`) |
+| `APPLE_API_ISSUER_ID` | App Store Connect Issuer ID |
+| `APPLE_API_KEY_P8` | the `.p8` itself, base64-encoded: `base64 -i AuthKey_XXXXXXXXXX.p8` |
+
+The `.p8` travels base64-encoded because notarization needs it as a file on
+disk; the workflow decodes it to `$RUNNER_TEMP` and points `APPLE_API_KEY_PATH`
+at it. Everything in that table grants access to the Apple account — they belong
+in repository secrets, never in the tree.
+
+Windows needs no secrets: the NSIS installer is unsigned, and code-signing it
+would need a separate Authenticode certificate.
+
 ## Icons (required once, locally)
 
 Icon binaries are **not** committed — the Tauri CLI generates every platform icon

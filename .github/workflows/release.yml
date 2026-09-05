@@ -20,16 +20,23 @@ jobs:
         include:
           # macOS is built twice — once per architecture — so both Apple Silicon
           # and Intel users get a native .dmg.
+          # --config tauri.dist.conf.json is not optional once the build is
+          # signed: the default Entitlements.plist claims aps-environment, and a
+          # Developer-ID bundle claiming it without an embedded provisioning
+          # profile is killed at launch by AMFI. The dist plist drops it.
           - platform: macos-latest
             target: aarch64-apple-darwin
-            args: "--target aarch64-apple-darwin"
+            args: "--target aarch64-apple-darwin --config src-tauri/tauri.dist.conf.json"
           - platform: macos-latest
             target: x86_64-apple-darwin
-            args: "--target x86_64-apple-darwin"
+            args: "--target x86_64-apple-darwin --config src-tauri/tauri.dist.conf.json"
           # Windows NSIS installer (.exe).
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
             args: ""
+
+    env:
+      APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
 
     steps:
       - uses: actions/checkout@v4
@@ -61,13 +68,29 @@ jobs:
         run: bun run tauri icon assets/icon.svg
         working-directory: desktop
 
-      # NOTE: macOS builds are UNSIGNED in v1 — users right-click > Open the first
-      # time (or `xattr -dr com.apple.quarantine`). To sign & notarize later, add
-      # the APPLE_* / signing env vars to this step per the tauri-action docs.
+      # Notarization uses an App Store Connect API key, matching
+      # desktop/scripts/build-macos-signed.sh — no app-specific password needed.
+      # The .p8 has to exist as a file, so it travels as a base64 secret.
+      - name: Write the App Store Connect key
+        if: runner.os == 'macOS' && env.APPLE_API_KEY_P8 != ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s' "$APPLE_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/asc/key.p8"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/asc/key.p8" >> "$GITHUB_ENV"
+
+      # Signing is inert until the APPLE_* secrets exist: tauri-action imports a
+      # certificate only when APPLE_CERTIFICATE is set and notarizes only when the
+      # API key is present, so an unconfigured checkout still builds as before.
       - name: Build & release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
         with:
           projectPath: desktop
           tagName: ${{ github.ref_name }}
