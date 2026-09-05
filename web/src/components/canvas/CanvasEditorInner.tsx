@@ -17,12 +17,20 @@ export function CanvasEditorInner({
   docId,
   user,
   editable,
+  viewOnly,
   onStatus,
   onPeers,
 }: {
   docId: string
   user: { name: string; color: string }
   editable: boolean
+  /**
+   * Local, self-imposed read-only: the viewer *may* edit but asked not to (the
+   * presentation toggle). Distinct from `editable`, which is the role gate — this
+   * one is per-tab, nothing is persisted, and it is safe to flip mid-session
+   * because the Yjs binding reads `canEdit` through a ref.
+   */
+  viewOnly?: boolean
   onStatus: (status: DocConnStatus) => void
   onPeers: (peers: Peer[]) => void
 }) {
@@ -55,7 +63,7 @@ export function CanvasEditorInner({
   const { ydoc, provider } = holder.current
   const teardownTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const canEdit = editable && role === 'editor'
+  const canEdit = editable && role === 'editor' && !viewOnly
 
   // Excalidraw scene bound to our Y.Doc + Awareness. `synced` gates the mount,
   // so an empty default scene can never be written over server state.

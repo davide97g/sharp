@@ -42,6 +42,25 @@ doc REST surface, the per-channel + per-doc role model, trash/restore, and the
 - **Wire**: `Doc` carries `kind`; `POST /channels/{id}/docs` accepts optional `kind`.
   `doc.created`/`doc.updated` carry `kind`, so clients route to the doc editor (`/d/:id`)
   or the canvas editor (`/x/:id`).
+- **Presentation modes** (client-only, no wire change). `CanvasEditor` layers two
+  independent toggles over the shared `DocSurface` shell:
+  - **Full screen** (`⌘⇧F`, or the actions menu) turns the stage wrapper into a
+    `fixed inset-0 z-(--z-lightbox)` overlay — covering the rail, the surface header and
+    the title row — and hands that same element to the native Fullscreen API so the
+    browser's own chrome goes too. The API call is best-effort: refused (no user gesture,
+    a permission-less iframe), the in-page overlay alone still yields a chrome-free canvas.
+    `fullscreenchange` syncs React state back when the browser leaves on its own (F11, its
+    Escape), and a hidden `overlay`-scope Escape binding covers the fallback path. The only
+    chrome kept is a bottom-centred pill (Excalidraw owns the other three corners) that
+    fades after 2.5 s of stillness.
+  - **Read-only** (`⌘⇧E`) is a per-tab, never-persisted `viewOnly` flag that ANDs into
+    `canEdit`, so Excalidraw goes to `viewModeEnabled` and the Yjs binding stops writing —
+    remote updates still land. It stacks *under* the role gate: a `viewer` is already
+    read-only and is offered no toggle. Safe to flip mid-session because
+    `useExcalidrawYjs` reads `canEdit` through a ref.
+
+  The stage wrapper only ever changes its className — moving `<CanvasEditorInner>` between
+  subtrees would unmount it and tear down the Y.Doc and sync socket.
 - **Web**: a third **Canvas** mode in the rail; `web/src/components/canvas/` mirrors
   `components/docs/` (Home / channel list / sidebar / editor). The editor chunk is
   lazy-loaded, and its fonts are **self-hosted** — no CDN. `vite.config.ts`

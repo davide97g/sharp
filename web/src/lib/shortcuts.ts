@@ -177,6 +177,34 @@ export const SHORTCUTS: ShortcutDef[] = [
     displayOnly: 'Hold Space',
   },
   {
+    id: 'canvas.fullscreen',
+    label: 'Full screen canvas',
+    group: 'Canvas',
+    // Excalidraw claims the bare letter keys for its tools (f is the frame tool),
+    // so every canvas binding needs a modifier.
+    defaultChord: 'mod+shift+f',
+    scope: 'pane',
+    allowInInput: true,
+  },
+  {
+    id: 'canvas.readOnly',
+    label: 'Read-only view',
+    group: 'Canvas',
+    // Not mod+shift+r or mod+shift+d — Chrome reserves those (hard reload, bookmark
+    // all tabs) and never delivers the keydown.
+    defaultChord: 'mod+shift+e',
+    scope: 'pane',
+    allowInInput: true,
+  },
+  {
+    id: 'canvas.exitFullscreen',
+    label: 'Leave full screen',
+    group: 'Canvas',
+    defaultChord: 'escape',
+    scope: 'overlay',
+    hidden: true,
+  },
+  {
     id: 'garden.leave',
     label: 'Leave the garden',
     group: 'Garden',

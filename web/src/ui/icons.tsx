@@ -272,5 +272,21 @@ export function GithubIcon({ size = 16, className }: IconProps) {
   )
 }
 
+export function ExpandIcon(p: IconProps) {
+  return (
+    <Icon {...p}>
+      <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+    </Icon>
+  )
+}
+
+export function ShrinkIcon(p: IconProps) {
+  return (
+    <Icon {...p}>
+      <path d="M14 10h6V4M10 14H4v6M20 4l-6 6M4 20l6-6" />
+    </Icon>
+  )
+}
+
 // Re-export the pre-existing chrome glyphs so the registry is the one import site.
 export { GearIcon, LockIcon, EyeIcon, EyeOffIcon } from '../components/icons'
